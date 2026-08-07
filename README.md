@@ -70,7 +70,8 @@ Owli 借鉴多 Agent 调研项目的协作思路，但不 fork BettaFish；目�
 
 ## 系统架构
 
-![Owli 三层系统架构与数据流](docs/assets/readme/system-architecture.svg)
+<img width="1448" height="1086" alt="CN Owli数据架构图" src="https://github.com/user-attachments/assets/409720b1-8f1b-4fdd-a0db-8af8498a9204" />
+
 
 | 系统边界 | 包含什么 | 负责什么 |
 |---|---|---|
