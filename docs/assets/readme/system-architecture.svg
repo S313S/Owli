@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" role="img" aria-labelledby="title desc">
+  <title id="title">Owli 三层系统架构与数据流</title>
+  <desc id="desc">浏览器工作台、本地 Owli 与外部服务三层架构。应用编排、Agent 引擎适配和证据与产物模块通过控制、事件、证据与信息、产物和复用路径连接。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/>
+      <stop offset="1" stop-color="#edf8f8"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d355e"/>
+      <stop offset="1" stop-color="#16759a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#0b2c50" flood-opacity="0.09"/>
+    </filter>
+    <marker id="blue-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#16759a"/>
+    </marker>
+    <marker id="orange-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#eea429"/>
+    </marker>
+    <marker id="green-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#4aafa7"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 2px; fill: #16759a; }
+      .heading { font-size: 34px; font-weight: 800; fill: #0b2c50; }
+      .subheading { font-size: 16px; fill: #4c6379; }
+      .zone-title { font-size: 18px; font-weight: 800; fill: #0b2c50; }
+      .zone-meta { font-size: 12px; font-weight: 700; fill: #16759a; letter-spacing: 1px; text-anchor: end; }
+      .module-title { font-size: 17px; font-weight: 800; fill: #0b2c50; text-anchor: middle; }
+      .module-copy { font-size: 13px; fill: #52697d; text-anchor: middle; }
+      .pill { font-size: 12px; font-weight: 700; fill: #126783; text-anchor: middle; }
+      .flow { font-size: 12px; font-weight: 800; }
+      .legend { font-size: 12px; fill: #52697d; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="960" rx="30" fill="url(#bg)"/>
+  <text x="70" y="55" class="eyebrow">SYSTEM BLUEPRINT</text>
+  <text x="70" y="98" class="heading">三层边界，五类路径，一条可干预的调研流水线</text>
+  <text x="70" y="130" class="subheading">浏览器负责交互，本地 Owli 负责编排与留痕，外部服务负责模型能力和信息获取。</text>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="165" width="1320" height="170" rx="22" fill="#ffffff" stroke="#b9d7e2"/>
+    <rect x="60" y="165" width="12" height="170" rx="6" fill="#16759a"/>
+    <text x="92" y="198" class="zone-title">浏览器工作台</text>
+    <text x="1340" y="198" class="zone-meta">INTERACTION</text>
+
+    <g transform="translate(130 220)">
+      <rect width="330" height="82" rx="16" fill="#eef7fb"/>
+      <text x="165" y="32" class="module-title">需求与计划</text>
+      <text x="165" y="58" class="module-copy">动态追问 · 多专家方案 · 计划核对</text>
+    </g>
+    <g transform="translate(555 220)">
+      <rect width="330" height="82" rx="16" fill="#eef7fb"/>
+      <text x="165" y="32" class="module-title">进度与干预</text>
+      <text x="165" y="58" class="module-copy">Goal 进度 · 暂停 · 调整 · 重试</text>
+    </g>
+    <g transform="translate(980 220)">
+      <rect width="330" height="82" rx="16" fill="#eef7fb"/>
+      <text x="165" y="32" class="module-title">报告与经验库</text>
+      <text x="165" y="58" class="module-copy">证据角标 · 文件导出 · 语义复用</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="380" width="1320" height="350" rx="22" fill="#ffffff" stroke="#9fcfc9" stroke-width="2"/>
+    <rect x="60" y="380" width="12" height="350" rx="6" fill="#4aafa7"/>
+    <text x="92" y="415" class="zone-title">本地 Owli</text>
+    <text x="1340" y="415" class="zone-meta">ORCHESTRATION · LOCAL-FIRST</text>
+
+    <g transform="translate(105 445)">
+      <rect width="340" height="108" rx="18" fill="#edf9f7" stroke="#b3ddd8"/>
+      <text x="170" y="35" class="module-title">应用编排</text>
+      <text x="170" y="62" class="module-copy">ResearchPlan → GoalSpec</text>
+      <text x="170" y="84" class="module-copy">并发调度 · 人工确认 · 限流路由</text>
+    </g>
+    <g transform="translate(550 445)">
+      <rect width="340" height="108" rx="18" fill="#edf9f7" stroke="#b3ddd8"/>
+      <text x="170" y="35" class="module-title">Agent 引擎适配</text>
+      <text x="170" y="62" class="module-copy">统一任务接口 · NormalizedEvent</text>
+      <text x="170" y="84" class="module-copy">Claude / Codex 特性分别保留</text>
+    </g>
+    <g transform="translate(995 445)">
+      <rect width="340" height="108" rx="18" fill="#edf9f7" stroke="#b3ddd8"/>
+      <text x="170" y="35" class="module-title">证据与产物</text>
+      <text x="170" y="62" class="module-copy">EvidenceRecord · ArtifactManifest</text>
+      <text x="170" y="84" class="module-copy">来源、可靠度、报告与变更日志</text>
+    </g>
+
+    <g transform="translate(250 590)">
+      <rect width="940" height="105" rx="18" fill="#f7fbfd" stroke="#c8dce7"/>
+      <text x="32" y="32" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="15" font-weight="800" fill="#0b2c50">Agent 执行区</text>
+      <rect x="185" y="18" width="150" height="34" rx="17" fill="#e6f2f7"/>
+      <text x="260" y="40" class="pill">GoalSpec</text>
+      <path d="M340 35H390" stroke="#16759a" stroke-width="2.5" marker-end="url(#blue-arrow)"/>
+      <rect x="400" y="18" width="170" height="34" rx="17" fill="#e6f2f7"/>
+      <text x="485" y="40" class="pill">AgentTaskSpec</text>
+      <path d="M575 35H625" stroke="#16759a" stroke-width="2.5" marker-end="url(#blue-arrow)"/>
+      <rect x="635" y="18" width="190" height="34" rx="17" fill="#e6f2f7"/>
+      <text x="730" y="40" class="pill">并发 Subagent</text>
+      <text x="470" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="13" fill="#52697d" text-anchor="middle">状态 · 暂停 · 重试 · 产物校验 · change log</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="775" width="1320" height="120" rx="22" fill="#ffffff" stroke="#e4c481"/>
+    <rect x="60" y="775" width="12" height="120" rx="6" fill="#eea429"/>
+    <text x="92" y="810" class="zone-title">外部服务</text>
+    <text x="1340" y="810" class="zone-meta">MODEL · SOURCE</text>
+    <g transform="translate(210 830)">
+      <rect width="210" height="42" rx="21" fill="#fff5df"/>
+      <text x="105" y="27" class="module-title">Claude</text>
+    </g>
+    <g transform="translate(480 830)">
+      <rect width="210" height="42" rx="21" fill="#fff5df"/>
+      <text x="105" y="27" class="module-title">Codex</text>
+    </g>
+    <g transform="translate(750 830)">
+      <rect width="210" height="42" rx="21" fill="#fff5df"/>
+      <text x="105" y="27" class="module-title">网页搜索</text>
+    </g>
+    <g transform="translate(1020 830)">
+      <rect width="210" height="42" rx="21" fill="#fff5df"/>
+      <text x="105" y="27" class="module-title">平台信息源</text>
+    </g>
+  </g>
+
+  <g fill="none" stroke-width="3">
+    <path d="M250 335V366" stroke="#16759a" marker-end="url(#blue-arrow)"/>
+    <text x="260" y="359" class="flow" fill="#16759a">控制</text>
+
+    <path d="M470 380V349" stroke="#4aafa7" marker-end="url(#green-arrow)"/>
+    <text x="480" y="369" class="flow" fill="#348b84">事件</text>
+
+    <path d="M1050 730V755" stroke="#eea429" marker-end="url(#orange-arrow)"/>
+    <text x="1062" y="751" class="flow" fill="#9a6500">任务</text>
+
+    <path d="M1230 775V744" stroke="#4aafa7" marker-end="url(#green-arrow)"/>
+    <text x="1240" y="767" class="flow" fill="#348b84">证据&amp;信息</text>
+
+    <path d="M1110 380V349" stroke="#eea429" marker-end="url(#orange-arrow)"/>
+    <text x="1120" y="369" class="flow" fill="#9a6500">产物</text>
+
+    <path d="M1170 335C1170 360 1380 350 1380 500C1380 665 1260 680 1190 680" stroke="#4aafa7" stroke-dasharray="9 7" marker-end="url(#green-arrow)"/>
+    <text x="1308" y="510" class="flow" fill="#348b84">复用</text>
+  </g>
+
+  <g transform="translate(70 930)">
+    <line x1="0" y1="0" x2="34" y2="0" stroke="#16759a" stroke-width="3"/>
+    <text x="45" y="5" class="legend">控制 / 事件</text>
+    <line x1="160" y1="0" x2="194" y2="0" stroke="#eea429" stroke-width="3"/>
+    <text x="205" y="5" class="legend">任务 / 产物</text>
+    <line x1="320" y1="0" x2="354" y2="0" stroke="#4aafa7" stroke-width="3" stroke-dasharray="7 5"/>
+    <text x="365" y="5" class="legend">证据&amp;信息 / 复用</text>
+    <text x="1300" y="5" class="legend" text-anchor="end">系统设计蓝图，不代表已部署运行</text>
+  </g>
+</svg>
