@@ -1,17 +1,40 @@
+# macOS
 .DS_Store
+
+# Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Node.js
 node_modules/
 .npm/
+web/dist/
+
+# 凭证与本地配置
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+
+# 编辑器与临时文件
 .idea/
 .vscode/
 *.swp
 *.tmp
 *~
+
+# ── 运行期产物：绝不入库 ──────────────────────────────────
+# runs/ 是调研产物目录，含抓取回来的原始数据（可能含平台内容与个人信息）。
+# 目录结构本身是契约（runs/<research_id>/goals/goal-N/），但内容不进版本库。
+runs/
+
+# var/ 是本地状态：SQLite 库（owli.db）与日志。
+# 注意：Codex 的 CODEX_HOME 刻意放在仓库之外（默认 ~/.owli/codex_home/），
+# 因为它含 auth.json 凭证，而本仓库是公开仓库 —— 凭证不进工作树。
+var/
+
+# 指向内部设计文档的软链（仅本机开发用，见 AGENTS.md 第 2 节）
+.docs-ref
