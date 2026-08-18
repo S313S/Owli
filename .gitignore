@@ -38,3 +38,8 @@ var/
 
 # 指向内部设计文档的软链（仅本机开发用，见 AGENTS.md 第 2 节）
 .docs-ref
+
+# 前端编译残留（vite.config.ts 的 tsc 产物与增量编译缓存）
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
