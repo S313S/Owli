@@ -316,20 +316,35 @@ def _markdown_sections(text: str) -> list[tuple[str, str, int, int]]:
     return sections
 
 
+def _markdown_section_subtrees(text: str) -> list[tuple[str, str]]:
+    """父章节正文包含其子标题，直到同级或更高级标题。"""
+    matches = list(_HEADING.finditer(text))
+    subtrees: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        level = len(match.group(1))
+        end = len(text)
+        for candidate in matches[index + 1:]:
+            if len(candidate.group(1)) <= level:
+                end = candidate.start()
+                break
+        subtrees.append((match.group(2).strip(), text[match.end():end]))
+    return subtrees
+
+
 @validator("sections_exist")
 def sections_exist(ctx: Ctx, arguments: list[str]) -> Result:
     name = "sections_exist"
     if not arguments or any(not argument for argument in arguments):
         return _result(Verdict.UNAVAILABLE, name, f"{name} 至少需要一个章节名")
     try:
-        sections = _markdown_sections(ctx.read_text())
+        sections = _markdown_section_subtrees(ctx.read_text())
     except (OSError, UnicodeDecodeError) as exc:
         return _result(
             Verdict.UNAVAILABLE, name, f"无法读取 Markdown：{type(exc).__name__}: {exc}"
         )
-    by_title = {title: body for title, body, _, _ in sections}
+    by_title = {title: body for title, body in sections}
     missing = [title for title in arguments if not by_title.get(title, "").strip()]
-    actual = [title for title, _, _, _ in sections]
+    actual = [title for title, _ in sections]
     if missing:
         return _result(
             Verdict.FAIL,
@@ -355,6 +370,53 @@ def section_exists(ctx: Ctx, arguments: list[str]) -> Result:
 
 
 _CITATION = re.compile(r"\[S(?:0[1-9]|[1-9][0-9])\]")
+_LIST_ITEM = re.compile(r"^([ \t]*)(?:[-+*]|\d+[.)])[ \t]+(.+)$")
+
+
+def _conclusion_citation_items(text: str) -> tuple[bool, list[str]]:
+    """检查「结论」子树的叶子列表项；父项可仅作分组标题。"""
+    headings = list(_HEADING.finditer(text))
+    for index, heading in enumerate(headings):
+        if heading.group(2).strip() != "结论":
+            continue
+        level = len(heading.group(1))
+        end = len(text)
+        for candidate in headings[index + 1:]:
+            if len(candidate.group(1)) <= level:
+                end = candidate.start()
+                break
+        lines = text[heading.end():end].splitlines()
+        items: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+        for line in lines:
+            match = _LIST_ITEM.match(line)
+            if match:
+                if current is not None:
+                    items.append(current)
+                indent = len(match.group(1).expandtabs(4))
+                for item in reversed(items):
+                    if item["indent"] < indent:
+                        item["has_child"] = True
+                        break
+                current = {
+                    "indent": indent,
+                    "parts": [match.group(2).strip()],
+                    "has_child": False,
+                }
+            elif current is not None and line.strip() and not _HEADING.match(line):
+                current["parts"].append(line.strip())
+            elif current is not None and _HEADING.match(line):
+                items.append(current)
+                current = None
+        if current is not None:
+            items.append(current)
+        leaves = [
+            " ".join(item["parts"]).strip()
+            for item in items
+            if not item["has_child"]
+        ]
+        return bool(items), [item for item in leaves if not _CITATION.search(item)]
+    return False, []
 
 
 def _citation_sets(ctx: Ctx, name: str) -> tuple[set[str], set[str], Result | None]:
@@ -396,9 +458,44 @@ def citation_marks_resolvable(ctx: Ctx, arguments: list[str]) -> Result:
     name = "citation_marks_resolvable"
     if arguments:
         return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    try:
+        text = ctx.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        return _result(
+            Verdict.UNAVAILABLE,
+            name,
+            f"无法读取 Markdown：{type(exc).__name__}: {exc}",
+        )
     body, sources, error = _citation_sets(ctx, name)
     if error:
         return error
+    if not body:
+        return _result(
+            Verdict.FAIL,
+            name,
+            "正文未找到任何 [Sxx] 角标",
+            detail={"body_marks": [], "source_marks": sorted(sources)},
+        )
+    has_conclusion_items, uncited = _conclusion_citation_items(text)
+    if not has_conclusion_items:
+        return _result(
+            Verdict.FAIL,
+            name,
+            "「结论」必须使用至少一个可逐条校验的 Markdown 列表项",
+            detail={"body_marks": sorted(body), "source_marks": sorted(sources)},
+        )
+    if uncited:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"「结论」中有 {len(uncited)} 个列表项未带 [Sxx] 角标",
+            [item[:40] for item in uncited],
+            {
+                "body_marks": sorted(body),
+                "source_marks": sorted(sources),
+                "uncited_items": uncited,
+            },
+        )
     unresolved = sorted(body - sources)
     if unresolved:
         return _result(
@@ -419,6 +516,13 @@ def no_orphan_citation(ctx: Ctx, arguments: list[str]) -> Result:
     body, sources, error = _citation_sets(ctx, name)
     if error:
         return error
+    if not sources:
+        return _result(
+            Verdict.FAIL,
+            name,
+            "信息源清单未找到任何 [Sxx] 条目",
+            detail={"body_marks": sorted(body), "source_marks": []},
+        )
     orphaned = sorted(sources - body)
     if orphaned:
         return _result(

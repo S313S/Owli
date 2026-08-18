@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Any, Optional
+from typing import AsyncIterator, Any, Callable, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -15,6 +17,8 @@ from pydantic import BaseModel
 
 from app.adapters.selfcheck import SchemaCheckError, initialize_and_check
 from app.api.events import ResearchEventBuffer
+from app.orchestrator.mini import MiniOrchestrator, build_actions, build_initial_state
+from app.store.dao import Store
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,46 +31,20 @@ class ResearchRequest(BaseModel):
     query: str
 
 
-def _initial_state(research_id: str, query: str) -> dict[str, Any]:
-    return {
-        "research_id": research_id,
-        "title": query,
-        "status": "running",
-        "status_label": "运行中",
-        "progress": {"done": 1, "total": 6, "summary": "当前：子目标 ② 与 ③ 并行采集中"},
-        "actions": [
-            {"id": "pause", "label": "暂停", "method": "POST", "href": f"/api/researches/{research_id}/pause"},
-            {"id": "stop", "label": "终止", "danger": True, "confirm": "终止本次调研？已入库证据与产物会保留。", "method": "POST", "href": f"/api/researches/{research_id}/stop"},
-        ],
-        "goals": [
-            {"id": "goal-1", "title": "界定竞品集与评估框架", "status": "done", "summary": "2 个 agent 全部完成 · 产物 competitor-set.md", "agents": []},
-            {"id": "goal-2", "title": "海外社区真实使用反馈采集", "status": "running", "summary": "1 完成 / 2 运行 / 1 排队 · 已入库证据 31 条", "agents": [
-                {"id": "hn", "name": "Hacker News 采集", "engine": "Codex", "status": "running", "activity": "正在取 story 32932137 的评论区（已 412 / 793 条）"},
-                {"id": "ph", "name": "Product Hunt 采集", "engine": "Codex", "status": "running", "activity": "正在读取产品页与评论"},
-            ]},
-            {"id": "goal-3", "title": "官方文档与第三方评测采集", "status": "running", "summary": "2 个 agent 运行中 · 已入库证据 14 条", "agents": [
-                {"id": "docs", "name": "官方文档采集", "engine": "Claude", "status": "running", "activity": "正在整理官方更新日志"},
-            ]},
-            {"id": "goal-4", "title": "可靠度评级", "status": "queued", "summary": "等待子目标 ②③ 汇合后开始", "agents": []},
-            {"id": "goal-5", "title": "对比矩阵", "status": "queued", "summary": "等待可靠度评级完成", "agents": []},
-            {"id": "goal-6", "title": "报告与附件", "status": "queued", "summary": "等待前置子目标完成", "agents": []},
-        ],
-        "cards": [],
-        "events": [],
-    }
-
-
 def create_app(
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     schema_path: str | Path = DEFAULT_SCHEMA_PATH,
     frontend_dist: str | Path = DEFAULT_FRONTEND_DIST,
     event_buffer: ResearchEventBuffer | None = None,
+    orchestrator_factory: Callable[..., Any] | None = None,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
     frontend = Path(frontend_dist)
     events = event_buffer or ResearchEventBuffer(max_events=2000, max_age_seconds=3600)
     researches: dict[str, dict[str, Any]] = {}
+    background_tasks: set[asyncio.Task[Any]] = set()
+    store = Store(database)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -81,6 +59,87 @@ def create_app(
     application = FastAPI(title="Owli", lifespan=lifespan)
     application.state.event_buffer = events
     application.state.researches = researches
+    application.state.background_tasks = background_tasks
+    application.state.store = store
+
+    async def run_in_background(
+        research_id: str,
+        runner: Any,
+    ) -> None:
+        """消化编排器边界外的意外异常，避免任务永远卡在 running。"""
+        try:
+            await runner.run()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            state = researches[research_id]
+            raw = {"exception": type(exc).__name__, "message": str(exc)}
+            try:
+                if store.get_report(research_id) is not None:
+                    store.finish_report(
+                        research_id,
+                        status="failed",
+                        completed_at=datetime.now(timezone.utc).isoformat(),
+                    )
+            except Exception as storage_exc:
+                raw = {
+                    "original": raw,
+                    "storage_finalize_error": {
+                        "exception": type(storage_exc).__name__,
+                        "message": str(storage_exc),
+                    },
+                }
+            state["status"] = "unavailable"
+            state["status_label"] = "引擎不可用"
+            state["actions"] = []
+            state["progress"]["summary"] = (
+                f"后台编排异常：{type(exc).__name__}: {exc}"
+            )
+            if state["goals"]:
+                state["goals"][0]["status"] = "failed"
+                state["goals"][0]["summary"] = state["progress"]["summary"]
+            await events.publish(
+                research_id,
+                {
+                    "type": "agent_update",
+                    "data": {
+                        "goal_id": "goal-1",
+                        "agent_id": "orchestrator",
+                        "engine": "Owli",
+                        "status": "failed",
+                        "activity": state["progress"]["summary"],
+                    },
+                },
+            )
+            await events.publish(
+                research_id,
+                {
+                    "type": "error",
+                    "raw": raw,
+                    "data": {
+                        "goal_id": "goal-1",
+                        "agent_id": "orchestrator",
+                        "status": "unavailable",
+                        "summary": state["progress"]["summary"],
+                    },
+                },
+            )
+            await events.publish(
+                research_id,
+                {"type": "progress", "data": dict(state["progress"])},
+            )
+            await events.publish(
+                research_id,
+                {
+                    "type": "research_update",
+                    "data": {
+                        "status": state["status"],
+                        "status_label": state["status_label"],
+                        "actions": [],
+                        "goals": state["goals"],
+                    },
+                },
+            )
 
     @application.get("/api/health")
     async def health() -> dict:
@@ -96,23 +155,38 @@ def create_app(
         if not query:
             raise HTTPException(status_code=422, detail="需求文本不能为空")
         research_id = f"r-{uuid.uuid4().hex[:12]}"
-        researches[research_id] = _initial_state(research_id, query)
+        researches[research_id] = build_initial_state(research_id, query)
         await events.publish(
             research_id,
             {"type": "research_snapshot", "data": researches[research_id]},
         )
+        factory = orchestrator_factory or MiniOrchestrator
+        runner = factory(
+            research_id=research_id,
+            query=query,
+            store=store,
+            event_buffer=events,
+            state=researches[research_id],
+        )
+        task = asyncio.create_task(
+            run_in_background(research_id, runner),
+            name=f"owli:{research_id}",
+        )
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
         return {"ok": True, "data": {"research_id": research_id, "similar": []}, "error": None}
 
     @application.get("/api/researches/{research_id}")
     async def get_research(research_id: str) -> dict:
-        state = researches.setdefault(
-            research_id,
-            _initial_state(research_id, "飞书竞品优缺点挖掘"),
-        )
+        state = researches.get(research_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
         return {"ok": True, "data": state, "error": None}
 
     async def change_state(research_id: str, status: str, label: str) -> dict:
-        state = researches.setdefault(research_id, _initial_state(research_id, research_id))
+        state = researches.get(research_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
         state["status"] = status
         state["status_label"] = label
         return {"ok": True, "data": state, "error": None}
@@ -143,7 +217,7 @@ def create_app(
     @application.post("/api/researches/{research_id}/resume")
     async def resume_research(research_id: str) -> dict:
         response = await change_state(research_id, "running", "运行中")
-        response["data"]["actions"] = _initial_state(research_id, "")["actions"]
+        response["data"]["actions"] = build_actions(research_id)
         await publish_state_update(research_id, response["data"])
         return response
 

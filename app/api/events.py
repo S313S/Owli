@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -83,7 +84,12 @@ class ResearchEventBuffer:
     def _append_locked(self, research_id: str, payload: Mapping[str, Any]) -> SequencedEvent:
         now = self.clock()
         self._sequences[research_id] += 1
-        event = SequencedEvent(research_id, self._sequences[research_id], now, dict(payload))
+        event = SequencedEvent(
+            research_id,
+            self._sequences[research_id],
+            now,
+            copy.deepcopy(dict(payload)),
+        )
         self._events[research_id].append(event)
         self._prune(research_id, now)
         return event

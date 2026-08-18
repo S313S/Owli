@@ -170,6 +170,20 @@ def test_sections_exist_含单数别名并要求正文非空(validation_env):
     assert alias.results[-1].detail["alias_of"] == "sections_exist"
 
 
+def test_sections_exist_父章节只有子标题正文也算非空(validation_env):
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n\n## Slack\n- 结论 [S01]\n\n# 信息源\n- [S01] https://example.com\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(ctx, ["sections_exist:结论,信息源"])
+
+    assert report.verdict is validation.Verdict.PASS
+
+
 def test_角标双向校验分别报告编造与孤立(validation_env):
     validation, output_path = validation_env
     output_path = output_path.with_suffix(".md")
@@ -188,6 +202,78 @@ def test_角标双向校验分别报告编造与孤立(validation_env):
     assert len(report.failures) == 2
     assert report.failures[0].offenders == ["[S03]"]
     assert report.failures[1].offenders == ["[S02]"]
+
+
+def test_角标双向校验不允许两个空集合冒充通过(validation_env):
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n只有无引用结论。\n\n# 信息源\n暂无。\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(
+        ctx, ["citation_marks_resolvable", "no_orphan_citation"]
+    )
+
+    assert report.verdict is validation.Verdict.FAIL
+    assert len(report.failures) == 2
+    assert "正文未找到任何" in report.failures[0].message
+    assert "信息源清单未找到任何" in report.failures[1].message
+
+
+def test_每条列表结论都必须带角标(validation_env):
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n- 有证据的结论 [S01]\n- 没有证据的结论\n\n"
+        "# 信息源\n- [S01] https://example.com/1\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(
+        ctx, ["citation_marks_resolvable", "no_orphan_citation"]
+    )
+
+    assert report.verdict is validation.Verdict.FAIL
+    assert report.failures[0].offenders == ["没有证据的结论"]
+
+
+def test_结论必须使用可逐条校验的_Markdown_列表(validation_env):
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n第一段有证据 [S01]。\n\n第二段没有证据。\n\n"
+        "# 信息源\n- [S01] https://example.com/1\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(
+        ctx, ["citation_marks_resolvable", "no_orphan_citation"]
+    )
+
+    assert report.verdict is validation.Verdict.FAIL
+    assert "Markdown 列表" in report.failures[0].message
+
+
+def test_结论容器列表项可以由带角标的子项支撑(validation_env):
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n- 缺点：\n  - 子结论 [S01]\n\n"
+        "# 信息源\n- [S01] https://example.com/1\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(
+        ctx, ["citation_marks_resolvable", "no_orphan_citation"]
+    )
+
+    assert report.verdict is validation.Verdict.PASS
 
 
 def test_db_row_exists_走固定读接口并区分空值与读库失败(validation_env):
@@ -283,8 +369,14 @@ def test_claude_选项强制隔离设置并用_disallowed_tools_收敛白名单(
         def __init__(self, **values):
             self.values = values
 
+    class FakeHookMatcher:
+        def __init__(self, *, matcher=None, hooks=None):
+            self.matcher = matcher
+            self.hooks = hooks or []
+
     class FakeSdk:
         ClaudeAgentOptions = FakeOptions
+        HookMatcher = FakeHookMatcher
 
     _, output_path = validation_env
     task = ClaudeTask(
@@ -301,10 +393,13 @@ def test_claude_选项强制隔离设置并用_disallowed_tools_收敛白名单(
 
     assert options.values["setting_sources"] == []
     assert options.values["permission_mode"] == "dontAsk"
+    assert options.values["tools"] == ["Read", "Write"]
+    assert options.values["allowed_tools"] == ["Read", "Write"]
     assert "Bash" in options.values["disallowed_tools"]
     assert "Read" not in options.values["disallowed_tools"]
     assert "Write" not in options.values["disallowed_tools"]
     assert options.values["can_use_tool"] is not None
+    assert len(options.values["hooks"]["PreToolUse"]) == 1
 
 
 def test_can_use_tool_拒绝越界写入并指出路径(validation_env):
@@ -345,6 +440,80 @@ def test_can_use_tool_拒绝越界写入并指出路径(validation_env):
     assert str(output_path.parents[3] / "outside.txt") in denied.message
     assert denials == [str(output_path.parents[3] / "outside.txt")]
     assert isinstance(allowed, Allow)
+
+
+def test_PreToolUse_即使工具已预批准也强制复核写入路径(validation_env):
+    import asyncio
+    from app.adapters.claude import (
+        ClaudeTask,
+        build_claude_options,
+        make_permission_callback,
+    )
+
+    class Allow:
+        pass
+
+    class Deny:
+        def __init__(self, *, message):
+            self.message = message
+
+    class FakeOptions:
+        def __init__(self, **values):
+            self.values = values
+
+    class FakeHookMatcher:
+        def __init__(self, *, matcher=None, hooks=None):
+            self.matcher = matcher
+            self.hooks = hooks or []
+
+    class FakeSdk:
+        PermissionResultAllow = Allow
+        PermissionResultDeny = Deny
+        ClaudeAgentOptions = FakeOptions
+        HookMatcher = FakeHookMatcher
+
+    _, output_path = validation_env
+    task = ClaudeTask(
+        body="执行任务",
+        output_path=output_path,
+        output_format="json",
+        research_id="research-1",
+        goal_id="goal-1",
+        agent_id="agent-1",
+        validators=["file_exists"],
+        tools=frozenset({"Write"}),
+    )
+    denials = []
+    callback = make_permission_callback(task, denials, sdk=FakeSdk)
+    options = build_claude_options(task, callback, sdk=FakeSdk)
+    hook = options.values["hooks"]["PreToolUse"][0].hooks[0]
+
+    outside = asyncio.run(
+        hook(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(output_path.parents[3] / "outside.txt")},
+            },
+            "tool-1",
+            {"signal": None},
+        )
+    )
+    inside = asyncio.run(
+        hook(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(output_path)},
+            },
+            "tool-2",
+            {"signal": None},
+        )
+    )
+
+    assert outside["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "越界" in outside["hookSpecificOutput"]["permissionDecisionReason"]
+    assert inside["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 def test_common_prompt_总是在任务正文之前(validation_env):
@@ -411,6 +580,16 @@ def test_claude_sdk_流式读取后以结论块加产物校验判成功(validati
         SystemMessage=type("SystemMessage", (), {}),
         PermissionResultAllow=type("Allow", (), {}),
         PermissionResultDeny=type("Deny", (), {"__init__": lambda self, **kw: None}),
+        HookMatcher=type(
+            "HookMatcher",
+            (),
+            {
+                "__init__": lambda self, matcher=None, hooks=None: (
+                    setattr(self, "matcher", matcher),
+                    setattr(self, "hooks", hooks or []),
+                )[-1],
+            },
+        ),
     )
 
     validation, output_path = validation_env

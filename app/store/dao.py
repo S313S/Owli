@@ -185,8 +185,49 @@ class Store:
                 report[field] = json.loads(report[field])
         return report
 
+    def finish_report(
+        self,
+        report_id: str,
+        *,
+        status: str,
+        completed_at: str,
+        summary: str | None = None,
+        summary_line: str | None = None,
+        report_path: str | None = None,
+    ) -> None:
+        """用具名字段完成或终止报告，禁止调用方拼接 SQL。"""
+        if status not in {"completed", "failed"}:
+            raise ValueError("finish_report.status 只能是 completed 或 failed")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE reports
+                SET status = ?, completed_at = ?, summary = COALESCE(?, summary),
+                    summary_line = COALESCE(?, summary_line),
+                    report_path = COALESCE(?, report_path)
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    completed_at,
+                    summary,
+                    summary_line,
+                    report_path,
+                    report_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"报告不存在：{report_id}")
+
     def read_validation_path(self, path: str, report_id: str) -> Any:
         """按封闭路径读取校验数据；调用方不能传 SQL 或表名片段。"""
+        if path == "evidence":
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT id FROM evidence WHERE report_id = ? ORDER BY citation_no, id",
+                    (report_id,),
+                ).fetchall()
+            return [row["id"] for row in rows]
         if path == "report_tags":
             with self._connect() as connection:
                 rows = connection.execute(

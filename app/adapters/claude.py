@@ -143,17 +143,49 @@ def make_permission_callback(task: ClaudeTask, denials: list[str], *, sdk=None):
     return can_use_tool
 
 
+def make_pre_tool_hook(permission_callback, *, sdk=None):
+    """即使工具已预批准，也在执行前强制复核 capability 与写入路径。"""
+    sdk = sdk or _load_sdk()
+
+    async def enforce(input_data: dict[str, Any], tool_use_id: str | None, context: Any):
+        del tool_use_id
+        decision = await permission_callback(
+            input_data.get("tool_name", ""),
+            input_data.get("tool_input", {}),
+            context,
+        )
+        denied = isinstance(decision, sdk.PermissionResultDeny)
+        reason = getattr(decision, "message", "") or "工具调用被 capability 边界拒绝"
+        hook_output = {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny" if denied else "allow",
+        }
+        if denied:
+            hook_output["permissionDecisionReason"] = reason
+        return {
+            "hookSpecificOutput": hook_output,
+        }
+
+    return sdk.HookMatcher(matcher=None, hooks=[enforce])
+
+
 def build_claude_options(task: ClaudeTask, permission_callback, *, sdk=None):
     sdk = sdk or _load_sdk()
     unknown = sorted(task.tools - CLAUDE_TOOL_UNIVERSE)
     if unknown:
         raise ValueError(f"Claude 工具白名单包含未知工具：{','.join(unknown)}")
+    declared_tools = sorted(task.tools)
     values: dict[str, Any] = {
         "cwd": str(PROJECT_ROOT),
         "setting_sources": [],
+        "tools": declared_tools,
+        "allowed_tools": declared_tools,
         "disallowed_tools": sorted(CLAUDE_TOOL_UNIVERSE - task.tools),
         "permission_mode": "dontAsk",
         "can_use_tool": permission_callback,
+        "hooks": {
+            "PreToolUse": [make_pre_tool_hook(permission_callback, sdk=sdk)],
+        },
     }
     if task.model:
         values["model"] = task.model

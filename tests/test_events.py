@@ -75,6 +75,19 @@ class EventBufferTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(event.payload["raw"], raw)
 
+    async def test_已发布事件冻结嵌套快照不受后续状态修改(self) -> None:
+        state = {"goals": [{"id": "goal-1", "status": "queued"}]}
+        await self.buffer.publish(
+            "r-1", {"type": "research_snapshot", "data": state}
+        )
+
+        state["goals"][0]["status"] = "done"
+        replay = await self.buffer.replay_after("r-1", 0)
+
+        self.assertEqual(
+            replay.events[0].payload["data"]["goals"][0]["status"], "queued"
+        )
+
 
 class ApiShapeTest(unittest.TestCase):
     def test_缓冲器可在服务运行循环启动时重绑通知器(self) -> None:
