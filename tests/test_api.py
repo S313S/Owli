@@ -15,7 +15,15 @@ class HealthApiTest(unittest.TestCase):
         from app.api.main import create_app
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            app = create_app(Path(temp_dir) / "owli.db", SCHEMA_PATH)
+            engine_checks = {
+                "claude": {"status": "available", "version": "0.1.60"},
+                "codex": {"status": "unavailable", "status_label": "引擎不可用"},
+            }
+            app = create_app(
+                Path(temp_dir) / "owli.db",
+                SCHEMA_PATH,
+                engine_probe=lambda: engine_checks,
+            )
 
             async def request_health() -> dict:
                 async with app.router.lifespan_context(app):
@@ -33,6 +41,7 @@ class HealthApiTest(unittest.TestCase):
         self.assertIsNone(response["error"])
         self.assertTrue(response["data"]["schema"]["ok"])
         self.assertEqual(response["data"]["schema"]["journal_mode"], "wal")
+        self.assertEqual(response["data"]["engines"], engine_checks)
 
 
 if __name__ == "__main__":

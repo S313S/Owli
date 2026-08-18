@@ -171,6 +171,49 @@ def normalize_claude_event(
     )]
 
 
-def normalize_codex_event(raw: Any) -> list[NormalizedEvent]:
-    """M1-b 实装：本包只锁定公共签名，不猜测 Codex 原生字段。"""
-    raise NotImplementedError("Codex 事件归一由 M1-b 实装")
+def _codex_text(body: dict[str, Any]) -> str:
+    for key in ("message", "text", "delta", "command", "aggregated_output"):
+        value = body.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+
+
+def normalize_codex_event(
+    raw: Any,
+    *,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
+) -> list[NormalizedEvent]:
+    """宽容归一 Codex JSONL；未知 kind 保留原文并归为 thinking。"""
+    if not isinstance(raw, dict):
+        return [NormalizedEvent(
+            "Codex", thread_id, turn_id, ItemKind.THINKING, str(raw), False, raw
+        )]
+
+    event_type = str(raw.get("type", ""))
+    body = raw.get("item") or raw.get("msg") or raw
+    body = body if isinstance(body, dict) else raw
+    native_kind = str(body.get("type") or event_type)
+    text = _codex_text(body)
+    current_thread = raw.get("thread_id") or thread_id
+    current_turn = raw.get("turn_id") or turn_id
+    lowered = native_kind.lower()
+
+    if event_type == "turn.failed" or "error" in lowered:
+        kind, is_error = ItemKind.ERROR, True
+    elif event_type == "turn.completed":
+        kind, is_error = ItemKind.DONE, False
+    elif any(token in lowered for token in ("exec", "tool", "command", "patch", "mcp")):
+        kind, is_error = ItemKind.TOOL_CALL, False
+        text = f"[{native_kind}] {text}"
+    elif any(token in lowered for token in ("agent_message", "assistant", "output_text")):
+        kind, is_error = ItemKind.OUTPUT, False
+    elif any(token in lowered for token in ("reasoning", "thinking")):
+        kind, is_error = ItemKind.THINKING, False
+    else:
+        kind, is_error = ItemKind.THINKING, False
+        text = f"[{native_kind}] {text}"
+    return [NormalizedEvent(
+        "Codex", current_thread, current_turn, kind, text, is_error, raw
+    )]

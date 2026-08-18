@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.adapters.selfcheck import SchemaCheckError, initialize_and_check
+from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe_engines
 from app.api.events import ResearchEventBuffer
 from app.orchestrator.mini import MiniOrchestrator, build_actions, build_initial_state
 from app.store.dao import Store
@@ -38,6 +38,7 @@ def create_app(
     frontend_dist: str | Path = DEFAULT_FRONTEND_DIST,
     event_buffer: ResearchEventBuffer | None = None,
     orchestrator_factory: Callable[..., Any] | None = None,
+    engine_probe: Callable[[], dict[str, dict[str, Any]]] | None = None,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
@@ -52,6 +53,7 @@ def create_app(
         try:
             events.bind_to_running_loop()
             application.state.schema_check = initialize_and_check(database, schema)
+            application.state.engine_checks = (engine_probe or probe_engines)()
         except SchemaCheckError as error:
             print(str(error), file=sys.stderr)
             raise
@@ -146,7 +148,10 @@ def create_app(
     async def health() -> dict:
         return {
             "ok": True,
-            "data": {"schema": application.state.schema_check},
+            "data": {
+                "schema": application.state.schema_check,
+                "engines": application.state.engine_checks,
+            },
             "error": None,
         }
 

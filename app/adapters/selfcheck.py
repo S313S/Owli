@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import re
+import subprocess
+import tempfile
+from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from app.adapters.codex import CodexAuthMode, build_codex_env
 
 from app.store.schema import (
     initialize_database_if_empty,
@@ -14,6 +20,122 @@ from app.store.schema import (
 
 class SchemaCheckError(RuntimeError):
     """SQLite 实际结构与权威 schema 不一致。"""
+
+
+def _engine_result(
+    status: str,
+    *,
+    version: str | None = None,
+    sandbox: str | None = None,
+    detail: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "status_label": "可用" if status == "available" else "引擎不可用",
+        "version": version,
+        "sandbox": sandbox,
+        "detail": detail,
+    }
+
+
+def probe_claude_sdk(
+    *,
+    version_reader: Callable[[str], str] = package_version,
+) -> dict[str, Any]:
+    try:
+        version = version_reader("claude-agent-sdk")
+    except Exception as exc:
+        return _engine_result(
+            "unavailable",
+            detail=f"Claude Agent SDK 版本探测失败：{type(exc).__name__}: {exc}",
+        )
+    return _engine_result(
+        "available",
+        version=version,
+        detail="Claude Agent SDK 版本探测通过",
+    )
+
+
+def _combined_output(completed: Any) -> str:
+    return "\n".join(
+        value.strip()
+        for value in (getattr(completed, "stdout", ""), getattr(completed, "stderr", ""))
+        if isinstance(value, str) and value.strip()
+    )
+
+
+def probe_codex_cli(
+    *,
+    executable: str = "codex",
+    codex_home: str | Path | None = None,
+    auth_mode: CodexAuthMode | str = CodexAuthMode.SUBSCRIPTION,
+    api_key: str | None = None,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    try:
+        env = build_codex_env(
+            auth_mode,
+            codex_home=codex_home,
+            api_key=api_key,
+        )
+        Path(env["CODEX_HOME"]).mkdir(parents=True, exist_ok=True)
+        version_run = runner(
+            [executable, "--version"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        version = _combined_output(version_run).splitlines()[0].strip()
+        if not version:
+            raise RuntimeError("codex --version 未返回版本文本")
+
+        with tempfile.TemporaryDirectory(prefix="owli-codex-selfcheck-") as temp_dir:
+            command = [
+                executable,
+                "exec",
+                "-C",
+                temp_dir,
+                "-s",
+                "read-only",
+                "--skip-git-repo-check",
+                "这是启动自检：只输出“自检完成”，不要调用工具。",
+            ]
+            dry_run = runner(
+                command,
+                cwd=temp_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=True,
+            )
+        output = _combined_output(dry_run)
+        match = re.search(r"sandbox:\s*([a-z-]+)", output, re.IGNORECASE)
+        actual_sandbox = match.group(1).lower() if match else None
+        if actual_sandbox != "read-only":
+            shown = actual_sandbox or "未回显"
+            raise RuntimeError(f"Codex 沙箱档位不符：期望 read-only，实际 {shown}")
+    except Exception as exc:
+        return _engine_result(
+            "unavailable",
+            detail=f"Codex CLI 探测失败：{type(exc).__name__}: {exc}",
+        )
+    return _engine_result(
+        "available",
+        version=version,
+        sandbox=actual_sandbox,
+        detail="Codex CLI 版本与沙箱干跑探测通过",
+    )
+
+
+def probe_engines(
+    *,
+    claude_probe: Callable[[], dict[str, Any]] = probe_claude_sdk,
+    codex_probe: Callable[[], dict[str, Any]] = probe_codex_cli,
+) -> dict[str, dict[str, Any]]:
+    return {"claude": claude_probe(), "codex": codex_probe()}
 
 
 def initialize_and_check(

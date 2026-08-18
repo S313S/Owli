@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OwliResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "output_path",
+    "summary",
+    "assumptions",
+    "unmet",
+    "capability_denials"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "partial", "blocked"]
+    },
+    "output_path": {"type": "string", "minLength": 1},
+    "summary": {"type": "string", "maxLength": 200},
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "reason"],
+        "properties": {
+          "item": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "unmet": {"type": "array", "items": {"type": "string"}},
+    "capability_denials": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
