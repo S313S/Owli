@@ -92,6 +92,19 @@ Owli 使用 Claude 与 Codex 协作完成不同类型的调研任务，并保留
 
 这些结论已经过最小方案验证；完整产品功能仍在逐步实现中。
 
+## 怎么起服务
+
+当前 M0 骨架提供单进程 FastAPI 服务，需要 Python 3.9+ 与支持 `STRICT` 表的 SQLite 3.37+。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8721 --workers 1
+```
+
+服务启动时会初始化 `var/owli.db` 并校验 schema；实际表或列与 `app/store/schema.sql` 不一致时会拒绝启动。健康检查地址为 `http://127.0.0.1:8721/api/health`。
+
 ---
 
 <p align="center">Owli · Owl + Sight · 让市场调研的每一步都有依据</p>
