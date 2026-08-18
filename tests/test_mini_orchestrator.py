@@ -73,14 +73,23 @@ class FakeAdapter:
         self.tasks = []
 
     async def run(self, task, ctx, on_event=None):
-        from app.adapters.claude import ClaudeEvent, ClaudeRunResult, OwliResult
+        from app.adapters.claude import ClaudeRunResult, OwliResult
+        from app.adapters.events import ItemKind, NormalizedEvent
         from app.adapters.validation import Result, ValidationReport, Verdict, validate
 
         self.calls[task.agent_id] += 1
         self.tasks.append(task)
         outcome = self.outcomes[task.agent_id].popleft()
         if on_event is not None:
-            await on_event(ClaudeEvent("thinking", "正在执行", {"agent": task.agent_id}))
+            await on_event(NormalizedEvent(
+                engine="Claude",
+                thread_id="thread-test",
+                turn_id=f"turn-{self.calls[task.agent_id]}",
+                item_kind=ItemKind.THINKING,
+                text="正在执行",
+                is_error=False,
+                raw={"agent": task.agent_id},
+            ))
 
         if outcome == "unavailable":
             unavailable = Result(
@@ -94,7 +103,15 @@ class FakeAdapter:
                 None,
                 "依赖缺失",
                 ValidationReport(Verdict.UNAVAILABLE, [unavailable]),
-                [ClaudeEvent("error", "依赖缺失", self.raw_error)],
+                [NormalizedEvent(
+                    engine="Claude",
+                    thread_id="thread-test",
+                    turn_id=f"turn-{self.calls[task.agent_id]}",
+                    item_kind=ItemKind.ERROR,
+                    text="依赖缺失",
+                    is_error=True,
+                    raw=self.raw_error,
+                )],
                 [],
                 "依赖缺失",
             )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -244,12 +245,19 @@ def create_app(
         else:
             last_event_id = last_event_id_query
 
-        await events.publish(
-            research_id,
-            {"type": "stream_connected", "data": {"message": "SSE 已连接"}},
-        )
-
         async def stream() -> AsyncIterator[str]:
+            connected = {
+                "type": "stream_connected",
+                "research_id": research_id,
+                "sequence": last_event_id or 0,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "data": {"message": "SSE 已连接"},
+            }
+            body = json.dumps(
+                connected, ensure_ascii=False, separators=(",", ":")
+            )
+            # 连接确认不进入 research 共享缓冲，也不写 id，避免污染重放游标。
+            yield f"event: stream_connected\ndata: {body}\n\n"
             replay = await events.replay_after(research_id, last_event_id)
             cursor = last_event_id or 0
             for event in replay.events:

@@ -10,6 +10,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from app.adapters.events import NormalizedEvent, normalize_claude_event
+from app.adapters.logging import append_engine_error
 from app.adapters import validation as artifact_validation
 
 
@@ -56,18 +58,11 @@ class ClaudeTask:
 
 
 @dataclass(frozen=True)
-class ClaudeEvent:
-    kind: str
-    text: str
-    raw: Any
-
-
-@dataclass(frozen=True)
 class ClaudeRunResult:
     conclusion: OwliResult | None
     conclusion_error: str | None
     validation: artifact_validation.ValidationReport
-    events: list[ClaudeEvent]
+    events: list[NormalizedEvent]
     permission_denials: list[str]
     engine_error: str | None = None
 
@@ -201,26 +196,6 @@ async def _prompt_stream(prompt: str):
     }
 
 
-def _message_event(message: Any, sdk: Any) -> ClaudeEvent:
-    if isinstance(message, sdk.AssistantMessage):
-        for block in message.content:
-            if isinstance(block, sdk.ToolUseBlock):
-                payload = json.dumps(getattr(block, "input", {}), ensure_ascii=False)
-                return ClaudeEvent("tool_call", f"[{block.name}] {payload}", message)
-            if isinstance(block, sdk.TextBlock) and block.text.strip():
-                return ClaudeEvent("output", block.text, message)
-        return ClaudeEvent("thinking", "[assistant]", message)
-    if isinstance(message, sdk.UserMessage):
-        return ClaudeEvent("tool_call", "[tool_result] 工具返回", message)
-    if isinstance(message, sdk.ResultMessage):
-        kind = "error" if getattr(message, "is_error", False) else "done"
-        return ClaudeEvent(kind, str(getattr(message, "result", "") or ""), message)
-    if isinstance(message, sdk.SystemMessage):
-        subtype = getattr(message, "subtype", "")
-        return ClaudeEvent("thinking", f"[session] {subtype}", message)
-    return ClaudeEvent("thinking", f"[{type(message).__name__}]", message)
-
-
 def _assistant_text(message: Any, sdk: Any) -> list[str]:
     texts = []
     if isinstance(message, sdk.AssistantMessage):
@@ -238,7 +213,7 @@ def _assistant_text(message: Any, sdk: Any) -> list[str]:
 
 def _unavailable_run(
     error: Exception,
-    events: list[ClaudeEvent],
+    events: list[NormalizedEvent],
     denials: list[str],
 ) -> ClaudeRunResult:
     message = f"Claude Agent SDK 不可用：{type(error).__name__}: {error}"
@@ -275,22 +250,31 @@ class ClaudeAdapter:
     ) -> ClaudeRunResult:
         sdk = self._sdk or _load_sdk()
         denials: list[str] = []
-        events: list[ClaudeEvent] = []
+        events: list[NormalizedEvent] = []
         output_text: list[str] = []
         callback = make_permission_callback(task, denials, sdk=sdk)
         options = build_claude_options(task, callback, sdk=sdk)
         client = sdk.ClaudeSDKClient(options)
         self._client = client
+        fallback_thread_id = f"{task.research_id}:{task.goal_id}:{task.agent_id}"
+        run_turn_id = f"{fallback_thread_id}:turn-1"
         try:
             await client.connect(_prompt_stream(compose_prompt(task.body)))
             async for message in client.receive_response():
-                event = _message_event(message, sdk)
-                events.append(event)
                 output_text.extend(_assistant_text(message, sdk))
-                if on_event is not None:
-                    callback_result = on_event(event)
-                    if inspect.isawaitable(callback_result):
-                        await callback_result
+                normalized = normalize_claude_event(
+                    message,
+                    sdk=sdk,
+                    thread_id=fallback_thread_id,
+                    turn_id=run_turn_id,
+                )
+                for event in normalized:
+                    events.append(event)
+                    append_engine_error(event)
+                    if on_event is not None:
+                        callback_result = on_event(event)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
         except Exception as exc:
             return _unavailable_run(exc, events, denials)
         finally:

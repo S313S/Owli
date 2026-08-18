@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from app.adapters import validation
 from app.adapters.claude import ClaudeAdapter, ClaudeRunResult, ClaudeTask
+from app.adapters.events import NormalizedEvent
 from app.sources.hn import search as search_hn
 
 
@@ -154,7 +155,7 @@ def _plain_raw(value: Any) -> Any:
 
 def _adapter_raw(result: ClaudeRunResult) -> Any:
     for event in reversed(result.events):
-        if event.kind == "error":
+        if event.is_error:
             return _plain_raw(event.raw)
     return {
         "engine_error": result.engine_error,
@@ -417,8 +418,8 @@ class MiniOrchestrator:
     async def _run_engine_task(self, task: ClaudeTask) -> StepAttempt:
         ctx = self._ctx(task.output_path, task.output_format, task.agent_id)
 
-        async def on_event(event: Any) -> None:
-            if event.kind == "error":
+        async def on_event(event: NormalizedEvent) -> None:
+            if event.is_error:
                 await self.events.publish(
                     self.research_id,
                     {

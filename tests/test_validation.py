@@ -615,7 +615,7 @@ def test_claude_sdk_流式读取后以结论块加产物校验判成功(validati
     assert result.succeeded
     assert result.validation.verdict is validation.Verdict.PASS
     assert result.conclusion.status == "done"
-    assert result.events[-1].kind == "error"
+    assert result.events[-1].is_error is True
     assert FakeClient.instance.prompt.startswith("你是 Owli")
 
     outside = output_path.parents[3] / "outside.json"
