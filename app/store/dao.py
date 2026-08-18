@@ -185,6 +185,37 @@ class Store:
                 report[field] = json.loads(report[field])
         return report
 
+    def read_validation_path(self, path: str, report_id: str) -> Any:
+        """按封闭路径读取校验数据；调用方不能传 SQL 或表名片段。"""
+        if path == "report_tags":
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT tag FROM report_tags WHERE report_id = ? ORDER BY tag",
+                    (report_id,),
+                ).fetchall()
+            return [row["tag"] for row in rows]
+
+        parts = path.split(".")
+        if len(parts) < 2 or parts[0] != "reports":
+            raise ValueError(f"不支持的校验读取路径：{path}")
+        report = self.get_report(report_id)
+        if report is None:
+            return None
+
+        if parts[1] == "extra":
+            current: Any = report["extra"]
+            remaining = parts[2:]
+        elif len(parts) == 2 and parts[1] in report:
+            return report[parts[1]]
+        else:
+            raise ValueError(f"不支持的校验读取路径：{path}")
+
+        for key in remaining:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        return current
+
     def _existing_evidence_extra_keys(
         self,
         connection: sqlite3.Connection,
