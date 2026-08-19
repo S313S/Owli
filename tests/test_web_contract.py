@@ -8,14 +8,38 @@ WEB = ROOT / "web"
 
 
 class WebContractTest(unittest.TestCase):
-    def test_只有需求输入与实时工作板两个路由(self) -> None:
+    def test_需求输入_计划编辑_实时工作板三个路由(self) -> None:
         app = WEB / "src" / "App.tsx"
         self.assertTrue(app.is_file(), "web/src/App.tsx 尚未创建")
         source = app.read_text(encoding="utf-8")
         self.assertIn("<ResearchInputPage", source)
+        self.assertIn("<PlanEditorPage", source)
         self.assertIn("<WorkboardPage", source)
-        self.assertNotIn("PlanPage", source)
         self.assertNotIn("ReportPage", source)
+
+    def test_计划编辑器包含_origin_恢复_追问_批准冻结与409提示(self) -> None:
+        editor = WEB / "src" / "PlanEditorPage.tsx"
+        self.assertTrue(editor.is_file(), "web/src/PlanEditorPage.tsx 尚未创建")
+        source = editor.read_text(encoding="utf-8")
+        for contract in (
+            "已自定义", "已修改", "恢复初始化", "批准并开始执行",
+            "计划已冻结", "decision_balance", "plan_rev", "409", "重新加载",
+            "V1.0 暂不生效", "执行策略，V1.0 只读", "公共前缀 common/v1 不可编辑",
+        ):
+            self.assertIn(contract, source)
+
+    def test_工作板渲染_deadline_倒计时和重跑次数(self) -> None:
+        source = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
+        card = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
+        self.assertIn("重跑第", source)
+        self.assertIn("deadline", card)
+        self.assertIn("超时后", card)
+
+    def test_卡片统一走_respond_并携带客户端请求ID(self) -> None:
+        source = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
+        self.assertIn("/api/cards/", source)
+        self.assertIn("/respond", source)
+        self.assertIn("X-Request-ID", source)
 
     def test_前端不轮询(self) -> None:
         sources = list((WEB / "src").glob("**/*.ts")) + list((WEB / "src").glob("**/*.tsx"))

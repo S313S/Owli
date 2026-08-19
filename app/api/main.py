@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -11,14 +13,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator, Any, Callable, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe_engines
 from app.api.events import ResearchEventBuffer
 from app.orchestrator.mini import MiniOrchestrator, build_actions, build_initial_state
+from app.plan.cards import Card, CardStatus
+from app.plan.editing import (
+    PlanApprovalRejected,
+    PlanEditRejected,
+    PlanLintRejected,
+    apply_edit,
+    approve,
+    reset,
+)
+from app.plan.model import Plan
+from app.plan.store import PlanRevisionConflict, load_plan, save_plan
 from app.store.dao import Store
 
 
@@ -32,6 +45,24 @@ class ResearchRequest(BaseModel):
     query: str
 
 
+class ResetPlanRequest(BaseModel):
+    scope: str
+    target_id: str | None = None
+
+
+class ResetAgentRequest(BaseModel):
+    agent_id: str
+
+
+class CardResponseRequest(BaseModel):
+    action: str
+    payload: Any
+
+
+class TestFixtureRequest(BaseModel):
+    unanswered: bool = False
+
+
 def create_app(
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     schema_path: str | Path = DEFAULT_SCHEMA_PATH,
@@ -39,12 +70,20 @@ def create_app(
     event_buffer: ResearchEventBuffer | None = None,
     orchestrator_factory: Callable[..., Any] | None = None,
     engine_probe: Callable[[], dict[str, dict[str, Any]]] | None = None,
+    enable_test_routes: bool | None = None,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
     frontend = Path(frontend_dist)
+    test_routes_enabled = (
+        os.getenv("OWLI_ENABLE_TEST_ROUTES") == "1"
+        if enable_test_routes is None
+        else enable_test_routes
+    )
     events = event_buffer or ResearchEventBuffer(max_events=2000, max_age_seconds=3600)
     researches: dict[str, dict[str, Any]] = {}
+    cards: dict[str, Card] = {}
+    request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
     store = Store(database)
 
@@ -64,6 +103,35 @@ def create_app(
     application.state.researches = researches
     application.state.background_tasks = background_tasks
     application.state.store = store
+    application.state.cards = cards
+    application.state.request_cache = request_cache
+
+    def envelope(data: Any = None) -> dict[str, Any]:
+        return {"ok": True, "data": data, "error": None}
+
+    def error_envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "data": None,
+            "error": {"code": code, "message": message, "details": details},
+        }
+
+    def cached(scope: str, request_id: str) -> JSONResponse | None:
+        result = request_cache.get((scope, request_id))
+        if result is None:
+            return None
+        status_code, body = result
+        return JSONResponse(copy.deepcopy(body), status_code=status_code)
+
+    def remember(
+        scope: str,
+        request_id: str,
+        body: dict[str, Any],
+        *,
+        status_code: int = 200,
+    ) -> JSONResponse:
+        request_cache[(scope, request_id)] = (status_code, copy.deepcopy(body))
+        return JSONResponse(body, status_code=status_code)
 
     async def run_in_background(
         research_id: str,
@@ -156,7 +224,14 @@ def create_app(
         }
 
     @application.post("/api/researches")
-    async def create_research(request: ResearchRequest) -> dict:
+    async def create_research(
+        request: ResearchRequest,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> Any:
+        scope = "create_research"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
         query = request.query.strip()
         if not query:
             raise HTTPException(status_code=422, detail="需求文本不能为空")
@@ -180,7 +255,9 @@ def create_app(
         )
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
-        return {"ok": True, "data": {"research_id": research_id, "similar": []}, "error": None}
+        response = envelope({"research_id": research_id, "similar": []})
+        request_cache[(scope, x_request_id)] = (200, copy.deepcopy(response))
+        return response
 
     @application.get("/api/researches/{research_id}")
     async def get_research(research_id: str) -> dict:
@@ -188,6 +265,198 @@ def create_app(
         if state is None:
             raise HTTPException(status_code=404, detail="调研任务不存在")
         return {"ok": True, "data": state, "error": None}
+
+    def required_plan(research_id: str) -> Plan | JSONResponse:
+        try:
+            plan = load_plan(store, research_id)
+        except KeyError:
+            return JSONResponse(
+                error_envelope("plan_not_found", "调研计划不存在，请返回入口重新发起"),
+                status_code=404,
+            )
+        if plan is None:
+            return JSONResponse(
+                error_envelope("plan_not_ready", "计划仍在生成中，请稍后重新加载"),
+                status_code=404,
+            )
+        return plan
+
+    @application.get("/api/researches/{research_id}/plan")
+    async def get_research_plan(research_id: str) -> Any:
+        plan = required_plan(research_id)
+        return plan if isinstance(plan, JSONResponse) else envelope(plan.to_dict())
+
+    @application.put("/api/researches/{research_id}/plan")
+    async def put_research_plan(
+        research_id: str,
+        submitted: dict[str, Any] = Body(...),
+    ) -> Any:
+        current = required_plan(research_id)
+        if isinstance(current, JSONResponse):
+            return current
+        try:
+            updated, lint_result = apply_edit(store, current, submitted)
+        except PlanRevisionConflict:
+            return JSONResponse(
+                error_envelope(
+                    "plan_revision_conflict",
+                    "计划已被更新。你的这次修改没有保存，请重新加载后再改一次，避免互相覆盖",
+                ),
+                status_code=409,
+            )
+        except PlanEditRejected as error:
+            return JSONResponse(
+                error_envelope("field_not_editable", str(error), error.details),
+                status_code=422,
+            )
+        except PlanLintRejected as error:
+            return JSONResponse(
+                error_envelope("plan_lint_failed", str(error), error.result["errors"]),
+                status_code=422,
+            )
+        except (TypeError, ValueError) as error:
+            return JSONResponse(
+                error_envelope("invalid_plan", f"计划字段不合法：{error}"),
+                status_code=422,
+            )
+        data = updated.to_dict()
+        data["lint"] = lint_result
+        return envelope(data)
+
+    async def reset_plan_response(
+        research_id: str,
+        *,
+        scope: str,
+        target_id: str | None,
+        request_id: str,
+        cache_scope: str,
+    ) -> JSONResponse:
+        hit = cached(cache_scope, request_id)
+        if hit is not None:
+            return hit
+        current = required_plan(research_id)
+        if isinstance(current, JSONResponse):
+            return current
+        try:
+            updated = reset(store, current, scope=scope, target_id=target_id)
+        except PlanRevisionConflict:
+            return remember(
+                cache_scope,
+                request_id,
+                error_envelope(
+                    "plan_revision_conflict",
+                    "计划已被更新，恢复操作没有生效；请重新加载后再试",
+                ),
+                status_code=409,
+            )
+        except PlanLintRejected as error:
+            return remember(
+                cache_scope,
+                request_id,
+                error_envelope("plan_lint_failed", str(error), error.result["errors"]),
+                status_code=422,
+            )
+        except (PlanEditRejected, TypeError, ValueError) as error:
+            details = error.details if isinstance(error, PlanEditRejected) else None
+            return remember(
+                cache_scope,
+                request_id,
+                error_envelope("reset_rejected", str(error), details),
+                status_code=422,
+            )
+        return remember(cache_scope, request_id, envelope(updated.to_dict()))
+
+    @application.post("/api/researches/{research_id}/plan/reset")
+    async def reset_research_plan(
+        research_id: str,
+        request: ResetPlanRequest,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        return await reset_plan_response(
+            research_id,
+            scope=request.scope,
+            target_id=request.target_id,
+            request_id=x_request_id,
+            cache_scope=f"reset:{research_id}",
+        )
+
+    @application.post("/api/researches/{research_id}/plan/reset-agent")
+    async def reset_research_agent(
+        research_id: str,
+        request: ResetAgentRequest,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        return await reset_plan_response(
+            research_id,
+            scope="agent",
+            target_id=request.agent_id,
+            request_id=x_request_id,
+            cache_scope=f"reset-agent:{research_id}",
+        )
+
+    @application.post("/api/researches/{research_id}/plan/approve")
+    async def approve_research_plan(
+        research_id: str,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        scope = f"approve:{research_id}"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
+        current = required_plan(research_id)
+        if isinstance(current, JSONResponse):
+            return current
+        try:
+            updated = approve(store, current)
+        except PlanApprovalRejected as error:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope("questions_unanswered", str(error)),
+                status_code=422,
+            )
+        except PlanLintRejected as error:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope("plan_lint_failed", str(error), error.result["errors"]),
+                status_code=422,
+            )
+        except PlanRevisionConflict:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope(
+                    "plan_revision_conflict",
+                    "计划已被更新，批准操作没有生效；请重新加载后再试",
+                ),
+                status_code=409,
+            )
+        state = researches.get(research_id)
+        if state is not None:
+            state["status"] = "approved"
+            state["status_label"] = "计划已冻结"
+            state["actions"] = build_actions(research_id)
+            await events.publish(
+                research_id,
+                {
+                    "type": "research_update",
+                    "data": {
+                        "status": "approved",
+                        "status_label": "计划已冻结",
+                        "actions": state["actions"],
+                    },
+                },
+            )
+        return remember(
+            scope,
+            x_request_id,
+            envelope({
+                "status": updated.status,
+                "approved_at": updated.approved_at,
+                "plan_rev": updated.plan_rev,
+            }),
+        )
 
     async def change_state(research_id: str, status: str, label: str) -> dict:
         state = researches.get(research_id)
@@ -211,28 +480,224 @@ def create_app(
         )
 
     @application.post("/api/researches/{research_id}/pause")
-    async def pause_research(research_id: str) -> dict:
+    async def pause_research(
+        research_id: str,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        scope = f"pause:{research_id}"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
         response = await change_state(research_id, "paused", "已暂停")
         response["data"]["actions"] = [
             {"id": "resume", "label": "继续", "method": "POST", "href": f"/api/researches/{research_id}/resume"},
             *[action for action in response["data"]["actions"] if action["id"] == "stop"],
         ]
         await publish_state_update(research_id, response["data"])
-        return response
+        return remember(scope, x_request_id, response)
 
     @application.post("/api/researches/{research_id}/resume")
-    async def resume_research(research_id: str) -> dict:
+    async def resume_research(
+        research_id: str,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        scope = f"resume:{research_id}"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
         response = await change_state(research_id, "running", "运行中")
         response["data"]["actions"] = build_actions(research_id)
         await publish_state_update(research_id, response["data"])
-        return response
+        return remember(scope, x_request_id, response)
 
     @application.post("/api/researches/{research_id}/stop")
-    async def stop_research(research_id: str) -> dict:
+    async def stop_research(
+        research_id: str,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        scope = f"stop:{research_id}"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
         response = await change_state(research_id, "stopped", "已终止")
         response["data"]["actions"] = []
         await publish_state_update(research_id, response["data"])
-        return response
+        return remember(scope, x_request_id, response)
+
+    @application.post("/api/cards/{card_id}/respond")
+    async def respond_to_card(
+        card_id: str,
+        request: CardResponseRequest,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> JSONResponse:
+        scope = f"respond:{card_id}"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
+        card = cards.get(card_id)
+        if card is None:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope("card_not_found", "待办卡片不存在或已被清理，请重新加载工作板"),
+                status_code=404,
+            )
+        if card.status is not CardStatus.PENDING:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope("card_already_resolved", "这张卡片已经处理过，无需重复提交"),
+                status_code=409,
+            )
+        allowed = {
+            str(action.get("id") or action.get("type"))
+            for action in card.actions
+        }
+        if request.action not in allowed:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope(
+                    "card_action_invalid",
+                    "提交的动作不在卡片允许范围内，请重新加载后选择页面上的按钮",
+                    {"allowed": sorted(allowed)},
+                ),
+                status_code=422,
+            )
+        card.status = CardStatus.ANSWERED
+        card.result = {"action": request.action, "payload": copy.deepcopy(request.payload)}
+        card.resolved_at = datetime.now(timezone.utc).isoformat()
+        state = researches.get(card.research_id)
+        if state is not None:
+            state["cards"] = [
+                card.to_dict() if item.get("card_id") == card.card_id else item
+                for item in state.get("cards", [])
+            ]
+        await events.publish(card.research_id, card.to_event())
+        return remember(scope, x_request_id, envelope(card.to_dict()))
+
+    if test_routes_enabled:
+        @application.post("/api/test/fixtures/m2-d")
+        async def load_m2d_fixture(
+            request: TestFixtureRequest,
+            x_request_id: str = Header(..., alias="X-Request-ID"),
+        ) -> JSONResponse:
+            """仅测试：装载确定性计划；生产默认不注册此路由。"""
+            scope = "test-fixture:m2-d"
+            hit = cached(scope, x_request_id)
+            if hit is not None:
+                return hit
+            from tests.plan_factory import make_plan_dict
+
+            source = make_plan_dict()
+            runner = source["goals"][0]["agents"][0]
+            runner["engine"] = "codex"
+            runner["capability"] = {
+                "profile": "sandboxed-runner",
+                "tools": ["shell.exec", "fs.read", "fs.write"],
+                "sources": [],
+                "fs": {
+                    "read": ["goals/goal-1/**"],
+                    "write": ["goals/goal-1/**"],
+                },
+                "network": "none",
+                "shell": "workspace",
+            }
+            source["baseline"]["goals"][0]["agents"][0] = copy.deepcopy(runner)
+            if request.unanswered:
+                source["decision_balance"][0]["answer"] = None
+                source["decision_balance"][0]["answered_at"] = None
+            plan = Plan.from_dict(source)
+            store.create_report(
+                id=plan.research_id,
+                title=plan.title,
+                research_question=plan.research_question,
+                use_case=plan.use_case,
+                status="running",
+                created_at=plan.created_at,
+            )
+            save_plan(store, plan, expected_rev=0)
+            researches[plan.research_id] = {
+                "research_id": plan.research_id,
+                "title": plan.title,
+                "status": "awaiting_review",
+                "status_label": "等待核对计划",
+                "progress": {
+                    "done": 0,
+                    "total": len(plan.goals),
+                    "summary": "计划已生成，等待回答追问并批准",
+                },
+                "actions": [],
+                "goals": [
+                    {
+                        "id": goal.goal_id,
+                        "title": goal.title,
+                        "status": goal.status,
+                        "summary": goal.objective,
+                        "agents": [
+                            {
+                                "id": agent.agent_id,
+                                "name": agent.display_name,
+                                "engine": agent.engine,
+                                "status": agent.status,
+                                "activity": agent.task,
+                            }
+                            for agent in goal.agents
+                        ],
+                    }
+                    for goal in plan.goals
+                ],
+                "cards": [],
+                "events": [],
+            }
+            return remember(
+                scope,
+                x_request_id,
+                envelope({"research_id": plan.research_id}),
+            )
+
+        @application.post("/api/test/researches/{research_id}/cards")
+        async def inject_test_card(
+            research_id: str,
+            payload: dict[str, Any] = Body(...),
+            x_request_id: str = Header(..., alias="X-Request-ID"),
+        ) -> JSONResponse:
+            """仅测试：注入运行期卡片并沿真实 SSE 发布。"""
+            scope = f"test-card:{research_id}"
+            hit = cached(scope, x_request_id)
+            if hit is not None:
+                return hit
+            if research_id not in researches:
+                return remember(
+                    scope,
+                    x_request_id,
+                    error_envelope("research_not_found", "调研任务不存在，无法注入测试卡片"),
+                    status_code=404,
+                )
+            try:
+                card = Card(**payload)
+            except (TypeError, ValueError) as error:
+                return remember(
+                    scope,
+                    x_request_id,
+                    error_envelope("invalid_test_card", f"测试卡片字段不合法：{error}"),
+                    status_code=422,
+                )
+            if card.research_id != research_id:
+                return remember(
+                    scope,
+                    x_request_id,
+                    error_envelope("invalid_test_card", "卡片 research_id 与路径不一致"),
+                    status_code=422,
+                )
+            cards[card.card_id] = card
+            state = researches[research_id]
+            state["cards"] = [
+                card.to_dict(),
+                *[item for item in state.get("cards", []) if item.get("card_id") != card.card_id],
+            ]
+            await events.publish(research_id, card.to_event())
+            return remember(scope, x_request_id, envelope(card.to_dict()))
 
     @application.get("/api/researches/{research_id}/events")
     async def research_events(

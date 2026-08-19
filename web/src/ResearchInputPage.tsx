@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Input, Space, Typography } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ApiEnvelope } from './types'
 
 const { TextArea } = Input
@@ -13,14 +13,16 @@ export default function ResearchInputPage() {
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(false)
+  const requestId = useRef('')
 
   async function submit() {
     if (!query.trim()) return
     setSubmitting(true)
     setError(false)
     try {
+      requestId.current ||= `research-${crypto.randomUUID()}`
       const response = await fetch('/api/researches', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Request-ID': requestId.current },
         body: JSON.stringify({ query }),
       })
       if (!response.ok) throw new Error('提交失败')

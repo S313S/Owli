@@ -175,3 +175,50 @@ def append_change_log(
     if feedback is not None and feedback_id is None:
         updated.change_log[-1]["feedback_id"] = None
     return updated
+
+
+def commit_changes(
+    store: Store,
+    plan: Plan,
+    changes: list[Mapping[str, Any]],
+    *,
+    expected_rev: int | None = None,
+) -> Plan:
+    """一个 PUT 追加多条日志但只升一次 plan_rev。"""
+    if expected_rev is None:
+        expected_rev = plan.plan_rev
+    if plan.plan_rev != expected_rev:
+        raise PlanRevisionConflict(
+            f"计划版本冲突：{plan.research_id} 期望 rev={expected_rev}，"
+            f"调用方计划为 rev={plan.plan_rev}"
+        )
+    if not changes:
+        return plan
+
+    updated = Plan.from_dict(plan.to_dict())
+    updated.plan_rev = expected_rev + 1
+    feedbacks: list[dict[str, Any]] = []
+    for offset, change in enumerate(changes, start=1):
+        normalized = _normalize_change(change, len(plan.change_log) + offset)
+        if normalized["phase"] == "runtime_intervention":
+            normalized["feedback_id"] = f"fb-{_ulid()}"
+        updated.change_log.append(normalized)
+        if normalized["phase"] == "runtime_intervention":
+            feedbacks.append(_feedback(updated, normalized))
+    updated.updated_at = str(updated.change_log[-1]["at"])
+
+    try:
+        saved_ids = store.save_plan_changes(
+            updated.research_id,
+            snapshot=updated.to_dict(),
+            expected_rev=expected_rev,
+            feedbacks=feedbacks,
+        )
+    except PlanSnapshotConflict as error:
+        _raise_conflict(error)
+    saved = set(saved_ids)
+    for change in updated.change_log:
+        feedback_id = change.get("feedback_id")
+        if feedback_id is not None and feedback_id not in saved:
+            change["feedback_id"] = None
+    return updated

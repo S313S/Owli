@@ -9,6 +9,10 @@ const statusColor: Record<string, string> = {
   paused: 'warning', queued: 'default', stopped: 'error',
 }
 
+const agentPriority: Record<string, number> = {
+  failed: 0, retrying: 1, running: 2, queued: 3, skipped: 4, done: 5,
+}
+
 export default function WorkboardPage({ researchId }: { researchId: string }) {
   const { snapshot, connection, loadError, retry } = useResearchStream(researchId)
   const pending = snapshot?.cards.filter((card) => card.status === 'pending').length ?? 0
@@ -25,6 +29,7 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
 
   const percent = snapshot.progress.total ? Math.round(snapshot.progress.done / snapshot.progress.total * 100) : 0
   const activeGoals = snapshot.goals.filter((goal) => goal.status === 'running').map((goal) => goal.id)
+  const sortedCards = snapshot.cards.slice().sort((left, right) => Number(right.status === 'pending') - Number(left.status === 'pending'))
 
   return <main className="board-page">
     {connection !== 'connected' && <Alert className="connection-banner" type="info" showIcon
@@ -51,9 +56,10 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
         <Collapse defaultActiveKey={activeGoals} items={snapshot.goals.map((goal, index) => ({
           key: goal.id,
           label: <div className="lane-label"><b>{index + 1}. {goal.title}</b><span>{goal.summary}</span><Tag color={statusColor[goal.status]}>{goal.status}</Tag></div>,
-          children: goal.agents.length ? <div className="agent-grid">{goal.agents.map((agent) => <Card key={agent.id} size="small" className={`agent-card agent-${agent.status}`}>
+          children: goal.agents.length ? <div className="agent-grid">{goal.agents.slice().sort((left, right) => (agentPriority[left.status] ?? 9) - (agentPriority[right.status] ?? 9)).map((agent) => <Card key={agent.id} size="small" className={`agent-card agent-${agent.status}`}>
             <div className="agent-title"><b>{agent.name}</b><Tag>{agent.engine}</Tag></div>
             <Typography.Paragraph type="secondary">{agent.activity}</Typography.Paragraph>
+            {agent.status === 'retrying' && <Typography.Text type="warning">重跑第 {agent.retry_attempt ?? '—'} / {agent.retry_max ?? 10} 次</Typography.Text>}
             <Badge status={statusColor[agent.status] as 'success' | 'processing' | 'warning' | 'error' | 'default'} text={agent.status} />
           </Card>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={goal.summary} />,
         }))} />
@@ -61,8 +67,8 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
 
       <aside className="board-rail">
         <Card title={<Space>需要你处理 <Badge count={pending} showZero /></Space>} className="todo-panel">
-          {snapshot.cards.length
-            ? snapshot.cards.map((card) => <ActionCardView key={card.card_id} card={card} />)
+          {sortedCards.length
+            ? sortedCards.map((card) => <ActionCardView key={card.card_id} card={card} />)
             : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有需要你处理的事项" />}
         </Card>
         <Card title="事件流" extra={<Typography.Text type="secondary">默认仅显示关键事件</Typography.Text>} className="event-panel">

@@ -1,11 +1,13 @@
 export type ServerAction = {
   id: string
   label: string
-  href: string
-  method: string
+  href?: string
+  method?: string
   danger?: boolean
   confirm?: string
   type?: 'OPEN_URL' | 'OPEN_FILE' | 'TEXT_INPUT' | 'CHOICE_2'
+  value?: string
+  default?: boolean
 }
 
 export type AgentState = {
@@ -14,6 +16,8 @@ export type AgentState = {
   engine: string
   status: string
   activity: string
+  retry_attempt?: number
+  retry_max?: number
 }
 
 export type GoalState = {
@@ -32,6 +36,79 @@ export type ActionCard = {
   blocking: string
   status: string
   actions: ServerAction[]
+  target?: Record<string, unknown>
+  deadline?: string | null
+  result?: Record<string, unknown> | null
+  created_at?: string
+  resolved_at?: string | null
+}
+
+export type Origin = Record<string, 'generated' | 'user' | 'reset'>
+
+export type PlanAgent = {
+  agent_id: string
+  display_name: string
+  task: string
+  depends_on: string[]
+  inputs: Array<Record<string, unknown>>
+  engine: string
+  model: string | null
+  capability: {
+    profile: string
+    tools: string[]
+    sources: string[]
+    fs: { read: string[]; write: string[] }
+    network: string
+    shell: string
+    justification?: string
+  }
+  prompt: { preamble_ref: string; body: string; assumptions_policy: string }
+  output: { format: string; path: string; validators: string[] }
+  extra_quota_credits: number | null
+  origin: Origin
+  status: string
+}
+
+export type PlanGoal = {
+  goal_id: string
+  title: string
+  objective: string
+  depends_on: string[]
+  deliverable: { format: string; path: string; description: string }
+  acceptance: string[]
+  intervention: { on_complete: boolean; prompt: string }
+  retry_policy: Record<string, string | number>
+  on_upstream_failure: string
+  agents: PlanAgent[]
+  status: string
+}
+
+export type DecisionQuestion = {
+  q_id: string
+  question: string
+  options: string[]
+  input_type: 'single' | 'multi' | 'choice_2' | 'text'
+  answer: string | string[] | null
+  affects: string[]
+  answered_at: string | null
+}
+
+export type ResearchPlan = {
+  research_id: string
+  plan_rev: number
+  title: string
+  research_question: string
+  use_case: string
+  status: string
+  approved_at: string | null
+  decision_balance: DecisionQuestion[]
+  expert_panel: Record<string, unknown> | null
+  goals: PlanGoal[]
+  change_log: Array<Record<string, unknown>>
+  baseline: { title: string; use_case: string; goals: PlanGoal[] }
+  baseline_source: string
+  created_at: string
+  updated_at: string
 }
 
 export type ResearchSnapshot = {
@@ -54,4 +131,5 @@ export type NormalizedEvent = {
   raw?: unknown
 }
 
-export type ApiEnvelope<T> = { ok: boolean; data: T; error: unknown }
+export type ApiError = { code: string; message: string; details?: unknown }
+export type ApiEnvelope<T> = { ok: boolean; data: T; error: ApiError | null }
