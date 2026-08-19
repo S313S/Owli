@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -10,9 +11,13 @@ from pathlib import Path
 from typing import Any
 
 
-__all__ = ["Store"]
+__all__ = ["PlanSnapshotConflict", "Store"]
 
 _EXTRA_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class PlanSnapshotConflict(RuntimeError):
+    """reports.plan_snapshot 的乐观锁版本不匹配。"""
 
 
 def _json_text(value: Any) -> str | None:
@@ -185,6 +190,58 @@ class Store:
                 report[field] = json.loads(report[field])
         return report
 
+    def save_plan_snapshot(
+        self,
+        report_id: str,
+        *,
+        snapshot: dict[str, Any],
+        expected_rev: int,
+    ) -> None:
+        """整棵计划树写入具名列；expected_rev=0 只允许首次保存。"""
+        with self._connect() as connection:
+            cursor = self._update_plan_snapshot(
+                connection, report_id, snapshot=snapshot, expected_rev=expected_rev
+            )
+            if cursor.rowcount != 1:
+                raise PlanSnapshotConflict(
+                    f"计划版本冲突：{report_id} 期望 rev={expected_rev}"
+                )
+
+    def save_plan_change(
+        self,
+        report_id: str,
+        *,
+        snapshot: dict[str, Any],
+        expected_rev: int,
+        feedback: dict[str, Any] | None,
+    ) -> str | None:
+        """计划变更与可选 feedback 同事务；feedback 故障降级为空标记。"""
+        snapshot_to_save = copy.deepcopy(snapshot)
+        feedback_id: str | None = None
+        with self._connect() as connection:
+            if feedback is not None:
+                connection.execute("SAVEPOINT feedback_write")
+                try:
+                    self._insert_feedback(connection, feedback)
+                except Exception:
+                    connection.execute("ROLLBACK TO feedback_write")
+                    connection.execute("RELEASE feedback_write")
+                    snapshot_to_save["change_log"][-1]["feedback_id"] = None
+                else:
+                    connection.execute("RELEASE feedback_write")
+                    feedback_id = str(feedback["id"])
+            cursor = self._update_plan_snapshot(
+                connection,
+                report_id,
+                snapshot=snapshot_to_save,
+                expected_rev=expected_rev,
+            )
+            if cursor.rowcount != 1:
+                raise PlanSnapshotConflict(
+                    f"计划版本冲突：{report_id} 期望 rev={expected_rev}"
+                )
+        return feedback_id
+
     def finish_report(
         self,
         report_id: str,
@@ -256,6 +313,64 @@ class Store:
                 return None
             current = current[key]
         return current
+
+    def _update_plan_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        report_id: str,
+        *,
+        snapshot: dict[str, Any],
+        expected_rev: int,
+    ) -> sqlite3.Cursor:
+        return connection.execute(
+            """
+            UPDATE reports
+            SET plan_snapshot = ?, decision_balance = ?, title = ?,
+                research_question = ?, use_case = ?
+            WHERE id = ? AND (
+              (? = 0 AND plan_snapshot IS NULL)
+              OR json_extract(plan_snapshot, '$.plan_rev') = ?
+            )
+            """,
+            (
+                _json_text(snapshot),
+                _json_text(snapshot["decision_balance"]),
+                snapshot["title"],
+                snapshot["research_question"],
+                snapshot["use_case"],
+                report_id,
+                expected_rev,
+                expected_rev,
+            ),
+        )
+
+    def _insert_feedback(
+        self,
+        connection: sqlite3.Connection,
+        feedback: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO feedback (
+              id, report_id, evidence_id, kind, target, before_value,
+              after_value, reason, actor, created_at, applied, extra
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                feedback["id"],
+                feedback["report_id"],
+                feedback["evidence_id"],
+                feedback["kind"],
+                feedback["target"],
+                _json_text(feedback["before_value"]),
+                _json_text(feedback["after_value"]),
+                feedback["reason"],
+                feedback["actor"],
+                feedback["created_at"],
+                feedback["applied"],
+                _json_text(feedback["extra"]),
+            ),
+        )
 
     def _existing_evidence_extra_keys(
         self,
