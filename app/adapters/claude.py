@@ -10,9 +10,16 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from app.adapters.capability import (
+    CapabilityValidationError,
+    ClaudeOptions,
+    to_claude_options,
+)
 from app.adapters.events import NormalizedEvent, normalize_claude_event
-from app.adapters.logging import append_engine_error
+from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
+from app.adapters.ratelimit import route
 from app.adapters import validation as artifact_validation
+from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 
 
 _RESULT_BLOCK = re.compile(
@@ -34,18 +41,13 @@ class OwliResultError(ValueError):
     """Claude 最终输出不含可解析的 owli-result 结论块。"""
 
 
-@dataclass(frozen=True)
-class OwliResult:
-    status: str
-    output_path: str
-    summary: str
-    assumptions: list[dict[str, str]]
-    unmet: list[str]
-    capability_denials: list[str]
+ClaudeRunResult = EngineRunResult
 
 
 @dataclass(frozen=True)
 class ClaudeTask:
+    """M0-c 旧调用兼容；新链路统一使用 EngineTask。"""
+
     body: str
     output_path: Path
     output_format: str
@@ -57,24 +59,7 @@ class ClaudeTask:
     model: str | None = None
 
 
-@dataclass(frozen=True)
-class ClaudeRunResult:
-    conclusion: OwliResult | None
-    conclusion_error: str | None
-    validation: artifact_validation.ValidationReport
-    events: list[NormalizedEvent]
-    permission_denials: list[str]
-    engine_error: str | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return (
-            self.engine_error is None
-            and self.conclusion_error is None
-            and self.conclusion is not None
-            and self.conclusion.status == "done"
-            and self.validation.verdict is artifact_validation.Verdict.PASS
-        )
+TaskSpec = EngineTask | ClaudeTask
 
 
 def _load_sdk():
@@ -89,7 +74,7 @@ def compose_prompt(body: str) -> str:
     return f"{prefix}\n{body}"
 
 
-def _goal_root(task: ClaudeTask) -> Path:
+def _goal_root(task: TaskSpec) -> Path:
     return (
         artifact_validation.RUNS_ROOT
         / task.research_id
@@ -113,21 +98,58 @@ def _resolve_tool_path(raw_path: str) -> Path:
     return (PROJECT_ROOT / path).resolve(strict=False)
 
 
-def make_permission_callback(task: ClaudeTask, denials: list[str], *, sdk=None):
+def _capability_path(task: TaskSpec, raw_path: str) -> str | None:
+    actual = _resolve_tool_path(raw_path)
+    research_root = (
+        artifact_validation.RUNS_ROOT / task.research_id
+    ).resolve(strict=False)
+    try:
+        return actual.relative_to(research_root).as_posix()
+    except ValueError:
+        return None
+
+
+def _claude_capability(task: TaskSpec) -> ClaudeOptions | None:
+    capability = getattr(task, "capability", None)
+    if capability is None:
+        return None
+    return to_claude_options(capability)
+
+
+def make_permission_callback(task: TaskSpec, denials: list[str], *, sdk=None):
     sdk = sdk or _load_sdk()
     write_tools = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+    read_tools = {"Read", "Glob", "Grep"}
+    translated = _claude_capability(task)
+    allowed_tools = (
+        CLAUDE_TOOL_UNIVERSE - set(translated.disallowed_tools)
+        if translated is not None
+        else task.tools
+    )
 
     async def can_use_tool(tool_name: str, input_data: dict[str, Any], context: Any):
         del context
-        if tool_name not in task.tools:
+        if tool_name not in allowed_tools:
             denials.append(tool_name)
             return sdk.PermissionResultDeny(message=f"工具不在 capability 白名单：{tool_name}")
-        if tool_name in write_tools:
+        access = "write" if tool_name in write_tools else "read"
+        if tool_name in write_tools | read_tools:
             raw_path = _tool_path(input_data)
             if raw_path is None:
                 denials.append(f"{tool_name}:未提供路径")
                 return sdk.PermissionResultDeny(message=f"{tool_name} 未提供可校验的写入路径")
             actual = _resolve_tool_path(raw_path)
+            if translated is not None:
+                relative = _capability_path(task, raw_path)
+                allowed = relative is not None and translated.path_predicate(
+                    relative, access
+                )
+                if not allowed:
+                    denials.append(str(actual))
+                    return sdk.PermissionResultDeny(
+                        message=f"路径不在 capability 路径范围：{actual}"
+                    )
+        if tool_name in write_tools:
             try:
                 actual.relative_to(_goal_root(task))
             except ValueError:
@@ -164,19 +186,29 @@ def make_pre_tool_hook(permission_callback, *, sdk=None):
     return sdk.HookMatcher(matcher=None, hooks=[enforce])
 
 
-def build_claude_options(task: ClaudeTask, permission_callback, *, sdk=None):
+def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
     sdk = sdk or _load_sdk()
-    unknown = sorted(task.tools - CLAUDE_TOOL_UNIVERSE)
-    if unknown:
-        raise ValueError(f"Claude 工具白名单包含未知工具：{','.join(unknown)}")
-    declared_tools = sorted(task.tools)
+    translated = _claude_capability(task)
+    if translated is None:
+        unknown = sorted(task.tools - CLAUDE_TOOL_UNIVERSE)
+        if unknown:
+            raise ValueError(f"Claude 工具白名单包含未知工具：{','.join(unknown)}")
+        declared_tools = sorted(task.tools)
+        disallowed_tools = sorted(CLAUDE_TOOL_UNIVERSE - task.tools)
+        setting_sources: list[str] = []
+        permission_mode = "dontAsk"
+    else:
+        disallowed_tools = list(translated.disallowed_tools)
+        declared_tools = sorted(CLAUDE_TOOL_UNIVERSE - set(disallowed_tools))
+        setting_sources = list(translated.setting_sources)
+        permission_mode = translated.permission_mode
     values: dict[str, Any] = {
         "cwd": str(PROJECT_ROOT),
-        "setting_sources": [],
+        "setting_sources": setting_sources,
         "tools": declared_tools,
         "allowed_tools": declared_tools,
-        "disallowed_tools": sorted(CLAUDE_TOOL_UNIVERSE - task.tools),
-        "permission_mode": "dontAsk",
+        "disallowed_tools": disallowed_tools,
+        "permission_mode": permission_mode,
         "can_use_tool": permission_callback,
         "hooks": {
             "PreToolUse": [make_pre_tool_hook(permission_callback, sdk=sdk)],
@@ -233,8 +265,16 @@ def _unavailable_run(
 class ClaudeAdapter:
     """用 ClaudeSDKClient 流式执行一个 agent，并做双保险判定。"""
 
-    def __init__(self, *, sdk=None):
+    def __init__(
+        self,
+        *,
+        sdk=None,
+        log_root: Path = DEFAULT_LOG_ROOT,
+        on_rate_limited=None,
+    ):
         self._sdk = sdk
+        self._log_root = log_root
+        self._on_rate_limited = on_rate_limited
         self._client = None
 
     async def interrupt(self) -> None:
@@ -244,17 +284,36 @@ class ClaudeAdapter:
 
     async def run(
         self,
-        task: ClaudeTask,
+        task: TaskSpec,
         ctx: artifact_validation.Ctx,
         on_event=None,
     ) -> ClaudeRunResult:
-        sdk = self._sdk or _load_sdk()
         denials: list[str] = []
         events: list[NormalizedEvent] = []
         output_text: list[str] = []
-        callback = make_permission_callback(task, denials, sdk=sdk)
-        options = build_claude_options(task, callback, sdk=sdk)
-        client = sdk.ClaudeSDKClient(options)
+        try:
+            sdk = self._sdk or _load_sdk()
+        except Exception as exc:
+            return _unavailable_run(exc, events, denials)
+        try:
+            callback = make_permission_callback(task, denials, sdk=sdk)
+            options = build_claude_options(task, callback, sdk=sdk)
+        except (CapabilityValidationError, ValueError) as exc:
+            failure = artifact_validation.Result(
+                artifact_validation.Verdict.FAIL,
+                "claude_capability",
+                f"Claude capability 无法安全执行：{exc}",
+                [],
+                {"exception": type(exc).__name__},
+            )
+            report = artifact_validation.ValidationReport(
+                artifact_validation.Verdict.FAIL, [failure]
+            )
+            return ClaudeRunResult(None, str(exc), report, events, denials)
+        try:
+            client = sdk.ClaudeSDKClient(options)
+        except Exception as exc:
+            return _unavailable_run(exc, events, denials)
         self._client = client
         fallback_thread_id = f"{task.research_id}:{task.goal_id}:{task.agent_id}"
         run_turn_id = f"{fallback_thread_id}:turn-1"
@@ -262,6 +321,20 @@ class ClaudeAdapter:
             await client.connect(_prompt_stream(compose_prompt(task.body)))
             async for message in client.receive_response():
                 output_text.extend(_assistant_text(message, sdk))
+                routing_events: list[NormalizedEvent] = []
+                route(
+                    message,
+                    engine="Claude",
+                    on_event=routing_events.append,
+                    on_rate_limited=self._on_rate_limited,
+                    log_root=self._log_root,
+                )
+                for event in routing_events:
+                    events.append(event)
+                    if on_event is not None:
+                        callback_result = on_event(event)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
                 normalized = normalize_claude_event(
                     message,
                     sdk=sdk,
@@ -270,7 +343,8 @@ class ClaudeAdapter:
                 )
                 for event in normalized:
                     events.append(event)
-                    append_engine_error(event)
+                    if not routing_events:
+                        append_engine_error(event, log_root=self._log_root)
                     if on_event is not None:
                         callback_result = on_event(event)
                         if inspect.isawaitable(callback_result):

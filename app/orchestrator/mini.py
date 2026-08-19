@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from app.adapters import validation
-from app.adapters.claude import ClaudeAdapter, ClaudeRunResult, ClaudeTask
+from app.adapters.capability import Capability, FileSystemScope
+from app.adapters.contracts import EngineRunResult, EngineTask
 from app.adapters.events import NormalizedEvent
+from app.adapters.routing import RoutedAdapter, pick_engine
 from app.sources.hn import search as search_hn
 
 
@@ -88,6 +90,15 @@ def build_actions(research_id: str) -> list[dict[str, Any]]:
 
 def build_initial_state(research_id: str, query: str) -> dict[str, Any]:
     """真实 M0 单 goal 快照，不含演示 goal 或假进度。"""
+    agent_kinds = {
+        "keyword-extractor": "planning",
+        "hn-collector": "m0_hn_collection",
+        "report-writer": "report_writing",
+    }
+
+    def engine_label(agent_id: str) -> str:
+        return pick_engine(agent_kinds[agent_id], None).engine.title()
+
     return {
         "research_id": research_id,
         "title": query,
@@ -105,21 +116,24 @@ def build_initial_state(research_id: str, query: str) -> dict[str, Any]:
                     {
                         "id": "keyword-extractor",
                         "name": "英文关键词提取",
-                        "engine": "Claude",
+                        "agent_kind": agent_kinds["keyword-extractor"],
+                        "engine": engine_label("keyword-extractor"),
                         "status": "queued",
                         "activity": "等待执行",
                     },
                     {
                         "id": "hn-collector",
                         "name": "Hacker News 采集",
-                        "engine": "Owli",
+                        "agent_kind": agent_kinds["hn-collector"],
+                        "engine": engine_label("hn-collector"),
                         "status": "queued",
                         "activity": "等待关键词",
                     },
                     {
                         "id": "report-writer",
                         "name": "Markdown 报告成稿",
-                        "engine": "Claude",
+                        "agent_kind": agent_kinds["report-writer"],
+                        "engine": engine_label("report-writer"),
                         "status": "queued",
                         "activity": "等待证据入库",
                     },
@@ -153,7 +167,7 @@ def _plain_raw(value: Any) -> Any:
     return {"type": type(value).__name__, "text": str(value)}
 
 
-def _adapter_raw(result: ClaudeRunResult) -> Any:
+def _adapter_raw(result: EngineRunResult) -> Any:
     for event in reversed(result.events):
         if event.is_error:
             return _plain_raw(event.raw)
@@ -172,7 +186,7 @@ def _adapter_raw(result: ClaudeRunResult) -> Any:
     }
 
 
-def _classify_adapter_result(result: ClaudeRunResult) -> StepAttempt:
+def _classify_adapter_result(result: EngineRunResult) -> StepAttempt:
     if (
         result.engine_error is not None
         or result.validation.verdict is validation.Verdict.UNAVAILABLE
@@ -216,7 +230,7 @@ class MiniOrchestrator:
         self.store = store
         self.events = event_buffer
         self.state = state
-        self.adapter = adapter or ClaudeAdapter()
+        self.adapter = adapter or RoutedAdapter()
         self.source_search = source_search
         self.goal_root = runs_root / research_id / "goals" / GOAL_ID
         self.keywords_path = self.goal_root / "keywords.json"
@@ -415,10 +429,31 @@ class MiniOrchestrator:
         await self._publish_progress()
         await self._publish_state()
 
-    async def _run_engine_task(self, task: ClaudeTask) -> StepAttempt:
+    async def _run_engine_task(self, task: EngineTask) -> StepAttempt:
         ctx = self._ctx(task.output_path, task.output_format, task.agent_id)
 
         async def on_event(event: NormalizedEvent) -> None:
+            if event.route_state is not None:
+                await self.events.publish(
+                    self.research_id,
+                    {
+                        "type": "engine_route",
+                        "raw": _plain_raw(event.raw),
+                        "data": {
+                            "goal_id": GOAL_ID,
+                            "agent_id": task.agent_id,
+                            "state": event.route_state,
+                            "summary": event.text,
+                            "suspend_new_tasks": event.suspend_new_tasks,
+                            "failover_target": event.failover_target,
+                            "no_fallback_left": event.no_fallback_left,
+                            "scope": event.scope,
+                            "allow_current_task_to_finish": (
+                                event.allow_current_task_to_finish
+                            ),
+                        },
+                    },
+                )
             if event.is_error:
                 await self.events.publish(
                     self.research_id,
@@ -445,7 +480,7 @@ class MiniOrchestrator:
 
     async def _keywords_attempt(self, attempt_number: int) -> StepAttempt:
         del attempt_number
-        task = ClaudeTask(
+        task = EngineTask(
             body=(
                 f"用户调研需求：{self.query}\n\n"
                 "从该中文需求提取 3–6 个适合 Hacker News 近 90 天检索的宽泛英文检索词。"
@@ -463,8 +498,12 @@ class MiniOrchestrator:
             research_id=self.research_id,
             goal_id=GOAL_ID,
             agent_id="keyword-extractor",
+            agent_kind="planning",
             validators=["file_exists", "json_array_min_items:3"],
-            tools=frozenset({"Write"}),
+            capability=Capability(
+                tools=("fs.write",),
+                fs=FileSystemScope(write=(f"goals/{GOAL_ID}/**",)),
+            ),
         )
         result = await self._run_engine_task(task)
         if result.verdict is not StepVerdict.PASS:
@@ -614,7 +653,7 @@ class MiniOrchestrator:
 
     async def _report_attempt(self, attempt_number: int) -> StepAttempt:
         del attempt_number
-        task = ClaudeTask(
+        task = EngineTask(
             body=(
                 f"用户调研需求：{self.query}\n\n"
                 f"唯一可读信息源是 {self.evidence_path}。禁止出网，禁止重新采集，"
@@ -641,8 +680,15 @@ class MiniOrchestrator:
             research_id=self.research_id,
             goal_id=GOAL_ID,
             agent_id="report-writer",
+            agent_kind="report_writing",
             validators=REPORT_VALIDATORS,
-            tools=frozenset({"Read", "Write"}),
+            capability=Capability(
+                tools=("fs.read", "fs.write"),
+                fs=FileSystemScope(
+                    read=(f"goals/{GOAL_ID}/**",),
+                    write=(f"goals/{GOAL_ID}/**",),
+                ),
+            ),
         )
         result = await self._run_engine_task(task)
         if result.verdict is not StepVerdict.PASS:

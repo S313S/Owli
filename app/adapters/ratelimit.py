@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,7 +11,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from app.adapters.events import ItemKind, NormalizedEvent
-from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
+from app.adapters.logging import (
+    DEFAULT_LOG_ROOT,
+    append_engine_error,
+    append_routing_event,
+)
 
 
 class RouteState(str, Enum):
@@ -27,6 +32,9 @@ class RouteDecision:
     raw: Any
     failover_target: str | None = None
     no_fallback_left: bool = False
+    suspend_new_tasks: bool = False
+    scope: str | None = None
+    allow_current_task_to_finish: bool = False
 
 
 EventCallback = Callable[[NormalizedEvent], Any]
@@ -61,6 +69,8 @@ def _failover(raw: Any, reason: str, target: str | None) -> RouteDecision:
         raw,
         failover_target=target,
         no_fallback_left=no_fallback_left,
+        scope="new_tasks",
+        allow_current_task_to_finish=True,
     )
 
 
@@ -75,17 +85,25 @@ def _decision_event(
     decision: RouteDecision,
     *,
     engine: str,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
 ) -> NormalizedEvent:
-    thread_id, turn_id = _message_ids(decision.raw)
+    raw_thread_id, raw_turn_id = _message_ids(decision.raw)
     is_error = decision.state in {RouteState.BACKOFF, RouteState.FAILOVER}
     return NormalizedEvent(
         engine=engine,
-        thread_id=thread_id,
-        turn_id=turn_id,
+        thread_id=raw_thread_id or thread_id,
+        turn_id=raw_turn_id or turn_id,
         item_kind=ItemKind.ERROR if is_error else ItemKind.THINKING,
         text=decision.reason,
         is_error=is_error,
         raw=decision.raw,
+        route_state=decision.state.value,
+        suspend_new_tasks=decision.suspend_new_tasks,
+        failover_target=decision.failover_target,
+        no_fallback_left=decision.no_fallback_left,
+        scope=decision.scope,
+        allow_current_task_to_finish=decision.allow_current_task_to_finish,
     )
 
 
@@ -93,9 +111,11 @@ def _is_rate_limited(decision: RouteDecision) -> bool:
     info = _field(decision.raw, "rate_limit_info", "rateLimitInfo")
     if info is not None:
         return _field(info, "status") == "rejected"
-    return _field(
+    api_limited = _field(
         decision.raw, "api_error_status", "apiErrorStatus"
     ) == 429
+    raw_text = json.dumps(decision.raw, ensure_ascii=False, default=str)
+    return api_limited or classify_codex_error(raw_text)
 
 
 def _publish(
@@ -106,14 +126,22 @@ def _publish(
     on_rate_limited: RateLimitedCallback | None,
     log_root: Path,
     log_clock: Clock | None,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
 ) -> RouteDecision:
     if decision.state is RouteState.CONTINUE:
         return decision
-    event = _decision_event(decision, engine=engine)
+    event = _decision_event(
+        decision,
+        engine=engine,
+        thread_id=thread_id,
+        turn_id=turn_id,
+    )
+    logging_args = {"log_root": log_root}
+    if log_clock is not None:
+        logging_args["clock"] = log_clock
+    append_routing_event(event, **logging_args)
     if event.is_error:
-        logging_args = {"log_root": log_root}
-        if log_clock is not None:
-            logging_args["clock"] = log_clock
         append_engine_error(event, **logging_args)
     if on_event is not None:
         on_event(event)
@@ -144,6 +172,7 @@ def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:
                 f"{rate_limit_type} 限流；overage 可用{overage_warning}，"
                 "继续跑会计费，等待用户确认",
                 message,
+                suspend_new_tasks=True,
             )
         disabled_reason = _field(
             info,
@@ -165,6 +194,10 @@ def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:
             RouteState.WARN,
             f"{rate_limit_type} 已用 {percentage}，接近上限；后续新任务让路",
             message,
+            failover_target="codex",
+            no_fallback_left=True,
+            scope="new_tasks",
+            allow_current_task_to_finish=True,
         )
     return RouteDecision(RouteState.CONTINUE, "额度正常", message)
 
@@ -178,11 +211,36 @@ def _route_result_message(message: Any) -> RouteDecision:
             reason = "API 429 限流，等待编排层退避重试"
         else:
             reason = f"API {api_error_status} 服务端错误，等待编排层退避重试"
-        return RouteDecision(RouteState.BACKOFF, reason, message)
+        return RouteDecision(
+            RouteState.BACKOFF,
+            reason,
+            message,
+            suspend_new_tasks=True,
+        )
     if bool(_field(message, "is_error", "isError", default=False)):
         subtype = _field(message, "subtype", default="未知错误")
         return _failover(message, f"非限流错误：{subtype}", "codex")
     return RouteDecision(RouteState.CONTINUE, "消息正常", message)
+
+
+def _route_claude_message(message: Any) -> RouteDecision:
+    info = _field(message, "rate_limit_info", "rateLimitInfo")
+    if info is not None:
+        return _route_rate_limit_event(message, info)
+    return _route_result_message(message)
+
+
+def _route_codex_message(message: Any) -> RouteDecision:
+    raw_text = json.dumps(message, ensure_ascii=False, default=str)
+    if not classify_codex_error(raw_text):
+        return RouteDecision(RouteState.CONTINUE, "消息正常", message)
+    return RouteDecision(
+        RouteState.BACKOFF,
+        "Codex 撞墙式限流；无下一引擎可退，等待额度重置",
+        message,
+        no_fallback_left=True,
+        suspend_new_tasks=True,
+    )
 
 
 def route(
@@ -193,13 +251,19 @@ def route(
     on_rate_limited: RateLimitedCallback | None = None,
     log_root: Path = DEFAULT_LOG_ROOT,
     log_clock: Clock | None = None,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
 ) -> RouteDecision:
-    """把 Claude 扩展事件或结果消息归入四态，并同步发布非正常事件。"""
-    info = _field(msg, "rate_limit_info", "rateLimitInfo")
-    if info is not None:
-        decision = _route_rate_limit_event(msg, info)
-    else:
-        decision = _route_result_message(msg)
+    """把双引擎消息归入四态，并同步发布非正常事件。"""
+    routers = {
+        "claude": _route_claude_message,
+        "codex": _route_codex_message,
+    }
+    engine_key = engine.strip().casefold()
+    try:
+        decision = routers[engine_key](msg)
+    except KeyError as exc:
+        raise ValueError(f"未知限流消息来源：{engine}") from exc
     return _publish(
         decision,
         engine=engine,
@@ -207,6 +271,8 @@ def route(
         on_rate_limited=on_rate_limited,
         log_root=log_root,
         log_clock=log_clock,
+        thread_id=thread_id,
+        turn_id=turn_id,
     )
 
 

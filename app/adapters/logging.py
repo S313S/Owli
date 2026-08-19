@@ -71,3 +71,81 @@ def append_engine_error(
     with path.open("ab") as stream:
         stream.write(payload)
     return path
+
+
+def append_routing_event(
+    event: NormalizedEvent,
+    *,
+    log_root: Path = DEFAULT_LOG_ROOT,
+    clock: Clock = _now,
+) -> Path:
+    """非 CONTINUE 路由事件完整落盘，raw 保持原始结构。"""
+
+    if event.route_state is None:
+        raise ValueError("只有路由事件可以写入 routing 日志")
+    now = clock()
+    path = (
+        log_root
+        / "routing"
+        / f"{_engine_slug(event.engine)}-{now.date().isoformat()}.jsonl"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "engine": event.engine,
+        "thread_id": event.thread_id,
+        "turn_id": event.turn_id,
+        "item_kind": event.item_kind.value,
+        "text": event.text,
+        "is_error": event.is_error,
+        "route_state": event.route_state,
+        "suspend_new_tasks": event.suspend_new_tasks,
+        "failover_target": event.failover_target,
+        "no_fallback_left": event.no_fallback_left,
+        "scope": event.scope,
+        "allow_current_task_to_finish": event.allow_current_task_to_finish,
+        "raw": _json_value(event.raw),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    with path.open("ab") as stream:
+        stream.write(encoded)
+    return path
+
+
+def append_outcome_event(
+    event: NormalizedEvent,
+    *,
+    log_root: Path = DEFAULT_LOG_ROOT,
+    clock: Clock = _now,
+) -> Path:
+    """把 FAIL / UNAVAILABLE 终止事件写入独立日志，避免污染原生错误样本。"""
+
+    if event.outcome not in {"FAIL", "UNAVAILABLE"}:
+        raise ValueError("终止事件 outcome 必须是 FAIL 或 UNAVAILABLE")
+    now = clock()
+    path = (
+        log_root
+        / "outcomes"
+        / f"{_engine_slug(event.engine)}-{now.date().isoformat()}.jsonl"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        {
+            "engine": event.engine,
+            "thread_id": event.thread_id,
+            "turn_id": event.turn_id,
+            "outcome": event.outcome,
+            "text": event.text,
+            "raw": _json_value(event.raw),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    with path.open("ab") as stream:
+        stream.write(payload)
+    return path

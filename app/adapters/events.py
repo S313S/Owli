@@ -27,6 +27,13 @@ class NormalizedEvent:
     text: str
     is_error: bool
     raw: Any
+    route_state: str | None = None
+    suspend_new_tasks: bool = False
+    failover_target: str | None = None
+    no_fallback_left: bool = False
+    scope: str | None = None
+    allow_current_task_to_finish: bool = False
+    outcome: str | None = None
 
 
 def _message_ids(

@@ -10,12 +10,24 @@ import signal
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from app.adapters import validation as artifact_validation
-from app.adapters.claude import OwliResult, OwliResultError, parse_owli_result
-from app.adapters.events import NormalizedEvent, normalize_codex_event
-from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
+from app.adapters.capability import (
+    CapabilityValidationError,
+    CodexArgs,
+    to_codex_args,
+)
+from app.adapters.claude import OwliResultError, parse_owli_result
+from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
+from app.adapters.events import ItemKind, NormalizedEvent, normalize_codex_event
+from app.adapters.logging import (
+    DEFAULT_LOG_ROOT,
+    append_engine_error,
+    append_outcome_event,
+)
+from app.adapters.ratelimit import route
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +47,7 @@ _INFRASTRUCTURE_MARKERS = (
     "service unavailable",
     "model_not_found",
     "unsupported model",
+    "missing optional dependency",
 )
 
 
@@ -43,8 +56,13 @@ class CodexAuthMode(StrEnum):
     API_KEY = "api_key"
 
 
+CodexRunResult = EngineRunResult
+
+
 @dataclass(frozen=True)
 class CodexTask:
+    """M1-b 旧调用兼容；新链路统一使用 EngineTask。"""
+
     body: str
     output_path: Path
     output_format: str
@@ -58,24 +76,7 @@ class CodexTask:
     network: bool = False
 
 
-@dataclass(frozen=True)
-class CodexRunResult:
-    conclusion: OwliResult | None
-    conclusion_error: str | None
-    validation: artifact_validation.ValidationReport
-    events: list[NormalizedEvent]
-    permission_denials: list[str]
-    engine_error: str | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return (
-            self.engine_error is None
-            and self.conclusion_error is None
-            and self.conclusion is not None
-            and self.conclusion.status == "done"
-            and self.validation.verdict is artifact_validation.Verdict.PASS
-        )
+TaskSpec = EngineTask | CodexTask
 
 
 def resolve_codex_home(
@@ -117,11 +118,11 @@ def compose_prompt(body: str) -> str:
     return f"{prefix}\n{body}"
 
 
-def _workdir(task: CodexTask) -> Path:
+def _workdir(task: TaskSpec) -> Path:
     return _resolve_output_path(task.output_path).parent
 
 
-def _last_message_path(task: CodexTask) -> Path:
+def _last_message_path(task: TaskSpec) -> Path:
     safe_agent = "".join(
         character if character.isalnum() or character in "-_" else "-"
         for character in task.agent_id
@@ -129,14 +130,73 @@ def _last_message_path(task: CodexTask) -> Path:
     return _workdir(task) / f".{safe_agent or 'agent'}-codex-last-message.json"
 
 
+def _writable_directories(task: TaskSpec, roots: tuple[str, ...]) -> list[Path]:
+    """把 capability 写 glob 收敛为 Codex 可挂载的目录根。"""
+
+    directories: list[Path] = []
+    research_root = (
+        artifact_validation.RUNS_ROOT / task.research_id
+    ).resolve(strict=False)
+    goal_root = (research_root / "goals" / task.goal_id).resolve(strict=False)
+    replacements = {
+        "<current-goal>": task.goal_id,
+    }
+    for raw_root in roots:
+        normalized = raw_root.replace("\\", "/")
+        for placeholder, value in replacements.items():
+            normalized = normalized.replace(placeholder, value)
+        parts: list[str] = []
+        for part in PurePosixPath(normalized).parts:
+            if any(marker in part for marker in ("*", "?", "[", "<")):
+                break
+            parts.append(part)
+        if not parts:
+            continue
+        directory = research_root.joinpath(*parts).resolve(strict=False)
+        try:
+            directory.relative_to(goal_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Codex capability 写根必须位于当前 goal：{directory}"
+            ) from exc
+        if directory not in directories:
+            directories.append(directory)
+    return directories
+
+
+def _require_capability_output(task: TaskSpec, translated: CodexArgs) -> None:
+    """防止 -C 自带的可写权限绕过 capability 路径谓词。"""
+
+    research_root = (
+        artifact_validation.RUNS_ROOT / task.research_id
+    ).resolve(strict=False)
+    output_path = _resolve_output_path(task.output_path)
+    try:
+        relative = output_path.relative_to(research_root).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"Codex 产物路径不在调研根目录：{output_path}") from exc
+    if not translated.path_predicate(relative, "write"):
+        raise ValueError(
+            f"Codex 产物路径不在 capability.fs.write：{output_path}"
+        )
+
+
 def build_codex_command(
-    task: CodexTask,
+    task: TaskSpec,
     *,
     executable: str = "codex",
 ) -> list[str]:
-    if task.sandbox not in _SANDBOXES:
-        raise ValueError(f"不支持的 Codex 沙箱档位：{task.sandbox}")
-    if task.network and task.sandbox != "workspace-write":
+    capability = getattr(task, "capability", None)
+    translated: CodexArgs | None = (
+        to_codex_args(capability) if capability is not None else None
+    )
+    if translated is not None:
+        _require_capability_output(task, translated)
+    sandbox = translated.sandbox if translated is not None else task.sandbox
+    network = translated.network_enabled if translated is not None else task.network
+    if sandbox not in _SANDBOXES:
+        raise ValueError(f"不支持的 Codex 沙箱档位：{sandbox}")
+    if network and sandbox != "workspace-write":
         raise ValueError("联网任务必须使用 workspace-write 沙箱档位")
     command = [
         executable,
@@ -145,7 +205,7 @@ def build_codex_command(
         "-C",
         str(_workdir(task)),
         "-s",
-        task.sandbox,
+        sandbox,
         "--skip-git-repo-check",
         "-o",
         str(_last_message_path(task)),
@@ -154,7 +214,10 @@ def build_codex_command(
     ]
     if task.model:
         command.extend(["-m", task.model])
-    if task.network:
+    if translated is not None:
+        for directory in _writable_directories(task, translated.writable_roots):
+            command.extend(["--add-dir", str(directory)])
+    if network:
         command.extend([
             "-c", "sandbox_workspace_write.network_access=true"
         ])
@@ -170,7 +233,7 @@ def _resolve_output_path(path: str | Path) -> Path:
 
 
 def _task_contract_failure(
-    task: CodexTask,
+    task: TaskSpec,
     ctx: artifact_validation.Ctx,
 ) -> artifact_validation.Result | None:
     actual_path = _resolve_output_path(task.output_path)
@@ -208,15 +271,11 @@ def _task_contract_failure(
     )
 
 
-def _infrastructure_error(
-    events: list[NormalizedEvent],
-    process_status: int | None,
-) -> str | None:
-    event_text = "\n".join(event.text for event in events if event.text)
-    if process_status:
-        return event_text or f"Codex CLI 进程异常结束：status={process_status}"
+def _infrastructure_error(events: list[NormalizedEvent]) -> str | None:
+    """只按可识别的基础设施错误载荷分类，绝不按进程状态码分类。"""
+
     for event in events:
-        if not event.is_error:
+        if not event.is_error and not isinstance(event.raw, str):
             continue
         text = event.text.lower()
         if any(marker in text for marker in _INFRASTRUCTURE_MARKERS):
@@ -276,6 +335,7 @@ class CodexAdapter:
         api_key: str | None = None,
         log_root: Path = DEFAULT_LOG_ROOT,
         timeout_seconds: float = 300.0,
+        on_rate_limited: Any = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("Codex 任务超时必须大于 0 秒")
@@ -285,8 +345,42 @@ class CodexAdapter:
         self._api_key = api_key
         self._log_root = log_root
         self._timeout_seconds = timeout_seconds
+        self._on_rate_limited = on_rate_limited
         self._process: asyncio.subprocess.Process | None = None
         self._interrupted = False
+
+    async def _emit_outcome(
+        self,
+        events: list[NormalizedEvent],
+        on_event: Any,
+        *,
+        outcome: str,
+        message: str,
+        detail: Any,
+    ) -> None:
+        last_event = events[-1] if events else None
+        raw = {
+            "type": "engine_run_outcome",
+            "outcome": outcome,
+            "message": message,
+            "detail": detail,
+        }
+        event = NormalizedEvent(
+            engine="Codex",
+            thread_id=last_event.thread_id if last_event else None,
+            turn_id=last_event.turn_id if last_event else None,
+            item_kind=ItemKind.ERROR,
+            text=message,
+            is_error=True,
+            raw=raw,
+            outcome=outcome,
+        )
+        events.append(event)
+        append_outcome_event(event, log_root=self._log_root)
+        if on_event is not None:
+            callback_result = on_event(event)
+            if inspect.isawaitable(callback_result):
+                await callback_result
 
     async def interrupt(self) -> None:
         if self._process is None:
@@ -334,11 +428,28 @@ class CodexAdapter:
             if isinstance(raw, dict) and raw.get("type") == "turn.started":
                 turn_number += 1
                 turn_id = raw.get("turn_id") or f"{thread_id or 'codex'}:turn-{turn_number}"
+            routing_events: list[NormalizedEvent] = []
+            route(
+                raw,
+                engine="Codex",
+                on_event=routing_events.append,
+                on_rate_limited=self._on_rate_limited,
+                log_root=self._log_root,
+                thread_id=thread_id,
+                turn_id=turn_id,
+            )
+            for event in routing_events:
+                events.append(event)
+                if on_event is not None:
+                    callback_result = on_event(event)
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
             for event in normalize_codex_event(
                 raw, thread_id=thread_id, turn_id=turn_id
             ):
                 events.append(event)
-                append_engine_error(event, log_root=self._log_root)
+                if not routing_events:
+                    append_engine_error(event, log_root=self._log_root)
                 if on_event is not None:
                     callback_result = on_event(event)
                     if inspect.isawaitable(callback_result):
@@ -409,7 +520,7 @@ class CodexAdapter:
 
     def _timeout_result(
         self,
-        task: CodexTask,
+        task: TaskSpec,
         ctx: artifact_validation.Ctx,
         events: list[NormalizedEvent],
     ) -> CodexRunResult:
@@ -434,7 +545,7 @@ class CodexAdapter:
 
     def _interrupted_result(
         self,
-        task: CodexTask,
+        task: TaskSpec,
         ctx: artifact_validation.Ctx,
         events: list[NormalizedEvent],
     ) -> CodexRunResult:
@@ -459,7 +570,7 @@ class CodexAdapter:
 
     async def run(
         self,
-        task: CodexTask,
+        task: TaskSpec,
         ctx: artifact_validation.Ctx,
         on_event: Any = None,
     ) -> CodexRunResult:
@@ -470,7 +581,7 @@ class CodexAdapter:
             report = artifact_validation.ValidationReport(
                 artifact_validation.Verdict.FAIL, [contract_failure]
             )
-            return CodexRunResult(
+            result = CodexRunResult(
                 None,
                 contract_failure.message,
                 report,
@@ -478,8 +589,38 @@ class CodexAdapter:
                 [],
                 None,
             )
+            await self._emit_outcome(
+                events,
+                on_event,
+                outcome="FAIL",
+                message=contract_failure.message,
+                detail=contract_failure.detail,
+            )
+            return result
         try:
             command = build_codex_command(task, executable=self._executable)
+        except (CapabilityValidationError, ValueError) as exc:
+            message = f"Codex capability 无法安全执行：{exc}"
+            failure = artifact_validation.Result(
+                artifact_validation.Verdict.FAIL,
+                "codex_capability",
+                message,
+                [],
+                {"exception": type(exc).__name__},
+            )
+            report = artifact_validation.ValidationReport(
+                artifact_validation.Verdict.FAIL, [failure]
+            )
+            result = CodexRunResult(None, str(exc), report, events, [], None)
+            await self._emit_outcome(
+                events,
+                on_event,
+                outcome="FAIL",
+                message=message,
+                detail=failure.detail,
+            )
+            return result
+        try:
             env = build_codex_env(
                 self._auth_mode,
                 codex_home=self._codex_home,
@@ -501,24 +642,46 @@ class CodexAdapter:
                 start_new_session=True,
             )
             self._process = process
-            process_status = await self._run_with_timeout(
+            await self._run_with_timeout(
                 process, events, on_event
             )
             if self._interrupted:
-                return self._interrupted_result(task, ctx, events)
-            infrastructure_error = _infrastructure_error(
-                events, process_status
-            )
+                result = self._interrupted_result(task, ctx, events)
+                await self._emit_outcome(
+                    events,
+                    on_event,
+                    outcome="FAIL",
+                    message=result.conclusion_error or "Codex 任务已中断",
+                    detail={"interrupted": True},
+                )
+                return result
+            infrastructure_error = _infrastructure_error(events)
             if infrastructure_error is not None:
                 raise RuntimeError(infrastructure_error)
         except asyncio.TimeoutError:
             if self._process is not None:
                 await self._terminate_process(self._process)
-            return self._timeout_result(task, ctx, events)
+            result = self._timeout_result(task, ctx, events)
+            await self._emit_outcome(
+                events,
+                on_event,
+                outcome="FAIL",
+                message=result.conclusion_error or "Codex 任务超时",
+                detail={"timeout_seconds": self._timeout_seconds},
+            )
+            return result
         except Exception as exc:
             if self._process is not None:
                 await self._terminate_process(self._process)
-            return self._unavailable(exc, events)
+            result = self._unavailable(exc, events)
+            await self._emit_outcome(
+                events,
+                on_event,
+                outcome="UNAVAILABLE",
+                message=result.engine_error or "Codex CLI 不可用",
+                detail={"exception": type(exc).__name__, "message": str(exc)},
+            )
+            return result
         finally:
             self._process = None
 
@@ -555,10 +718,26 @@ class CodexAdapter:
                 verdict, [*report.results, path_failure]
             )
         denials = conclusion.capability_denials if conclusion is not None else []
-        return CodexRunResult(
+        result = CodexRunResult(
             conclusion,
             conclusion_error,
             report,
             events,
             denials,
         )
+        if not result.succeeded:
+            messages = [item.message for item in report.failures]
+            if conclusion_error:
+                messages.append(conclusion_error)
+            message = "；".join(messages) or "产物与结构化结论未同时通过"
+            await self._emit_outcome(
+                events,
+                on_event,
+                outcome="FAIL",
+                message=message,
+                detail={
+                    "validation_verdict": report.verdict.value,
+                    "conclusion_error": conclusion_error,
+                },
+            )
+        return result
