@@ -164,13 +164,24 @@ def _agent_prompt(query: str, task: str, output: Mapping[str, Any], agent_kind: 
     chart_rule = ""
     if agent_kind in {"report", "report_writing", "excel_generation"}:
         chart_rule = "图表按‘结论→比较类型→图形’三步法与 8 条禁则选择；Excel 固定 6 sheet。"
+    if agent_kind in {"report", "report_writing"}:
+        chart_rule += (
+            "引用契约：「结论」章节必须用 Markdown 列表，每条结论列表项末尾带 [SNN] 角标"
+            "（S01 起编号）；「信息源」章节逐条以“- [SNN] [标题](permalink)（fetched_at=…）”"
+            "列出；正文角标与信息源条目双向一致，不得有悬空角标或未被引用的信息源。"
+        )
     if agent_kind in {"data_collection", "browser_automation"}:
         method = (
             f"查询式={query}；HN Algolia 时间窗=近90天，"
             "numericFilters=created_at_i>执行时点UTC epoch-7776000,points>50，"
             "hitsPerPage=1000。"
         )
-        evidence_rule = "所有事实保留 permalink 与 fetched_at。"
+        evidence_rule = (
+            "所有事实保留 permalink 与 fetched_at。"
+            "本文件顶层必须是 JSON 数组，每个元素为一条命中记录；"
+            "goal 验收若描述对象结构（如顶层含 queries/hits 等键），"
+            "那是清洗类产物的口径，不适用于本文件，不要为此自报 partial。"
+        )
     else:
         method = (
             f"仅消费上游产物，不发起新抓取；输入口径为查询式={query}、"
@@ -178,6 +189,14 @@ def _agent_prompt(query: str, task: str, output: Mapping[str, Any], agent_kind: 
             "points>50、hitsPerPage=1000。"
         )
         evidence_rule = "事实须反向引用上游 permalink 与 fetched_at。"
+        if "no_item_missing_rating" in output["validators"]:
+            evidence_rule += (
+                "本文件顶层必须是 JSON 数组；每个元素为一条评级条目，必须逐条带齐 "
+                "score_authority、score_freshness、score_crossref、score_completeness、"
+                "score_independence、rating_notes、rated_by 七个字段（评分为整数，"
+                "rating_notes 说明依据，rated_by 填 agent_id）；"
+                "goal 验收若描述对象结构，属于其他产物，不适用本文件。"
+            )
     return (
         f"目标：{task}；把可复核结果写入 {output['path']}。\n"
         f"方法要点：{method}{chart_rule}\n"

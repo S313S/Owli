@@ -312,6 +312,26 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
 
 
 @async_test
+async def test_执行任务正文包含绝对产物路径供引擎落盘(tmp_path: Path):
+    async with api_client(tmp_path, auto_confirm=True) as (_, client, engine):
+        created = await client.post(
+            "/api/researches",
+            json={"query": "飞书竞品优缺点"},
+            headers={"X-Request-ID": "create-m2-abs-path"},
+        )
+        research_id = created.json()["data"]["research_id"]
+        await wait_for_status(client, research_id, "completed")
+
+    executed = [task for task in engine.tasks if task.agent_kind != "planning"]
+    assert executed
+    for task in executed:
+        assert str(task.output_path) in task.body, (
+            f"{task.agent_id} 的任务正文缺少绝对产物路径，"
+            "引擎无从得知落盘位置（cwd 不是 research 根时相对路径必然越界）"
+        )
+
+
+@async_test
 async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Path):
     engine = RecordingEngine()
     engine.block_kind = "data_collection"

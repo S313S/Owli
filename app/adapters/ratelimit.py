@@ -230,9 +230,33 @@ def _route_claude_message(message: Any) -> RouteDecision:
     return _route_result_message(message)
 
 
+def _codex_error_text(message: Any) -> str:
+    """只提取错误载荷文本参与撞墙匹配。
+
+    普通输出（命令回显、读到的文件内容）不得参与：真实误报样本——agent
+    `sed` 读 architecture.md，正文里的文件名 `ratelimit.py` 命中宽容正则，
+    整条链路被误判 BACKOFF（2026-08-19 M2-e 验收实录）。
+    """
+    if not isinstance(message, Mapping):
+        return str(message or "")
+    texts: list[str] = []
+    if str(message.get("type", "")) == "error":
+        texts.append(str(message.get("message", "")))
+    item = message.get("item")
+    if isinstance(item, Mapping) and str(item.get("type", "")) == "error":
+        texts.append(str(item.get("message", "")))
+    error = message.get("error")
+    if isinstance(error, Mapping):
+        texts.append(str(error.get("message", "")))
+    elif isinstance(error, str):
+        texts.append(error)
+    if bool(_field(message, "is_error", "isError", default=False)):
+        texts.append(json.dumps(message, ensure_ascii=False, default=str))
+    return "\n".join(text for text in texts if text)
+
+
 def _route_codex_message(message: Any) -> RouteDecision:
-    raw_text = json.dumps(message, ensure_ascii=False, default=str)
-    if not classify_codex_error(raw_text):
+    if not classify_codex_error(_codex_error_text(message)):
         return RouteDecision(RouteState.CONTINUE, "消息正常", message)
     return RouteDecision(
         RouteState.BACKOFF,

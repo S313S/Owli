@@ -183,6 +183,47 @@ def test_codex_撞墙文案采用宽容匹配():
     assert classify_codex_error("工具执行失败，请检查参数") is False
 
 
+def test_codex_普通命令输出提到_ratelimit_文件名不算撞墙():
+    from app.adapters.ratelimit import RouteState, route
+
+    # 真实误报样本（2026-08-19 M2-e 验收实录）：agent 读 architecture.md，
+    # 正文含文件名 `adapters/ratelimit.py`，曾被整串 JSON 宽容匹配误判 BACKOFF。
+    decision = route(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_3",
+                "type": "command_execution",
+                "command": "/bin/zsh -lc \"sed -n '1,260p' .docs-ref/architecture.md\"",
+                "aggregated_output": "L4 adapters/ratelimit.py 限流四态路由；rate limits 见 R8。",
+            },
+        },
+        engine="Codex",
+    )
+
+    assert decision.state is RouteState.CONTINUE
+
+
+def test_codex_错误载荷撞墙文案仍判_BACKOFF(tmp_path):
+    from app.adapters.ratelimit import RouteState, route
+
+    decision = route(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_0",
+                "type": "error",
+                "message": "You've hit your usage limit. Visit settings to purchase more credits",
+            },
+        },
+        engine="Codex",
+        log_root=tmp_path,
+    )
+
+    assert decision.state is RouteState.BACKOFF
+    assert decision.suspend_new_tasks is True
+
+
 def test_每个非_continue_决策只产一条_normalized_event_且透传_raw(tmp_path):
     from app.adapters.events import ItemKind, NormalizedEvent
     from app.adapters.ratelimit import route

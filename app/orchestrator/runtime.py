@@ -341,17 +341,20 @@ class RuntimeCoordinator:
         kind = self._agent_kind(agent)
         goal = next(item for item in plan.goals if item.goal_id == context.goal_id)
         acceptance = "；".join(str(item) for item in goal.acceptance)
+        output_path = self.runs_root / plan.research_id / str(agent.output["path"])
         body = (
             f"Goal 目标：{goal.objective}\n"
             f"Agent 任务：{agent.task}\n"
-            f"验收条件：{acceptance}\n\n"
+            f"Goal 验收条件（由本 goal 全部 agent 协同满足；描述其他 agent 产物的条目"
+            f"不属于你的职责，不要为此自报 partial 或写入 unmet）：{acceptance}\n"
+            f"产物落盘路径（写文件与 owli-result.output_path 都逐字用它）：{output_path}\n\n"
             f"{agent.prompt['body']}"
         )
         if kind in {"report", "report_writing"}:
             body = f"{body}\n\n{self._decision_context(plan)}"
         return EngineTask(
             body=body,
-            output_path=self.runs_root / plan.research_id / str(agent.output["path"]),
+            output_path=output_path,
             output_format=str(agent.output["format"]),
             research_id=plan.research_id,
             goal_id=context.goal_id,
@@ -559,9 +562,17 @@ class RuntimeCoordinator:
             agent
             for goal in plan.goals
             for agent in goal.agents
-            if str(agent.capability.get("profile")) == "report-writer"
+            if self._agent_kind(agent) in {"report", "report_writing"}
             and str(agent.output.get("format")) == "markdown"
         ]
+        if not report_agents:
+            report_agents = [
+                agent
+                for goal in plan.goals
+                for agent in goal.agents
+                if str(agent.capability.get("profile")) == "report-writer"
+                and str(agent.output.get("format")) == "markdown"
+            ]
         if report_agents:
             return self.runs_root / plan.research_id / str(report_agents[-1].output["path"])
         return self.runs_root / plan.research_id / "goals" / plan.goals[-1].goal_id / "report.md"

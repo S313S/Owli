@@ -650,6 +650,7 @@ def create_app(
                 source["decision_balance"][0]["answer"] = None
                 source["decision_balance"][0]["answered_at"] = None
             plan = Plan.from_dict(source)
+            runtime._adapters[plan.research_id] = runtime.adapter_factory()
             store.create_report(
                 id=plan.research_id,
                 title=plan.title,
