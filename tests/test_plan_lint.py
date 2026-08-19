@@ -10,7 +10,7 @@ from tests.plan_factory import make_agent, make_plan_dict
 def _messages(plan: dict) -> list[str]:
     from app.plan.lint import lint
 
-    return lint(plan)["errors"]
+    return lint(plan, for_approval=True)["errors"]
 
 
 @pytest.mark.parametrize(

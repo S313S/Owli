@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import sqlite3
+from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+
+NOW = "2026-08-19T03:00:00+00:00"
+RESEARCH_ID = "r-01JXPLAN0000000000000000"
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sql"
+
+
+def _agent(name: str, task: str, **extra) -> dict:
+    return {"name": name, "task": task, **extra}
+
+
+def _goal(number: int, agents: list[dict], *, acceptance=None) -> dict:
+    return {
+        "title": f"阶段{number}",
+        "objective": f"形成阶段{number}可独立验收的证据产物。",
+        "depends_on": [] if number == 1 else [f"goal-{number - 1}"],
+        "deliverable": {
+            "format": "json" if number < 3 else "markdown",
+            "path": f"stage-{number}.json" if number < 3 else "report.md",
+            "description": "可供下游复核的结构化产物。",
+        },
+        "acceptance": acceptance or ["文件存在且至少包含 1 条带链接记录"],
+        "agents": agents,
+    }
+
+
+def _valid_skeleton() -> dict:
+    return {
+        "goals": [
+            _goal(1, [_agent("HN 数据抓取", "通过 API 抓取 Hacker News 证据")]),
+            _goal(2, [_agent("可靠度审计", "审核证据可靠度并做交叉验证")]),
+            _goal(3, [_agent("报告撰写", "撰写带角标的 Markdown 报告")]),
+        ]
+    }
+
+
+class FakeStore:
+    def __init__(self, root: Path) -> None:
+        self.runs_root = root / "runs"
+        self.events = []
+        self.saved = []
+
+    def get_drafting_report(self, query: str):
+        return {
+            "id": RESEARCH_ID,
+            "research_question": query,
+            "created_at": NOW,
+            "extra": {"plan_generated_at": NOW},
+        }
+
+    def save_plan_snapshot(self, report_id, *, snapshot, expected_rev):
+        self.saved.append((report_id, deepcopy(snapshot), expected_rev))
+
+    async def on_plan_event(self, event) -> None:
+        self.events.append(event)
+
+
+class FakeEngine:
+    def __init__(self, skeletons: list[dict]) -> None:
+        self.skeletons = [deepcopy(item) for item in skeletons]
+        self.tasks = []
+
+    async def run(self, task, ctx, on_event=None):
+        del ctx, on_event
+        self.tasks.append(task)
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.skeletons[min(len(self.tasks) - 1, len(self.skeletons) - 1)]
+        task.output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return SimpleNamespace(succeeded=True)
+
+
+class ForbiddenEngine:
+    async def run(self, task, ctx, on_event=None):
+        del task, ctx, on_event
+        raise AssertionError("规划任务不得路由到 Codex")
+
+
+def _generate(tmp_path: Path, skeletons: list[dict]):
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    engine = FakeEngine(skeletons)
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+    return plan, store, engine
+
+
+def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> None:
+    from app.plan.lint import lint
+    from app.plan.model import DEFAULT_RETRY_POLICY
+
+    skeleton = _valid_skeleton()
+    skeleton["estimated_cost"] = 12
+    skeleton["goals"][0]["estimated_minutes"] = 20
+    skeleton["goals"][0]["agents"][0].update(
+        engine="claude", planned_steps=9, capability={"profile": "custom"}
+    )
+
+    plan, store, engine = _generate(tmp_path, [skeleton])
+
+    assert len(engine.tasks) == 1
+    assert engine.tasks[0].agent_kind == "planning"
+    assert plan.status == "awaiting_review"
+    assert plan.baseline_source == "generated"
+    assert plan.expert_panel is None and plan.change_log == []
+    assert lint(plan)["errors"] == []
+    assert any(
+        error.startswith("[规则12]")
+        for error in lint(plan, for_approval=True)["errors"]
+    )
+    assert store.saved[0][0::2] == (RESEARCH_ID, 0)
+    raw = plan.to_dict()
+    assert "estimated_cost" not in raw
+    assert "estimated_minutes" not in raw["goals"][0]
+    assert "planned_steps" not in raw["goals"][0]["agents"][0]
+    assert [goal["goal_id"] for goal in raw["goals"]] == [
+        "goal-1", "goal-2", "goal-3"
+    ]
+    for goal in raw["goals"]:
+        assert goal["retry_policy"] == DEFAULT_RETRY_POLICY
+        assert goal["status"] == "pending"
+        assert goal["intervention"]["on_complete"] is True
+        for agent in goal["agents"]:
+            assert agent["prompt"]["preamble_ref"] == "common/v1"
+            assert agent["prompt"]["assumptions_policy"] == "assume_and_declare"
+            assert set(agent["origin"].values()) == {"generated"}
+
+
+@pytest.mark.parametrize(
+    ("name", "task", "engine", "profile"),
+    [
+        ("规划", "拆分 goal", "claude", "readonly-analyst"),
+        ("计划仲裁", "仲裁计划", "claude", "readonly-analyst"),
+        ("可靠度审计", "审核证据可靠度", "claude", "readonly-analyst"),
+        ("交叉验证", "交叉验证断言", "claude", "readonly-analyst"),
+        ("一致性检查", "检查证据一致性", "claude", "readonly-analyst"),
+        ("报告撰写", "撰写报告", "claude", "report-writer"),
+        ("摘要", "生成摘要", "claude", "report-writer"),
+        ("标签", "生成标签", "claude", "report-writer"),
+        ("API 数据抓取", "通过 API 抓取数据", "codex", "web-collector"),
+        ("MediaCrawler", "运行 MediaCrawler 采集", "codex", "sandboxed-runner"),
+        ("浏览器自动化", "自动化浏览器采集", "codex", "sandboxed-runner"),
+        ("代码执行", "执行代码", "codex", "sandboxed-runner"),
+        ("Excel 生成", "生成 Excel", "codex", "sandboxed-runner"),
+        ("数据清洗", "清洗数据", "codex", "sandboxed-runner"),
+    ],
+)
+def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_path) -> None:
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["agents"] = [_agent(name, task)]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+    generated = plan.goals[0].agents[0]
+
+    assert generated.engine == engine
+    assert generated.capability["profile"] == profile
+
+
+def test_角色只按封闭名称分类_任务中的_API_不得误派报告_agent(tmp_path) -> None:
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["agents"] = [
+        _agent("报告撰写", "撰写 API 竞品报告")
+    ]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+
+    agent = plan.goals[0].agents[0]
+    assert agent.engine == "claude"
+    assert agent.capability["profile"] == "report-writer"
+
+
+def test_每个_goal_最终_agent_产出_deliverable_且下游_inputs_逐字引用(tmp_path) -> None:
+    plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
+
+    for goal in plan.goals:
+        assert goal.agents[-1].output["path"] == goal.deliverable["path"]
+        assert goal.agents[-1].output["format"] == goal.deliverable["format"]
+        for index, agent in enumerate(goal.agents):
+            expected = [] if index == 0 else [goal.agents[index - 1].agent_id]
+            assert agent.depends_on == expected
+    for goal in plan.goals[1:]:
+        assert goal.agents[0].inputs == [
+            {
+                "from_goal": upstream,
+                "artifact": next(
+                    item.deliverable["path"]
+                    for item in plan.goals if item.goal_id == upstream
+                ),
+            }
+            for upstream in goal.depends_on
+        ]
+
+
+def test_每个落盘_agent_都具有当前_goal_写权限(tmp_path) -> None:
+    plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
+
+    for goal in plan.goals:
+        writer = goal.agents[-1]
+        assert "fs.write" in writer.capability["tools"]
+        assert f"goals/{goal.goal_id}/**" in writer.capability["fs"]["write"]
+
+
+def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> None:
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["agents"] = [_agent("报告撰写", "输出 JSON 摘要")]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+
+    output = plan.goals[0].agents[-1].output
+    assert output["format"] == "json"
+    assert output["validators"] == ["file_exists"]
+
+
+def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:
+    from app.adapters.events import NormalizedEvent
+
+    invalid = _valid_skeleton()
+    invalid["goals"][0]["acceptance"] = ["结果质量良好"]
+    plan, store, engine = _generate(tmp_path, [invalid, invalid, _valid_skeleton()])
+
+    assert plan.status == "awaiting_review"
+    assert len(engine.tasks) == 3
+    assert "[规则4]" in engine.tasks[1].body
+    assert "结果质量良好" in engine.tasks[1].body
+    assert "[规则4]" in engine.tasks[2].body
+    assert len(store.events) == 2
+    assert all(isinstance(event, NormalizedEvent) for event in store.events)
+    assert all(event.outcome == "retrying" for event in store.events)
+
+
+def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import PlanGenerationError, generate_plan
+
+    invalid = _valid_skeleton()
+    invalid["goals"][0]["acceptance"] = ["结果质量良好"]
+    engine = FakeEngine([invalid])
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+
+    with pytest.raises(PlanGenerationError, match="连续 3 次") as captured:
+        asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+
+    assert len(engine.tasks) == 3
+    assert "[规则4]" in str(captured.value)
+    assert store.saved == []
+
+
+def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_path) -> None:
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    class FlakyEngine(FakeEngine):
+        async def run(self, task, ctx, on_event=None):
+            result = await super().run(task, ctx, on_event)
+            if len(self.tasks) == 1:
+                return SimpleNamespace(
+                    succeeded=False,
+                    engine_error=None,
+                    conclusion_error="owli-result.summary 必须是 200 字以内字符串",
+                )
+            return result
+
+    engine = FlakyEngine([_valid_skeleton()])
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+
+    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+
+    assert plan.status == "awaiting_review"
+    assert len(engine.tasks) == 2
+    assert "owli-result.summary 必须是 200 字以内字符串" in engine.tasks[1].body
+    assert len(store.events) == 1 and store.events[0].outcome == "retrying"
+
+
+def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None:
+    from app.adapters import validation
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    class ValidationFlakyEngine(FakeEngine):
+        async def run(self, task, ctx, on_event=None):
+            result = await super().run(task, ctx, on_event)
+            if len(self.tasks) == 1:
+                failure = validation.Result(
+                    validation.Verdict.FAIL,
+                    "file_exists",
+                    "产物文件不存在",
+                    ["plan-skeleton.json"],
+                )
+                return SimpleNamespace(
+                    succeeded=False,
+                    engine_error=None,
+                    conclusion_error=None,
+                    validation=validation.ValidationReport(
+                        validation.Verdict.FAIL, [failure]
+                    ),
+                )
+            return result
+
+    engine = ValidationFlakyEngine([_valid_skeleton()])
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+
+    asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+
+    assert "产物文件不存在" in engine.tasks[1].body
+    assert "plan-skeleton.json" in engine.tasks[1].body
+
+
+def test_非采集_agent_prompt_明确禁止新抓取(tmp_path) -> None:
+    plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
+
+    collector = plan.goals[0].agents[0]
+    auditor = plan.goals[1].agents[0]
+    assert "不发起新抓取" not in collector.prompt["body"]
+    assert "不发起新抓取" in auditor.prompt["body"]
+
+
+def test_decision_balance_选项式引用合法且_baseline_深拷贝独立(tmp_path) -> None:
+    plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
+    questions = plan.decision_balance
+    node_ids = {
+        *(goal.goal_id for goal in plan.goals),
+        *(agent.agent_id for goal in plan.goals for agent in goal.agents),
+    }
+
+    assert 1 <= len(questions) <= 5
+    for question in questions:
+        assert question["input_type"] in {"single", "multi", "choice_2"}
+        assert 2 <= len(question["options"]) <= 4
+        assert question["answer"] is None
+        assert question["affects"]
+        assert set(question["affects"]) <= node_ids
+
+    baseline = plan.to_dict()["baseline"]
+    before = deepcopy(baseline)
+    plan.goals[0].title = "用户改过的标题"
+    plan.goals[0].agents[0].task = "用户改过的任务"
+    assert plan.to_dict()["baseline"] == before
+
+
+def test_规划_prompt_固定四段与_HN_可复现参数(tmp_path) -> None:
+    _, _, engine = _generate(tmp_path, [_valid_skeleton()])
+    body = engine.tasks[0].body
+
+    assert all(label in body for label in ("目标：", "方法要点：", "产物结构：", "边界与降级："))
+    assert "created_at_i>" in body
+    assert "7776000" in body
+    assert "points>50" in body
+    assert "3–7" in body
+
+
+def test_store_只返回同需求且尚未保存计划的最新报告(tmp_path) -> None:
+    from app.store.dao import Store
+
+    database = tmp_path / "owli.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    store = Store(database)
+    for report_id, created_at, snapshot in (
+        ("r-old", "2026-08-19T01:00:00Z", None),
+        ("r-done", "2026-08-19T02:00:00Z", {"plan_rev": 1}),
+        (RESEARCH_ID, NOW, None),
+    ):
+        store.create_report(
+            id=report_id,
+            title="飞书竞品优缺点",
+            research_question="飞书竞品优缺点",
+            created_at=created_at,
+            plan_snapshot=snapshot,
+        )
+
+    report = store.get_drafting_report("飞书竞品优缺点")
+
+    assert report is not None and report["id"] == RESEARCH_ID
+
+
+def test_真实_store_保留_normalized_plan_event(tmp_path) -> None:
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.store.dao import Store
+
+    store = Store(tmp_path / "owli.db")
+    event = NormalizedEvent(
+        engine="Owli",
+        thread_id=RESEARCH_ID,
+        turn_id="plan-attempt-2",
+        item_kind=ItemKind.ERROR,
+        text="[rule4]",
+        is_error=True,
+        raw={"errors": ["[rule4]"]},
+        outcome="retrying",
+    )
+
+    store.on_plan_event(event)
+
+    assert store.plan_events == (event,)

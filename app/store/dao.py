@@ -52,6 +52,16 @@ class Store:
 
     def __init__(self, database_path: str | Path) -> None:
         self._database_path = Path(database_path)
+        self._plan_events: list[Any] = []
+
+    def on_plan_event(self, event: Any) -> None:
+        """暂存计划生成事件，供同一请求的上层事件缓冲读取。"""
+        self._plan_events.append(event)
+
+    @property
+    def plan_events(self) -> tuple[Any, ...]:
+        """只读返回本 Store 实例收到的计划生成事件。"""
+        return tuple(self._plan_events)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._database_path)
@@ -190,6 +200,26 @@ class Store:
                 report[field] = json.loads(report[field])
         return report
 
+    def get_drafting_report(self, research_question: str) -> dict[str, Any] | None:
+        """读取调用方已建、尚未写入计划快照的最新报告。"""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM reports
+                WHERE research_question = ? AND plan_snapshot IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (research_question,),
+            ).fetchone()
+        if row is None:
+            return None
+        report = dict(row)
+        for field in ("decision_balance", "engines_used", "attachments", "extra"):
+            if report[field] is not None:
+                report[field] = json.loads(report[field])
+        return report
+
     def save_plan_snapshot(
         self,
         report_id: str,
@@ -215,21 +245,44 @@ class Store:
         expected_rev: int,
         feedback: dict[str, Any] | None,
     ) -> str | None:
-        """计划变更与可选 feedback 同事务；feedback 故障降级为空标记。"""
+        """兼容单条计划变更；批量实现由 save_plan_changes 统一承担。"""
+        feedbacks = [] if feedback is None else [feedback]
+        saved = self.save_plan_changes(
+            report_id,
+            snapshot=snapshot,
+            expected_rev=expected_rev,
+            feedbacks=feedbacks,
+        )
+        return saved[0] if saved else None
+
+    def save_plan_changes(
+        self,
+        report_id: str,
+        *,
+        snapshot: dict[str, Any],
+        expected_rev: int,
+        feedbacks: list[dict[str, Any]],
+    ) -> list[str]:
+        """一次 PUT 的多条变更与 feedback 同事务，单条 feedback 可降级。"""
         snapshot_to_save = copy.deepcopy(snapshot)
-        feedback_id: str | None = None
+        feedback_ids: list[str] = []
         with self._connect() as connection:
-            if feedback is not None:
-                connection.execute("SAVEPOINT feedback_write")
+            for index, feedback in enumerate(feedbacks):
+                savepoint = f"feedback_write_{index}"
+                connection.execute(f"SAVEPOINT {savepoint}")
                 try:
                     self._insert_feedback(connection, feedback)
                 except Exception:
-                    connection.execute("ROLLBACK TO feedback_write")
-                    connection.execute("RELEASE feedback_write")
-                    snapshot_to_save["change_log"][-1]["feedback_id"] = None
+                    connection.execute(f"ROLLBACK TO {savepoint}")
+                    connection.execute(f"RELEASE {savepoint}")
+                    change_id = feedback["extra"]["change_id"]
+                    for change in snapshot_to_save["change_log"]:
+                        if change.get("change_id") == change_id:
+                            change["feedback_id"] = None
+                            break
                 else:
-                    connection.execute("RELEASE feedback_write")
-                    feedback_id = str(feedback["id"])
+                    connection.execute(f"RELEASE {savepoint}")
+                    feedback_ids.append(str(feedback["id"]))
             cursor = self._update_plan_snapshot(
                 connection,
                 report_id,
@@ -240,7 +293,7 @@ class Store:
                 raise PlanSnapshotConflict(
                     f"计划版本冲突：{report_id} 期望 rev={expected_rev}"
                 )
-        return feedback_id
+        return feedback_ids
 
     def finish_report(
         self,

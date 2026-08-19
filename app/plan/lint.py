@@ -403,8 +403,10 @@ def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
-def lint(plan: Plan | Mapping[str, Any]) -> dict[str, list[str]]:
-    """按 agents-spec §10 的编号顺序返回全部问题，不在首错处短路。"""
+def lint(
+    plan: Plan | Mapping[str, Any], *, for_approval: bool = False
+) -> dict[str, list[str]]:
+    """按 §10 返回问题；规则 12 是批准闸门，普通保存不阻断。"""
     raw = _data(plan)
     goals = list(raw.get("goals", []))
     errors: list[str] = []
@@ -419,6 +421,7 @@ def lint(plan: Plan | Mapping[str, Any]) -> dict[str, list[str]]:
     errors.extend(_rule_9(goals))
     errors.extend(_rule_10(raw))
     errors.extend(_rule_11(goals))
-    errors.extend(_rule_12(raw))
+    if for_approval:
+        errors.extend(_rule_12(raw))
     errors.extend(_rule_13(goals))
     return {"errors": errors, "warnings": _warnings(goals)}
