@@ -44,6 +44,9 @@ export default function ActionCardView({ card }: { card: ActionCard }) {
         const body = await response.json()
         throw new Error(body.error?.message ?? '卡片回答没有生效')
       }
+      if (action.value === 'adjust' && card.research_id) {
+        window.location.assign(`/researches/${encodeURIComponent(card.research_id)}/plan?runtime=1`)
+      }
     } catch (error) {
       setFailure(`${String(error)}。卡片仍保留，可直接重试`)
     } finally {

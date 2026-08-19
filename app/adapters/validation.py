@@ -40,6 +40,7 @@ class Ctx:
     read_json: Callable[[], Any]
     store: Any
     source_domains: frozenset[str]
+    runs_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,7 @@ def file_exists(ctx: Ctx, arguments: list[str]) -> Result:
         )
     actual = _resolved_output_path(ctx.output_path)
     expected_root = (
-        RUNS_ROOT / ctx.research_id / "goals" / ctx.goal_id
+        (ctx.runs_root or RUNS_ROOT) / ctx.research_id / "goals" / ctx.goal_id
     ).resolve(strict=False)
     try:
         actual.relative_to(expected_root)
@@ -575,6 +576,34 @@ def db_row_exists(ctx: Ctx, arguments: list[str]) -> Result:
     )
 
 
+@validator("no_item_missing_rating")
+def no_item_missing_rating(ctx: Ctx, arguments: list[str]) -> Result:
+    name = "no_item_missing_rating"
+    if arguments:
+        return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    items, error = _read_json_array(ctx, name)
+    if error is not None:
+        return error
+    required = (
+        "score_authority", "score_freshness", "score_crossref",
+        "score_completeness", "score_independence", "rating_notes", "rated_by",
+    )
+    offenders = [
+        f"items[{index}].{field}"
+        for index, item in enumerate(items or [])
+        for field in required
+        if not isinstance(item, dict) or _is_empty(item.get(field))
+    ]
+    if offenders:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"{len(offenders)} 个评级字段缺失或为空",
+            offenders,
+        )
+    return _result(Verdict.PASS, name, f"{len(items or [])} 条证据评级字段齐全")
+
+
 _UNIMPLEMENTED = (
     "zip_entry_glob_exists",
     "openpyxl_reload_ok",
@@ -588,7 +617,6 @@ _UNIMPLEMENTED = (
     "each_row_urls_reachable",
     "db_field_non_empty",
     "claims_backfilled",
-    "no_item_missing_rating",
     "rating_notes_matches_regex",
     "rating_notes_scores_match_columns",
     "no_baseline_prefix_left",

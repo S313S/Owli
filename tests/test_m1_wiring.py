@@ -34,16 +34,11 @@ def test_r2_default_route_and_user_origin_marker():
     assert overridden.origin == "user"
 
 
-def test_m0_three_cards_use_routing_but_keep_all_claude_assignment():
-    from app.orchestrator.mini import build_initial_state
+def test_m0_固定三卡已由计划驱动运行时替换():
+    from app.orchestrator.mini import MiniOrchestrator
+    from app.orchestrator.runtime import RuntimeCoordinator
 
-    state = build_initial_state("r-1", "飞书竞品优缺点")
-    agents = state["goals"][0]["agents"]
-
-    assert [agent["agent_kind"] for agent in agents] == [
-        "planning", "m0_hn_collection", "report_writing"
-    ]
-    assert {agent["engine"] for agent in agents} == {"Claude"}
+    assert MiniOrchestrator is RuntimeCoordinator
 
 
 def test_same_task_and_same_result_contract_are_shared_by_both_adapters(tmp_path):
@@ -781,56 +776,10 @@ def test_codex_invalid_capability_is_task_fail_not_engine_unavailable(
     assert [event.outcome for event in result.events if event.outcome] == ["FAIL"]
 
 
-def test_mini_publishes_route_transition_to_sse_with_complete_raw(tmp_path, monkeypatch):
-    from app.adapters import validation
-    from app.adapters.capability import Capability
-    from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
-    from app.adapters.events import ItemKind, NormalizedEvent
-    from app.api.events import ResearchEventBuffer
-    from app.orchestrator.mini import MiniOrchestrator, build_initial_state
+def test_runtime_defensive_raw_copy_preserves_nested_rate_limit_sample():
+    from app.orchestrator.runtime import RuntimeCoordinator
 
     raw = {"type": "rate_limit_event", "nested": {"kept": [1, 2, 3]}}
-    route_event = NormalizedEvent(
-        engine="Claude", thread_id="s-1", turn_id="t-1",
-        item_kind=ItemKind.THINKING, text="后续新任务让路", is_error=False,
-        raw=raw, route_state="WARN", scope="new_tasks",
-        allow_current_task_to_finish=True,
-    )
+    runtime = object.__new__(RuntimeCoordinator)
 
-    class FakeAdapter:
-        async def run(self, task, ctx, on_event=None):
-            await on_event(route_event)
-            task.output_path.parent.mkdir(parents=True, exist_ok=True)
-            task.output_path.write_text("产物", encoding="utf-8")
-            report = validation.validate(ctx, task.validators)
-            conclusion = OwliResult(
-                "done", str(task.output_path), "完成", [], [], []
-            )
-            return EngineRunResult(conclusion, None, report, [route_event], [])
-
-    runs_root = tmp_path / "runs"
-    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
-    buffer = ResearchEventBuffer()
-    orchestrator = MiniOrchestrator(
-        research_id="r-1", query="测试", store=object(), event_buffer=buffer,
-        state=build_initial_state("r-1", "测试"), adapter=FakeAdapter(),
-        runs_root=runs_root,
-    )
-    task = EngineTask(
-        body="假任务", output_path=orchestrator.keywords_path,
-        output_format="markdown", research_id="r-1", goal_id="goal-1",
-        agent_id="keyword-extractor", agent_kind="planning",
-        validators=["file_exists"], capability=Capability(),
-    )
-
-    asyncio.run(orchestrator._run_engine_task(task))
-    replay = asyncio.run(buffer.replay_after("r-1", 0))
-    payload = next(
-        event.payload for event in replay.events
-        if event.payload["type"] == "engine_route"
-    )
-
-    assert payload["raw"] == raw
-    assert payload["data"]["state"] == "WARN"
-    assert payload["data"]["scope"] == "new_tasks"
-    assert payload["data"]["allow_current_task_to_finish"] is True
+    assert runtime._plain(raw) == raw

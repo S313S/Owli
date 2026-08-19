@@ -118,6 +118,22 @@ def test_json_数组数量与字段校验一次返回三条失败(validation_env
     assert len([result for result in report.results if result.verdict is validation.Verdict.FAIL]) == 3
 
 
+def test_计划生成器默认评级校验器可真实执行(validation_env):
+    validation, output_path = validation_env
+    rated = {
+        "score_authority": 2,
+        "score_freshness": 1,
+        "score_crossref": 2,
+        "score_completeness": 1,
+        "score_independence": 0,
+        "rating_notes": "权威2:官方文档 · 时效1:历史页面 · 交叉2:多源一致 · 完整1:部分字段 · 无关0:厂商自述",
+        "rated_by": "reliability-auditor",
+    }
+    output_path.write_text(json.dumps([rated], ensure_ascii=False), encoding="utf-8")
+    rating = validation.validate(make_ctx(validation, output_path), ["no_item_missing_rating"])
+    assert rating.verdict is validation.Verdict.PASS
+
+
 def test_each_item_has_把容器和空串判空但保留零与_false(validation_env):
     validation, output_path = validation_env
     output_path.write_text(

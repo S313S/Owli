@@ -41,6 +41,15 @@ class WebContractTest(unittest.TestCase):
         self.assertIn("/respond", source)
         self.assertIn("X-Request-ID", source)
 
+    def test_调整后继续_进入运行期计划编辑且可返回工作板(self) -> None:
+        card = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
+        editor = (WEB / "src" / "PlanEditorPage.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("action.value === 'adjust'", card)
+        self.assertIn("?runtime=1", card)
+        self.assertIn("运行期调整", editor)
+        self.assertIn("返回工作板继续", editor)
+
     def test_前端不轮询(self) -> None:
         sources = list((WEB / "src").glob("**/*.ts")) + list((WEB / "src").glob("**/*.tsx"))
         self.assertTrue(sources, "web/src 尚无 TypeScript 源码")

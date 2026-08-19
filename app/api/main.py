@@ -9,9 +9,8 @@ import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Any, Callable, Optional
+from typing import AsyncIterator, Any, Awaitable, Callable, Optional
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -20,7 +19,7 @@ from pydantic import BaseModel
 
 from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe_engines
 from app.api.events import ResearchEventBuffer
-from app.orchestrator.mini import MiniOrchestrator, build_actions, build_initial_state
+from app.orchestrator.runtime import RuntimeCoordinator
 from app.plan.cards import Card, CardStatus
 from app.plan.editing import (
     PlanApprovalRejected,
@@ -68,7 +67,9 @@ def create_app(
     schema_path: str | Path = DEFAULT_SCHEMA_PATH,
     frontend_dist: str | Path = DEFAULT_FRONTEND_DIST,
     event_buffer: ResearchEventBuffer | None = None,
-    orchestrator_factory: Callable[..., Any] | None = None,
+    adapter_factory: Callable[[], Any] | None = None,
+    runs_root: str | Path | None = None,
+    auto_confirm: bool | None = None,
     engine_probe: Callable[[], dict[str, dict[str, Any]]] | None = None,
     enable_test_routes: bool | None = None,
 ) -> FastAPI:
@@ -86,6 +87,15 @@ def create_app(
     request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
     store = Store(database)
+    runtime = RuntimeCoordinator(
+        store=store,
+        event_buffer=events,
+        researches=researches,
+        cards=cards,
+        adapter_factory=adapter_factory,
+        runs_root=runs_root or ROOT / "runs",
+        auto_confirm=auto_confirm,
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -105,6 +115,7 @@ def create_app(
     application.state.store = store
     application.state.cards = cards
     application.state.request_cache = request_cache
+    application.state.runtime = runtime
 
     def envelope(data: Any = None) -> dict[str, Any]:
         return {"ok": True, "data": data, "error": None}
@@ -135,11 +146,11 @@ def create_app(
 
     async def run_in_background(
         research_id: str,
-        runner: Any,
+        operation: Awaitable[Any],
     ) -> None:
         """消化编排器边界外的意外异常，避免任务永远卡在 running。"""
         try:
-            await runner.run()
+            await operation
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -150,7 +161,7 @@ def create_app(
                     store.finish_report(
                         research_id,
                         status="failed",
-                        completed_at=datetime.now(timezone.utc).isoformat(),
+                        completed_at=runtime.now_iso(),
                     )
             except Exception as storage_exc:
                 raw = {
@@ -236,21 +247,22 @@ def create_app(
         if not query:
             raise HTTPException(status_code=422, detail="需求文本不能为空")
         research_id = f"r-{uuid.uuid4().hex[:12]}"
-        researches[research_id] = build_initial_state(research_id, query)
+        researches[research_id] = runtime.initial_state(research_id, query)
+        created_at = runtime.now_iso()
+        store.create_report(
+            id=research_id,
+            title=query[:40],
+            research_question=query,
+            created_at=created_at,
+            status="running",
+            extra={"plan_generated_at": created_at},
+        )
         await events.publish(
             research_id,
             {"type": "research_snapshot", "data": researches[research_id]},
         )
-        factory = orchestrator_factory or MiniOrchestrator
-        runner = factory(
-            research_id=research_id,
-            query=query,
-            store=store,
-            event_buffer=events,
-            state=researches[research_id],
-        )
         task = asyncio.create_task(
-            run_in_background(research_id, runner),
+            run_in_background(research_id, runtime.prepare_research(research_id, query)),
             name=f"owli:{research_id}",
         )
         background_tasks.add(task)
@@ -295,7 +307,16 @@ def create_app(
         if isinstance(current, JSONResponse):
             return current
         try:
-            updated, lint_result = apply_edit(store, current, submitted)
+            updated, lint_result = apply_edit(
+                store,
+                current,
+                submitted,
+                at=runtime.now_iso(),
+                completed_goal_ids=runtime.completed_goal_ids(research_id),
+                runs_root=runtime.runs_root,
+            )
+            runtime.update_plan(updated)
+            await runtime.sync_question_cards(updated)
         except PlanRevisionConflict:
             return JSONResponse(
                 error_envelope(
@@ -338,7 +359,13 @@ def create_app(
         if isinstance(current, JSONResponse):
             return current
         try:
-            updated = reset(store, current, scope=scope, target_id=target_id)
+            updated = reset(
+                store,
+                current,
+                scope=scope,
+                target_id=target_id,
+                at=runtime.now_iso(),
+            )
         except PlanRevisionConflict:
             return remember(
                 cache_scope,
@@ -407,7 +434,7 @@ def create_app(
         if isinstance(current, JSONResponse):
             return current
         try:
-            updated = approve(store, current)
+            updated = approve(store, current, at=runtime.now_iso())
         except PlanApprovalRejected as error:
             return remember(
                 scope,
@@ -436,7 +463,7 @@ def create_app(
         if state is not None:
             state["status"] = "approved"
             state["status_label"] = "计划已冻结"
-            state["actions"] = build_actions(research_id)
+            state["actions"] = runtime.running_actions(research_id)
             await events.publish(
                 research_id,
                 {
@@ -448,6 +475,12 @@ def create_app(
                     },
                 },
             )
+        task = asyncio.create_task(
+            run_in_background(research_id, runtime.start_research(updated)),
+            name=f"owli:scheduler:{research_id}",
+        )
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
         return remember(
             scope,
             x_request_id,
@@ -488,6 +521,7 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        await runtime.pause(research_id)
         response = await change_state(research_id, "paused", "已暂停")
         response["data"]["actions"] = [
             {"id": "resume", "label": "继续", "method": "POST", "href": f"/api/researches/{research_id}/resume"},
@@ -505,8 +539,9 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        await runtime.resume(research_id)
         response = await change_state(research_id, "running", "运行中")
-        response["data"]["actions"] = build_actions(research_id)
+        response["data"]["actions"] = runtime.running_actions(research_id)
         await publish_state_update(research_id, response["data"])
         return remember(scope, x_request_id, response)
 
@@ -519,6 +554,7 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        await runtime.stop(research_id)
         response = await change_state(research_id, "stopped", "已终止")
         response["data"]["actions"] = []
         await publish_state_update(research_id, response["data"])
@@ -564,17 +600,23 @@ def create_app(
                 ),
                 status_code=422,
             )
-        card.status = CardStatus.ANSWERED
-        card.result = {"action": request.action, "payload": copy.deepcopy(request.payload)}
-        card.resolved_at = datetime.now(timezone.utc).isoformat()
-        state = researches.get(card.research_id)
-        if state is not None:
-            state["cards"] = [
-                card.to_dict() if item.get("card_id") == card.card_id else item
-                for item in state.get("cards", [])
-            ]
-        await events.publish(card.research_id, card.to_event())
-        return remember(scope, x_request_id, envelope(card.to_dict()))
+        payload = (
+            copy.deepcopy(request.payload)
+            if isinstance(request.payload, dict)
+            else {"value": copy.deepcopy(request.payload)}
+        )
+        try:
+            resolved = await runtime.respond_card(
+                card_id, action=request.action, payload=payload
+            )
+        except (RuntimeError, ValueError) as error:
+            return remember(
+                scope,
+                x_request_id,
+                error_envelope("card_response_rejected", str(error)),
+                status_code=409,
+            )
+        return remember(scope, x_request_id, envelope(resolved.to_dict()))
 
     if test_routes_enabled:
         @application.post("/api/test/fixtures/m2-d")
@@ -720,7 +762,7 @@ def create_app(
                 "type": "stream_connected",
                 "research_id": research_id,
                 "sequence": last_event_id or 0,
-                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "occurred_at": runtime.now_iso(),
                 "data": {"message": "SSE 已连接"},
             }
             body = json.dumps(

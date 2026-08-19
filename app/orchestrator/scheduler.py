@@ -126,6 +126,41 @@ class Scheduler:
             }
             _assert_acyclic(agent_graph, f"{goal.goal_id} agent")
 
+    def update_plan(self, plan: Plan) -> None:
+        """在干预点替换后续计划；保留已运行节点的运行时状态。"""
+        if plan.research_id != self.plan.research_id:
+            raise ValueError("不能用其他 research 的计划更新 Scheduler")
+        active = {
+            goal_id for goal_id, status in self.goal_statuses.items()
+            if status == "running"
+        }
+        changed_active = {
+            goal.goal_id
+            for goal in plan.goals
+            if goal.goal_id in active and goal.to_dict() != self._goals[goal.goal_id].to_dict()
+        }
+        if changed_active:
+            raise ValueError(f"运行中的 goal 不允许修改：{sorted(changed_active)}")
+        old_agent_statuses = dict(self.agent_statuses)
+        old_goal_statuses = dict(self.goal_statuses)
+        self.plan = plan
+        self._goals = {goal.goal_id: goal for goal in plan.goals}
+        self._agents = {
+            agent.agent_id: (goal, agent)
+            for goal in plan.goals
+            for agent in goal.agents
+        }
+        self._validate_graphs()
+        self.goal_statuses = {
+            goal.goal_id: old_goal_statuses.get(goal.goal_id, "pending")
+            for goal in plan.goals
+        }
+        self.agent_statuses = {
+            agent.agent_id: old_agent_statuses.get(agent.agent_id, "queued")
+            for goal in plan.goals
+            for agent in goal.agents
+        }
+
     async def _emit(self, event: Any) -> None:
         self.emitted_events.append(event)
         result = self._emit_callback(event)
@@ -622,6 +657,15 @@ class Scheduler:
                 )
             return
         if kind == "intervene":
+            adjusts = any(token in choice for token in ("adjust", "调整"))
+            if adjusts:
+                await self._emit({
+                    "type": "intervention_adjustment_requested",
+                    "data": {"goal_id": card.goal_id},
+                })
+                if card.goal_id is not None:
+                    await self._create_intervention_card(self._goals[card.goal_id])
+                return
             if card.goal_id is not None:
                 await self._set_goal_status(card.goal_id, "done")
             await self._drive()

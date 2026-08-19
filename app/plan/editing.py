@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
 
 from app.plan.lint import lint
@@ -258,6 +259,8 @@ def apply_edit(
     submitted: Mapping[str, Any],
     *,
     at: str | None = None,
+    completed_goal_ids: set[str] | None = None,
+    runs_root: str | Path | None = None,
 ) -> tuple[Plan, dict[str, list[str]]]:
     timestamp = at or _now()
     raw, changes = _validate_and_collect(current, submitted, at=timestamp)
@@ -265,8 +268,59 @@ def apply_edit(
     lint_result = lint(candidate, for_approval=False)
     if lint_result["errors"]:
         raise PlanLintRejected(lint_result)
+    discarded = _discard_completed_artifacts(
+        current,
+        completed_goal_ids or set(),
+        runs_root=runs_root,
+        discarded_at=timestamp,
+    )
+    for index, artifact in enumerate(discarded):
+        if index >= len(changes):
+            break
+        changes[index]["artifact_discarded"] = artifact
     updated = commit_changes(store, candidate, changes, expected_rev=current.plan_rev)
     return updated, lint_result
+
+
+def _discard_completed_artifacts(
+    plan: Plan,
+    goal_ids: set[str],
+    *,
+    runs_root: str | Path | None,
+    discarded_at: str,
+) -> list[dict[str, str]]:
+    """逐个删除已完成 goal 的契约产物；不扫描或批量删除目录。"""
+    if not plan.approved_at or not goal_ids or runs_root is None:
+        return []
+    research_root = (Path(runs_root) / plan.research_id).resolve(strict=False)
+    records: list[dict[str, str]] = []
+    seen: set[Path] = set()
+    for goal in plan.goals:
+        if goal.goal_id not in goal_ids:
+            continue
+        goal_root = (research_root / "goals" / goal.goal_id).resolve(strict=False)
+        relative_paths = [
+            *(str(agent.output["path"]) for agent in goal.agents),
+            str(goal.deliverable["path"]),
+        ]
+        for relative in relative_paths:
+            candidate = (research_root / relative).resolve(strict=False)
+            try:
+                candidate.relative_to(goal_root)
+            except ValueError as exc:
+                raise PlanEditRejected(
+                    f"运行期产物路径越界，拒绝删除：{candidate}"
+                ) from exc
+            if candidate in seen or not candidate.is_file():
+                continue
+            seen.add(candidate)
+            candidate.unlink()
+            records.append({
+                "goal_id": goal.goal_id,
+                "path": str(candidate),
+                "discarded_at": discarded_at,
+            })
+    return records
 
 
 def approve(store: Store, current: Plan, *, at: str | None = None) -> Plan:

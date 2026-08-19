@@ -144,7 +144,9 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
     () => plan?.decision_balance.filter((item) => item.answer === null || item.answer === '' || (Array.isArray(item.answer) && item.answer.length === 0)).length ?? 0,
     [plan],
   )
-  const frozen = Boolean(plan?.approved_at)
+  const approved = Boolean(plan?.approved_at)
+  const runtimeEdit = new URLSearchParams(window.location.search).get('runtime') === '1'
+  const frozen = approved && !runtimeEdit
   const planModified = useMemo(() => {
     if (!plan) return false
     return plan.title !== plan.baseline.title
@@ -178,6 +180,8 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
   return <main className="plan-page">
     {frozen && <Alert className="plan-frozen" type="success" showIcon message="计划已冻结"
       description={`计划已冻结为执行基线（批准于 ${plan.approved_at}）。此后的改动请走工作板上的干预点，会记入调整日志`} />}
+    {runtimeEdit && approved && <Alert className="plan-frozen" type="warning" showIcon message="运行期调整"
+      description="只修改后续 goal；保存会写入变更日志与 feedback，并丢弃已完成阶段的旧产物。完成后返回工作板点击“继续”。" />}
     {failure && <Alert className="plan-error" type="error" showIcon message={failure.message}
       description={fieldDetails(failure.details)}
       action={failure.conflict ? <Button onClick={() => void load()}>重新加载</Button> : undefined} />}
@@ -188,7 +192,7 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
       <section className="plan-main">
         <Card className="question-queue" title={<Space>决策天平追问 <Tag color={unanswered ? 'warning' : 'success'}>{unanswered ? `${unanswered} 个待回答` : '已全部回答'}</Tag></Space>}>
           {plan.decision_balance.length ? plan.decision_balance.map((question, index) =>
-            <QuestionView key={question.q_id} question={question} disabled={frozen || saving}
+            <QuestionView key={question.q_id} question={question} disabled={approved || saving}
               onChange={(answer) => updateQuestion(index, answer)} />)
             : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本次计划没有补充追问" />}
         </Card>
@@ -229,7 +233,8 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
       <aside className="plan-rail">
         <Card title="计划闸门">
           <Typography.Paragraph>确认追问答案、阶段产物和 Agent 卡片后再批准。批准后编辑器切为只读。</Typography.Paragraph>
-          <Button block type="primary" size="large" loading={saving} disabled={frozen || unanswered > 0} onClick={() => void approvePlan()}>批准并开始执行</Button>
+          {!approved && <Button block type="primary" size="large" loading={saving} disabled={unanswered > 0} onClick={() => void approvePlan()}>批准并开始执行</Button>}
+          {runtimeEdit && <Button block type="primary" size="large" href={`/researches/${encodeURIComponent(researchId)}`}>返回工作板继续</Button>}
           {unanswered > 0 && <Typography.Text type="danger">还有 {unanswered} 个追问未回答，所以按钮不可用</Typography.Text>}
           {frozen && <Typography.Text type="secondary">计划已冻结；运行期调整请从工作板干预卡进入</Typography.Text>}
         </Card>

@@ -31,6 +31,9 @@ export type GoalState = {
 export type ActionCard = {
   card_id: string
   card_type: string
+  research_id: string
+  goal_id?: string | null
+  agent_id?: string | null
   title: string
   body?: string
   blocking: string
