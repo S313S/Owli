@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from app.adapters.ratelimit import RouteState
+from app.sources.spec import SourceSpec
 
 from app.store.usage import (
     SourceUsageStore,
@@ -23,11 +24,7 @@ from app.store.usage import (
 )
 
 
-SOURCE_SPEC = {
-    "source_id": "x",
-    "tool": "source.x",
-    "entrypoint": "app.sources.x:search",
-}
+# SOURCE_SPEC 实例在模块尾部声明（entrypoint 指向下方 search 函数）。
 
 _WINDOW_PATTERN = re.compile(r"^([1-7])d$")
 _UNSUPPORTED_ENGAGEMENT_OPERATOR = re.compile(
@@ -613,3 +610,10 @@ def search(
         min_likes=min_likes,
         min_retweets=min_retweets,
     )
+
+
+SOURCE_SPEC = SourceSpec(
+    source_id="x",
+    tool_name="source.x",
+    entrypoint=search,
+)

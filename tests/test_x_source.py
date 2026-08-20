@@ -71,13 +71,13 @@ def _payload():
 
 
 def test_SOURCE_SPEC_在源模块内声明_x_槽位() -> None:
-    from app.sources.x import SOURCE_SPEC
+    from app.sources.spec import SourceSpec
+    from app.sources.x import SOURCE_SPEC, search
 
-    assert SOURCE_SPEC == {
-        "source_id": "x",
-        "tool": "source.x",
-        "entrypoint": "app.sources.x:search",
-    }
+    assert isinstance(SOURCE_SPEC, SourceSpec)
+    assert SOURCE_SPEC.source_id == "x"
+    assert SOURCE_SPEC.tool_name == "source.x"
+    assert SOURCE_SPEC.entrypoint is search
 
 
 def test_recent_search_查询强制双降噪且不含_API_不支持的互动量操作符() -> None:
