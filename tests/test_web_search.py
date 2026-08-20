@@ -94,6 +94,17 @@ def test_只从指定_env_读取且_Exa_请求与证据映射固定(tmp_path, mo
     assert evidence["fetched_at"] == "2026-08-20T00:00:00+00:00"
     assert evidence["raw_metrics"] == {}
     assert evidence["extra"]["provider"] == "exa"
+    assert all(
+        isinstance(evidence[field], int)
+        for field in (
+            "score_authority",
+            "score_freshness",
+            "score_crossref",
+            "score_completeness",
+            "score_independence",
+        )
+    )
+    assert evidence["rated_by"] == "rule:reliability@v1"
     datetime.fromisoformat(evidence["fetched_at"])
 
 
@@ -210,7 +221,9 @@ def test_Exa_报错或超额才降级_Tavily_并落事件(
         "provider": "tavily",
         "freshness_degraded_source": "fetched_at",
     }
-    assert evidence["published_at"] == evidence["fetched_at"]
+    assert evidence["published_at"] is None
+    assert evidence["score_freshness"] == 1
+    assert evidence["rated_by"] == "rule:reliability@v1"
     assert answer not in json.dumps(evidence, ensure_ascii=False)
     assert events[0].route_state == "FAILOVER"
     assert events[0].failover_target == "tavily"
@@ -307,6 +320,7 @@ def test_Tavily_证据经_M3a_打分归一化后走_Store_入库且_answer_隔�
         "field": "published_at",
         "source": "fetched_at",
     }
+    assert evidence["published_at"] is None
     assert [
         evidence[field]
         for field in (

@@ -30,7 +30,7 @@ M3-c/d 可分别只改自己的 `product_hunt.py`、`x.py`，无需编辑注册�
    并写 routing JSONL，再调用 Tavily。
 6. Tavily 请求显式开启正文并关闭 answer 入证据路径；响应即使包含 `answer`，也只写线索日志。
 7. 结果映射为 `platform=web_search` 的证据。Exa 使用绝对 ISO `publishedDate`；
-   Tavily 将 `published_at=fetched_at`，同时在受控上下文标注 degraded 来源。
+   Tavily 的 `published_at` 保持 `NULL`，时效纯函数改用 `fetched_at` 兜底，并在受控上下文标注 degraded 来源。
 8. 整批调用 `normalize_evidence_metrics()`：网页搜索固定得到
    `normalized_score=NULL`、`norm_method=none`、`reason=no_metric_available`。
 9. 每条调用 `score_evidence()`，随后一次性走 `Store.add_evidence_batch()`；

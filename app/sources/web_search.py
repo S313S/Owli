@@ -69,6 +69,15 @@ class Evidence(TypedDict):
     fetch_method: str
     published_at: str | None
     extra: dict[str, Any]
+    score_authority: int
+    score_freshness: int
+    score_crossref: int
+    score_completeness: int
+    score_independence: int
+    score_total: int
+    grade: str
+    rating_notes: str
+    rated_by: str
 
 
 def _unquote(value: str) -> str:
@@ -189,7 +198,9 @@ def _tavily_evidence(item: Any, query: str, fetched_at: str) -> Evidence:
         "author_name": None,
         "source_keyword": query,
         "fetch_method": "search_index",
-        "published_at": fetched_at,
+        # Tavily 的 published_date 实测恒空：冻结列保持真实缺失，
+        # 时效兜底仅由 freshness_degraded_source 驱动 M3-a 纯函数完成。
+        "published_at": None,
         "fetched_at": fetched_at,
         "raw_metrics": {},
         "extra": {
@@ -197,6 +208,15 @@ def _tavily_evidence(item: Any, query: str, fetched_at: str) -> Evidence:
             "freshness_degraded_source": "fetched_at",
         },
     }
+
+
+def _rate(items: list[Evidence]) -> list[Evidence]:
+    """让工具层返回值也满足 HN 同构的五维证据契约。"""
+
+    for item in items:
+        item.update(score_evidence(item))
+        item["rated_by"] = "rule:reliability@v1"
+    return items
 
 
 def _emit_empty(on_event: EventSink | None, provider: str) -> None:
@@ -328,7 +348,7 @@ def search(
         else:
             if not evidence:
                 _emit_empty(on_event, "exa")
-            return evidence
+            return _rate(evidence)
 
     if credentials.tavily_api_key is None:
         reason, _ = _failure_reason(primary_error)
@@ -360,7 +380,7 @@ def search(
     ]
     if not evidence:
         _emit_empty(on_event, "tavily")
-    return evidence
+    return _rate(evidence)
 
 
 def _evidence_id() -> str:
