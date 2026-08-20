@@ -163,6 +163,19 @@ def run(query: str, *, force_429: bool) -> bool:
                     failovers[0].text if failovers else "未观察到降级事件",
                 ),
                 _check(
+                    "Tavily 时效降级",
+                    bool(evidence) and all(
+                        item["published_at"] is None
+                        and item["norm_context"].get("degraded") == {
+                            "provider": "tavily",
+                            "field": "published_at",
+                            "source": "fetched_at",
+                        }
+                        for item in evidence
+                    ),
+                    "published_at=NULL，时效改用 fetched_at 且 norm_context 已标记",
+                ),
+                _check(
                     "降级事件落盘",
                     bool(routing_logs),
                     str(routing_logs[0]) if routing_logs else "无 routing JSONL",

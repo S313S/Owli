@@ -263,6 +263,39 @@ def test_缺少_Exa_key_直接以结构化原因降级_Tavily(tmp_path) -> None:
     assert events[1].outcome == "empty"
 
 
+def test_Exa_响应解码异常也统一降级且不泄露凭证(tmp_path) -> None:
+    from app.sources import web_search
+
+    env_path = _env_file(tmp_path, exa=_exa_key(), tavily=_tavily_key())
+    decoding_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")
+    http = FakeHttp(decoding_error, {"answer": None, "results": []})
+    events = []
+
+    result = web_search.search(
+        "飞书",
+        "30d",
+        env_path=env_path,
+        http_post=http,
+        on_event=events.append,
+        log_root=tmp_path,
+        clock=lambda: "2026-08-20T00:00:00+00:00",
+    )
+
+    assert result == []
+    assert [call["url"] for call in http.calls] == [
+        "https://api.exa.ai/search",
+        "https://api.tavily.com/search",
+    ]
+    assert events[0].route_state == "FAILOVER"
+    assert "UnicodeDecodeError" in events[0].text
+    log_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "routing").glob("*.jsonl")
+    )
+    assert _exa_key() not in log_text
+    assert _tavily_key() not in log_text
+
+
 def test_Tavily_证据经_M3a_打分归一化后走_Store_入库且_answer_隔离(
     tmp_path,
 ) -> None:

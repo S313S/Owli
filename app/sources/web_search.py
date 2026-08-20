@@ -7,6 +7,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypedDict
 from urllib.error import HTTPError, URLError
@@ -129,7 +130,7 @@ def _http_post(
             decoded = json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         raise ProviderRequestError(provider, error.code) from error
-    except (URLError, OSError, json.JSONDecodeError) as error:
+    except (URLError, OSError, HTTPException, UnicodeError, json.JSONDecodeError) as error:
         raise ProviderRequestError(provider) from error
     if not isinstance(decoded, Mapping):
         raise ProviderRequestError(provider)
@@ -343,7 +344,9 @@ def search(
             evidence = [
                 _exa_evidence(item, query.strip(), fetched_at) for item in results
             ]
-        except (ProviderRequestError, RuntimeError) as error:
+        # 注入 HTTP 层也可能抛出解码/协议异常；所有 Exa 请求与响应错误
+        # 都在此边界分类降级，且后续事件只记录异常类型、不记录异常消息。
+        except Exception as error:
             primary_error = error
         else:
             if not evidence:
