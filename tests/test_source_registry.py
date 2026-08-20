@@ -10,13 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_自动发现_HN_并按工具名解析入口() -> None:
-    from app.sources import hn
+    from app.sources import hn, web_search
     from app.sources.registry import discover_sources, get_tool
 
     discovered = discover_sources()
 
     assert discovered["hacker_news"] is hn.SOURCE_SPEC
+    assert discovered["web_search"] is web_search.SOURCE_SPEC
     assert get_tool("source.hacker_news") is hn.search
+    assert get_tool("source.web_search") is web_search.search
 
 
 def test_SourceSpec_拒绝不自洽声明() -> None:

@@ -28,7 +28,7 @@
 
 **Step 2: Run test to verify it fails**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_source_registry.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_source_registry.py -q`
 Expected: FAIL，缺少 `app.sources.registry`。
 
 **Step 3: Write minimal implementation**
@@ -52,7 +52,7 @@ registry 用 `pkgutil.iter_modules(app.sources.__path__)` + `importlib.import_mo
 
 **Step 4: Run test to verify it passes**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_source_registry.py tests/test_hn.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_source_registry.py tests/test_hn.py -q`
 Expected: PASS。
 
 ### Task 2: M3-a 识别 Tavily 发布时间降级
@@ -69,7 +69,7 @@ Expected: PASS。
 
 **Step 2: Run test to verify it fails**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_reliability.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_reliability.py -q`
 Expected: FAIL，当前返回时效 2。
 
 **Step 3: Write minimal implementation**
@@ -79,7 +79,7 @@ Expected: FAIL，当前返回时效 2。
 
 **Step 4: Run test to verify it passes**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_reliability.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_reliability.py -q`
 Expected: PASS。
 
 ### Task 3: 凭证、自检、Exa 正常与空结果
@@ -97,7 +97,7 @@ Expected: PASS。
 
 **Step 2: Run tests to verify RED**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py -q`
 Expected: FAIL，缺少 `app.sources.web_search`。
 
 **Step 3: Write minimal implementation**
@@ -118,7 +118,7 @@ _EXA_PAYLOAD = {
 
 **Step 4: Run tests to verify GREEN**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py tests/test_hn.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py tests/test_hn.py -q`
 Expected: PASS。
 
 ### Task 4: Exa 失败降级 Tavily、answer 隔离与事件落盘
@@ -139,7 +139,7 @@ Tavily 请求 `search_depth=advanced`、`include_answer=true`、`include_raw_con
 
 **Step 2: Run tests to verify RED**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py tests/test_normalized_events.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py tests/test_normalized_events.py -q`
 Expected: FAIL，尚无 Tavily 降级与 source routing 日志。
 
 **Step 3: Write minimal implementation**
@@ -151,7 +151,7 @@ Expected: FAIL，尚无 Tavily 降级与 source routing 日志。
 
 **Step 4: Run tests to verify GREEN**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py tests/test_normalized_events.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py tests/test_normalized_events.py -q`
 Expected: PASS。
 
 ### Task 5: M3-a 归一化、五维打分与 Store 入库
@@ -170,7 +170,7 @@ Tavily answer 不在 evidence 任一 JSON/text 列；批内任一非法条目时
 
 **Step 2: Run tests to verify RED**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py tests/test_dao.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py tests/test_dao.py -q`
 Expected: FAIL，尚无 `collect_and_store()`。
 
 **Step 3: Write minimal implementation**
@@ -189,7 +189,7 @@ Tavily 的 `norm_context.degraded` 在纯函数返回后追加，保留 §5 全�
 
 **Step 4: Run tests to verify GREEN**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest tests/test_web_search.py tests/test_dao.py tests/test_reliability.py -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest tests/test_web_search.py tests/test_dao.py tests/test_reliability.py -q`
 Expected: PASS。
 
 ### Task 6: 全量、真实查询与架构审计
@@ -207,7 +207,7 @@ Expected: PASS。
 
 **Step 2: Run full fake-HTTP suite**
 
-Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/pytest -q`
+Run: `/Users/xiaoci/Downloads/Workspace/VibeCoding/InformationCollection/Owli/.venv/bin/python -m pytest -q`
 Expected: 全部 PASS，0 failures。
 
 **Step 3: Run real provider acceptance**
