@@ -161,6 +161,34 @@ def test_缺发布时间不能被高分平台基线抬高() -> None:
     assert result["score_freshness"] == 0
 
 
+def test_抓取时刻代替发布时间时_时效封顶一分并留痕() -> None:
+    from app.reliability.scoring import score_evidence
+
+    degraded = score_evidence(
+        _evidence(
+            platform="web_search",
+            published_at="2026-08-01T00:00:00Z",
+            fetched_at="2026-08-01T00:00:00Z",
+            extra={
+                "content_kind": "market_data",
+                "freshness_degraded_source": "fetched_at",
+            },
+        )
+    )
+    ordinary = score_evidence(
+        _evidence(
+            platform="web_search",
+            published_at="2026-08-01T00:00:00Z",
+            fetched_at="2026-08-01T00:00:00Z",
+            extra={"content_kind": "market_data"},
+        )
+    )
+
+    assert degraded["score_freshness"] == 1
+    assert "时效1:抓取时刻兜底" in degraded["rating_notes"]
+    assert ordinary["score_freshness"] == 2
+
+
 def test_内容类型与发布时间同缺时取保守下界而非平台基线() -> None:
     from app.reliability.scoring import score_evidence
 

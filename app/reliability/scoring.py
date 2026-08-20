@@ -152,6 +152,17 @@ def _freshness(evidence: Mapping[str, Any], content_kind: str | None) -> tuple[i
             return 0, "版本已废弃", None
         content_kind = "industry_view"
 
+    extra = evidence.get("extra")
+    degraded_source = (
+        extra.get("freshness_degraded_source")
+        if isinstance(extra, Mapping)
+        else None
+    )
+    if degraded_source == "fetched_at":
+        if not evidence.get("fetched_at"):
+            return 0, "缺采集时间", None
+        return 1, "抓取时刻兜底", None
+
     published_at = evidence.get("published_at")
     fetched_at = evidence.get("fetched_at")
     if not published_at:
