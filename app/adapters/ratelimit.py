@@ -136,8 +136,9 @@ def _publish(
     log_clock: Clock | None,
     thread_id: str | None = None,
     turn_id: str | None = None,
+    publish_continue: bool = False,
 ) -> RouteDecision:
-    if decision.state is RouteState.CONTINUE:
+    if decision.state is RouteState.CONTINUE and not publish_continue:
         return decision
     event = _decision_event(
         decision,
@@ -158,6 +159,33 @@ def _publish(
     if _is_rate_limited(decision) and on_rate_limited is not None:
         on_rate_limited(engine, decision)
     return decision
+
+
+def publish_route_decision(
+    decision: RouteDecision,
+    *,
+    engine: str,
+    on_event: EventCallback | None = None,
+    on_rate_limited: RateLimitedCallback | None = None,
+    log_root: Path = DEFAULT_LOG_ROOT,
+    log_clock: Clock | None = None,
+    thread_id: str | None = None,
+    turn_id: str | None = None,
+    publish_continue: bool = False,
+) -> RouteDecision:
+    """把外部适配器的四态决策接入统一事件落盘与附加通知。"""
+
+    return _publish(
+        decision,
+        engine=engine,
+        on_event=on_event,
+        on_rate_limited=on_rate_limited,
+        log_root=log_root,
+        log_clock=log_clock,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        publish_continue=publish_continue,
+    )
 
 
 def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:

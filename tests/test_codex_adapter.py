@@ -3,12 +3,14 @@ import json
 import os
 import signal
 import stat
+import sys
 import time
 from dataclasses import fields
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def test_非结构化_WARN_遥测失败不覆盖已完成任务() -> None:
@@ -32,6 +34,50 @@ def test_非结构化_WARN_遥测失败不覆盖已完成任务() -> None:
         raw="WARN authentication failed: not logged in",
     )
     assert _infrastructure_error([authentication]) == authentication.text
+
+
+def test_推荐插件目录_WARN_不覆盖已落盘的成功产物() -> None:
+    from app.adapters.codex import _infrastructure_error
+    from app.adapters.events import ItemKind, NormalizedEvent
+
+    text = (
+        "WARN codex_core_plugins::manager: failed to load recommended plugins "
+        "error=failed to send remote plugin catalog request to "
+        "https://chatgpt.com/backend-api/ps/plugins/suggested?scope=GLOBAL: "
+        "error sending request for url"
+    )
+    warning = NormalizedEvent(
+        engine="Codex",
+        thread_id="thread-real-regression",
+        turn_id="turn-1",
+        item_kind=ItemKind.THINKING,
+        text=text,
+        is_error=False,
+        raw=text,
+    )
+
+    assert _infrastructure_error([warning]) is None
+
+
+def test_传输错误后有turn_completed则保留错误但不覆盖最终成功() -> None:
+    from app.adapters.codex import _infrastructure_error
+    from app.adapters.events import ItemKind, NormalizedEvent
+
+    error_text = (
+        "ERROR responses_websocket: failed to connect to websocket: "
+        "IO error: tls handshake eof"
+    )
+    transport_error = NormalizedEvent(
+        "Codex", "thread-1", "turn-1", ItemKind.THINKING,
+        error_text, False, error_text,
+    )
+    completed = NormalizedEvent(
+        "Codex", "thread-1", "turn-1", ItemKind.DONE,
+        "", False, {"type": "turn.completed"},
+    )
+
+    assert _infrastructure_error([transport_error]) == error_text
+    assert _infrastructure_error([transport_error, completed]) is None
 
 
 def _write_fake_codex(path: Path, *, create_artifact: bool, error_event: bool = False) -> None:
