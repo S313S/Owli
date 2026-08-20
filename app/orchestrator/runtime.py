@@ -352,6 +352,12 @@ class RuntimeCoordinator:
         )
         if kind in {"report", "report_writing"}:
             body = f"{body}\n\n{self._decision_context(plan)}"
+        feedback = getattr(context, "failure_feedback", None)
+        if feedback:
+            body = (
+                f"{body}\n\n上一轮判定失败原因（逐条修正后重做，"
+                f"不要原样重复上一轮输出）：\n{feedback}"
+            )
         return EngineTask(
             body=body,
             output_path=output_path,

@@ -31,6 +31,7 @@ class TaskRunResult:
     succeeded: bool
     engine: str | None = None
     route_decisions: tuple[Any, ...] = field(default_factory=tuple)
+    failure_feedback: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class TaskContext:
     round_number: int
     engine: str
     on_event: Callable[[Any], Awaitable[None]]
+    failure_feedback: str | None = None
 
 
 RunTask = Callable[[Agent, TaskContext], Awaitable[TaskRunResult | Any]]
@@ -71,6 +73,34 @@ def _field(value: Any, *names: str, default: Any = None) -> Any:
         if hasattr(value, name):
             return getattr(value, name)
     return default
+
+
+def _failure_feedback(result: Any) -> str | None:
+    """提取契约层失败原因供下一轮重试回灌；引擎/传输层失败不回灌。
+
+    真实样本 r-6b4baebabade goal-3/tagging：owli-result.summary 三轮均超
+    200 字被拒，重试提示词却不带原因，agent 每轮盲改、重试耗尽。规划期
+    已有 errors 回灌机制，执行期此前没有。
+    """
+    if _field(result, "engine_error"):
+        return None
+    parts: list[str] = []
+    conclusion_error = _field(result, "conclusion_error")
+    if conclusion_error:
+        parts.append(f"结构化结论被拒：{conclusion_error}")
+    conclusion = _field(result, "conclusion")
+    status = getattr(conclusion, "status", None)
+    if conclusion is not None and status and status != "done":
+        parts.append(f"上一轮结构化结论自报 status={status}")
+    validation = _field(result, "validation", "report")
+    for item in getattr(validation, "results", ()) or ():
+        verdict = str(getattr(item, "verdict", "")).lower()
+        if verdict and verdict != "pass":
+            parts.append(
+                f"产物校验未过（{getattr(item, 'name', '')}）："
+                f"{getattr(item, 'message', '')}"
+            )
+    return "\n".join(parts) or None
 
 
 class Scheduler:
@@ -114,6 +144,7 @@ class Scheduler:
         self._card_sequence = 0
         self._gated_engines: dict[str, datetime | None] = {}
         self._backoff_counts: dict[str, int] = {}
+        self._agent_feedback: dict[str, str | None] = {}
 
     def _validate_graphs(self) -> None:
         goal_graph = {
@@ -380,6 +411,7 @@ class Scheduler:
             succeeded=succeeded,
             engine=_field(result, "engine"),
             route_decisions=tuple(decisions),
+            failure_feedback=None if succeeded else _failure_feedback(result),
         )
 
     async def _execute_agent(self, goal: Goal, agent: Agent) -> None:
@@ -408,6 +440,7 @@ class Scheduler:
                 on_event=lambda event, selected=engine: self._consume_signal(
                     event, selected
                 ),
+                failure_feedback=self._agent_feedback.get(agent.agent_id),
             )
             try:
                 result = self._normalize_result(await self._run_task(agent, context))
@@ -430,6 +463,7 @@ class Scheduler:
             if result.succeeded:
                 await self._set_agent_status(agent.agent_id, "done")
                 return
+            self._agent_feedback[agent.agent_id] = result.failure_feedback
             if attempt == ask_at:
                 await self._create_engine_switch_card(goal, agent, engine)
             if attempt < total:

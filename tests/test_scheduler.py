@@ -233,6 +233,77 @@ async def test_C3_第5次发卡_不阻塞第6次_第11次换引擎_20次失败()
 
 
 @async_test
+async def test_契约层失败原因回灌到下一轮重试上下文():
+    # 真实样本 r-6b4baebabade goal-3/tagging：owli-result.summary 三轮均超
+    # 200 字被拒，重试提示词不带原因 → agent 盲改 → 重试耗尽。
+    from types import SimpleNamespace
+
+    from app.orchestrator.scheduler import Scheduler
+
+    contexts: list[Any] = []
+    events: list[dict[str, Any]] = []
+
+    async def run_task(agent, context):
+        contexts.append(context)
+        if context.attempt == 1:
+            return SimpleNamespace(
+                succeeded=False,
+                engine=context.engine,
+                engine_error=None,
+                conclusion=None,
+                conclusion_error="owli-result.summary 必须是 200 字以内字符串",
+                validation=SimpleNamespace(results=[]),
+            )
+        return SimpleNamespace(
+            succeeded=True, engine=context.engine,
+        )
+
+    fake_time = FakeClockTimer()
+    scheduler = Scheduler(
+        plan_with_goals(goal(1)), run_task, events.append,
+        fake_time.clock, fake_time.timer,
+    )
+    await scheduler.start()
+
+    assert contexts[0].failure_feedback is None
+    assert "200 字以内" in contexts[1].failure_feedback
+    assert scheduler.goal_statuses["goal-1"] == "awaiting_intervention"
+
+
+@async_test
+async def test_引擎传输层失败不回灌到重试上下文():
+    from types import SimpleNamespace
+
+    from app.orchestrator.scheduler import Scheduler
+
+    contexts: list[Any] = []
+    events: list[dict[str, Any]] = []
+
+    async def run_task(agent, context):
+        contexts.append(context)
+        if context.attempt == 1:
+            return SimpleNamespace(
+                succeeded=False,
+                engine=context.engine,
+                engine_error="socket connection was closed",
+                conclusion=None,
+                conclusion_error=None,
+                validation=SimpleNamespace(results=[]),
+            )
+        return SimpleNamespace(succeeded=True, engine=context.engine)
+
+    fake_time = FakeClockTimer()
+    scheduler = Scheduler(
+        plan_with_goals(goal(1)), run_task, events.append,
+        fake_time.clock, fake_time.timer,
+    )
+    await scheduler.start()
+
+    assert contexts[1].failure_feedback is None
+    assert scheduler.goal_statuses["goal-1"] == "awaiting_intervention"
+
+
+@async_test
 async def test_goal_推进12小时触发总闸且忽略迟到结果():
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
