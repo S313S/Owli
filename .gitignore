@@ -22,6 +22,7 @@ web/dist/
 # 编辑器与临时文件
 .idea/
 .vscode/
+.worktrees/
 *.swp
 *.tmp
 *~
