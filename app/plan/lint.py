@@ -451,6 +451,11 @@ def _rule_17(goals: list[dict[str, Any]]) -> list[str]:
     真实样本 r-4878be30ff8c：验收写「文件为合法 JSON，顶层恰含 … 三个字段」
     却未指明是哪个文件，同 goal 的 data-cleaning 输出 format=markdown +
     sections_exist:结论 —— agent 按验收写纯 JSON，章节校验器必失败。
+
+    点名与否按 goal 级判定，不逐行索要文件名。真实样本 r-29586a489b34：
+    回喂后模型已在首行点名「文件 pros-cons.json 存在且顶层为 JSON object」，
+    次行「顶层 object 含 competitors 字段」描述同一文件的结构却因行内无
+    文件名被逐行误拒，三次重试全灭——契约有归属即视为已点名。
     """
     messages: list[str] = []
     json_contract = re.compile(
@@ -470,9 +475,15 @@ def _rule_17(goals: list[dict[str, Any]]) -> list[str]:
         ]
         if not section_agents:
             continue
+        goal_names_json = any(
+            names_json_file.search(str(item))
+            for item in goal.get("acceptance", [])
+        )
+        if goal_names_json:
+            continue
         for acceptance in goal.get("acceptance", []):
             text = str(acceptance)
-            if json_contract.search(text) and not names_json_file.search(text):
+            if json_contract.search(text):
                 agent_ids = [str(agent.get("agent_id")) for agent in section_agents]
                 messages.append(
                     f"[规则17] {goal.get('goal_id')} 验收要求 JSON 文件契约但未点名"

@@ -173,6 +173,24 @@ def test_JSON契约点名了json文件时章节校验器不冲突() -> None:
     assert not any("[规则17]" in item for item in lint(plan)["errors"])
 
 
+def test_JSON契约点名按goal级判定_同goal其他结构行不再逐行索要文件名() -> None:
+    # r-29586a489b34 goal-4 实锤：回喂后模型已在首行点名
+    # 「文件 pros-cons.json 存在且顶层为 JSON object」，次行描述同一文件
+    # 结构（「顶层 object 含 competitors 字段」）因行内无文件名被逐行
+    # 误拒，三次重试全灭。契约有归属即视为已点名。
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = [
+        "文件 pros-cons.json 存在且顶层为 JSON object",
+        "顶层 object 含 competitors 字段且其值为数组",
+    ]
+    goal["agents"][0]["output"]["validators"] = ["file_exists", "sections_exist:结论"]
+
+    assert not any("[规则17]" in item for item in lint(plan)["errors"])
+
+
 def test_规则14的object契约同样认字段措辞() -> None:
     from app.plan.lint import lint
 
