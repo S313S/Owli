@@ -55,6 +55,13 @@ _STREAM_LINE_LIMIT = 16 * 1024 * 1024
 _NON_FATAL_WARNING_MARKERS = (
     "analytics", "telemetry", "opentelemetry", "analytics-events",
     "featured plugin ids cache", "featured plugin cache",
+    "failed to load recommended plugins",
+)
+_RECOVERABLE_TRANSPORT_MARKERS = (
+    "tls handshake eof",
+    "stream disconnected",
+    "failed to connect to websocket",
+    "reconnecting",
 )
 
 
@@ -281,10 +288,19 @@ def _task_contract_failure(
 def _infrastructure_error(events: list[NormalizedEvent]) -> str | None:
     """只按可识别的基础设施错误载荷分类，绝不按进程状态码分类。"""
 
-    for event in events:
+    for index, event in enumerate(events):
         if not event.is_error and not isinstance(event.raw, str):
             continue
         text = event.text.lower()
+        recovered = any(
+            later.item_kind is ItemKind.DONE
+            and (event.thread_id is None or later.thread_id == event.thread_id)
+            for later in events[index + 1:]
+        )
+        if recovered and any(
+            marker in text for marker in _RECOVERABLE_TRANSPORT_MARKERS
+        ):
+            continue
         if (
             not event.is_error
             and re.search(r"\bwarn(?:ing)?\b", text)
