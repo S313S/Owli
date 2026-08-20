@@ -38,6 +38,7 @@ _ROLE_MAP = {
     "标签": ("tagging", "report-writer"),
     "api 数据抓取": ("data_collection", "web-collector"),
     "hn 数据抓取": ("data_collection", "web-collector"),
+    "x 数据抓取": ("data_collection", "web-collector"),
     "mediacrawler": ("browser_automation", "sandboxed-runner"),
     "浏览器自动化": ("browser_automation", "sandboxed-runner"),
     "代码执行": ("code_execution", "sandboxed-runner"),
@@ -63,13 +64,15 @@ def _planning_prompt(query: str, output_path: Path, errors: list[str]) -> str:
         f"目标：为用户原始需求《{query}》生成一棵 3–7 个 goal 的三层计划骨架，"
         f"写入 {output_path}；"
         "按证据链自然断点拆分，每个 goal 同时满足独立产物、验收可判定、值得干预、失败可局部化。\n"
-        "方法要点：当前 M2 只使用 Hacker News；固定查询策略为 HN Algolia /api/v1/search，"
+        "方法要点：当前可使用 Hacker News 与 X；HN 查询为 Algolia /api/v1/search，"
         "tags=story，numericFilters=created_at_i>执行时点UTC epoch-7776000,points>50，"
-        "hitsPerPage=1000。禁止按搜索/阅读/总结工种拆 goal。\n"
+        "hitsPerPage=1000；X 查询为 recent search 且强制 -is:retweet -is:reply 与本地互动量过滤。"
+        "禁止按搜索/阅读/总结工种拆 goal。\n"
         f"产物结构：只输出 JSON object 到 {output_path}，顶层只能有 goals。每个 goal 只能含 "
         "title、objective、depends_on、deliverable、acceptance、agents；agents 每项只能含 "
         "name、task，name 应从规划、计划仲裁、可靠度审计、交叉验证、一致性检查、报告撰写、"
-        "摘要、标签、API 数据抓取、MediaCrawler、浏览器自动化、代码执行、Excel 生成、数据清洗中选。"
+        "摘要、标签、API 数据抓取、HN 数据抓取、X 数据抓取、MediaCrawler、浏览器自动化、"
+        "代码执行、Excel 生成、数据清洗中选。"
         "depends_on 用 goal-<n>；deliverable 含 format/path/description，format 只能取 "
         "table、markdown、excel、json，path 只写文件名；"
         "不得输出 id、engine、capability、prompt、状态、重试或时间字段。\n"
@@ -88,14 +91,20 @@ def _planning_prompt(query: str, output_path: Path, errors: list[str]) -> str:
     )
 
 
-def _capability(profile: str, goal_id: str, upstream: list[str]) -> dict[str, Any]:
+def _capability(
+    profile: str,
+    goal_id: str,
+    upstream: list[str],
+    *,
+    source_id: str = "hacker_news",
+) -> dict[str, Any]:
     upstream_paths = [f"goals/{item}/**" for item in upstream]
     current = f"goals/{goal_id}/**"
     if profile == "web-collector":
         return {
             "profile": profile,
-            "tools": ["source.hacker_news", "fs.write", "db.write"],
-            "sources": ["hacker_news"],
+            "tools": [f"source.{source_id}", "fs.write", "db.write"],
+            "sources": [source_id],
             "fs": {"read": upstream_paths, "write": [current]},
             "network": "sources_only",
             "shell": "none",
@@ -362,6 +371,8 @@ def _build_agent(
     if not name or not task:
         raise ValueError(f"{goal_id}.agents 的 name/task 不能为空")
     agent_kind, profile = _classify(name, task)
+    normalized_name = " ".join(name.casefold().split())
+    source_id = "x" if normalized_name == "x 数据抓取" else "hacker_news"
     counters[agent_kind] += 1
     suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
     agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
@@ -378,7 +389,9 @@ def _build_agent(
         ],
         "engine": pick_engine(agent_kind, None).engine,
         "model": None,
-        "capability": _capability(profile, goal_id, upstream),
+        "capability": _capability(
+            profile, goal_id, upstream, source_id=source_id
+        ),
         "prompt": {
             "preamble_ref": "common/v1",
             "body": _agent_prompt(query, task, output, agent_kind),

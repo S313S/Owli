@@ -228,6 +228,20 @@ def test_每个落盘_agent_都具有当前_goal_写权限(tmp_path) -> None:
         assert f"goals/{goal.goal_id}/**" in writer.capability["fs"]["write"]
 
 
+def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) -> None:
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["agents"] = [
+        _agent("X 数据抓取", "通过 recent search 采集 X 证据")
+    ]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+
+    capability = plan.goals[0].agents[0].capability
+    assert capability["profile"] == "web-collector"
+    assert capability["tools"] == ["source.x", "fs.write", "db.write"]
+    assert capability["sources"] == ["x"]
+
+
 def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> None:
     skeleton = _valid_skeleton()
     skeleton["goals"][0]["agents"] = [_agent("报告撰写", "输出 JSON 摘要")]

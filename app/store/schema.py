@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
+_LATEST_SCHEMA_VERSION = 2
+
+
 def initialize_database_if_empty(
     database_path: str | Path, schema_path: str | Path
 ) -> None:
@@ -23,6 +26,28 @@ def initialize_database_if_empty(
         user_version = connection.execute("PRAGMA user_version").fetchone()[0]
         if table_count == 0 and user_version == 0:
             connection.executescript(Path(schema_path).read_text(encoding="utf-8"))
+        elif user_version > 0:
+            _apply_migrations(connection, Path(schema_path), user_version)
+
+
+def _apply_migrations(
+    connection: sqlite3.Connection, schema_path: Path, current_version: int
+) -> None:
+    """按版本号只向前执行 store 自有迁移。"""
+
+    if current_version > _LATEST_SCHEMA_VERSION:
+        return
+    migrations_dir = schema_path.parent / "migrations"
+    for version in range(current_version + 1, _LATEST_SCHEMA_VERSION + 1):
+        matches = sorted(migrations_dir.glob(f"v{version}_*.sql"))
+        if len(matches) != 1:
+            raise RuntimeError(f"schema v{version} 迁移文件数量必须为 1，实际 {len(matches)}")
+        connection.executescript(matches[0].read_text(encoding="utf-8"))
+        migrated_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if migrated_version != version:
+            raise RuntimeError(
+                f"schema v{version} 迁移未更新 user_version，实际 {migrated_version}"
+            )
 
 
 def read_database_snapshot(database_path: str | Path) -> dict[str, Any]:
