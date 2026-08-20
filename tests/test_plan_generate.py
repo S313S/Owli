@@ -315,6 +315,35 @@ def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_pat
     assert len(store.events) == 1 and store.events[0].outcome == "retrying"
 
 
+def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> None:
+    # 真实样本 r-41651a233827：首轮骨架落盘后 lint 拒收，重试轮因规划
+    # 工具集无 Read 而无法覆盖残留文件，三轮全 blocked。修复后每轮
+    # adapter.run 起跑时产物路径必须是空的。
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    invalid = _valid_skeleton()
+    invalid["goals"][0]["acceptance"] = ["结果质量良好"]
+
+    class RecordingEngine(FakeEngine):
+        def __init__(self, skeletons: list[dict]) -> None:
+            super().__init__(skeletons)
+            self.existed_at_run: list[bool] = []
+
+        async def run(self, task, ctx, on_event=None):
+            self.existed_at_run.append(task.output_path.exists())
+            return await super().run(task, ctx, on_event)
+
+    engine = RecordingEngine([invalid, _valid_skeleton()])
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+
+    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+
+    assert plan.status == "awaiting_review"
+    assert engine.existed_at_run == [False, False]
+
+
 def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None:
     from app.adapters import validation
     from app.adapters.routing import RoutedAdapter

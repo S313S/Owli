@@ -478,6 +478,9 @@ async def generate_plan(query: str, store: Any, adapter: Any) -> Plan:
     errors: list[str] = []
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        # 每轮起跑前清残留骨架：规划工具集只有 fs.write（无 Read），而
+        # Write/Edit 覆盖已存在文件要求先 Read，残留会把所有重试轮卡死。
+        skeleton_path.unlink(missing_ok=True)
         task = EngineTask(
             body=_planning_prompt(normalized_query, skeleton_path, errors),
             output_path=skeleton_path,
