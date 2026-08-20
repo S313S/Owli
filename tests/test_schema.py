@@ -9,7 +9,7 @@ SCHEMA_PATH = ROOT / "app" / "store" / "schema.sql"
 
 
 class SchemaSqlTest(unittest.TestCase):
-    def test_schema_建立五张业务表和召回虚拟表(self) -> None:
+    def test_schema_建立五张业务表_两张运行态表和召回虚拟表(self) -> None:
         self.assertTrue(SCHEMA_PATH.is_file(), "app/store/schema.sql 尚未创建")
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -24,14 +24,17 @@ class SchemaSqlTest(unittest.TestCase):
                 }
                 journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
 
-        business_tables = {
+        application_tables = {
             name
             for name in tables
             if not name.startswith("recall_fts") and not name.startswith("sqlite_")
         }
         self.assertEqual(
-            business_tables,
-            {"reports", "evidence", "feedback", "report_tags", "ext_key_registry"},
+            application_tables,
+            {
+                "reports", "evidence", "feedback", "report_tags", "ext_key_registry",
+                "source_usage", "source_usage_billed_resource",
+            },
         )
         self.assertIn("recall_fts", tables)
         self.assertEqual(journal_mode, "wal")

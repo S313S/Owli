@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 1;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 2;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -157,6 +157,24 @@ CREATE TABLE report_tags (
 ) STRICT;
 
 CREATE INDEX idx_tags_tag ON report_tags(tag);      -- 跨报告按标签检索
+
+-- ═══════════════════════════════════════════
+-- 信息源运行态用量：只由 app/store 固定方法读写，不属于五张业务表
+-- ═══════════════════════════════════════════
+CREATE TABLE source_usage (
+  source     TEXT NOT NULL,
+  utc_date   TEXT NOT NULL,
+  reads      INTEGER NOT NULL DEFAULT 0 CHECK (reads >= 0),
+  requests   INTEGER NOT NULL DEFAULT 0 CHECK (requests >= 0),
+  PRIMARY KEY (source, utc_date)
+) STRICT;
+
+CREATE TABLE source_usage_billed_resource (
+  source      TEXT NOT NULL,
+  utc_date    TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  PRIMARY KEY (source, utc_date, resource_id)
+) STRICT;
 
 -- ═══════════════════════════════════════════
 -- 扩展键登记表：extra JSON 里出现过的键，驱动 §3.3 升级机制
