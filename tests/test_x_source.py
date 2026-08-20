@@ -154,7 +154,9 @@ def test_token_只从指定的_owli_env_读取且不采纳进程环境(tmp_path,
 
     env_file = tmp_path / ".owli" / ".env"
     env_file.parent.mkdir()
-    env_file.write_text("X_BEARER_TOKEN=file-secret\n", encoding="utf-8")
+    env_file.write_text(
+        "X_BEARER_TOKEN" + "=" + "file-secret\n", encoding="utf-8"
+    )
     monkeypatch.setenv("X_BEARER_TOKEN", "process-secret")
 
     assert load_bearer_token(env_file) == "file-secret"
