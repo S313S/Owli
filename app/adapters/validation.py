@@ -430,7 +430,10 @@ def _citation_sets(ctx: Ctx, name: str) -> tuple[set[str], set[str], Result | No
     source_spans = [
         (start, end, body)
         for title, body, start, end in _markdown_sections(text)
-        if "信息源清单" in title
+        # 与收尾四件套 sections_exist:信息源 同口径：认「信息源」即认清单章节
+        # （覆盖「信息源清单」）。r-7497a1d65adb 实锤：只认「信息源清单」时
+        # 落入行内 URL 启发式，正文内联链接风格被整体误判为清单定义行。
+        if "信息源" in title
     ]
     if source_spans:
         source_text = "\n".join(body for _, _, body in source_spans)
@@ -584,16 +587,22 @@ def no_item_missing_rating(ctx: Ctx, arguments: list[str]) -> Result:
     items, error = _read_json_array(ctx, name)
     if error is not None:
         return error
-    required = (
+    score_fields = (
         "score_authority", "score_freshness", "score_crossref",
-        "score_completeness", "score_independence", "rating_notes", "rated_by",
+        "score_completeness", "score_independence",
     )
-    offenders = [
-        f"items[{index}].{field}"
-        for index, item in enumerate(items or [])
-        for field in required
-        if not isinstance(item, dict) or _is_empty(item.get(field))
-    ]
+    offenders: list[str] = []
+    for index, item in enumerate(items or []):
+        if not isinstance(item, dict):
+            offenders.extend(f"items[{index}].{field}" for field in (*score_fields, "rating_notes", "rated_by"))
+            continue
+        for field in score_fields:
+            value = item.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2:
+                offenders.append(f"items[{index}].{field}")
+        for field in ("rating_notes", "rated_by"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                offenders.append(f"items[{index}].{field}")
     if offenders:
         return _result(
             Verdict.FAIL,
@@ -602,6 +611,64 @@ def no_item_missing_rating(ctx: Ctx, arguments: list[str]) -> Result:
             offenders,
         )
     return _result(Verdict.PASS, name, f"{len(items or [])} 条证据评级字段齐全")
+
+
+@validator("rating_notes_matches_regex")
+def rating_notes_matches_regex(ctx: Ctx, arguments: list[str]) -> Result:
+    name = "rating_notes_matches_regex"
+    if arguments:
+        return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    items, error = _read_json_array(ctx, name)
+    if error is not None:
+        return error
+    from app.reliability.scoring import rating_notes_problem
+
+    problems = []
+    detail = []
+    for index, item in enumerate(items or []):
+        notes = item.get("rating_notes") if isinstance(item, dict) else None
+        problem = rating_notes_problem(notes)
+        if problem is not None:
+            problems.append(f"items[{index}].rating_notes")
+            detail.append({"index": index, "problem": problem})
+    if problems:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"{len(problems)} 条 rating_notes 不符合五段式格式",
+            problems,
+            {"items": detail},
+        )
+    return _result(Verdict.PASS, name, f"{len(items or [])} 条 rating_notes 格式合格")
+
+
+@validator("rating_notes_scores_match_columns")
+def rating_notes_scores_match_columns(ctx: Ctx, arguments: list[str]) -> Result:
+    name = "rating_notes_scores_match_columns"
+    if arguments:
+        return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    items, error = _read_json_array(ctx, name)
+    if error is not None:
+        return error
+    from app.reliability.scoring import rating_notes_problem
+
+    problems = []
+    detail = []
+    for index, item in enumerate(items or []):
+        notes = item.get("rating_notes") if isinstance(item, dict) else None
+        problem = rating_notes_problem(notes, item if isinstance(item, dict) else {})
+        if problem is not None:
+            problems.append(f"items[{index}].rating_notes")
+            detail.append({"index": index, "problem": problem})
+    if problems:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"{len(problems)} 条 rating_notes 分数与五维列不一致",
+            problems,
+            {"items": detail},
+        )
+    return _result(Verdict.PASS, name, f"{len(items or [])} 条 rating_notes 分数一致")
 
 
 _UNIMPLEMENTED = (
@@ -617,8 +684,6 @@ _UNIMPLEMENTED = (
     "each_row_urls_reachable",
     "db_field_non_empty",
     "claims_backfilled",
-    "rating_notes_matches_regex",
-    "rating_notes_scores_match_columns",
     "no_baseline_prefix_left",
     "norm_method_in_enum",
     "norm_context_required_keys",

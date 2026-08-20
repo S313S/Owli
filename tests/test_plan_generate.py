@@ -96,6 +96,23 @@ def _generate(tmp_path: Path, skeletons: list[dict]):
     return plan, store, engine
 
 
+def test_acceptance_写成分号长串时确定性归一为数组(tmp_path) -> None:
+    # r-825ec6b5228a 实锤：生成器把整组验收写成「；」分隔长串，直接被
+    # 「至少需要 1 条」打回三次导致规划不可用。归一后 lint 照常逐条把关。
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["acceptance"] = (
+        "文件为有效 JSON；每条命中含 objectID 且 permalink 非空；命中为 0 时保留空集说明"
+    )
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+    goal = plan.to_dict()["goals"][0]
+    assert goal["acceptance"] == [
+        "文件为有效 JSON",
+        "每条命中含 objectID 且 permalink 非空",
+        "命中为 0 时保留空集说明",
+    ]
+
+
 def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> None:
     from app.plan.lint import lint
     from app.plan.model import DEFAULT_RETRY_POLICY

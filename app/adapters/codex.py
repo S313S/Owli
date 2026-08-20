@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import signal
 from dataclasses import dataclass
 from enum import StrEnum
@@ -48,6 +49,12 @@ _INFRASTRUCTURE_MARKERS = (
     "model_not_found",
     "unsupported model",
     "missing optional dependency",
+)
+_STREAM_LINE_LIMIT = 16 * 1024 * 1024
+
+_NON_FATAL_WARNING_MARKERS = (
+    "analytics", "telemetry", "opentelemetry", "analytics-events",
+    "featured plugin ids cache", "featured plugin cache",
 )
 
 
@@ -278,6 +285,12 @@ def _infrastructure_error(events: list[NormalizedEvent]) -> str | None:
         if not event.is_error and not isinstance(event.raw, str):
             continue
         text = event.text.lower()
+        if (
+            not event.is_error
+            and re.search(r"\bwarn(?:ing)?\b", text)
+            and any(marker in text for marker in _NON_FATAL_WARNING_MARKERS)
+        ):
+            continue
         if any(marker in text for marker in _INFRASTRUCTURE_MARKERS):
             return event.text
     return None
@@ -640,6 +653,9 @@ class CodexAdapter:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 start_new_session=True,
+                # 大产物会让 Codex 单行事件超过 asyncio 默认 64KB 行缓冲，
+                # readline 抛 ValueError 被误判为引擎不可用（r-4878be30ff8c 实锤）。
+                limit=_STREAM_LINE_LIMIT,
             )
             self._process = process
             await self._run_with_timeout(

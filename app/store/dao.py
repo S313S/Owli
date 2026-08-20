@@ -8,12 +8,71 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 
 __all__ = ["PlanSnapshotConflict", "Store"]
 
 _EXTRA_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_NORM_METHODS = {
+    "percentile_in_batch", "percentile_in_window", "log_zscore_in_window", "none",
+}
+_NORM_CONTEXT_KEYS = {
+    "scope", "platform", "metric", "n", "formula", "stats", "computed_at",
+}
+_NORM_NONE_REASONS = {
+    "insufficient_sample", "no_metric_available", "metric_not_collected",
+}
+_PRIMARY_METRICS = {
+    "hacker_news": "points", "product_hunt": "votes_count", "x": "like_count",
+    "bilibili": "view", "xhs": "liked_count", "douyin": "digg_count",
+    "reddit": None, "web_search": None,
+}
+_SCORE_FIELDS = (
+    "score_authority", "score_freshness", "score_crossref",
+    "score_completeness", "score_independence",
+)
+_AUTHORITY_KINDS = {
+    "first_party_official", "verified_principal", "institutional_primary",
+    "named_secondary", "community_high_signal", "anonymous_or_unverifiable",
+    "content_farm",
+}
+_CONTENT_KINDS = {
+    "product_launch", "market_data", "user_opinion", "industry_view", "reference",
+}
+_INTEREST_RELATIONS = {
+    "arms_length", "disclosed_interest", "undisclosed_interest",
+}
+_CROSSREF_VERDICTS = {"PASS", "WEAK", "SINGLE", "CONFLICT"}
+_EVIDENCE_DEFAULTS: dict[str, Any] = {
+    "goal_id": None,
+    "agent_name": None,
+    "engine": None,
+    "source_type": "post",
+    "platform_item_id": None,
+    "title": None,
+    "content_excerpt": None,
+    "author_name": None,
+    "author_meta": None,
+    "source_keyword": None,
+    "fetch_method": "official_api",
+    "published_at": None,
+    "raw_metrics": None,
+    "normalized_score": None,
+    "norm_method": None,
+    "norm_context": None,
+    "score_authority": None,
+    "score_freshness": None,
+    "score_crossref": None,
+    "score_completeness": None,
+    "score_independence": None,
+    "rating_notes": None,
+    "rated_by": None,
+    "citation_no": None,
+    "extra": None,
+}
+_EVIDENCE_REQUIRED = {"id", "report_id", "platform", "permalink", "fetched_at"}
+_EVIDENCE_FIELDS = _EVIDENCE_REQUIRED | set(_EVIDENCE_DEFAULTS)
 
 
 class PlanSnapshotConflict(RuntimeError):
@@ -45,6 +104,124 @@ def _value_type(value: Any) -> str:
     if isinstance(value, dict):
         return "object"
     return "text"
+
+
+def _string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _validate_evidence_extra(extra: dict[str, Any]) -> None:
+    list_keys = ("claim_ids", "crossref_peers", "crossref_conflicts")
+    for key in list_keys:
+        if key in extra and not _string_list(extra[key]):
+            raise ValueError(f"evidence.extra.{key} 必须是 string[]")
+    for key in ("origin_key", "crossref_cluster", "rating_override_reason"):
+        if key in extra and (not isinstance(extra[key], str) or not extra[key]):
+            raise ValueError(f"evidence.extra.{key} 必须是非空字符串")
+    if "crossref_n_clusters" in extra and (
+        not isinstance(extra["crossref_n_clusters"], int)
+        or isinstance(extra["crossref_n_clusters"], bool)
+        or extra["crossref_n_clusters"] < 1
+    ):
+        raise ValueError("evidence.extra.crossref_n_clusters 必须是正整数")
+    closed_sets = {
+        "crossref_verdict": _CROSSREF_VERDICTS,
+        "authority_kind": _AUTHORITY_KINDS,
+        "content_kind": _CONTENT_KINDS,
+        "interest_relation": _INTEREST_RELATIONS,
+    }
+    for key, allowed in closed_sets.items():
+        if key in extra and extra[key] not in allowed:
+            raise ValueError(f"evidence.extra.{key} 不在闭集：{extra[key]!r}")
+    if "crossref_secondary" in extra and not isinstance(extra["crossref_secondary"], dict):
+        raise ValueError("evidence.extra.crossref_secondary 必须是 object")
+    for claim_id, result in (extra.get("crossref_secondary") or {}).items():
+        if not isinstance(claim_id, str) or not claim_id or not isinstance(result, dict):
+            raise ValueError("evidence.extra.crossref_secondary 必须按 claim_id 映射 object")
+        if result.get("verdict") not in _CROSSREF_VERDICTS:
+            raise ValueError("evidence.extra.crossref_secondary.verdict 不在闭集")
+
+
+def _validate_normalization(payload: dict[str, Any]) -> None:
+    method = payload["norm_method"]
+    score = payload["normalized_score"]
+    context = payload["norm_context"]
+    if method is None:
+        if score is not None or context is not None:
+            raise ValueError("normalized_score/norm_context 存在时 norm_method 不能为空")
+        return
+    if method not in _NORM_METHODS:
+        raise ValueError(f"norm_method 不在闭集：{method!r}")
+    if not isinstance(context, dict):
+        raise ValueError("norm_context 必须是 object")
+    missing = sorted(_NORM_CONTEXT_KEYS - set(context))
+    if missing:
+        raise ValueError(f"norm_context 缺必填键：{missing}")
+    if context.get("platform") != payload["platform"]:
+        raise ValueError("norm_context.platform 与 evidence.platform 不一致")
+    if context.get("scope") not in {"batch", "window"}:
+        raise ValueError("norm_context.scope 只能是 batch 或 window")
+    if payload["platform"] == "x" and context.get("sampling") != "post_filtered_local":
+        raise ValueError("X 归一化必须标记 sampling=post_filtered_local")
+    expected_metric = _PRIMARY_METRICS.get(payload["platform"])
+    if context.get("metric") != expected_metric:
+        raise ValueError("norm_context.metric 与平台主指标不一致")
+    n = context.get("n")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        raise ValueError("norm_context.n 必须是非负整数")
+    if method == "none":
+        if score is not None:
+            raise ValueError("norm_method=none 时 normalized_score 必须为 NULL")
+        if context.get("reason") not in _NORM_NONE_REASONS:
+            raise ValueError("norm_method=none 时 norm_context.reason 不在闭集")
+        return
+    if method == "percentile_in_batch" and (
+        context.get("scope") != "batch" or n < 20
+    ):
+        raise ValueError("percentile_in_batch 要求 scope=batch 且 n>=20")
+    if method in {"percentile_in_window", "log_zscore_in_window"} and (
+        context.get("scope") != "window" or n < 50
+    ):
+        raise ValueError(f"{method} 要求 scope=window 且 n>=50")
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or not 0 <= score <= 1:
+        raise ValueError("启用归一化时 normalized_score 必须是 0–1 数值")
+    if context.get("scope") == "window" and not {
+        "window_days", "fallback_from",
+    } <= set(context):
+        raise ValueError("窗口归一化缺 window_days/fallback_from")
+
+
+def _prepare_evidence(values: dict[str, Any]) -> dict[str, Any]:
+    unknown = set(values) - _EVIDENCE_FIELDS - {"score_total", "grade"}
+    if unknown:
+        raise TypeError(f"evidence 含未知字段：{sorted(unknown)}")
+    missing = sorted(key for key in _EVIDENCE_REQUIRED if not values.get(key))
+    if missing:
+        raise ValueError(f"evidence 缺必填字段：{missing}")
+    payload = {**_EVIDENCE_DEFAULTS, **{key: value for key, value in values.items() if key in _EVIDENCE_FIELDS}}
+    payload["extra"] = {} if payload["extra"] is None else payload["extra"]
+    payload["raw_metrics"] = {} if payload["raw_metrics"] is None else payload["raw_metrics"]
+    if not isinstance(payload["raw_metrics"], dict):
+        raise TypeError("raw_metrics 必须是 dict")
+    _extra_text(payload["extra"])
+    _validate_evidence_extra(payload["extra"])
+    _validate_normalization(payload)
+    score_values = [payload[field] for field in _SCORE_FIELDS]
+    if any(value is not None for value in score_values):
+        if not all(
+            isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2
+            for value in score_values
+        ):
+            raise ValueError("五维分必须同时提供五个 0–2 整数")
+        if not payload["rating_notes"]:
+            raise ValueError("有五维分时 rating_notes 必填")
+    if payload["rating_notes"] is not None:
+        from app.reliability.scoring import rating_notes_problem
+
+        problem = rating_notes_problem(payload["rating_notes"], payload)
+        if problem is not None:
+            raise ValueError(f"rating_notes 非法：{problem}")
+    return payload
 
 
 class Store:
@@ -149,41 +326,61 @@ class Store:
         citation_no: int | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
-        normalized_extra = {} if extra is None else extra
-        extra_json = _extra_text(normalized_extra)
-        metrics_json = _json_text({} if raw_metrics is None else raw_metrics)
+        payload = _prepare_evidence(
+            {key: value for key, value in locals().items() if key != "self"}
+        )
         with self._connect() as connection:
-            existing_keys = self._existing_evidence_extra_keys(
-                connection, report_id, normalized_extra
+            self._insert_evidence(connection, payload)
+
+    def add_evidence_batch(self, evidence_items: Iterable[Mapping[str, Any]]) -> None:
+        """同事务批量写 evidence；任一条不合格或冲突则整批回滚。"""
+        payloads = [_prepare_evidence(dict(item)) for item in evidence_items]
+        with self._connect() as connection:
+            for payload in payloads:
+                self._insert_evidence(connection, payload)
+
+    def _insert_evidence(
+        self, connection: sqlite3.Connection, payload: dict[str, Any]
+    ) -> None:
+        normalized_extra = payload["extra"]
+        existing_keys = self._existing_evidence_extra_keys(
+            connection, payload["report_id"], normalized_extra
+        )
+        connection.execute(
+            """
+            INSERT INTO evidence (
+              id, report_id, goal_id, agent_name, engine, platform, source_type,
+              platform_item_id, permalink, title, content_excerpt, author_name,
+              author_meta, source_keyword, fetch_method, published_at, fetched_at,
+              raw_metrics, normalized_score, norm_method, norm_context,
+              score_authority, score_freshness, score_crossref,
+              score_completeness, score_independence, rating_notes, rated_by,
+              citation_no, extra
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
-            connection.execute(
-                """
-                INSERT INTO evidence (
-                  id, report_id, goal_id, agent_name, engine, platform, source_type,
-                  platform_item_id, permalink, title, content_excerpt, author_name,
-                  author_meta, source_keyword, fetch_method, published_at, fetched_at,
-                  raw_metrics, normalized_score, norm_method, norm_context,
-                  score_authority, score_freshness, score_crossref,
-                  score_completeness, score_independence, rating_notes, rated_by,
-                  citation_no, extra
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-                """,
-                (
-                    id, report_id, goal_id, agent_name, engine, platform, source_type,
-                    platform_item_id, permalink, title, content_excerpt, author_name,
-                    _json_text(author_meta), source_keyword, fetch_method, published_at,
-                    fetched_at, metrics_json, normalized_score, norm_method,
-                    _json_text(norm_context), score_authority, score_freshness,
-                    score_crossref, score_completeness, score_independence,
-                    rating_notes, rated_by, citation_no, extra_json,
-                ),
-            )
-            self._register_extra(
-                connection, "evidence", report_id, normalized_extra, existing_keys
-            )
+            """,
+            (
+                payload["id"], payload["report_id"], payload["goal_id"],
+                payload["agent_name"], payload["engine"], payload["platform"],
+                payload["source_type"], payload["platform_item_id"],
+                payload["permalink"], payload["title"], payload["content_excerpt"],
+                payload["author_name"], _json_text(payload["author_meta"]),
+                payload["source_keyword"], payload["fetch_method"],
+                payload["published_at"], payload["fetched_at"],
+                _json_text(payload["raw_metrics"]), payload["normalized_score"],
+                payload["norm_method"], _json_text(payload["norm_context"]),
+                payload["score_authority"], payload["score_freshness"],
+                payload["score_crossref"], payload["score_completeness"],
+                payload["score_independence"], payload["rating_notes"],
+                payload["rated_by"], payload["citation_no"],
+                _extra_text(normalized_extra),
+            ),
+        )
+        self._register_extra(
+            connection, "evidence", payload["report_id"], normalized_extra, existing_keys
+        )
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

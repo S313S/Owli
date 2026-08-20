@@ -100,3 +100,156 @@ def test_六类_warning_均覆盖() -> None:
     assert len(warnings) >= 6
     for number in range(1, 7):
         assert any(item.startswith(f"[警告{number}]") for item in warnings)
+
+
+def test_M2真实矛盾_JSON数组校验器与_object_验收冲突报_error() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = [
+        "文件存在且为合法 JSON object，顶层含 query_params 与 hits 两个键"
+    ]
+    goal["agents"][0]["output"]["validators"] = [
+        "file_exists", "json_array_min_items:1"
+    ]
+
+    errors = lint(plan)["errors"]
+    assert any("[规则14]" in item and "agent-1" in item for item in errors)
+
+
+def test_M2真实矛盾_同_goal_两个_agent_写同一路径报_error() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    second = make_agent("reliability-audit", "goal-1")
+    second["output"]["path"] = goal["agents"][0]["output"]["path"]
+    goal["agents"].append(second)
+
+    errors = lint(plan)["errors"]
+    assert any("[规则15]" in item and "reliability-audit" in item for item in errors)
+
+
+def test_同_goal_语义相同的点路径也视为冲突() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    original = goal["agents"][0]["output"]["path"]
+    second = make_agent("reliability-audit", "goal-1")
+    second["output"]["path"] = original.replace("/", "/./", 1)
+    goal["agents"].append(second)
+    assert any("[规则15]" in item for item in lint(plan)["errors"])
+
+
+def test_M3a验收真实矛盾_JSON契约未点名文件遇章节校验器报_error() -> None:
+    # r-4878be30ff8c goal-2 实锤：验收要 JSON 契约但没说是哪个文件，
+    # 同 goal 的 data-cleaning 却挂 sections_exist:结论 —— agent 写纯 JSON
+    # 后章节校验器必失败，重试耗尽 goal 直接 failed。
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = [
+        "文件为合法 JSON，顶层恰含 columns、rows、competitor_set 三个字段"
+    ]
+    goal["agents"][0]["output"]["validators"] = ["file_exists", "sections_exist:结论"]
+
+    errors = lint(plan)["errors"]
+    assert any("[规则17]" in item and "agent-1" in item for item in errors)
+
+
+def test_JSON契约点名了json文件时章节校验器不冲突() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = [
+        "candidates.json 为合法 JSON，顶层恰含 columns、rows、competitor_set 三个字段"
+    ]
+    goal["agents"][0]["output"]["validators"] = ["file_exists", "sections_exist:结论"]
+
+    assert not any("[规则17]" in item for item in lint(plan)["errors"])
+
+
+def test_规则14的object契约同样认字段措辞() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = ["文件是 JSON，顶层恰含 query_params 与 hits 两个字段"]
+    goal["agents"][0]["output"]["validators"] = ["file_exists", "json_array_min_items:1"]
+
+    assert any("[规则14]" in item for item in lint(plan)["errors"])
+
+
+def test_M2真实矛盾_验收预设具体实体只报_warning() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][1]["acceptance"] = [
+        "文件为 JSON 数组，长度介于 3 与 10 之间，且必须包含 Feishu/Lark 条目"
+    ]
+
+    result = lint(plan)
+    assert not any("必须包含 Feishu/Lark 条目" in item for item in result["errors"])
+    assert any("[警告7]" in item and "Feishu/Lark" in item for item in result["warnings"])
+
+
+def test_跨平台原始热度相加在_lint_层被拒() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][0]["agents"][0]["task"] = "将 HN points 与 PH votes 跨平台相加得到总热度。"
+
+    assert any(item.startswith("[规则16]") for item in lint(plan)["errors"])
+
+
+def test_不同平台专属原始指标相加即使没写跨平台也被拒() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][0]["agents"][0]["task"] = "将 HN points 与 PH votes 相加得到总热度。"
+    assert any(item.startswith("[规则16]") for item in lint(plan)["errors"])
+
+
+def test_M3a验收真实矛盾_无采集能力goal按实体写死最小条数报_error() -> None:
+    # r-b1b75c7000ab goal-3 实锤：验收要「每个竞品至少列出 2 条来自不同
+    # author 的独立证据」，上游契约只保证 distinct competitor ≥3、对每竞品
+    # 条数零承诺；3 个竞品各只剩 1 条，禁止新抓取的分析 agent 永不可满足，
+    # 重试与换引擎耗尽后整条调研 failed。
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][1]["acceptance"] = [
+        "报告为每个竞品至少列出 2 条来自不同 author 的独立证据"
+    ]
+
+    errors = lint(plan)["errors"]
+    assert any("[规则18]" in item and "goal-2" in item for item in errors)
+
+
+def test_规则18采集goal与首goal豁免() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    # 首 goal（无 depends_on）豁免：数据量由采集行为决定。
+    plan["goals"][0]["acceptance"] = ["每个竞品至少列出 2 条独立证据"]
+    # 下游 goal 但 agent 具备采集能力（sources 非空）同样豁免。
+    plan["goals"][2]["acceptance"] = ["每个竞品至少列出 2 条独立证据"]
+    plan["goals"][2]["agents"][0]["capability"]["sources"] = ["hacker_news"]
+    plan["goals"][2]["agents"][0]["capability"]["network"] = "sources_only"
+
+    assert not any("[规则18]" in item for item in lint(plan)["errors"])
+
+
+def test_规则18条件式措辞不报错() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][1]["acceptance"] = [
+        "每个竞品列出来自不同 author 的独立证据，上游不足 2 条时明确标注孤证"
+    ]
+
+    assert not any("[规则18]" in item for item in lint(plan)["errors"])

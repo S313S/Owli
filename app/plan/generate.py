@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -73,7 +74,15 @@ def _planning_prompt(query: str, output_path: Path, errors: list[str]) -> str:
         "table、markdown、excel、json，path 只写文件名；"
         "不得输出 id、engine、capability、prompt、状态、重试或时间字段。\n"
         "边界与降级：信息不足时做明确假设并继续；仍须保留 3–7 个 goal、每个 goal 至少一个 agent、"
-        "每个 acceptance 都含数量、字段、文件或集合等可直接判定条件；"
+        "acceptance 必须是字符串数组，每个元素恰是一条独立可判定条件"
+        "（含数量、字段、文件或集合等判定依据），禁止把多条并成一个字符串；"
+        "依赖上游产物的分析类 goal，acceptance 不得按实体写死最小条数"
+        "（如「每个竞品至少 2 条独立证据」——上游数据规模无契约保证，"
+        "数据不足时永不可满足），必须写成条件式：数据不足时在产物中"
+        "明确标注孤证或缺口即算达标；"
+        "采集类 agent（API 数据抓取、浏览器自动化）的 JSON 产物顶层必须是数组、"
+        "每条含 permalink 与 fetched_at（系统会按此硬校验），其 deliverable 描述与 "
+        "acceptance 不得写成「JSON object」或顶层对象结构；"
         "最终结构化结论的 summary 固定填写‘计划骨架已写入’。"
         f"{retry}"
     )
@@ -261,6 +270,12 @@ def _build_plan(
         objective = str(raw_goal.get("objective", "")).strip()
         depends_on = raw_goal.get("depends_on", [])
         acceptance = raw_goal.get("acceptance", [])
+        if isinstance(acceptance, str) and acceptance.strip():
+            # 生成器漂移实锤（r-825ec6b5228a）：整组验收写成「；」分隔长串。
+            # 确定性归一成数组，后续 lint 照常逐条把关。
+            acceptance = [
+                item.strip() for item in re.split(r"[；;]", acceptance) if item.strip()
+            ]
         raw_agents = raw_goal.get("agents", [])
         if not title or not objective:
             raise ValueError(f"{goal_id} 的 title/objective 不能为空")

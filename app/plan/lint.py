@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 13 条阻断校验和 6 类质量提示。"""
+"""计划树保存与批准前的 18 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -354,6 +354,175 @@ def _rule_13(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _rule_14(goals: list[dict[str, Any]]) -> list[str]:
+    """数组校验器不得与同一 agent 的对象型任务/goal 验收互相打架。"""
+    messages: list[str] = []
+    object_contract = re.compile(
+        r"JSON\s*object|顶层[^。；\n]{0,40}(?:含|包含)[^。；\n]{0,40}(?:键|字段)",
+        re.IGNORECASE,
+    )
+    for goal, agent in _agents(goals):
+        validators = agent.get("output", {}).get("validators", [])
+        if not any(
+            str(item).partition(":")[0] == "json_array_min_items"
+            for item in validators
+        ):
+            continue
+        texts = [
+            *(str(item) for item in goal.get("acceptance", [])),
+            str(agent.get("task", "")),
+        ]
+        conflict = next((text for text in texts if object_contract.search(text)), None)
+        if conflict:
+            messages.append(
+                f"[规则14] {goal.get('goal_id')}/{agent.get('agent_id')} 使用 "
+                f"json_array_min_items，但任务或验收要求 JSON object：{conflict}"
+            )
+    return messages
+
+
+def _rule_15(goals: list[dict[str, Any]]) -> list[str]:
+    """同一 goal 内不同 agent 不得覆盖同一产物路径。"""
+    messages: list[str] = []
+    for goal in goals:
+        by_path: dict[str, list[str]] = {}
+        for agent in goal.get("agents", []):
+            path = str(agent.get("output", {}).get("path", "")).strip()
+            if path:
+                normalized = str(PurePosixPath(path.replace("\\", "/")))
+                by_path.setdefault(normalized, []).append(str(agent.get("agent_id", "")))
+        for path, agent_ids in by_path.items():
+            if len(agent_ids) > 1:
+                messages.append(
+                    f"[规则15] {goal.get('goal_id')} 内多个 agent 的 output.path "
+                    f"相同：{path}；agent={agent_ids}"
+                )
+    return messages
+
+
+def _rule_16(goals: list[dict[str, Any]]) -> list[str]:
+    """R4：计划不得要求把不同平台的原始热度直接求和或加权。"""
+    messages: list[str] = []
+    heat = re.compile(
+        r"热度|points?|votes?(?:_count)?|likes?(?:_count)?|views?|播放量|点赞量",
+        re.IGNORECASE,
+    )
+    aggregate = re.compile(r"相加|求和|加总|总和|加权(?:合成|求和|相加)?")
+    negation = re.compile(r"禁止|不得|不允许|绝不|不可")
+    platform_signals = (
+        re.compile(r"\b(?:HN|Hacker\s*News|points?)\b", re.IGNORECASE),
+        re.compile(r"\b(?:PH|Product\s*Hunt|votes?(?:_count)?)\b", re.IGNORECASE),
+        re.compile(r"\bX\b|like_count", re.IGNORECASE),
+        re.compile(r"B站|bilibili|\bview\b", re.IGNORECASE),
+        re.compile(r"小红书|xhs|liked_count", re.IGNORECASE),
+        re.compile(r"抖音|douyin|digg_count", re.IGNORECASE),
+    )
+    for goal, agent in _agents(goals):
+        texts = [
+            str(agent.get("task", "")),
+            str(agent.get("prompt", {}).get("body", "")),
+            *(str(item) for item in goal.get("acceptance", [])),
+        ]
+        for text in texts:
+            for clause in re.split(r"[。；\n]", text):
+                if (
+                    (
+                        "跨平台" in clause
+                        or sum(bool(pattern.search(clause)) for pattern in platform_signals) >= 2
+                    )
+                    and heat.search(clause)
+                    and aggregate.search(clause)
+                    and not negation.search(clause)
+                ):
+                    messages.append(
+                        f"[规则16] {goal.get('goal_id')}/{agent.get('agent_id')} "
+                        f"要求跨平台聚合原始热度：{clause.strip()}"
+                    )
+                    break
+            else:
+                continue
+            break
+    return messages
+
+
+def _rule_17(goals: list[dict[str, Any]]) -> list[str]:
+    """goal 级 JSON 文件契约不得与章节校验器共存而不点名文件。
+
+    真实样本 r-4878be30ff8c：验收写「文件为合法 JSON，顶层恰含 … 三个字段」
+    却未指明是哪个文件，同 goal 的 data-cleaning 输出 format=markdown +
+    sections_exist:结论 —— agent 按验收写纯 JSON，章节校验器必失败。
+    """
+    messages: list[str] = []
+    json_contract = re.compile(
+        r"(?:文件|产物)[^。；\n]{0,10}(?:为|是)[^。；\n]{0,10}合法\s*JSON"
+        r"|JSON\s*object"
+        r"|顶层[^。；\n]{0,40}(?:含|包含)[^。；\n]{0,40}(?:键|字段)",
+        re.IGNORECASE,
+    )
+    names_json_file = re.compile(r"[\w./-]+\.json\b", re.IGNORECASE)
+    for goal in goals:
+        section_agents = [
+            agent for agent in goal.get("agents", [])
+            if any(
+                str(item).partition(":")[0] == "sections_exist"
+                for item in agent.get("output", {}).get("validators", [])
+            )
+        ]
+        if not section_agents:
+            continue
+        for acceptance in goal.get("acceptance", []):
+            text = str(acceptance)
+            if json_contract.search(text) and not names_json_file.search(text):
+                agent_ids = [str(agent.get("agent_id")) for agent in section_agents]
+                messages.append(
+                    f"[规则17] {goal.get('goal_id')} 验收要求 JSON 文件契约但未点名"
+                    f"文件，而 agent={agent_ids} 的校验器含 sections_exist（章节契约）"
+                    f"：两者必有一方无法满足。请在验收里写明 .json 文件名，或改"
+                    f"该 agent 的产物格式与校验器：{text}"
+                )
+                break
+    return messages
+
+
+def _rule_18(goals: list[dict[str, Any]]) -> list[str]:
+    """无采集能力的下游 goal，验收不得按实体写死最小条数。
+
+    真实样本 r-b1b75c7000ab goal-3：验收要求「报告为每个竞品至少列出
+    2 条来自不同 author 的独立证据」，上游 goal-2 契约只保证 distinct
+    competitor_name ≥3、对每竞品条数零承诺；实际 3 个竞品各只剩 1 条，
+    分析 agent 被禁止新抓取，诚实返回 partial 也无济于事，重试与换引擎
+    耗尽后整条调研 failed。数据规模断言只能落在采集 goal 或写成条件式。
+    """
+    messages: list[str] = []
+    per_entity_minimum = re.compile(
+        r"(?:每一?[个条组项名位家款]?|各)[^。；\n]{0,20}?"
+        r"(?:至少|不少于|不得少于|≥|>=)[^。；\n]{0,8}?\d+\s*[条个组篇项]"
+    )
+    negation = re.compile(r"禁止|不得|不要求|无需|不足时")
+    for goal in goals:
+        if not goal.get("depends_on"):
+            continue
+        can_collect = any(
+            agent.get("capability", {}).get("sources")
+            or agent.get("capability", {}).get("network") not in ("none", "", None)
+            for agent in goal.get("agents", [])
+        )
+        if can_collect:
+            continue
+        for index, acceptance in enumerate(goal.get("acceptance", [])):
+            text = str(acceptance)
+            matched = per_entity_minimum.search(text)
+            if matched and not negation.search(text):
+                messages.append(
+                    f"[规则18] {goal.get('goal_id')}.acceptance[{index}] 按实体"
+                    f"写死最小条数「{matched.group(0).strip()}」，但该 goal 无"
+                    f"采集能力且依赖上游数据，上游契约不保证每实体条数，数据"
+                    f"不足时永不可满足。请改为条件式（数据不足时在产物中明确"
+                    f"标注孤证或缺口即算达标）：{text}"
+                )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -400,6 +569,15 @@ def _warnings(goals: list[dict[str, Any]]) -> list[str]:
         count = len(goal.get("agents", []))
         if count > 5:
             messages.append(f"[警告6] {goal.get('goal_id')} 下有 {count} 个 agent，超过 5 个")
+    preset = re.compile(r"必须包含\s*([^，。；\n]{1,40}?)\s*条目")
+    for goal in goals:
+        for index, acceptance in enumerate(goal.get("acceptance", [])):
+            matched = preset.search(str(acceptance))
+            if matched:
+                messages.append(
+                    f"[警告7] {goal.get('goal_id')}.acceptance[{index}] 预设了"
+                    f"具体实体条目“{matched.group(1).strip()}”，真实数据不足时不应阻断"
+                )
     return messages
 
 
@@ -424,4 +602,9 @@ def lint(
     if for_approval:
         errors.extend(_rule_12(raw))
     errors.extend(_rule_13(goals))
+    errors.extend(_rule_14(goals))
+    errors.extend(_rule_15(goals))
+    errors.extend(_rule_16(goals))
+    errors.extend(_rule_17(goals))
+    errors.extend(_rule_18(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

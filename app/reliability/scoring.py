@@ -1,0 +1,494 @@
+"""五维可靠度、分级、评分理由与平台内归一化纯函数。"""
+
+from __future__ import annotations
+
+import math
+import re
+from collections import defaultdict
+from copy import deepcopy
+from datetime import datetime, timezone
+from typing import Any, Iterable, Mapping, Sequence
+
+
+SCORE_FIELDS = (
+    "score_authority",
+    "score_freshness",
+    "score_crossref",
+    "score_completeness",
+    "score_independence",
+)
+
+PLATFORM_BASELINES: dict[str, dict[str, int]] = {
+    "product_hunt": dict(zip(SCORE_FIELDS, (2, 2, 0, 1, 1))),
+    "hacker_news": dict(zip(SCORE_FIELDS, (1, 1, 1, 2, 2))),
+    "x": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 2))),
+    "web_search": dict(zip(SCORE_FIELDS, (1, 1, 1, 1, 1))),
+    "reddit": dict(zip(SCORE_FIELDS, (0, 1, 0, 0, 2))),
+    "xhs": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
+    "douyin": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
+    "bilibili": dict(zip(SCORE_FIELDS, (1, 1, 0, 2, 1))),
+}
+
+AUTHORITY_SCORES = {
+    "first_party_official": 2,
+    "verified_principal": 2,
+    "institutional_primary": 2,
+    "named_secondary": 1,
+    "community_high_signal": 1,
+    "anonymous_or_unverifiable": 0,
+    "content_farm": 0,
+}
+AUTHORITY_REASONS = {
+    "first_party_official": "主体官方域名",
+    "verified_principal": "认证议题当事方",
+    "institutional_primary": "具名机构一手披露",
+    "named_secondary": "具名二手来源",
+    "community_high_signal": "社区高信号作者",
+    "anonymous_or_unverifiable": "作者不可核验",
+    "content_farm": "内容农场",
+}
+
+INTEREST_SCORES = {
+    "arms_length": 2,
+    "disclosed_interest": 1,
+    "undisclosed_interest": 0,
+}
+INTEREST_REASONS = {
+    "arms_length": "无可见利益关系",
+    "disclosed_interest": "利益关系已披露",
+    "undisclosed_interest": "利益关系未披露",
+}
+
+FRESHNESS_WINDOWS = {
+    "product_launch": (90, 365),
+    "market_data": (30, 180),
+    "user_opinion": (180, 730),
+    "industry_view": (365, 1095),
+}
+
+CROSSREF_SCORES = {"PASS": 2, "WEAK": 1, "SINGLE": 0, "CONFLICT": 0}
+CROSSREF_REASONS = {
+    "PASS": "独立强源佐证",
+    "WEAK": "弱源或已说明分歧",
+    "SINGLE": "该断言仅一簇",
+    "CONFLICT": "存在未说明反证",
+}
+
+RATING_NOTES_PATTERN = re.compile(
+    r"^权威([0-2]):(.{1,14}) · 时效([0-2]):(.{1,14}) · "
+    r"交叉([0-2]):(.{1,14}) · 完整([0-2]):(.{1,14}) · "
+    r"无关([0-2]):(.{1,14})( ⚠️.{1,30})?$"
+)
+RATING_NOTES_FORBIDDEN = ("可能", "大概", "视情况", "疑似", "应该是")
+
+NORM_METHODS = {
+    "percentile_in_batch",
+    "percentile_in_window",
+    "log_zscore_in_window",
+    "none",
+}
+PRIMARY_METRICS = {
+    "hacker_news": "points",
+    "product_hunt": "votes_count",
+    "x": "like_count",
+    "bilibili": "view",
+    "xhs": "liked_count",
+    "douyin": "digg_count",
+    "reddit": None,
+    "web_search": None,
+}
+
+
+def _parse_time(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def grade_for_total(total: int) -> str:
+    """按 §1.6 的硬边界把 0–10 映射为 A/B/C/D。"""
+    if not isinstance(total, int) or isinstance(total, bool) or not 0 <= total <= 10:
+        raise ValueError("可靠度总分必须是 0–10 整数")
+    if total >= 8:
+        return "A"
+    if total >= 6:
+        return "B"
+    if total >= 4:
+        return "C"
+    return "D"
+
+
+def claim_support_is_valid(
+    grades: Iterable[str], *, downgraded_to_lead: bool = False
+) -> bool:
+    """D 级可作线索，但不得作为普通断言的唯一最高等级证据。"""
+    values = list(grades)
+    if not values:
+        return False
+    if downgraded_to_lead:
+        return True
+    return any(value in {"A", "B", "C"} for value in values)
+
+
+def _freshness(evidence: Mapping[str, Any], content_kind: str | None) -> tuple[int, str, str | None]:
+    if evidence.get("continuous_page"):
+        cutoff = evidence.get("statistics_cutoff_at")
+        if cutoff:
+            evidence = {**evidence, "published_at": cutoff}
+        else:
+            return 2, "持续页按采集日", None
+        content_kind = "market_data"
+    if content_kind == "reference":
+        status = evidence.get("reference_status")
+        if status == "current":
+            return 2, "现行版本", None
+        if status == "previous":
+            return 1, "上一大版本", None
+        if status in {"deprecated", "archived"}:
+            return 0, "版本已废弃", None
+        content_kind = "industry_view"
+
+    published_at = evidence.get("published_at")
+    fetched_at = evidence.get("fetched_at")
+    if not published_at:
+        inferred_year = evidence.get("published_year")
+        if not inferred_year:
+            return 0, "缺发布时间", None
+        if not fetched_at:
+            return 0, "缺采集时间", None
+        fetched = _parse_time(str(fetched_at))
+        age_days = max(0, (fetched - datetime(int(inferred_year), 1, 1, tzinfo=timezone.utc)).days)
+        candidate_windows = (
+            [FRESHNESS_WINDOWS[content_kind]]
+            if content_kind in FRESHNESS_WINDOWS
+            else list(FRESHNESS_WINDOWS.values())
+        )
+        score = min(
+            2 if age_days <= recent else 1 if age_days <= stale else 0
+            for recent, stale in candidate_windows
+        )
+        return min(score, 1), "仅推断发布年份", None
+    if not fetched_at:
+        return 0, "缺采集时间", None
+
+    published = _parse_time(str(published_at))
+    fetched = _parse_time(str(fetched_at))
+    age_days = (fetched - published).days
+    if age_days < 0:
+        return 0, "发布时间晚于采集", "时间戳异常"
+    candidate_windows = (
+        [FRESHNESS_WINDOWS[content_kind]]
+        if content_kind in FRESHNESS_WINDOWS
+        else list(FRESHNESS_WINDOWS.values())
+    )
+    score = min(
+        2 if age_days <= recent else 1 if age_days <= stale else 0
+        for recent, stale in candidate_windows
+    )
+    reason = f"距采集{age_days}天" if content_kind in FRESHNESS_WINDOWS else f"类型缺失保守{age_days}天"
+    return score, reason, None
+
+
+def _completeness(evidence: Mapping[str, Any], baseline: int) -> tuple[int, str]:
+    if evidence.get("source_type") == "search_snippet":
+        return 0, "仅搜索片段"
+    if evidence.get("permalink_reachable") is False:
+        return 0, "原文不可达"
+    if evidence.get("content_truncated") and not evidence.get("permalink_reachable"):
+        return 0, "正文截断不可溯"
+
+    has_body = evidence.get("has_body")
+    if has_body is None:
+        return baseline, "沿用平台基线"
+    if has_body:
+        discussion = evidence.get("source_type") in {"post", "article", "video"}
+        total = evidence.get("comments_total")
+        fetched = evidence.get("comments_fetched")
+        if discussion and isinstance(total, int) and total > 0:
+            ratio = (fetched or 0) / total
+            if ratio < 0.8:
+                return 1, f"评论覆盖{ratio:.0%}"
+        if evidence.get("published_at") and evidence.get("author_name"):
+            if evidence.get("platform") == "x" and not evidence.get("conversation_complete"):
+                return 1, "仅取单帖正文"
+            return 2, "正文作者时间齐全"
+        return 1, "正文要素不全"
+    if evidence.get("summary_sufficient") and evidence.get("permalink_reachable"):
+        return 1, "摘要充分可回溯"
+    return 0, "无完整正文"
+
+
+def _baseline(platform: str, supplied: Mapping[str, int] | None) -> dict[str, int]:
+    if supplied is not None:
+        result = dict(supplied)
+    else:
+        result = dict(PLATFORM_BASELINES.get(platform, PLATFORM_BASELINES["web_search"]))
+    if set(result) != set(SCORE_FIELDS) or any(
+        not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2
+        for value in result.values()
+    ):
+        raise ValueError("平台基线必须完整提供五个 0–2 整数分")
+    return result
+
+
+def _rating_notes(scores: Mapping[str, int], reasons: Sequence[str], warning: str | None) -> str:
+    labels = ("权威", "时效", "交叉", "完整", "无关")
+    main = " · ".join(
+        f"{label}{scores[field]}:{reason[:14]}"
+        for label, field, reason in zip(labels, SCORE_FIELDS, reasons)
+    )
+    return main + (f" ⚠️{warning[:30]}" if warning else "")
+
+
+def rating_notes_problem(
+    notes: Any, scores: Mapping[str, Any] | None = None
+) -> str | None:
+    """返回格式问题；None 表示 §4.2 正则、长度、禁用词与分数均通过。"""
+    if not isinstance(notes, str):
+        return "rating_notes 必须是字符串"
+    if "\n" in notes or "\r" in notes:
+        return "rating_notes 必须是单行"
+    if len(notes) > 160:
+        return "rating_notes 含尾注总长超过 160 字"
+    main = notes.split(" ⚠️", 1)[0]
+    if len(main) > 120:
+        return "rating_notes 主串总长超过 120 字"
+    forbidden = next((word for word in RATING_NOTES_FORBIDDEN if word in notes), None)
+    if forbidden:
+        return f"rating_notes 含禁用词：{forbidden}"
+    matched = RATING_NOTES_PATTERN.fullmatch(notes)
+    if matched is None:
+        return "rating_notes 不匹配五段式正则"
+    if scores is not None:
+        actual = tuple(int(matched.group(index)) for index in (1, 3, 5, 7, 9))
+        expected_values = tuple(scores.get(field) for field in SCORE_FIELDS)
+        if actual != expected_values:
+            return f"rating_notes 分数 {actual} 与五维列 {expected_values} 不一致"
+    return None
+
+
+def score_evidence(
+    evidence: Mapping[str, Any], *, baseline: Mapping[str, int] | None = None,
+    cluster_stats: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """输入证据、平台基线与簇统计，纯计算五维分、等级和评分理由。"""
+    platform = str(evidence.get("platform", "web_search"))
+    prior = _baseline(platform, baseline)
+    extra = evidence.get("extra") if isinstance(evidence.get("extra"), Mapping) else {}
+
+    authority_kind = extra.get("authority_kind")
+    authority = AUTHORITY_SCORES.get(authority_kind, prior["score_authority"])
+    authority_reason = AUTHORITY_REASONS.get(authority_kind, "沿用平台基线")
+    if (
+        authority_kind == "community_high_signal"
+        and not evidence.get("author_history_verified")
+        and (
+            not isinstance(evidence.get("normalized_score"), (int, float))
+            or isinstance(evidence.get("normalized_score"), bool)
+            or evidence["normalized_score"] < 0.75
+        )
+    ):
+        authority = 0
+        authority_reason = "未达P75且无历史"
+
+    content_kind = extra.get("content_kind")
+    freshness, freshness_reason, freshness_warning = _freshness(evidence, content_kind)
+    stats = dict(cluster_stats or {})
+    verdict = stats.get("verdict", extra.get("crossref_verdict"))
+    crossref = CROSSREF_SCORES.get(verdict, prior["score_crossref"])
+    crossref_reason = CROSSREF_REASONS.get(verdict, "沿用平台基线")
+
+    completeness, completeness_reason = _completeness(
+        evidence, prior["score_completeness"]
+    )
+
+    relation = extra.get("interest_relation")
+    independence = INTEREST_SCORES.get(relation, prior["score_independence"])
+    independence_reason = INTEREST_REASONS.get(relation, "沿用平台基线")
+    if authority_kind in {"first_party_official", "verified_principal"} and independence > 1:
+        independence = 1
+        independence_reason = "官方自述"
+
+    scores = dict(
+        zip(SCORE_FIELDS, (authority, freshness, crossref, completeness, independence))
+    )
+    total = sum(scores.values())
+    warnings = [value for value in (freshness_warning, "存在反证" if verdict == "CONFLICT" else None) if value]
+    warning = "；".join(warnings) or None
+    notes = _rating_notes(
+        scores,
+        (
+            authority_reason, freshness_reason, crossref_reason,
+            completeness_reason, independence_reason,
+        ),
+        warning,
+    )
+    problem = rating_notes_problem(notes, scores)
+    if problem is not None:
+        raise AssertionError(problem)
+    return {**scores, "score_total": total, "grade": grade_for_total(total), "rating_notes": notes}
+
+
+def _stats(values: Sequence[float]) -> dict[str, float | None]:
+    if not values:
+        return {"min": None, "p25": None, "median": None, "p75": None, "max": None}
+    ordered = sorted(values)
+
+    def percentile(fraction: float) -> float:
+        position = (len(ordered) - 1) * fraction
+        lower = math.floor(position)
+        upper = math.ceil(position)
+        if lower == upper:
+            return ordered[lower]
+        weight = position - lower
+        return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+    return {
+        "min": ordered[0], "p25": percentile(0.25), "median": percentile(0.5),
+        "p75": percentile(0.75), "max": ordered[-1],
+    }
+
+
+def _none_context(
+    *, platform: str, metric: str | None, computed_at: str, reason: str,
+    report_id: str, goal_id: str,
+) -> dict[str, Any]:
+    context = {
+        "scope": "batch", "platform": platform, "metric": metric,
+        "n": 0, "formula": "none", "stats": {}, "computed_at": computed_at,
+        "report_id": report_id, "goal_id": goal_id, "reason": reason,
+    }
+    if platform == "x":
+        context["sampling"] = "post_filtered_local"
+    return context
+
+
+def normalize_evidence_metrics(
+    evidence_items: Iterable[Mapping[str, Any]], *, computed_at: str,
+    report_id: str, goal_id: str, queries: Sequence[str] = (), filters: str = "",
+    window_values: Mapping[str, Sequence[float]] | None = None,
+    method: str | None = None,
+) -> list[dict[str, Any]]:
+    """只在同平台参照池内归一化，返回 raw_metrics 与 R4 三个派生字段。"""
+    if method is not None and method not in NORM_METHODS:
+        raise ValueError(f"norm_method 不在闭集：{method}")
+    items = [deepcopy(dict(item)) for item in evidence_items]
+    grouped: dict[str, list[int]] = defaultdict(list)
+    for index, item in enumerate(items):
+        if item.get("report_id") not in {None, report_id}:
+            raise ValueError("归一化条目的 report_id 与参照批不一致")
+        if item.get("goal_id") not in {None, goal_id}:
+            raise ValueError("归一化条目的 goal_id 与参照批不一致")
+        grouped[str(item.get("platform", ""))].append(index)
+    windows = window_values or {}
+
+    for platform, indices in grouped.items():
+        metric = PRIMARY_METRICS.get(platform)
+        if metric is None:
+            for index in indices:
+                items[index].update(
+                    normalized_score=None,
+                    norm_method="none",
+                    norm_context=_none_context(
+                        platform=platform, metric=None, computed_at=computed_at,
+                        reason="no_metric_available", report_id=report_id, goal_id=goal_id,
+                    ),
+                )
+            continue
+
+        available = [
+            float(items[index].get("raw_metrics", {}).get(metric))
+            for index in indices
+            if isinstance(items[index].get("raw_metrics", {}).get(metric), (int, float))
+            and not isinstance(items[index].get("raw_metrics", {}).get(metric), bool)
+        ]
+        window = [float(value) for value in windows.get(platform, ())]
+        if method == "none":
+            chosen = "none"
+            pool = []
+            scope = "batch"
+        elif method == "percentile_in_batch":
+            if len(available) < 20:
+                raise ValueError("percentile_in_batch 要求批内池 n>=20")
+            chosen = method
+            pool = available
+            scope = "batch"
+        elif method == "percentile_in_window":
+            if len(window) < 50:
+                raise ValueError("percentile_in_window 要求窗口池 n>=50")
+            chosen = method
+            pool = window
+            scope = "window"
+        elif method == "log_zscore_in_window":
+            if len(window) < 50:
+                raise ValueError("log_zscore_in_window 要求窗口池 n>=50")
+            chosen = method
+            pool = window
+            scope = "window"
+        elif len(available) >= 20:
+            chosen = "percentile_in_batch"
+            pool = available
+            scope = "batch"
+        elif len(window) >= 50:
+            chosen = "percentile_in_window"
+            pool = window
+            scope = "window"
+        else:
+            chosen = "none"
+            pool = []
+            scope = "batch"
+
+        for index in indices:
+            raw_value = items[index].get("raw_metrics", {}).get(metric)
+            if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+                items[index].update(
+                    normalized_score=None, norm_method="none",
+                    norm_context=_none_context(
+                        platform=platform, metric=metric, computed_at=computed_at,
+                        reason="metric_not_collected", report_id=report_id, goal_id=goal_id,
+                    ),
+                )
+                continue
+            if chosen == "none":
+                items[index].update(
+                    normalized_score=None, norm_method="none",
+                    norm_context=_none_context(
+                        platform=platform, metric=metric, computed_at=computed_at,
+                        reason="insufficient_sample", report_id=report_id, goal_id=goal_id,
+                    ),
+                )
+                continue
+
+            value = float(raw_value)
+            effective_pool = list(pool)
+            if scope == "window" and value not in effective_pool:
+                effective_pool.append(value)
+            if chosen == "log_zscore_in_window":
+                logs = [math.log1p(candidate) for candidate in effective_pool]
+                mean = sum(logs) / len(logs)
+                variance = sum((candidate - mean) ** 2 for candidate in logs) / len(logs)
+                sigma = math.sqrt(variance)
+                z_score = 0.0 if sigma == 0 else (math.log1p(value) - mean) / sigma
+                normalized = 0.5 * (1 + math.erf(z_score / math.sqrt(2)))
+                formula = "Phi((log1p(v)-mu)/sigma)"
+            else:
+                normalized = sum(candidate < value for candidate in effective_pool) / (len(effective_pool) - 1)
+                formula = "count(x<v)/(n-1)"
+            context: dict[str, Any] = {
+                "scope": scope, "platform": platform, "metric": metric,
+                "n": len(effective_pool), "formula": formula, "stats": _stats(effective_pool),
+                "queries": list(queries), "filters": filters,
+                "computed_at": computed_at, "report_id": report_id, "goal_id": goal_id,
+            }
+            if scope == "window":
+                context.update(window_days=90, fallback_from="batch")
+            if platform == "x":
+                context["sampling"] = "post_filtered_local"
+            items[index].update(
+                normalized_score=normalized, norm_method=chosen, norm_context=context
+            )
+    return items

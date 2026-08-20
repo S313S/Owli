@@ -11,6 +11,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_非结构化_WARN_遥测失败不覆盖已完成任务() -> None:
+    from app.adapters.codex import _infrastructure_error
+    from app.adapters.events import ItemKind, NormalizedEvent
+
+    warning = NormalizedEvent(
+        engine="Codex", thread_id="thread-1", turn_id="turn-1",
+        item_kind=ItemKind.THINKING,
+        text="WARN analytics: error sending request for url (https://example.invalid/events)",
+        is_error=False,
+        raw="WARN analytics: error sending request for url (https://example.invalid/events)",
+    )
+    assert _infrastructure_error([warning]) is None
+
+    authentication = NormalizedEvent(
+        engine="Codex", thread_id="thread-1", turn_id="turn-1",
+        item_kind=ItemKind.THINKING,
+        text="WARN authentication failed: not logged in",
+        is_error=False,
+        raw="WARN authentication failed: not logged in",
+    )
+    assert _infrastructure_error([authentication]) == authentication.text
+
+
 def _write_fake_codex(path: Path, *, create_artifact: bool, error_event: bool = False) -> None:
     source = f'''#!/usr/bin/env python3
 import json

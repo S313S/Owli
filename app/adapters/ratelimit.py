@@ -47,6 +47,14 @@ _CODEX_LIMIT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# 传输层抖动文案（本机代理掐流/断连的典型指纹），命中即退避而非让路。
+_TRANSPORT_JITTER_PATTERN = re.compile(
+    r"tls|handshake|stream disconnected|econn(?:reset|refused)|socket"
+    r"|connection (?:reset|refused|closed|aborted|error)|timed? ?out"
+    r"|proxy|\beof\b|network|dns|unreachable|broken pipe",
+    re.IGNORECASE,
+)
+
 
 def _field(value: Any, *names: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
@@ -219,6 +227,20 @@ def _route_result_message(message: Any) -> RouteDecision:
         )
     if bool(_field(message, "is_error", "isError", default=False)):
         subtype = _field(message, "subtype", default="未知错误")
+        # 判定陷阱四：本机代理掐流产生的传输层错误没有 api_error_status，
+        # 若按「非限流错误」让路会把整条调研的后续新任务静默钉死在 Codex
+        # 上（含规划重试）。网络抖动 ≠ 引擎故障：原引擎退避重跑，不让路。
+        probe = " ".join(
+            str(value)
+            for value in (subtype, _field(message, "result", default=""))
+        )
+        if _TRANSPORT_JITTER_PATTERN.search(probe):
+            return RouteDecision(
+                RouteState.BACKOFF,
+                f"疑似网络抖动（代理/传输层）：{subtype}，原引擎退避重试",
+                message,
+                suspend_new_tasks=True,
+            )
         return _failover(message, f"非限流错误：{subtype}", "codex")
     return RouteDecision(RouteState.CONTINUE, "消息正常", message)
 

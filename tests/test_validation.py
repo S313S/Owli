@@ -133,6 +133,38 @@ def test_计划生成器默认评级校验器可真实执行(validation_env):
     rating = validation.validate(make_ctx(validation, output_path), ["no_item_missing_rating"])
     assert rating.verdict is validation.Verdict.PASS
 
+    invalid = {**rated, "score_authority": True, "score_freshness": 7, "score_crossref": "2"}
+    output_path.write_text(json.dumps([invalid], ensure_ascii=False), encoding="utf-8")
+    rejected = validation.validate(make_ctx(validation, output_path), ["no_item_missing_rating"])
+    assert rejected.verdict is validation.Verdict.FAIL
+    assert set(rejected.failures[0].offenders) >= {
+        "items[0].score_authority", "items[0].score_freshness", "items[0].score_crossref",
+    }
+
+
+def test_rating_notes_正则校验器已注册且逐条执行(validation_env):
+    validation, output_path = validation_env
+    valid = {
+        "score_authority": 2,
+        "score_freshness": 1,
+        "score_crossref": 0,
+        "score_completeness": 2,
+        "score_independence": 1,
+        "rating_notes": "权威2:官方文档 · 时效1:历史页面 · 交叉0:孤证 · 完整2:全文可读 · 无关1:厂商自述",
+    }
+    output_path.write_text(json.dumps([valid, valid], ensure_ascii=False), encoding="utf-8")
+    passed = validation.validate(
+        make_ctx(validation, output_path),
+        ["rating_notes_matches_regex", "rating_notes_scores_match_columns"],
+    )
+    assert passed.verdict is validation.Verdict.PASS
+
+    invalid = {**valid, "rating_notes": "权威2:可能是官方 · 时效1:历史页面 · 交叉0:孤证 · 完整2:全文可读 · 无关1:厂商自述"}
+    output_path.write_text(json.dumps([invalid], ensure_ascii=False), encoding="utf-8")
+    failed = validation.validate(make_ctx(validation, output_path), ["rating_notes_matches_regex"])
+    assert failed.verdict is validation.Verdict.FAIL
+    assert failed.failures[0].offenders == ["items[0].rating_notes"]
+
 
 def test_each_item_has_把容器和空串判空但保留零与_false(validation_env):
     validation, output_path = validation_env
@@ -196,6 +228,27 @@ def test_sections_exist_父章节只有子标题正文也算非空(validation_en
     ctx = make_ctx(validation, output_path, output_format="markdown")
 
     report = validation.validate(ctx, ["sections_exist:结论,信息源"])
+
+    assert report.verdict is validation.Verdict.PASS
+
+
+def test_信息源标题与内联链接风格的双向校验通过(validation_env):
+    # r-7497a1d65adb 实锤：章节叫「信息源」（与 sections_exist 同口径）且正文
+    # 内联 [链接](url) [Sxx] 风格时，不得落入「行内 URL=清单行」启发式误判。
+    validation, output_path = validation_env
+    output_path = output_path.with_suffix(".md")
+    output_path.write_text(
+        "# 结论\n- 结论甲 [HN 讨论](https://news.ycombinator.com/item?id=1) [S01]\n"
+        "- 结论乙 [HN 讨论](https://news.ycombinator.com/item?id=2) [S02]\n\n"
+        "## 信息源\n- [S01] [标题一](https://news.ycombinator.com/item?id=1)\n"
+        "- [S02] [标题二](https://news.ycombinator.com/item?id=2)\n",
+        encoding="utf-8",
+    )
+    ctx = make_ctx(validation, output_path, output_format="markdown")
+
+    report = validation.validate(
+        ctx, ["citation_marks_resolvable", "no_orphan_citation"]
+    )
 
     assert report.verdict is validation.Verdict.PASS
 

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import claude_agent_sdk as claude_sdk
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,7 @@ def _result_message(
     is_error: bool,
     api_error_status: int | None = None,
     subtype: str = "error_during_execution",
+    result: str = "引擎返回",
 ):
     return claude_sdk.ResultMessage(
         subtype=subtype,
@@ -52,7 +54,7 @@ def _result_message(
         is_error=is_error,
         num_turns=1,
         session_id="thread-result",
-        result="引擎返回",
+        result=result,
         api_error_status=api_error_status,
         uuid="turn-result",
     )
@@ -144,6 +146,27 @@ def test_api_529_进入_backoff():
 
     assert decision.state is RouteState.BACKOFF
     assert "529" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "result_text",
+    [
+        "stream disconnected before completion: tls handshake eof",
+        "Connection reset by peer",
+        "request timed out via local proxy",
+    ],
+)
+def test_传输层抖动归_backoff_不让路(result_text):
+    # r-4908abdb0b9b 实锤：代理掐流被判「非限流错误」让路 Codex，
+    # 规划重试连挂三次。网络抖动必须退避重试原引擎，绝不 FAILOVER。
+    from app.adapters.ratelimit import RouteState, route
+
+    decision = route(_result_message(is_error=True, result=result_text))
+
+    assert decision.state is RouteState.BACKOFF
+    assert decision.failover_target is None
+    assert decision.suspend_new_tasks is True
+    assert "网络抖动" in decision.reason
 
 
 def test_非限流_is_error_进入_failover():
