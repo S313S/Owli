@@ -271,3 +271,18 @@ def test_规则18条件式措辞不报错() -> None:
     ]
 
     assert not any("[规则18]" in item for item in lint(plan)["errors"])
+
+
+def test_规则18条件式不认字面单选_不足以支撑与即算达标同样豁免() -> None:
+    # 真实样本 r-f14050856779：三轮回灌后模型写出的条件式因措辞不含
+    # 「不足时」被拒到重试耗尽。
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][1]["acceptance"] = [
+        "每条被标为 高 可靠度的断言均引用不少于 2 个来自上游 evidence 的"
+        " permalink，若上游数据不足以支撑则在该断言上标注 reliability_level="
+        "孤证 或在伴随 meta 的 gaps 中记录该缺口即算达标"
+    ]
+
+    assert not any("[规则18]" in item for item in lint(plan)["errors"])
