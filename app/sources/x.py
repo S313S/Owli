@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from app.adapters.ratelimit import RouteState
 
 from app.store.usage import (
     SourceUsageStore,
@@ -88,6 +92,7 @@ class HttpGet(Protocol):
 
 EventCallback = Callable[[dict[str, Any]], None]
 Clock = Callable[[], datetime]
+Sleeper = Callable[[float], None]
 
 
 def _now_utc() -> datetime:
@@ -241,6 +246,46 @@ def map_recent_search_response(
     )
 
 
+def prepare_evidence_batch(
+    result: XSearchResult,
+    *,
+    report_id: str,
+    goal_id: str,
+    agent_name: str,
+    engine: str,
+) -> list[dict[str, Any]]:
+    """补齐系统归属字段并复用 M3-a 平台内归一化契约。"""
+
+    from app.reliability.scoring import normalize_evidence_metrics
+
+    items = []
+    for evidence in result.evidence:
+        item_id = str(evidence["platform_item_id"])
+        items.append({
+            **evidence,
+            "id": f"ev-{report_id}-{item_id}",
+            "report_id": report_id,
+            "goal_id": goal_id,
+            "agent_name": agent_name,
+            "engine": engine,
+        })
+    computed_at = (
+        str(items[0]["fetched_at"])
+        if items else datetime.now(timezone.utc).isoformat()
+    )
+    queries = tuple(
+        dict.fromkeys(str(item["source_keyword"]) for item in items)
+    )
+    return normalize_evidence_metrics(
+        items,
+        computed_at=computed_at,
+        report_id=report_id,
+        goal_id=goal_id,
+        queries=queries,
+        filters="-is:retweet -is:reply + local_public_metrics",
+    )
+
+
 def budget_snapshot(
     config: XSourceConfig,
     usage_store: SourceUsageStore,
@@ -340,11 +385,29 @@ def _default_http_get(
     url: str, *, headers: Mapping[str, str], timeout: float
 ) -> HttpResponse:
     request = Request(url, headers=dict(headers))
-    with urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-        if not isinstance(payload, Mapping):
-            raise RuntimeError("X API 响应不是 JSON 对象")
-        return HttpResponse(response.status, dict(response.headers.items()), payload)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+            status = response.status
+            response_headers = dict(response.headers.items())
+    except HTTPError as error:
+        raw = error.read()
+        status = error.code
+        response_headers = dict(error.headers.items()) if error.headers else {}
+    payload = json.loads(raw.decode("utf-8")) if raw else {}
+    if not isinstance(payload, Mapping):
+        raise RuntimeError("X API 响应不是 JSON 对象")
+    return HttpResponse(status, response_headers, payload)
+
+
+def _rate_limit_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    lowered = {str(key).casefold(): str(value) for key, value in headers.items()}
+    names = (
+        "x-rate-limit-limit",
+        "x-rate-limit-remaining",
+        "x-rate-limit-reset",
+    )
+    return {name: lowered[name] for name in names if name in lowered}
 
 
 @dataclass
@@ -354,6 +417,7 @@ class XRecentSearch:
     token_loader: Callable[[], str]
     http_get: HttpGet = _default_http_get
     clock: Clock = _now_utc
+    sleeper: Sleeper = time.sleep
     on_event: EventCallback | None = None
 
     def _emit(self, event: dict[str, Any]) -> None:
@@ -384,15 +448,67 @@ class XRecentSearch:
             self._emit(_budget_card(snapshot, now))
         url = f"{self.config.api_base_url.rstrip('/')}/tweets/search/recent?{urlencode(params)}"
         token = self.token_loader()
-        response = self.http_get(
-            url,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "Owli/0.1 X-source",
-            },
-            timeout=self.config.timeout_seconds,
-        )
+        request_headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Owli/0.1 X-source",
+        }
+        backoff_count = 0
+        while True:
+            response = self.http_get(
+                url,
+                headers=request_headers,
+                timeout=self.config.timeout_seconds,
+            )
+            if response.status != 429:
+                break
+            self.usage_store.record_response(
+                "x_api", occurred_at=now, resource_ids=[]
+            )
+            rate_headers = _rate_limit_headers(response.headers)
+            reset_text = rate_headers.get("x-rate-limit-reset")
+            try:
+                resets_at = int(reset_text) if reset_text is not None else None
+            except ValueError:
+                resets_at = None
+            if resets_at is None:
+                resets_at = int(self.clock().timestamp()) + 2 ** backoff_count
+            self._emit({
+                "type": "source_route",
+                "data": {
+                    "source": "x",
+                    "route_state": RouteState.BACKOFF.value,
+                    "resets_at": resets_at,
+                    "rate_limit_headers": rate_headers,
+                    "suspend_new_tasks": True,
+                },
+            })
+            backoff_count += 1
+            if backoff_count > self.config.max_backoff_attempts:
+                return XSearchResult(
+                    evidence=[],
+                    conclusion={
+                        "status": "backoff",
+                        "route_state": RouteState.BACKOFF.value,
+                        "resets_at": resets_at,
+                        "backoff_count": backoff_count,
+                        "task_continues": True,
+                        "soft_budget_warning": bool(snapshot["warning"]),
+                        **snapshot,
+                    },
+                )
+            wait_seconds = max(0, resets_at - int(self.clock().timestamp()))
+            self.sleeper(wait_seconds)
+        if backoff_count:
+            self._emit({
+                "type": "source_route",
+                "data": {
+                    "source": "x",
+                    "route_state": RouteState.CONTINUE.value,
+                    "resumed_at": self.clock().astimezone(timezone.utc).isoformat(),
+                    "backoff_count": backoff_count,
+                },
+            })
         hard_gate = _platform_hard_gate(response)
         if hard_gate is not None:
             self.usage_store.record_response(
@@ -443,6 +559,7 @@ class XRecentSearch:
             soft_budget_warning=bool(snapshot["warning"]),
             soft_gate=snapshot["limiting_gate"] if snapshot["warning"] else None,
             hard_gate=None,
+            backoff_count=backoff_count,
             **snapshot,
         )
         self._emit({
@@ -474,6 +591,7 @@ def search(
     token_loader: Callable[[], str] | None = None,
     http_get: HttpGet = _default_http_get,
     clock: Clock = _now_utc,
+    sleeper: Sleeper = time.sleep,
     on_event: EventCallback | None = None,
 ) -> XSearchResult:
     loader = token_loader or (
@@ -485,6 +603,7 @@ def search(
         token_loader=loader,
         http_get=http_get,
         clock=clock,
+        sleeper=sleeper,
         on_event=on_event,
     ).search(
         query,

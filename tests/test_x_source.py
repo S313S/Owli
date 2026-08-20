@@ -318,3 +318,107 @@ def test_周预算已耗尽又撞平台硬闸时_硬闸胜出且事件写明闸�
     unavailable = [event for event in events if event["type"] == "source_unavailable"]
     assert unavailable[-1]["data"]["gate"] == "platform_billing_cycle_cap"
     assert unavailable[-1]["data"]["supersedes"] == "owli_weekly_budget"
+
+
+def test_429进入_BACKOFF_并按响应头挂起后恢复贯通事件(tmp_path) -> None:
+    from app.adapters.ratelimit import RouteState
+    from app.sources.x import HttpResponse, XRecentSearch
+
+    now = datetime(2026, 8, 20, 12, tzinfo=timezone.utc)
+    reset_at = int(now.timestamp()) + 7
+    responses = [
+        HttpResponse(
+            429,
+            {
+                "x-rate-limit-limit": "450",
+                "x-rate-limit-remaining": "0",
+                "x-rate-limit-reset": str(reset_at),
+            },
+            {"title": "Too Many Requests"},
+        ),
+        HttpResponse(200, {}, _payload()),
+    ]
+    events = []
+    waits = []
+    source = XRecentSearch(
+        config=_config(),
+        usage_store=_usage_store(tmp_path),
+        token_loader=lambda: "secret",
+        http_get=lambda *args, **kwargs: responses.pop(0),
+        clock=lambda: now,
+        sleeper=waits.append,
+        on_event=events.append,
+    )
+
+    result = source.search(
+        "AI", window="7d", lang="en", max_results=10,
+        min_likes=0, min_retweets=0,
+    )
+
+    route_events = [event for event in events if event["type"] == "source_route"]
+    assert [event["data"]["route_state"] for event in route_events] == [
+        RouteState.BACKOFF.value,
+        RouteState.CONTINUE.value,
+    ]
+    assert route_events[0]["data"]["resets_at"] == reset_at
+    assert route_events[0]["data"]["rate_limit_headers"] == {
+        "x-rate-limit-limit": "450",
+        "x-rate-limit-remaining": "0",
+        "x-rate-limit-reset": str(reset_at),
+    }
+    assert waits == [7]
+    assert result.conclusion["status"] == "completed"
+    assert result.conclusion["backoff_count"] == 1
+
+
+def test_过滤后的_X_基线证据经_M3a_归一化后走_DAO_批量入库(tmp_path) -> None:
+    import json
+    import sqlite3
+
+    from app.sources.x import map_recent_search_response, prepare_evidence_batch
+    from app.store.dao import Store
+    from app.store.schema import initialize_database_if_empty
+
+    database = tmp_path / "owli.db"
+    schema = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sql"
+    initialize_database_if_empty(database, schema)
+    store = Store(database)
+    store.create_report(
+        id="r-x-test",
+        title="X 测试",
+        research_question="AI agent",
+        created_at="2026-08-20T12:00:00+00:00",
+    )
+    result = map_recent_search_response(
+        _payload(),
+        query="AI agent",
+        fetched_at=datetime(2026, 8, 20, 12, tzinfo=timezone.utc),
+        min_likes=20,
+        min_retweets=5,
+    )
+    items = prepare_evidence_batch(
+        result,
+        report_id="r-x-test",
+        goal_id="goal-2",
+        agent_name="x-collector",
+        engine="codex",
+    )
+
+    store.add_evidence_batch(items)
+
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            """
+            SELECT raw_metrics, score_authority, score_freshness, score_crossref,
+                   score_completeness, score_independence, score_total, grade,
+                   rated_by, norm_method, norm_context
+            FROM evidence WHERE report_id = 'r-x-test'
+            """
+        ).fetchone()
+    assert json.loads(row[0]) == {
+        "like_count": 21, "retweet_count": 2, "reply_count": 3, "quote_count": 4,
+    }
+    assert row[1:8] == (1, 2, 0, 1, 2, 6, "B")
+    assert row[8] == "baseline:x@v1"
+    assert row[9] == "none"
+    assert json.loads(row[10])["sampling"] == "post_filtered_local"
