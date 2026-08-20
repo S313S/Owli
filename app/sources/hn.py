@@ -14,6 +14,8 @@ from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from app.sources.spec import SourceSpec
+
 
 __all__ = ["search"]
 
@@ -168,6 +170,13 @@ def _main(argv: list[str] | None = None) -> None:
             separators=(",", ":"),
         )
     )
+
+
+SOURCE_SPEC = SourceSpec(
+    source_id="hacker_news",
+    tool_name="source.hacker_news",
+    entrypoint=search,
+)
 
 
 if __name__ == "__main__":
