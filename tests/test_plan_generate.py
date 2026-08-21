@@ -555,3 +555,58 @@ def test_goal段提示词自带非采集职能闭集() -> None:
     assert "职能闭集" in prompt
     assert "计划仲裁" in prompt and "一致性检查" in prompt
     assert "不得自造名称" in prompt
+
+
+def test_display_name别名可作采集agent名称且源id解析正确() -> None:
+    """6b 实跑取证（2026-08-21 r-e55ddfe36e51）：提示词列出
+    display_name（collector_name），模型写 display_name 被拒。"""
+    from collections import Counter
+
+    from app.plan.generate import _build_agent, _classify
+    from app.sources.registry import planning_catalog
+
+    for spec in planning_catalog():
+        assert _classify(spec.display_name, "采集") == (
+            "data_collection", "web-collector",
+        )
+        agent = _build_agent(
+            {"name": spec.display_name, "task": "采集"},
+            "goal-1",
+            [],
+            "查询",
+            Counter(),
+            previous_agent_id=None,
+            upstream_artifacts={},
+            target=None,
+        )
+        assert spec.source_id in agent["capability"]["sources"]
+
+
+def test_build_plan一次聚合全部goal结构错误() -> None:
+    """6b 实跑取证（2026-08-21 r-e55ddfe36e51）：逐个抛错打地鼠，
+    goal-1/2/4 各占一轮吃光 3 次段级预算。"""
+    from app.plan.generate import _build_plan
+
+    raw = {
+        "goals": [
+            {
+                "title": f"阶段{n}",
+                "objective": "形成独立产物。",
+                "depends_on": [],
+                "deliverable": {
+                    "format": "json",
+                    "path": f"stage-{n}.json",
+                    "description": "结构化产物",
+                },
+                "acceptance": ["条目可判定"],
+                "agents": [{"name": name, "task": "执行"}],
+            }
+            for n, name in ((1, "自造名甲"), (2, "hn 数据抓取"), (3, "自造名乙"))
+        ]
+    }
+    with pytest.raises(ValueError) as exc_info:
+        _build_plan(raw, query="查询", research_id="r-agg", timestamp="2026-08-21T00:00:00+00:00")
+    message = str(exc_info.value)
+    assert "goal-1" in message and "自造名甲" in message
+    assert "goal-3" in message and "自造名乙" in message
+    assert "goal-2" not in message

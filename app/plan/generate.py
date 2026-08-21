@@ -48,7 +48,14 @@ _ROLE_MAP = {
 
 
 def _source_specs() -> dict[str, Any]:
-    return {spec.collector_name.casefold(): spec for spec in planning_catalog()}
+    # collector_name 与 display_name 都唯一标识同一信息源；提示词以
+    # 「display_name（collector_name）」列出，模型两种写法都该被接受
+    # （6b 实跑取证：模型写「Hacker News」被拒，2026-08-21 r-e55ddfe36e51）。
+    specs: dict[str, Any] = {}
+    for spec in planning_catalog():
+        specs[" ".join(spec.collector_name.casefold().split())] = spec
+        specs[" ".join(spec.display_name.casefold().split())] = spec
+    return specs
 
 
 def _classify(name: str, task: str) -> tuple[str, str]:
@@ -359,66 +366,79 @@ def _build_plan(
     for index, raw_goal in enumerate(raw_goals, start=1):
         if not isinstance(raw_goal, Mapping):
             raise ValueError(f"goal-{index} 骨架必须是 object")
-    deliverables = {
-        f"goal-{index}": _deliverable(raw_goal.get("deliverable"), f"goal-{index}")
-        for index, raw_goal in enumerate(raw_goals, start=1)
-    }
+    # 结构错误一次收集全量：逐个抛错会让段级重试打地鼠式消耗预算
+    # （6b 实跑取证：goal-1/2/4 各占一轮吃光 3 次预算，2026-08-21）。
+    structure_errors: list[str] = []
+    deliverables: dict[str, dict[str, Any]] = {}
+    for index, raw_goal in enumerate(raw_goals, start=1):
+        goal_id = f"goal-{index}"
+        try:
+            deliverables[goal_id] = _deliverable(raw_goal.get("deliverable"), goal_id)
+        except ValueError as exc:
+            structure_errors.append(str(exc))
     counters: Counter[str] = Counter()
     goals: list[dict[str, Any]] = []
     for index, raw_goal in enumerate(raw_goals, start=1):
         goal_id = f"goal-{index}"
-        title = str(raw_goal.get("title", "")).strip()
-        objective = str(raw_goal.get("objective", "")).strip()
-        depends_on = raw_goal.get("depends_on", [])
-        acceptance = raw_goal.get("acceptance", [])
-        if isinstance(acceptance, str) and acceptance.strip():
-            # 生成器漂移实锤（r-825ec6b5228a）：整组验收写成「；」分隔长串。
-            # 确定性归一成数组，后续 lint 照常逐条把关。
-            acceptance = [
-                item.strip() for item in re.split(r"[；;]", acceptance) if item.strip()
-            ]
-        raw_agents = raw_goal.get("agents", [])
-        if not title or not objective:
-            raise ValueError(f"{goal_id} 的 title/objective 不能为空")
-        if not isinstance(depends_on, list) or not all(isinstance(item, str) for item in depends_on):
-            raise ValueError(f"{goal_id}.depends_on 必须是字符串数组")
-        if not isinstance(acceptance, list) or not acceptance:
-            raise ValueError(f"{goal_id}.acceptance 至少需要 1 条")
-        if not isinstance(raw_agents, list) or not raw_agents:
-            raise ValueError(f"{goal_id}.agents 至少需要 1 项")
-        agents: list[dict[str, Any]] = []
-        previous_agent_id: str | None = None
-        upstream_artifacts = {
-            item: deliverables[item]["path"]
-            for item in depends_on
-            if item in deliverables
-        }
-        for agent_index, item in enumerate(raw_agents):
-            agent = _build_agent(
-                item,
-                goal_id,
-                list(depends_on),
-                query,
-                counters,
-                previous_agent_id=previous_agent_id,
-                upstream_artifacts=upstream_artifacts if agent_index == 0 else {},
-                target=deliverables[goal_id] if agent_index == len(raw_agents) - 1 else None,
-            )
-            agents.append(agent)
-            previous_agent_id = agent["agent_id"]
-        goals.append({
-            "goal_id": goal_id,
-            "title": title[:24],
-            "objective": objective,
-            "depends_on": list(depends_on),
-            "deliverable": deliverables[goal_id],
-            "acceptance": [str(item) for item in acceptance],
-            "intervention": {"on_complete": True, "prompt": f"请核对《{title[:24]}》产物，是否继续？"},
-            "retry_policy": dict(DEFAULT_RETRY_POLICY),
-            "on_upstream_failure": "skip",
-            "agents": agents,
-            "status": "pending",
-        })
+        if goal_id not in deliverables:
+            continue
+        try:
+            title = str(raw_goal.get("title", "")).strip()
+            objective = str(raw_goal.get("objective", "")).strip()
+            depends_on = raw_goal.get("depends_on", [])
+            acceptance = raw_goal.get("acceptance", [])
+            if isinstance(acceptance, str) and acceptance.strip():
+                # 生成器漂移实锤（r-825ec6b5228a）：整组验收写成「；」分隔长串。
+                # 确定性归一成数组，后续 lint 照常逐条把关。
+                acceptance = [
+                    item.strip() for item in re.split(r"[；;]", acceptance) if item.strip()
+                ]
+            raw_agents = raw_goal.get("agents", [])
+            if not title or not objective:
+                raise ValueError(f"{goal_id} 的 title/objective 不能为空")
+            if not isinstance(depends_on, list) or not all(isinstance(item, str) for item in depends_on):
+                raise ValueError(f"{goal_id}.depends_on 必须是字符串数组")
+            if not isinstance(acceptance, list) or not acceptance:
+                raise ValueError(f"{goal_id}.acceptance 至少需要 1 条")
+            if not isinstance(raw_agents, list) or not raw_agents:
+                raise ValueError(f"{goal_id}.agents 至少需要 1 项")
+            agents: list[dict[str, Any]] = []
+            previous_agent_id: str | None = None
+            upstream_artifacts = {
+                item: deliverables[item]["path"]
+                for item in depends_on
+                if item in deliverables
+            }
+            for agent_index, item in enumerate(raw_agents):
+                agent = _build_agent(
+                    item,
+                    goal_id,
+                    list(depends_on),
+                    query,
+                    counters,
+                    previous_agent_id=previous_agent_id,
+                    upstream_artifacts=upstream_artifacts if agent_index == 0 else {},
+                    target=deliverables[goal_id] if agent_index == len(raw_agents) - 1 else None,
+                )
+                agents.append(agent)
+                previous_agent_id = agent["agent_id"]
+            goals.append({
+                "goal_id": goal_id,
+                "title": title[:24],
+                "objective": objective,
+                "depends_on": list(depends_on),
+                "deliverable": deliverables[goal_id],
+                "acceptance": [str(item) for item in acceptance],
+                "intervention": {"on_complete": True, "prompt": f"请核对《{title[:24]}》产物，是否继续？"},
+                "retry_policy": dict(DEFAULT_RETRY_POLICY),
+                "on_upstream_failure": "skip",
+                "agents": agents,
+                "status": "pending",
+            })
+        except ValueError as exc:
+            structure_errors.append(str(exc))
+    if structure_errors:
+        raise ValueError("；".join(structure_errors))
     use_case = "other"
     if any(word in query for word in ("竞品", "优缺点", "对比")):
         use_case = "product_competitor"
