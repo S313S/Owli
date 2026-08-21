@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 
 class ItemKind(str, Enum):
@@ -65,6 +65,8 @@ def _event(
     item_kind: ItemKind,
     text: str,
     is_error: bool = False,
+    outcome: str | None = None,
+    cause: str | None = None,
 ) -> NormalizedEvent:
     return NormalizedEvent(
         engine="Claude",
@@ -74,7 +76,26 @@ def _event(
         text=str(text or ""),
         is_error=is_error,
         raw=message,
+        outcome=outcome,
+        cause=cause,
     )
+
+
+def _api_retry_cause(message: Any) -> str | None:
+    data = getattr(message, "data", None)
+    if not isinstance(data, Mapping):
+        return None
+    nested = data.get("error")
+    containers = [data]
+    if isinstance(nested, Mapping):
+        containers.append(nested)
+    for container in containers:
+        if container.get("api_error_status", container.get("apiErrorStatus")) == 429:
+            return "rate_limit"
+        info = container.get("rate_limit_info", container.get("rateLimitInfo"))
+        if isinstance(info, Mapping) and info.get("status") == "rejected":
+            return "rate_limit"
+    return None
 
 
 def _assistant_events(
@@ -163,12 +184,23 @@ def normalize_claude_event(
             is_error=is_error,
         )]
     if isinstance(message, sdk.SystemMessage):
+        subtype = str(getattr(message, "subtype", ""))
+        if subtype.casefold() == "api_retry":
+            return [_event(
+                message,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                item_kind=ItemKind.THINKING,
+                text="[session] api_retry",
+                outcome="API_RETRY",
+                cause=_api_retry_cause(message),
+            )]
         return [_event(
             message,
             thread_id=thread_id,
             turn_id=turn_id,
             item_kind=ItemKind.THINKING,
-            text=f"[session] {getattr(message, 'subtype', '')}",
+            text=f"[session] {subtype}",
         )]
     return [_event(
         message,

@@ -79,6 +79,45 @@ def test_subtype_success_但_api_error_status_429_仍归一为错误():
     assert events[0].raw is message
 
 
+def test_claude_api_retry_归一为结构化会话信号():
+    from app.adapters.events import ItemKind, normalize_claude_event
+
+    message = claude_sdk.SystemMessage(
+        subtype="api_retry",
+        data={"type": "system", "subtype": "api_retry", "attempt": 4},
+    )
+
+    event = normalize_claude_event(message, sdk=claude_sdk)[0]
+
+    assert event.item_kind is ItemKind.THINKING
+    assert event.outcome == "API_RETRY"
+    assert event.cause is None
+    assert event.raw is message
+
+
+def test_claude_api_retry_结构化限流只标_rate_limit_不标_transport():
+    from app.adapters.events import normalize_claude_event
+
+    messages = [
+        claude_sdk.SystemMessage(
+            subtype="api_retry",
+            data={"api_error_status": 429, "attempt": 2},
+        ),
+        claude_sdk.SystemMessage(
+            subtype="api_retry",
+            data={"rate_limit_info": {"status": "rejected"}, "attempt": 3},
+        ),
+    ]
+
+    events = [
+        normalize_claude_event(message, sdk=claude_sdk)[0]
+        for message in messages
+    ]
+
+    assert [event.outcome for event in events] == ["API_RETRY", "API_RETRY"]
+    assert [event.cause for event in events] == ["rate_limit", "rate_limit"]
+
+
 def test_同一次_claude_执行的所有消息共享_codex_口径_turn_id():
     from app.adapters.events import normalize_claude_event
 
