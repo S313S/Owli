@@ -611,3 +611,25 @@ def test_build_plan一次聚合全部goal结构错误() -> None:
     assert "goal-1" in message and "自造名甲" in message
     assert "goal-3" in message and "自造名乙" in message
     assert "goal-2" not in message
+
+
+def test_同义变体归一化接受且格式报错带闭集() -> None:
+    """6b 实跑取证（2026-08-21 r-bbc15dc5c4e8）：format 写 xlsx 被拒且
+    报错不给合法值；agent 名写 product-hunt（连字符）被拒。"""
+    from app.plan.generate import _classify, _deliverable
+
+    value = _deliverable(
+        {"format": "xlsx", "path": "对比表.xlsx", "description": "竞品对比表"},
+        "goal-3",
+    )
+    assert value["format"] == "excel"
+
+    with pytest.raises(ValueError) as exc_info:
+        _deliverable(
+            {"format": "docx", "path": "x.docx", "description": "说明"}, "goal-3"
+        )
+    message = str(exc_info.value)
+    assert "只能取" in message and "excel" in message and "markdown" in message
+
+    for variant in ("product-hunt 数据抓取", "Product_Hunt 数据抓取"):
+        assert _classify(variant, "采集") == ("data_collection", "web-collector")

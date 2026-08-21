@@ -53,14 +53,20 @@ def _source_specs() -> dict[str, Any]:
     # （6b 实跑取证：模型写「Hacker News」被拒，2026-08-21 r-e55ddfe36e51）。
     specs: dict[str, Any] = {}
     for spec in planning_catalog():
-        specs[" ".join(spec.collector_name.casefold().split())] = spec
-        specs[" ".join(spec.display_name.casefold().split())] = spec
+        specs[_normalize_name(spec.collector_name)] = spec
+        specs[_normalize_name(spec.display_name)] = spec
     return specs
+
+
+def _normalize_name(name: str) -> str:
+    # 连字符/下划线与空格视为同一分隔（6b 实跑取证：模型写
+    # 「product-hunt 数据抓取」被拒，2026-08-21 r-bbc15dc5c4e8）。
+    return " ".join(name.casefold().replace("-", " ").replace("_", " ").split())
 
 
 def _classify(name: str, task: str) -> tuple[str, str]:
     del task
-    normalized = " ".join(name.casefold().split())
+    normalized = _normalize_name(name)
     if normalized in _source_specs():
         return "data_collection", "web-collector"
     try:
@@ -326,9 +332,17 @@ def _agent_prompt(
 def _deliverable(raw: Any, goal_id: str) -> dict[str, str]:
     if not isinstance(raw, Mapping):
         raise ValueError(f"{goal_id}.deliverable 必须是 object")
-    format_name = str(raw.get("format", ""))
+    format_name = str(raw.get("format", "")).strip().casefold()
+    # 无歧义同义写法归一化接受；报错必须带闭集（6b 实跑取证：模型写
+    # 'xlsx' 被拒且报错不给合法值，两轮未自纠，2026-08-21 r-bbc15dc5c4e8）。
+    format_name = {"xlsx": "excel", "xls": "excel", "md": "markdown"}.get(
+        format_name, format_name
+    )
     if format_name not in _FORMATS:
-        raise ValueError(f"{goal_id}.deliverable.format 非法：{format_name!r}")
+        raise ValueError(
+            f"{goal_id}.deliverable.format 非法：{format_name!r}；"
+            f"只能取：{'、'.join(sorted(_FORMATS))}"
+        )
     original = PurePosixPath(str(raw.get("path", "result.md")))
     leaf = original.name
     if not leaf or leaf in {".", ".."}:
@@ -487,7 +501,7 @@ def _build_agent(
     except ValueError as exc:
         # 带上 goal_id 才能让段级重试只重跑涉事段，而不是整份计划全重跑。
         raise ValueError(f"{goal_id} {exc}") from exc
-    normalized_name = " ".join(name.casefold().split())
+    normalized_name = _normalize_name(name)
     source_spec = _source_specs().get(normalized_name)
     source_id = source_spec.source_id if source_spec is not None else "hacker_news"
     counters[agent_kind] += 1
