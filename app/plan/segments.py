@@ -122,6 +122,18 @@ class PlanSegmentWorkspace:
                         raise ValueError("规划段 JSON 顶层必须是 object")
                 except (json.JSONDecodeError, ValueError) as exc:
                     last_error = f"{type(exc).__name__}: {exc}"
+                    if isinstance(exc, json.JSONDecodeError):
+                        # 回灌必须自带出错文本：只给行列号模型无从自纠
+                        # （6b 实跑取证：字符串内嵌未转义英文引号连拒三轮，
+                        # 2026-08-21 r-d7857eb04e56）。
+                        start = max(0, exc.pos - 60)
+                        end = min(len(assembled), exc.pos + 60)
+                        snippet = assembled[start:end]
+                        last_error += (
+                            f"；出错位置附近原文：…{snippet}…；"
+                            "若字符串值内出现未转义的英文双引号，"
+                            "请改用中文引号「」或转义"
+                        )
                 else:
                     formal.write_text(
                         json.dumps(value, ensure_ascii=False, indent=2) + "\n",

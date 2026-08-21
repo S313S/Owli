@@ -80,7 +80,8 @@ def _skeleton_prompt(query: str, errors: list[str]) -> str:
         "禁止按搜索/阅读/总结工种拆 goal。\n"
         "产物结构：只输出 JSON object，顶层只能有 goals；每个 goal 只能含 title、"
         "objective、depends_on。depends_on 只能引用在它之前的 goal-<n>。\n"
-        "边界与降级：信息不足时做明确假设并继续，不输出 Markdown 围栏、说明或任何"
+        "边界与降级：信息不足时做明确假设并继续，JSON 字符串值内部不得出现未转义"
+        "的英文双引号（引用名称用中文引号「」），不输出 Markdown 围栏、说明或任何"
         f"执行字段。{retry}"
     )
 
@@ -109,7 +110,8 @@ def _goal_prompt(
         "deliverable 含 format/path/description，path 只写文件名；acceptance 是逐条"
         "可判定字符串数组；agents 每项只含 name、task，不得输出 id、engine、"
         "capability、prompt、状态、重试或时间字段。\n"
-        "边界与降级：采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
+        "边界与降级：JSON 字符串值内部不得出现未转义的英文双引号，引用名称一律"
+        "用中文引号「」；采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
         "HN 查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、"
         "hitsPerPage=1000；"
         "数据不足时用结构化缺口口径，不得写死上游无法保证的实体最小条数；"

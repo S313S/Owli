@@ -382,3 +382,33 @@ def test_claude_规划短流从_stream_event_即时保留断流前缀():
     assert result.text == '{"title":"竞品'
     assert result.transport_interrupted is True
     assert result.cause == "transport"
+
+
+def test_非法json回灌自带出错位置原文与引号指引(tmp_path):
+    """6b 实跑取证（2026-08-21 r-d7857eb04e56）：字符串内嵌未转义英文引号，
+    回灌只有行列号，模型连拒三轮无从自纠。"""
+    from app.adapters.contracts import PlanningSegmentResult
+    from app.config import ResilienceConfig
+    from app.plan.segments import PlanSegmentWorkspace
+
+    prompts = []
+    bad = '{"acceptance":["文档包含"飞书核心定位"章节"]}'
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            prompts.append(request.prompt)
+            text = bad if len(prompts) == 1 else '{"ok":true}'
+            await on_text(text)
+            return PlanningSegmentResult(text=text, completed=True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / "r-quote-json",
+        ResilienceConfig(3, 2, 60, 900, 300),
+    )
+    value = asyncio.run(workspace.generate("goal-1", "生成合法 JSON", Adapter()))
+
+    assert value == {"ok": True}
+    retry_prompt = prompts[1]
+    assert "出错位置附近原文" in retry_prompt
+    assert "飞书核心定位" in retry_prompt  # 出错文本片段真的被带回
+    assert "中文引号「」" in retry_prompt
