@@ -289,12 +289,24 @@ class RoutedAdapter:
                 )
                 healthy = await self._probe(engine)
                 transitions = breaker.record_probe(engine, healthy=healthy)
+                reset = next(
+                    (
+                        transition
+                        for transition in transitions
+                        if transition.event.value == "RESET"
+                    ),
+                    None,
+                )
+                if reset is not None:
+                    current = self._route_overrides.get(research_id)
+                    if current == reset.target:
+                        self._route_overrides.pop(research_id, None)
                 for transition in transitions:
-                    if transition.event.value == "RESET":
-                        current = self._route_overrides.get(research_id)
-                        if current == transition.target:
-                            self._route_overrides.pop(research_id, None)
-                    await self._emit(on_event, self._health_event(transition))
+                    try:
+                        await self._emit(on_event, self._health_event(transition))
+                    except Exception:
+                        # 展示/日志投影失败不得反向破坏已完成的健康复位。
+                        continue
 
         task = asyncio.create_task(recover())
         self._recovery_tasks.add(task)
@@ -320,12 +332,12 @@ class RoutedAdapter:
             return
         activated = breaker.activate_failover(engine, target)
         self._route_overrides[task.research_id] = target
-        await self._emit(on_event, self._health_event(activated))
         self._start_recovery_probe(
             research_id=task.research_id,
             engine=engine,
             on_event=on_event,
         )
+        await self._emit(on_event, self._health_event(activated))
 
     async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
         self._last_research_id = task.research_id

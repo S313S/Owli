@@ -237,13 +237,18 @@ def test_执行期第三次传输故障让路并在真实探活后复位(tmp_pat
         probe_sleep=controlled_sleep,
     )
 
+    def observe(event):
+        observed.append(event)
+        if event.outcome == "PROBE_OK":
+            raise RuntimeError("模拟健康事件展示回调失败")
+
     async def scenario() -> None:
         for _ in range(3):
-            await adapter.run(task, object(), on_event=observed.append)
+            await adapter.run(task, object(), on_event=observe)
         assert calls == ["claude", "claude", "claude"]
         assert adapter.route_override == "codex"
         assert codex.probes == 1
-        await adapter.run(task, object(), on_event=observed.append)
+        await adapter.run(task, object(), on_event=observe)
         assert calls[-1] == "codex"
 
         await probe_waiting.wait()
