@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import tempfile
+import time
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,6 +211,7 @@ async def main() -> int:
             for source_id in SOURCE_ORDER
         }
         adapter = RoutedAdapter(
+            clock=time.monotonic,
             adapters={"claude": engine, "codex": engine},
             source_tools=source_tools,
         )

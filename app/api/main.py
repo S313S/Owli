@@ -7,8 +7,10 @@ import copy
 import json
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator, Any, Awaitable, Callable, Optional
 
@@ -32,6 +34,10 @@ from app.plan.editing import (
 from app.plan.model import Plan
 from app.plan.store import PlanRevisionConflict, load_plan, save_plan
 from app.store.dao import Store
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,6 +78,8 @@ def create_app(
     auto_confirm: bool | None = None,
     engine_probe: Callable[[], dict[str, dict[str, Any]]] | None = None,
     enable_test_routes: bool | None = None,
+    session_clock: Callable[[], float] = time.monotonic,
+    session_utc_clock: Callable[[], datetime] = _utc_now,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
@@ -95,6 +103,8 @@ def create_app(
         adapter_factory=adapter_factory,
         runs_root=runs_root or ROOT / "runs",
         auto_confirm=auto_confirm,
+        session_clock=session_clock,
+        session_utc_clock=session_utc_clock,
     )
 
     @asynccontextmanager

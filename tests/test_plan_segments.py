@@ -215,7 +215,10 @@ def test_规划短流路由固定_claude_且忽略执行期覆盖():
             raise AssertionError("规划短流不得进入 Codex")
 
     claude = Claude()
-    adapter = RoutedAdapter(adapters={"claude": claude, "codex": Codex()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": claude, "codex": Codex()},
+    )
     adapter._route_overrides["r-3"] = "codex"
 
     result = asyncio.run(adapter.run_planning_segment(
@@ -246,7 +249,10 @@ def test_通用运行入口的规划任务也固定_claude_且忽略所有覆盖
             del task, ctx, on_event
             raise AssertionError("规划任务不得进入 Codex")
 
-    adapter = RoutedAdapter(adapters={"claude": Claude(), "codex": Codex()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": Claude(), "codex": Codex()},
+    )
     adapter._route_overrides["r-plan-fixed"] = "codex"
     adapter.request_alternate("r-plan-fixed")
     task = EngineTask(

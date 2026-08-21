@@ -114,7 +114,10 @@ def _generate(tmp_path: Path, skeletons: list[dict]):
 
     engine = FakeEngine(skeletons)
     store = FakeStore(tmp_path)
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
     return plan, store, engine
 
@@ -315,7 +318,10 @@ def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
     invalid["goals"][0]["acceptance"] = ["结果质量良好"]
     engine = FakeEngine([invalid])
     store = FakeStore(tmp_path)
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
 
     with pytest.raises(PlanGenerationError, match="连续 3 次") as captured:
         asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
@@ -342,7 +348,10 @@ def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_pat
 
     engine = FlakyEngine([_valid_skeleton()])
     store = FakeStore(tmp_path)
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
 
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
@@ -374,7 +383,10 @@ def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> 
 
     engine = RecordingEngine([invalid, _valid_skeleton()])
     store = FakeStore(tmp_path)
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
 
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
@@ -409,7 +421,10 @@ def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None
 
     engine = ValidationFlakyEngine([_valid_skeleton()])
     store = FakeStore(tmp_path)
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": ForbiddenEngine()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
 
     asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 

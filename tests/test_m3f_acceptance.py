@@ -60,6 +60,7 @@ def test_验收_三次传输故障让路完成并探活复位(tmp_path):
     claude = Engine("claude", failing=True)
     codex = Engine("codex")
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": claude, "codex": codex},
         resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
         probe_sleep=probe_sleep,
@@ -201,7 +202,10 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
             self.events.append(event)
 
     store = Store()
-    adapter = RoutedAdapter(adapters={"claude": Claude(), "codex": Codex()})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        adapters={"claude": Claude(), "codex": Codex()},
+    )
     plan = asyncio.run(generate_plan(
         "飞书竞品优缺点",
         store,
@@ -218,3 +222,46 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
     ]
     assert lint(plan)["errors"] == []
     assert not list(segment_root.glob("*.partial"))
+
+
+def test_验收_重放_68_分钟_api_retry_在_600_秒只触发一次():
+    import claude_agent_sdk as claude_sdk
+
+    from app.adapters.events import normalize_claude_event
+    from app.adapters.session_stall import SessionStallDetector
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    detector = SessionStallDetector(timeout_seconds=600, clock=clock)
+    event_times = [0, 60, 180, 300, 420, 600]
+    event_times.extend(range(720, 68 * 60 + 1, 120))
+    evidence = []
+    for attempt, current in enumerate(event_times, start=1):
+        clock.value = current
+        message = claude_sdk.SystemMessage(
+            subtype="api_retry",
+            data={
+                "type": "system",
+                "subtype": "api_retry",
+                "attempt": attempt,
+            },
+        )
+        event = normalize_claude_event(message, sdk=claude_sdk)[0]
+        result = detector.observe(event)
+        if result is not None:
+            evidence.append(result)
+
+    print(
+        "68 分钟 api_retry 重放："
+        f"触发次数={len(evidence)}，"
+        f"首次 elapsed={evidence[0].elapsed_seconds:.0f}s，"
+        f"retry_count={evidence[0].api_retry_count}"
+    )
+    assert len(evidence) == 1
+    assert evidence[0].elapsed_seconds == 600
+    assert evidence[0].api_retry_count == 6

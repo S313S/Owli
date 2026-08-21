@@ -172,7 +172,11 @@ async def api_client(
     from app.api.main import create_app
 
     engine = engine or RecordingEngine()
-    adapter = RoutedAdapter(adapters={"claude": engine, "codex": engine})
+    adapter = RoutedAdapter(
+        clock=lambda: 0.0,
+        utc_clock=lambda: datetime.now(timezone.utc),
+        adapters={"claude": engine, "codex": engine},
+    )
     application = create_app(
         tmp_path / "owli.db",
         SCHEMA_PATH,

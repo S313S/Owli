@@ -17,6 +17,7 @@ from app.adapters.source_mcp import (
     prepare_source_events,
     replay_source_events,
 )
+from app.adapters.session_stall import SessionStallDetector, SessionStallEvidence
 from app.config import ResilienceConfig, load_resilience_config
 
 
@@ -50,6 +51,10 @@ class EngineSelection:
     origin: str
 
 
+class SessionStallError(RuntimeError):
+    """执行期会话停滞已被主动终止，本轮必须进入 goal 重试链。"""
+
+
 def pick_engine(agent_kind: str, user_override: str | None) -> EngineSelection:
     """按 R2 选默认引擎；显式覆盖保留 origin=user。"""
 
@@ -70,6 +75,8 @@ class RoutedAdapter:
     def __init__(
         self,
         *,
+        clock: Callable[[], float],
+        utc_clock: Callable[[], datetime] | None = None,
         adapters: Mapping[str, Any] | None = None,
         source_tools: Mapping[str, Any] | None = None,
         resilience_config: ResilienceConfig | None = None,
@@ -85,6 +92,8 @@ class RoutedAdapter:
         if missing:
             raise ValueError(f"缺少引擎适配器：{','.join(sorted(missing))}")
         self._adapters = dict(adapters)
+        self._clock = clock
+        self._utc_clock = utc_clock
         self._active: Any = None
         self._route_overrides: dict[str, str] = {}
         self._breakers: dict[str, ResearchCircuitBreaker] = {}
@@ -215,9 +224,11 @@ class RoutedAdapter:
         if reset_at is None:
             delay = float(self._resilience_config.backoff_seconds(count))
         else:
+            if self._utc_clock is None:
+                raise RuntimeError("带 reset_at 的退避必须注入 UTC 时钟")
             delay = max(
                 0.0,
-                (reset_at - datetime.now(timezone.utc)).total_seconds(),
+                (reset_at - self._utc_clock()).total_seconds(),
             )
         self._backoff_counts[key] = count + 1
         self._backoff_causes[key] = self._event_cause(event) or "normal"
@@ -284,6 +295,40 @@ class RoutedAdapter:
             failover_target=transition.target if is_down else None,
             scope="new_tasks" if is_down else None,
             outcome=transition.event.value,
+            cause="transport",
+        )
+
+    @staticmethod
+    def _session_stall_event(
+        task: Any,
+        engine: str,
+        evidence: SessionStallEvidence,
+        timeout_seconds: int,
+    ) -> NormalizedEvent:
+        raw = {
+            "event": "SESSION_STALL",
+            "research_id": task.research_id,
+            "goal_id": task.goal_id,
+            "agent_id": task.agent_id,
+            "engine": engine,
+            "elapsed_seconds": evidence.elapsed_seconds,
+            "api_retry_count": evidence.api_retry_count,
+            "timeout_seconds": timeout_seconds,
+        }
+        return NormalizedEvent(
+            engine=engine,
+            thread_id=task.research_id,
+            turn_id=None,
+            item_kind=ItemKind.ERROR,
+            text=(
+                "SESSION_STALL: 连续 API retry "
+                f"{evidence.elapsed_seconds:.0f}s，主动终止会话"
+            ),
+            is_error=True,
+            raw=raw,
+            route_state="BACKOFF",
+            suspend_new_tasks=True,
+            outcome="SESSION_STALL",
             cause="transport",
         )
 
@@ -386,6 +431,17 @@ class RoutedAdapter:
         )
         adapter = self._adapters[selected_engine]
         saw_transport = False
+        stall_evidence: SessionStallEvidence | None = None
+        stall_detector = (
+            None
+            if planning
+            else SessionStallDetector(
+                timeout_seconds=(
+                    self._resilience_config.session_stall_timeout_seconds
+                ),
+                clock=self._clock,
+            )
+        )
 
         if backoff_cause is not None:
             await self._emit(on_event, NormalizedEvent(
@@ -401,7 +457,7 @@ class RoutedAdapter:
             ))
 
         async def routed_event(event: Any) -> None:
-            nonlocal saw_transport
+            nonlocal saw_transport, stall_evidence
             if self._event_cause(event) == "transport":
                 saw_transport = True
             route_state = getattr(event, "route_state", None)
@@ -418,18 +474,57 @@ class RoutedAdapter:
                     raise ValueError(f"未知限流让路目标：{target}")
                 self._route_overrides[task.research_id] = target
             await self._emit(on_event, event)
+            if stall_detector is None:
+                return
+            evidence = stall_detector.observe(event)
+            if evidence is None:
+                return
+            stall_evidence = evidence
+            saw_transport = True
+            stall_event = self._session_stall_event(
+                task,
+                selected_engine,
+                evidence,
+                self._resilience_config.session_stall_timeout_seconds,
+            )
+            self._start_backoff(task.research_id, selected_engine, stall_event)
+            await self._emit(on_event, stall_event)
+            interrupt = getattr(adapter, "interrupt", None)
+            if interrupt is not None:
+                try:
+                    interrupted = interrupt()
+                    if inspect.isawaitable(interrupted):
+                        await interrupted
+                except Exception:
+                    # 即使底层 interrupt 回报失败，本轮也必须强制失败并计数。
+                    pass
+            raise SessionStallError(stall_event.text)
 
         self._active = adapter
         prepare_source_events(task)
         try:
+            stall_error: SessionStallError | None = None
             try:
                 parameters = inspect.signature(adapter.run).parameters
                 kwargs = {"on_event": routed_event}
                 if "source_adapter" in parameters:
                     kwargs["source_adapter"] = self._source_adapter
-                result = await adapter.run(task, ctx, **kwargs)
+                try:
+                    result = await adapter.run(task, ctx, **kwargs)
+                except SessionStallError as exc:
+                    stall_error = exc
+                    result = None
             finally:
                 await replay_source_events(task, routed_event)
+            if stall_evidence is not None:
+                await self._trip_if_needed(
+                    task=task,
+                    engine=selected_engine,
+                    on_event=on_event,
+                )
+                raise stall_error or SessionStallError(
+                    "SESSION_STALL: 执行期会话已被主动终止"
+                )
             breaker = self._breaker(task.research_id)
             succeeded = bool(getattr(result, "succeeded", False))
             if saw_transport and not succeeded:

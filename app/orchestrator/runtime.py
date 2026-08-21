@@ -47,12 +47,19 @@ class RuntimeCoordinator:
         adapter_factory: AdapterFactory | None = None,
         runs_root: str | Path = validation.RUNS_ROOT,
         auto_confirm: bool | None = None,
+        session_clock: Callable[[], float],
+        session_utc_clock: Callable[[], datetime],
     ) -> None:
         self.store = store
         self.events = event_buffer
         self.researches = researches
         self.cards = cards
-        self.adapter_factory = adapter_factory or RoutedAdapter
+        self.adapter_factory = adapter_factory or (
+            lambda: RoutedAdapter(
+                clock=session_clock,
+                utc_clock=session_utc_clock,
+            )
+        )
         self.runs_root = Path(runs_root)
         self.auto_confirm = (
             os.getenv("OWLI_AUTO_CONFIRM") == "1"

@@ -104,6 +104,7 @@ def test_routed_adapter_selects_without_orchestrator_engine_branch(tmp_path):
         capability=Capability(),
     )
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": FakeAdapter("claude"), "codex": FakeAdapter("codex")}
     )
 
@@ -150,7 +151,7 @@ def test_routed_adapter_moves_only_future_tasks_to_codex_after_warning(tmp_path)
         agent_id="agent-1", agent_kind="report", validators=["file_exists"],
         capability=Capability(),
     )
-    adapter = RoutedAdapter(adapters={
+    adapter = RoutedAdapter(clock=lambda: 0.0, adapters={
         "claude": FakeAdapter("claude", warning),
         "codex": FakeAdapter("codex"),
     })
@@ -232,6 +233,7 @@ def test_执行期第三次传输故障让路并在真实探活后复位(tmp_pat
         capability=Capability(),
     )
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": claude, "codex": codex},
         resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
         probe_sleep=controlled_sleep,
@@ -306,6 +308,7 @@ def test_规划期和限流事件都不触发传输断路(tmp_path):
         claude = FakeAdapter(cause)
         codex = FakeAdapter(cause)
         adapter = RoutedAdapter(
+            clock=lambda: 0.0,
             adapters={"claude": claude, "codex": codex},
             resilience_config=ResilienceConfig(2, 3, 60, 900, 300),
             backoff_sleep=no_wait,
@@ -363,6 +366,7 @@ def test_传输事件后本轮成功不得累计断路故障(tmp_path):
     claude = Engine()
     codex = Engine()
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": claude, "codex": codex},
         resilience_config=ResilienceConfig(2, 3, 60, 900, 300),
         backoff_sleep=no_wait,
@@ -437,6 +441,7 @@ def test_并发传输故障只触发一次升级探测(tmp_path):
 
     healthy = Healthy()
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": Failing(), "codex": healthy},
         resilience_config=ResilienceConfig(1, 3, 60, 900, 300),
         backoff_sleep=no_wait,
@@ -462,6 +467,249 @@ def test_并发传输故障只触发一次升级探测(tmp_path):
         await asyncio.sleep(0)
 
     asyncio.run(scenario())
+
+
+def test_执行期会话停滞会中断_发取证事件并累计一次传输故障(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter, SessionStallError
+    from app.config import ResilienceConfig
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    observed = []
+
+    def retry_event():
+        return NormalizedEvent(
+            engine="Claude", thread_id="r-stall", turn_id="turn-1",
+            item_kind=ItemKind.THINKING, text="[session] api_retry",
+            is_error=False, raw={}, outcome="API_RETRY",
+        )
+
+    class Stalled:
+        interrupts = 0
+        calls = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            self.calls += 1
+            for elapsed in (0, 600):
+                clock.value = (self.calls - 1) * 1000 + elapsed
+                emitted = on_event(retry_event())
+                if inspect.isawaitable(emitted):
+                    await emitted
+            return SimpleNamespace(succeeded=True)
+
+        async def interrupt(self):
+            self.interrupts += 1
+
+        async def probe(self):
+            return True
+
+    class Healthy:
+        probes = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx, on_event
+            return SimpleNamespace(succeeded=True)
+
+        async def probe(self):
+            self.probes += 1
+            return True
+
+    async def no_wait(seconds):
+        del seconds
+
+    recovery_hold = asyncio.Event()
+
+    async def hold_recovery(seconds):
+        del seconds
+        await recovery_hold.wait()
+
+    stalled = Stalled()
+    healthy = Healthy()
+    adapter = RoutedAdapter(
+        clock=clock,
+        adapters={"claude": stalled, "codex": healthy},
+        resilience_config=ResilienceConfig(3, 3, 60, 900, 300, 600),
+        backoff_sleep=no_wait,
+        probe_sleep=hold_recovery,
+    )
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.md", output_format="markdown",
+        research_id="r-stall", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+
+    async def scenario():
+        for _ in range(3):
+            with pytest.raises(SessionStallError):
+                await adapter.run(task, object(), on_event=observed.append)
+
+    asyncio.run(scenario())
+
+    stalls = [event for event in observed if event.outcome == "SESSION_STALL"]
+    assert stalled.interrupts == 3
+    assert len(stalls) == 3
+    assert stalls[0].raw["elapsed_seconds"] == 600
+    assert stalls[0].raw["api_retry_count"] == 2
+    assert all(event.cause == "transport" for event in stalls)
+    assert adapter.route_override == "codex"
+    assert healthy.probes == 1
+
+
+def test_会话活动复位且限流与规划任务不触发停滞(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    def event(kind, *, outcome=None, cause=None):
+        return NormalizedEvent(
+            engine="Claude", thread_id="r", turn_id="turn",
+            item_kind=kind, text=str(outcome or kind.value), is_error=False,
+            raw={}, outcome=outcome, cause=cause,
+        )
+
+    class Engine:
+        def __init__(self, mode):
+            self.mode = mode
+            self.interrupts = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            sequences = {
+                "activity": [
+                    (0, event(ItemKind.THINKING, outcome="API_RETRY")),
+                    (590, event(ItemKind.TOOL_CALL)),
+                    (610, event(ItemKind.THINKING, outcome="API_RETRY")),
+                    (1190, event(ItemKind.THINKING, outcome="API_RETRY")),
+                ],
+                "rate_limit": [
+                    (0, event(ItemKind.THINKING, outcome="API_RETRY", cause="rate_limit")),
+                    (1200, event(ItemKind.THINKING, outcome="API_RETRY", cause="rate_limit")),
+                ],
+                "planning": [
+                    (0, event(ItemKind.THINKING, outcome="API_RETRY")),
+                    (1200, event(ItemKind.THINKING, outcome="API_RETRY")),
+                ],
+            }
+            for current, item in sequences[self.mode]:
+                clock.value = current
+                emitted = on_event(item)
+                if inspect.isawaitable(emitted):
+                    await emitted
+            return SimpleNamespace(succeeded=True)
+
+        async def interrupt(self):
+            self.interrupts += 1
+
+    async def run_case(mode, kind):
+        claude = Engine(mode)
+        adapter = RoutedAdapter(
+            clock=clock,
+            adapters={"claude": claude, "codex": Engine(mode)},
+            resilience_config=ResilienceConfig(3, 3, 60, 900, 300, 600),
+        )
+        task = EngineTask(
+            body="测试", output_path=tmp_path / f"{mode}.json",
+            output_format="json", research_id=f"r-{mode}", goal_id="goal-1",
+            agent_id="agent-1", agent_kind=kind, validators=["file_exists"],
+            capability=Capability(),
+        )
+        result = await adapter.run(task, object())
+        return result.succeeded, claude.interrupts, adapter.route_override
+
+    assert asyncio.run(run_case("activity", "report")) == (True, 0, None)
+    assert asyncio.run(run_case("rate_limit", "report")) == (True, 0, None)
+    assert asyncio.run(run_case("planning", "planning")) == (True, 0, None)
+
+
+def test_会话停滞超时值配置覆盖到_routed_adapter(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter, SessionStallError
+    from app.config import ResilienceConfig
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class Engine:
+        interrupts = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            for current in (0, 119, 120):
+                clock.value = current
+                item = NormalizedEvent(
+                    engine="Claude", thread_id="r", turn_id="t",
+                    item_kind=ItemKind.THINKING, text="api_retry",
+                    is_error=False, raw={}, outcome="API_RETRY",
+                )
+                emitted = on_event(item)
+                if inspect.isawaitable(emitted):
+                    await emitted
+            return SimpleNamespace(succeeded=True)
+
+        async def interrupt(self):
+            self.interrupts += 1
+
+        async def probe(self):
+            return False
+
+    async def no_wait(seconds):
+        del seconds
+
+    engine = Engine()
+    adapter = RoutedAdapter(
+        clock=clock,
+        adapters={"claude": engine, "codex": Engine()},
+        resilience_config=ResilienceConfig(3, 3, 60, 900, 300, 120),
+        backoff_sleep=no_wait,
+    )
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.json", output_format="json",
+        research_id="r-config-stall", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+
+    with pytest.raises(SessionStallError):
+        asyncio.run(adapter.run(task, object()))
+    assert engine.interrupts == 1
 
 
 def test_claude_probe_只认真实模型健康标记且不用工具():
@@ -589,6 +837,7 @@ def test_限流退避由适配层等待且不触发断路(tmp_path):
         agent_kind="report", validators=["file_exists"], capability=Capability(),
     )
     adapter = RoutedAdapter(
+        clock=lambda: 0.0,
         adapters={"claude": Engine(), "codex": Other()},
         resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
         backoff_sleep=backoff_sleep,
@@ -632,7 +881,7 @@ def test_人工切换请求只在适配层按_agent_尝试数生效(tmp_path):
         research_id="r-manual", goal_id="goal-1", agent_id="agent-1",
         agent_kind="report", validators=["file_exists"], capability=Capability(),
     )
-    adapter = RoutedAdapter(adapters={
+    adapter = RoutedAdapter(clock=lambda: 0.0, adapters={
         "claude": Engine("claude"), "codex": Engine("codex"),
     })
     adapter.request_alternate("r-manual", agent_id="agent-1", after_attempt=1)
