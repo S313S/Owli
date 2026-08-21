@@ -87,8 +87,27 @@ class RecordingEngine:
         self.tasks.append(task)
         if task.agent_kind == "planning":
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if task.output_path.name == "skeleton.json":
+                payload = {
+                    "goals": [
+                        {
+                            "title": goal["title"],
+                            "objective": goal["objective"],
+                            "depends_on": goal["depends_on"],
+                        }
+                        for goal in self.skeleton["goals"]
+                    ]
+                }
+            else:
+                number = int(task.output_path.stem.removeprefix("goal-"))
+                goal = self.skeleton["goals"][number - 1]
+                payload = {
+                    "deliverable": goal["deliverable"],
+                    "acceptance": goal["acceptance"],
+                    "agents": goal["agents"],
+                }
             task.output_path.write_text(
-                json.dumps(self.skeleton, ensure_ascii=False), encoding="utf-8"
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
             )
         else:
             if task.agent_kind == self.block_kind:
@@ -212,7 +231,7 @@ async def test_POST_先生成计划停_awaiting_review_批准前不执行_agent(
     assert plan.json()["data"]["status"] == "awaiting_review"
     assert state["progress"]["done"] == 0
     assert state["progress"]["total"] == 3
-    assert [task.agent_kind for task in engine.tasks] == ["planning"]
+    assert [task.agent_kind for task in engine.tasks] == ["planning"] * 4
     assert application.state.runtime.scheduler_for(research_id) is None
     assert state["cards"]
     assert {card["card_type"] for card in state["cards"]} == {"QUESTION"}
@@ -260,7 +279,8 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
         replay = await application.state.event_buffer.replay_after(research_id, None)
 
     assert [task.agent_kind for task in engine.tasks] == [
-        "planning", "data_collection", "reliability_audit", "report_writing"
+        "planning", "planning", "planning", "planning",
+        "data_collection", "reliability_audit", "report_writing",
     ]
     assert completed["progress"]["done"] == 3
     assert plan["status"] == "approved" and plan["approved_at"]
@@ -351,7 +371,9 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
         engine.release.set()
         for _ in range(20):
             await asyncio.sleep(0)
-        assert [task.agent_kind for task in engine.tasks] == ["planning", "data_collection"]
+        assert [task.agent_kind for task in engine.tasks] == [
+            "planning", "planning", "planning", "planning", "data_collection"
+        ]
 
         resumed = await client.post(
             f"/api/researches/{research_id}/resume",
@@ -508,7 +530,9 @@ async def test_stop_接_scheduler_终止且在跑结果不再启动后续(tmp_pa
         snapshot = await client.get(f"/api/researches/{research_id}")
 
     assert snapshot.json()["data"]["status"] == "stopped"
-    assert [task.agent_kind for task in engine.tasks] == ["planning", "data_collection"]
+    assert [task.agent_kind for task in engine.tasks] == [
+        "planning", "planning", "planning", "planning", "data_collection"
+    ]
 
 
 @async_test

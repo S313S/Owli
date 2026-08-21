@@ -286,3 +286,47 @@ def test_规则18条件式不认字面单选_不足以支撑与即算达标同�
     ]
 
     assert not any("[规则18]" in item for item in lint(plan)["errors"])
+
+
+def test_跨_goal_deliverable_与_agent_output_路径冲突报_error() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["goals"][1]["deliverable"]["path"] = plan["goals"][0]["agents"][0]["output"]["path"]
+
+    errors = lint(plan)["errors"]
+    assert any(
+        item.startswith("[规则19]")
+        and "goal-1" in item
+        and "goal-2" in item
+        for item in errors
+    )
+
+
+def test_同_goal_最终_agent_与_deliverable_同路径是唯一合法重复() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["agents"][0]["output"]["path"] = goal["deliverable"]["path"]
+
+    assert not any("[规则19]" in item for item in lint(plan)["errors"])
+
+
+def test_report_writer_必须同时具备双向角标校验器() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    agent = plan["goals"][2]["agents"][0]
+    agent["capability"]["profile"] = "report-writer"
+    agent["output"]["validators"] = [
+        "file_exists",
+        "citation_marks_resolvable",
+    ]
+
+    errors = lint(plan)["errors"]
+    assert any(
+        item.startswith("[规则20]")
+        and "no_orphan_citation" in item
+        for item in errors
+    )

@@ -10,17 +10,16 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from app.adapters import validation
-from app.adapters.capability import Capability, FileSystemScope
-from app.adapters.contracts import EngineTask
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.routing import pick_engine
+from app.config import ResilienceConfig, load_resilience_config
 from app.plan.lint import lint
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan
 from app.plan.question import make_questions
+from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
 from app.sources.registry import planning_catalog
 
 
-MAX_ATTEMPTS = 3
 _FORMATS = {"table", "markdown", "excel", "json"}
 
 
@@ -63,46 +62,82 @@ def _classify(name: str, task: str) -> tuple[str, str]:
         raise ValueError(f"未知 agent 职能名称：{name}") from exc
 
 
-def _planning_prompt(query: str, output_path: Path, errors: list[str]) -> str:
+def _skeleton_prompt(query: str, errors: list[str]) -> str:
     retry = ""
     if errors:
-        retry = "\n上一轮 plan_lint 错误原文（逐条修正）：\n" + "\n".join(errors)
-    sources = planning_catalog()
-    source_lines = "；".join(
-        f"{item.display_name}（name={item.collector_name}，source={item.source_id}："
-        f"{item.capability_description}；{item.prompt_hint}）"
-        for item in sources
-    )
-    source_names = "、".join(item.collector_name for item in sources)
+        retry = "\n上一轮整计划 lint 错误原文（逐条修正结构）：\n" + "\n".join(errors)
     return (
-        f"目标：为用户原始需求《{query}》生成一棵 3–7 个 goal 的三层计划骨架，"
-        f"写入 {output_path}；"
-        "按证据链自然断点拆分，每个 goal 同时满足独立产物、验收可判定、值得干预、失败可局部化。\n"
-        f"方法要点：信息源能力只取共享注册表：{source_lines}。"
-        "飞书竞品优缺点类调研优先安排至少三个不同 source 的采集 agent；"
-        "每个采集 agent 的 name 唯一确定 capability.sources 与 source.* 工具，必须自洽。"
+        f"目标：为《{query}》生成 3–7 个 goal 的短骨架。\n"
+        "方法要点：按证据链自然断点拆分；goal 之间只用 depends_on 表达有向无环依赖，"
         "禁止按搜索/阅读/总结工种拆 goal。\n"
-        f"产物结构：只输出 JSON object 到 {output_path}，顶层只能有 goals。每个 goal 只能含 "
-        "title、objective、depends_on、deliverable、acceptance、agents；agents 每项只能含 "
-        "name、task，name 应从规划、计划仲裁、可靠度审计、交叉验证、一致性检查、报告撰写、"
-        f"摘要、标签、API 数据抓取、{source_names}、MediaCrawler、浏览器自动化、"
-        "代码执行、Excel 生成、数据清洗中选。"
-        "depends_on 用 goal-<n>；deliverable 含 format/path/description，format 只能取 "
-        "table、markdown、excel、json，path 只写文件名；"
-        "不得输出 id、engine、capability、prompt、状态、重试或时间字段。\n"
-        "边界与降级：信息不足时做明确假设并继续；仍须保留 3–7 个 goal、每个 goal 至少一个 agent、"
-        "acceptance 必须是字符串数组，每个元素恰是一条独立可判定条件"
-        "（含数量、字段、文件或集合等判定依据），禁止把多条并成一个字符串；"
-        "依赖上游产物的分析类 goal，acceptance 不得按实体写死最小条数"
-        "（如「每个竞品至少 2 条独立证据」——上游数据规模无契约保证，"
-        "数据不足时永不可满足），必须写成条件式：数据不足时在产物中"
-        "明确标注孤证或缺口即算达标；"
-        "采集类 agent（API 数据抓取、浏览器自动化）的 JSON 产物顶层必须是数组、"
-        "每条含 permalink 与 fetched_at（系统会按此硬校验），其 deliverable 描述与 "
-        "acceptance 不得写成「JSON object」或顶层对象结构；"
-        "最终结构化结论的 summary 固定填写‘计划骨架已写入’。"
-        f"{retry}"
+        "产物结构：只输出 JSON object，顶层只能有 goals；每个 goal 只能含 title、"
+        "objective、depends_on。depends_on 只能引用在它之前的 goal-<n>。\n"
+        "边界与降级：信息不足时做明确假设并继续，不输出 Markdown 围栏、说明或任何"
+        f"执行字段。{retry}"
     )
+
+
+def _goal_prompt(
+    query: str,
+    goal_id: str,
+    scaffold: Mapping[str, Any],
+    errors: list[str],
+) -> str:
+    retry = ""
+    if errors:
+        retry = "\n上一轮整计划 lint 错误原文（只修正本 goal 结构）：\n" + "\n".join(errors)
+    sources = "、".join(
+        f"{item.display_name}（{item.collector_name}）"
+        for item in planning_catalog()
+    )
+    return (
+        f"目标：扩展《{query}》中的 {goal_id}；骨架字段固定为："
+        f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
+        "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
+        f"注册表选择：{sources}；采集 agent 的 name 必须唯一确定 capability.sources "
+        "与 source.* 工具。\n"
+        "产物结构：只输出一个 JSON object，只含 deliverable、acceptance、agents。"
+        "deliverable 含 format/path/description，path 只写文件名；acceptance 是逐条"
+        "可判定字符串数组；agents 每项只含 name、task，不得输出 id、engine、"
+        "capability、prompt、状态、重试或时间字段。\n"
+        "边界与降级：采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
+        "HN 查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、"
+        "hitsPerPage=1000；"
+        "数据不足时用结构化缺口口径，不得写死上游无法保证的实体最小条数；"
+        f"不输出 Markdown 围栏或说明。{retry}"
+    )
+
+
+def _skeleton_scaffolds(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, Mapping) or not isinstance(value.get("goals"), list):
+        raise ValueError("骨架顶层必须是含 goals 数组的 object")
+    goals = value["goals"]
+    if not 3 <= len(goals) <= 7:
+        raise ValueError(f"goal 数必须在 3–7，实际为 {len(goals)}")
+    result: list[dict[str, Any]] = []
+    for index, raw in enumerate(goals, start=1):
+        goal_id = f"goal-{index}"
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"{goal_id} 骨架必须是 object")
+        title = str(raw.get("title", "")).strip()
+        objective = str(raw.get("objective", "")).strip()
+        depends_on = raw.get("depends_on", [])
+        if not title or not objective:
+            raise ValueError(f"{goal_id} 的 title/objective 不能为空")
+        if not isinstance(depends_on, list) or not all(
+            isinstance(item, str) for item in depends_on
+        ):
+            raise ValueError(f"{goal_id}.depends_on 必须是字符串数组")
+        allowed = {f"goal-{number}" for number in range(1, index)}
+        unknown = set(depends_on) - allowed
+        if unknown:
+            raise ValueError(f"{goal_id}.depends_on 含非法前向或未知依赖：{sorted(unknown)}")
+        result.append({
+            "title": title,
+            "objective": objective,
+            "depends_on": list(depends_on),
+        })
+    return result
 
 
 def _capability(
@@ -186,7 +221,12 @@ def _output(
     else:
         validators = ["file_exists", "sections_exist:结论"]
         if agent_kind in {"report", "report_writing"}:
-            validators = ["file_exists", "sections_exist:结论,信息源"]
+            validators = [
+                "file_exists",
+                "sections_exist:结论,信息源",
+                "citation_marks_resolvable",
+                "no_orphan_citation",
+            ]
         result = {"format": "markdown", "path": f"{base}.md", "validators": validators}
     if target is not None:
         if target["format"] != result["format"]:
@@ -452,20 +492,6 @@ def _build_agent(
     }
 
 
-def _ctx(path: Path, research_id: str, store: Any) -> validation.Ctx:
-    return validation.Ctx(
-        output_path=path,
-        output_format="json",
-        research_id=research_id,
-        goal_id="goal-1",
-        agent_id="plan-generator",
-        read_text=lambda: path.read_text(encoding="utf-8"),
-        read_json=lambda: json.loads(path.read_text(encoding="utf-8")),
-        store=store,
-        source_domains=frozenset(),
-    )
-
-
 async def _emit(store: Any, event: NormalizedEvent) -> None:
     sink = getattr(store, "on_plan_event", None)
     if sink is None:
@@ -488,28 +514,13 @@ def _retry_event(research_id: str, attempt: int, errors: list[str]) -> Normalize
     )
 
 
-def _adapter_error(result: Any) -> str:
-    messages: list[str] = []
-    for field in ("engine_error", "conclusion_error"):
-        value = getattr(result, field, None)
-        if value:
-            messages.append(str(value))
-    report = getattr(result, "validation", None)
-    for item in getattr(report, "results", []):
-        verdict = getattr(getattr(item, "verdict", None), "value", None)
-        if verdict == "pass":
-            continue
-        detail = str(getattr(item, "message", "")).strip()
-        offenders = [str(value) for value in getattr(item, "offenders", [])]
-        if offenders:
-            detail = f"{detail}；offenders={offenders}"
-        if detail:
-            messages.append(detail)
-    return "；".join(messages) or "规划产物与结构化结论未同时通过"
-
-
-async def generate_plan(query: str, store: Any, adapter: Any) -> Plan:
-    """从待规划报告生成、校验并原子保存 awaiting_review 计划。"""
+async def generate_plan(
+    query: str,
+    store: Any,
+    adapter: Any,
+    resilience_config: ResilienceConfig | None = None,
+) -> Plan:
+    """按骨架、逐 goal、整计划 lint 三阶段生成并原子保存计划。"""
 
     normalized_query = query.strip()
     if not normalized_query:
@@ -521,48 +532,65 @@ async def generate_plan(query: str, store: Any, adapter: Any) -> Plan:
     extra = report.get("extra") if isinstance(report.get("extra"), Mapping) else {}
     timestamp = str(extra.get("plan_generated_at") or report["created_at"])
     runs_root = Path(getattr(store, "runs_root", validation.RUNS_ROOT))
-    skeleton_path = runs_root / research_id / "goals" / "goal-1" / "plan-skeleton.json"
-    skeleton_path.parent.mkdir(parents=True, exist_ok=True)
+    config = resilience_config or load_resilience_config()
+    workspace = PlanSegmentWorkspace(runs_root / research_id, config)
     errors: list[str] = []
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        # 每轮起跑前清残留骨架：规划工具集只有 fs.write（无 Read），而
-        # Write/Edit 覆盖已存在文件要求先 Read，残留会把所有重试轮卡死。
-        skeleton_path.unlink(missing_ok=True)
-        task = EngineTask(
-            body=_planning_prompt(normalized_query, skeleton_path, errors),
-            output_path=skeleton_path,
-            output_format="json",
-            research_id=research_id,
-            goal_id="goal-1",
-            agent_id="plan-generator",
-            agent_kind="planning",
-            validators=["file_exists"],
-            capability=Capability(
-                profile="custom",
-                tools=("fs.write",),
-                fs=FileSystemScope(write=("goals/goal-1/**",)),
-            ),
-        )
-        result = await adapter.run(
-            task,
-            _ctx(skeleton_path, research_id, store),
-            on_event=lambda event: _emit(store, event),
-        )
-        if not bool(getattr(result, "succeeded", False)):
-            errors = [f"[规划双腿判定] {_adapter_error(result)}"]
-            if attempt < MAX_ATTEMPTS:
-                await _emit(store, _retry_event(research_id, attempt + 1, errors))
-            continue
+    for attempt in range(1, config.plan_segment_retries + 1):
         try:
-            skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+            skeleton = await workspace.generate(
+                "skeleton",
+                _skeleton_prompt(normalized_query, errors),
+                adapter,
+                on_retry=lambda retry, error: _emit(
+                    store,
+                    _retry_event(
+                        research_id,
+                        retry,
+                        [f"[段 skeleton] {error}"],
+                    ),
+                ),
+            )
+            scaffolds = _skeleton_scaffolds(skeleton)
+            expanded_goals: list[dict[str, Any]] = []
+            for index, scaffold in enumerate(scaffolds, start=1):
+                goal_id = f"goal-{index}"
+                expansion = await workspace.generate(
+                    goal_id,
+                    _goal_prompt(normalized_query, goal_id, scaffold, errors),
+                    adapter,
+                    on_retry=lambda retry, error, current=goal_id: _emit(
+                        store,
+                        _retry_event(
+                            research_id,
+                            retry,
+                            [f"[段 {current}] {error}"],
+                        ),
+                    ),
+                )
+                expanded_goals.append({
+                    "title": scaffold["title"],
+                    "objective": scaffold["objective"],
+                    "depends_on": list(scaffold["depends_on"]),
+                    "deliverable": expansion.get("deliverable"),
+                    "acceptance": expansion.get("acceptance"),
+                    "agents": expansion.get("agents"),
+                })
+            assembled = {"goals": expanded_goals}
+            assembled_path = workspace.root / "assembled.json"
+            assembled_path.write_text(
+                json.dumps(assembled, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             plan = _build_plan(
-                skeleton,
+                assembled,
                 query=normalized_query,
                 research_id=research_id,
                 timestamp=timestamp,
             )
             errors = lint(plan)["errors"]
+        except PlanSegmentError as exc:
+            raise PlanGenerationError(str(exc)) from exc
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             errors = [f"[结构] {type(exc).__name__}: {exc}"]
         if not errors:
@@ -570,11 +598,12 @@ async def generate_plan(query: str, store: Any, adapter: Any) -> Plan:
                 research_id, snapshot=plan.to_dict(), expected_rev=0
             )
             return plan
-        if attempt < MAX_ATTEMPTS:
+        if attempt < config.plan_segment_retries:
             await _emit(store, _retry_event(research_id, attempt + 1, errors))
 
     raise PlanGenerationError(
-        "计划生成连续 3 次仍有 error，计划未保存：\n" + "\n".join(errors)
+        f"计划生成连续 {config.plan_segment_retries} 次仍有 error，计划未保存：\n"
+        + "\n".join(errors)
     )
 
 

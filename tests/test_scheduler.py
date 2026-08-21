@@ -192,7 +192,7 @@ def test_入口防御性拒绝_goal_环和_agent_环():
 
 
 @async_test
-async def test_C3_第5次发卡_不阻塞第6次_第11次换引擎_20次失败():
+async def test_C3_第5次发卡_只发适配层覆盖请求且_scheduler_不存倾向():
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
     attempts: list[tuple[int, str]] = []
@@ -227,8 +227,14 @@ async def test_C3_第5次发卡_不阻塞第6次_第11次换引擎_20次失败()
     await running
 
     assert attempts[9] == (10, "claude")
-    assert attempts[10] == (11, "codex")
-    assert attempts[-1] == (20, "codex")
+    assert attempts[10] == (11, "claude")
+    assert attempts[-1] == (20, "claude")
+    request = next(item for item in events if item["type"] == "route_override_requested")
+    assert request["data"] == {
+        "scope": "agent", "agent_id": "agent-1", "after_attempt": 10,
+    }
+    assert not hasattr(scheduler, "future_engine")
+    assert not hasattr(scheduler, "_switch_targets")
     assert scheduler.goal_statuses["goal-1"] == "failed"
 
 
@@ -331,7 +337,7 @@ async def test_goal_推进12小时触发总闸且忽略迟到结果():
 
 
 @async_test
-async def test_BACKOFF_只挂起同引擎新任务_timer到点恢复():
+async def test_BACKOFF_scheduler_只投影事件不持有等待状态():
     from app.adapters.events import ItemKind, NormalizedEvent
     from app.adapters.ratelimit import RouteState
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
@@ -355,18 +361,18 @@ async def test_BACKOFF_只挂起同引擎新任务_timer到点恢复():
     first_agent = make_agent("agent-a", "goal-1")
     second_agent = make_agent("agent-b", "goal-1")
     second_agent["depends_on"] = ["agent-a"]
+    events = []
     scheduler = Scheduler(
         plan_with_goals(goal(1, agents=[first_agent, second_agent])),
-        run_task, lambda _: None,
+        run_task, events.append,
         fake_time.clock, fake_time.timer,
     )
     await scheduler.start()
 
-    assert calls == ["agent-a"]
-    await fake_time.advance(seconds=59)
-    assert calls == ["agent-a"]
-    await fake_time.advance(seconds=1)
     assert calls == ["agent-a", "agent-b"]
+    assert any(item["type"] == "route_update" for item in events)
+    assert not hasattr(scheduler, "_gated_engines")
+    assert not hasattr(scheduler, "_backoff_counts")
 
 
 @async_test
@@ -401,14 +407,13 @@ async def test_R8_发额外额度卡_15分钟默认切换并标记过期():
     cards = card_events(events, "EXTRA_QUOTA_CONFIRM")
     assert len(cards) == 1
     assert cards[0]["deadline"] == "2026-08-19T00:15:00+00:00"
-    assert calls == ["agent-a"]
+    assert calls == ["agent-a", "agent-b"]
 
     await fake_time.advance(minutes=15)
 
     updates = card_events(events, "EXTRA_QUOTA_CONFIRM")
     assert updates[-1]["status"] == "expired_defaulted"
-    assert scheduler.future_engine == "codex"
-    assert calls == ["agent-a", "agent-b"]
+    assert any(item["type"] == "route_override_requested" for item in events)
 
 
 @async_test
@@ -540,7 +545,7 @@ async def test_stop_进入终态且不再起新任务():
 
 
 @async_test
-async def test_WARN_挂起原引擎并让后续新任务走_future_engine():
+async def test_WARN_scheduler_只展示且不改后续任务偏好():
     from app.adapters.ratelimit import RouteDecision, RouteState
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
@@ -566,12 +571,12 @@ async def test_WARN_挂起原引擎并让后续新任务走_future_engine():
     )
     await scheduler.start()
 
-    assert engines == ["claude", "codex"]
-    assert scheduler.future_engine == "codex"
+    assert engines == ["claude", "claude"]
+    assert not hasattr(scheduler, "future_engine")
 
 
 @async_test
-async def test_FAILOVER_只更新后续让路目标_不改在跑任务结果():
+async def test_FAILOVER_scheduler_只展示_让路由适配层负责():
     from app.adapters.ratelimit import RouteDecision, RouteState
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
@@ -597,12 +602,12 @@ async def test_FAILOVER_只更新后续让路目标_不改在跑任务结果():
     )
     await scheduler.start()
 
-    assert seen == ["claude", "codex"]
+    assert seen == ["claude", "claude"]
     assert scheduler.agent_statuses == {"agent-a": "done", "agent-b": "done"}
 
 
 @async_test
-async def test_BACKOFF_同一_agent_重试也必须等待_timer():
+async def test_BACKOFF_同一_agent_等待不由_scheduler_负责():
     from app.adapters.ratelimit import RouteDecision, RouteState
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
@@ -624,9 +629,6 @@ async def test_BACKOFF_同一_agent_重试也必须等待_timer():
         fake_time.clock, fake_time.timer,
     )
     await scheduler.start()
-    assert calls == [1]
-
-    await fake_time.advance(seconds=60)
     assert calls == [1, 2]
 
 
@@ -687,4 +689,9 @@ async def test_R8_回答不接受计费_立即让路而不是误判为接受():
         card["card_id"], {"choice": "不接受，切换引擎"}
     )
 
-    assert scheduler.future_engine == "codex"
+    assert any(
+        item["type"] == "route_override_requested"
+        and item["data"]["scope"] == "research"
+        for item in events
+    )
+    assert not hasattr(scheduler, "future_engine")

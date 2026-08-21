@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import inspect
+import json
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping
 
 from app.adapters.circuitbreaker import CircuitTransition, ResearchCircuitBreaker
+from app.adapters.contracts import PlanningSegmentRequest, PlanningSegmentResult
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.source_mcp import (
     SourceToolAdapter,
@@ -71,6 +74,7 @@ class RoutedAdapter:
         source_tools: Mapping[str, Any] | None = None,
         resilience_config: ResilienceConfig | None = None,
         probe_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        backoff_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if adapters is None:
             from app.adapters.claude import ClaudeAdapter
@@ -87,7 +91,14 @@ class RoutedAdapter:
         self._last_research_id: str | None = None
         self._resilience_config = resilience_config or load_resilience_config()
         self._probe_sleep = probe_sleep
+        self._backoff_sleep = backoff_sleep
         self._recovery_tasks: set[asyncio.Task[None]] = set()
+        self._backoff_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._backoff_counts: dict[tuple[str, str], int] = {}
+        self._quota_gates: dict[str, asyncio.Event] = {}
+        self._manual_research_alternates: set[str] = set()
+        self._manual_agent_alternates: dict[tuple[str, str], int] = {}
+        self._agent_runs: dict[tuple[str, str], int] = {}
         self._source_adapter = SourceToolAdapter(source_tools)
 
     @property
@@ -115,6 +126,96 @@ class RoutedAdapter:
             breaker = ResearchCircuitBreaker(research_id, self._resilience_config)
             self._breakers[research_id] = breaker
         return breaker
+
+    @staticmethod
+    def _alternate(engine: str) -> str:
+        return next(item for item in _ENGINES if item != engine)
+
+    def request_alternate(
+        self,
+        research_id: str,
+        *,
+        agent_id: str | None = None,
+        after_attempt: int = 0,
+    ) -> None:
+        """记录人工让路意图；具体目标仍只由适配层根据当前默认路由推导。"""
+
+        if agent_id is None:
+            self._manual_research_alternates.add(research_id)
+            return
+        self._manual_agent_alternates[(research_id, agent_id)] = max(
+            0, int(after_attempt)
+        )
+
+    def release_route_gate(self, research_id: str) -> None:
+        gate = self._quota_gates.pop(research_id, None)
+        if gate is not None:
+            gate.set()
+
+    async def _await_route_gates(self, research_id: str, engine: str) -> bool:
+        backoff_released = False
+        quota_gate = self._quota_gates.get(research_id)
+        if quota_gate is not None:
+            await quota_gate.wait()
+        key = (research_id, engine)
+        backoff = self._backoff_tasks.get(key)
+        if backoff is not None:
+            await backoff
+            backoff_released = True
+            if self._backoff_tasks.get(key) is backoff:
+                self._backoff_tasks.pop(key, None)
+        return backoff_released
+
+    @staticmethod
+    def _reset_at(event: Any) -> datetime | None:
+        raw = getattr(event, "raw", None)
+        raw = raw if isinstance(raw, Mapping) else {}
+        info = raw.get("rate_limit_info") or raw.get("rateLimitInfo") or raw
+        value = next((
+            info.get(name)
+            for name in (
+                "resets_at", "resetsAt", "reset_at", "resetAt",
+                "five_hour_resets_at", "fiveHourResetsAt",
+            )
+            if info.get(name) is not None
+        ), None)
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
+
+    def _is_rate_limit(self, event: Any) -> bool:
+        if self._event_cause(event) == "rate_limit":
+            return True
+        raw = getattr(event, "raw", None)
+        return isinstance(raw, Mapping) and (
+            raw.get("api_error_status") == 429
+            or "rate_limit_info" in raw
+            or "rateLimitInfo" in raw
+        )
+
+    def _start_backoff(self, research_id: str, engine: str, event: Any) -> None:
+        key = (research_id, engine)
+        current = self._backoff_tasks.get(key)
+        if current is not None and not current.done():
+            return
+        count = self._backoff_counts.get(key, 0)
+        reset_at = self._reset_at(event)
+        if reset_at is None:
+            delay = float(self._resilience_config.backoff_seconds(count))
+        else:
+            delay = max(
+                0.0,
+                (reset_at - datetime.now(timezone.utc)).total_seconds(),
+            )
+        self._backoff_counts[key] = count + 1
+        self._backoff_tasks[key] = asyncio.create_task(self._backoff_sleep(delay))
 
     @staticmethod
     def _event_cause(event: Any) -> str | None:
@@ -229,14 +330,49 @@ class RoutedAdapter:
     async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
         self._last_research_id = task.research_id
         selection = pick_engine(task.agent_kind, task.user_override)
-        selected_engine = self._route_overrides.get(task.research_id, selection.engine)
+        run_key = (task.research_id, task.agent_id)
+        run_number = self._agent_runs.get(run_key, 0) + 1
+        self._agent_runs[run_key] = run_number
+        after_attempt = self._manual_agent_alternates.get(run_key)
+        manual_alternate = (
+            task.research_id in self._manual_research_alternates
+            or (after_attempt is not None and run_number > after_attempt)
+        )
+        preferred = (
+            self._alternate(selection.engine) if manual_alternate else selection.engine
+        )
+        selected_engine = self._route_overrides.get(task.research_id, preferred)
+        backoff_released = await self._await_route_gates(
+            task.research_id, selected_engine
+        )
         adapter = self._adapters[selected_engine]
         saw_transport = False
+
+        if backoff_released:
+            await self._emit(on_event, NormalizedEvent(
+                engine=selected_engine,
+                thread_id=task.research_id,
+                turn_id=None,
+                item_kind=ItemKind.THINKING,
+                text="退避结束",
+                is_error=False,
+                raw={"event": "BACKOFF_RELEASED"},
+                route_state="CONTINUE",
+                outcome="BACKOFF_RELEASED",
+                cause="rate_limit",
+            ))
 
         async def routed_event(event: Any) -> None:
             nonlocal saw_transport
             if self._event_cause(event) == "transport":
                 saw_transport = True
+            route_state = getattr(event, "route_state", None)
+            state_value = getattr(route_state, "value", route_state)
+            if state_value == "BACKOFF" and self._is_rate_limit(event):
+                self._start_backoff(task.research_id, selected_engine, event)
+            reason = str(getattr(event, "reason", None) or getattr(event, "text", ""))
+            if state_value == "WARN" and "继续跑会计费" in reason:
+                self._quota_gates.setdefault(task.research_id, asyncio.Event())
             target = getattr(event, "failover_target", None)
             scope = getattr(event, "scope", None)
             if target is not None and scope == "new_tasks":
@@ -270,6 +406,99 @@ class RoutedAdapter:
             return result
         finally:
             self._active = None
+
+    async def run_planning_segment(
+        self,
+        request: PlanningSegmentRequest,
+        *,
+        on_text: Any = None,
+    ) -> PlanningSegmentResult:
+        """规划短流固定走 Claude；执行期断路覆盖对此入口无效。"""
+
+        generator = getattr(self._adapters["claude"], "generate_plan_segment", None)
+        if generator is None:
+            if request.output_path is None:
+                return PlanningSegmentResult(
+                    text="",
+                    completed=False,
+                    error="规划短流请求缺少落盘路径",
+                )
+            from app.adapters import validation
+            from app.adapters.capability import Capability, FileSystemScope
+            from app.adapters.contracts import EngineTask
+
+            task = EngineTask(
+                body=request.prompt,
+                output_path=request.output_path,
+                output_format="json",
+                research_id=request.research_id,
+                goal_id="plan-segments",
+                agent_id=f"plan-{request.segment_name}",
+                agent_kind="planning",
+                validators=["file_exists"],
+                capability=Capability(
+                    profile="custom",
+                    tools=("fs.write",),
+                    fs=FileSystemScope(write=("plan-segments/**",)),
+                ),
+            )
+            ctx = validation.Ctx(
+                output_path=request.output_path,
+                output_format="json",
+                research_id=request.research_id,
+                goal_id="plan-segments",
+                agent_id=f"plan-{request.segment_name}",
+                read_text=lambda: request.output_path.read_text(encoding="utf-8"),
+                read_json=lambda: json.loads(
+                    request.output_path.read_text(encoding="utf-8")
+                ),
+                store=None,
+                source_domains=frozenset(),
+            )
+            result = await self._adapters["claude"].run(task, ctx)
+            text = (
+                request.output_path.read_text(encoding="utf-8")
+                if request.output_path.is_file()
+                else ""
+            )
+            if on_text is not None and text:
+                callback_result = on_text(text)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+            transport = any(
+                self._event_cause(event) == "transport"
+                for event in getattr(result, "events", [])
+            )
+            error = (
+                getattr(result, "engine_error", None)
+                or getattr(result, "conclusion_error", None)
+            )
+            if not error:
+                details: list[str] = []
+                report = getattr(result, "validation", None)
+                for item in getattr(report, "results", []):
+                    verdict = getattr(getattr(item, "verdict", None), "value", None)
+                    if verdict == "pass":
+                        continue
+                    message = str(getattr(item, "message", "")).strip()
+                    offenders = [str(value) for value in getattr(item, "offenders", [])]
+                    if offenders:
+                        message = f"{message}；offenders={offenders}"
+                    if message:
+                        details.append(message)
+                error = "；".join(details) or None
+            return PlanningSegmentResult(
+                text=text,
+                completed=bool(getattr(result, "succeeded", False)),
+                transport_interrupted=transport,
+                error=str(error) if error else None,
+            )
+        result = generator(request, on_text=on_text)
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, PlanningSegmentResult):
+            raise TypeError("规划短流适配器必须返回 PlanningSegmentResult")
+        return result
 
     async def call_source(
         self,

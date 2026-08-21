@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 18 条阻断校验和 7 类质量提示。"""
+"""计划树保存与批准前的 20 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -539,6 +539,72 @@ def _rule_18(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _rule_19(goals: list[dict[str, Any]]) -> list[str]:
+    """整计划产物路径唯一；只豁免本 goal 最终 agent 对齐 deliverable。"""
+
+    owners: dict[str, list[tuple[str, str]]] = {}
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        deliverable_path = str(goal.get("deliverable", {}).get("path", "")).strip()
+        if deliverable_path:
+            normalized = str(PurePosixPath(deliverable_path.replace("\\", "/")))
+            owners.setdefault(normalized, []).append((goal_id, "deliverable"))
+        agents = list(goal.get("agents", []))
+        for index, agent in enumerate(agents):
+            path = str(agent.get("output", {}).get("path", "")).strip()
+            if not path:
+                continue
+            normalized = str(PurePosixPath(path.replace("\\", "/")))
+            role = (
+                "final-agent"
+                if index == len(agents) - 1
+                else f"agent:{agent.get('agent_id')}"
+            )
+            owners.setdefault(normalized, []).append((goal_id, role))
+
+    messages: list[str] = []
+    for path, path_owners in owners.items():
+        allowed = (
+            len(path_owners) == 2
+            and path_owners[0][0] == path_owners[1][0]
+            and {item[1] for item in path_owners} == {"deliverable", "final-agent"}
+        )
+        if len(path_owners) > 1 and not allowed:
+            messages.append(
+                f"[规则19] 整计划产物路径冲突：{path}；owners={path_owners}"
+            )
+    return messages
+
+
+def _rule_20(goals: list[dict[str, Any]]) -> list[str]:
+    """声明引用校验或信息源章节的输出必须验证角标双向闭合。"""
+
+    required = {"citation_marks_resolvable", "no_orphan_citation"}
+    messages: list[str] = []
+    for goal, agent in _agents(goals):
+        specifications = [
+            str(item) for item in agent.get("output", {}).get("validators", [])
+        ]
+        validators = {
+            str(item).partition(":")[0]
+            for item in specifications
+        }
+        citation_signal = bool(required & validators) or any(
+            item.partition(":")[0] == "sections_exist"
+            and "信息源" in item.partition(":")[2].split(",")
+            for item in specifications
+        )
+        if not citation_signal:
+            continue
+        missing = sorted(required - validators)
+        if missing:
+            messages.append(
+                f"[规则20] {goal.get('goal_id')}/{agent.get('agent_id')} "
+                f"引用输出缺少双向角标校验器：{missing}"
+            )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -623,4 +689,6 @@ def lint(
     errors.extend(_rule_16(goals))
     errors.extend(_rule_17(goals))
     errors.extend(_rule_18(goals))
+    errors.extend(_rule_19(goals))
+    errors.extend(_rule_20(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

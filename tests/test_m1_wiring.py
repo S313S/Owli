@@ -294,11 +294,15 @@ def test_规划期和限流事件都不触发传输断路(tmp_path):
             return True
 
     async def exercise(kind: str, cause: str) -> tuple[int, int, str | None]:
+        async def no_wait(seconds: float) -> None:
+            del seconds
+
         claude = FakeAdapter(cause)
         codex = FakeAdapter(cause)
         adapter = RoutedAdapter(
             adapters={"claude": claude, "codex": codex},
             resilience_config=ResilienceConfig(2, 3, 60, 900, 300),
+            backoff_sleep=no_wait,
         )
         task = EngineTask(
             body="测试", output_path=tmp_path / f"{kind}-{cause}.json",
@@ -393,6 +397,107 @@ raise SystemExit(7)
     ).probe())
 
     assert healthy is True
+
+
+def test_限流退避由适配层等待且不触发断路(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    calls = []
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+
+    async def backoff_sleep(seconds):
+        assert seconds == 60
+        waiting.set()
+        await release.wait()
+
+    class Engine:
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            calls.append("claude")
+            if len(calls) == 1:
+                event = NormalizedEvent(
+                    engine="claude", thread_id="t", turn_id="u",
+                    item_kind=ItemKind.ERROR, text="429", is_error=True,
+                    raw={"api_error_status": 429}, route_state="BACKOFF",
+                    suspend_new_tasks=True, cause="rate_limit",
+                )
+                result = on_event(event)
+                if inspect.isawaitable(result):
+                    await result
+            return SimpleNamespace(succeeded=True)
+
+    class Other:
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx, on_event
+            calls.append("codex")
+            return SimpleNamespace(succeeded=True)
+
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.md", output_format="markdown",
+        research_id="r-backoff", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+    adapter = RoutedAdapter(
+        adapters={"claude": Engine(), "codex": Other()},
+        resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
+        backoff_sleep=backoff_sleep,
+    )
+
+    async def scenario():
+        await adapter.run(task, object())
+        await waiting.wait()
+        second = asyncio.create_task(adapter.run(task, object()))
+        await asyncio.sleep(0)
+        assert calls == ["claude"]
+        release.set()
+        await second
+
+    asyncio.run(scenario())
+
+    assert calls == ["claude", "claude"]
+    assert adapter.route_override is None
+
+
+def test_人工切换请求只在适配层按_agent_尝试数生效(tmp_path):
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.routing import RoutedAdapter
+
+    calls = []
+
+    class Engine:
+        def __init__(self, name):
+            self.name = name
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx, on_event
+            calls.append(self.name)
+            return SimpleNamespace(succeeded=True)
+
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.md", output_format="markdown",
+        research_id="r-manual", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+    adapter = RoutedAdapter(adapters={
+        "claude": Engine("claude"), "codex": Engine("codex"),
+    })
+    adapter.request_alternate("r-manual", agent_id="agent-1", after_attempt=1)
+
+    asyncio.run(adapter.run(task, object()))
+    asyncio.run(adapter.run(task, object()))
+
+    assert calls == ["claude", "codex"]
 
 
 def test_capability_is_mounted_on_claude_callback_and_codex_tier(tmp_path, monkeypatch):

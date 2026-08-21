@@ -72,8 +72,27 @@ class PlanEngine:
         del ctx, on_event
         self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        if task.output_path.name == "skeleton.json":
+            payload = {
+                "goals": [
+                    {
+                        "title": goal["title"],
+                        "objective": goal["objective"],
+                        "depends_on": goal["depends_on"],
+                    }
+                    for goal in self.skeleton["goals"]
+                ]
+            }
+        else:
+            number = int(task.output_path.stem.removeprefix("goal-"))
+            goal = self.skeleton["goals"][number - 1]
+            payload = {
+                "deliverable": goal["deliverable"],
+                "acceptance": goal["acceptance"],
+                "agents": goal["agents"],
+            }
         task.output_path.write_text(
-            json.dumps(self.skeleton, ensure_ascii=False), encoding="utf-8"
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
         return SimpleNamespace(succeeded=True)
 
@@ -96,7 +115,7 @@ def test_多源计划生成由注册表补齐能力与产物契约(tmp_path: Pat
         assert agent.output["format"] == "json"
         assert "json_array_min_items:1" in agent.output["validators"]
         assert "each_item_has:permalink,fetched_at" in agent.output["validators"]
-    planning_prompt = engine.tasks[0].body
+    planning_prompt = engine.tasks[1].body
     assert all(
         name in planning_prompt
         for name in ("Hacker News", "网页搜索", "Product Hunt", "X")

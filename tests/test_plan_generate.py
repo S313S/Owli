@@ -69,12 +69,34 @@ class FakeEngine:
     def __init__(self, skeletons: list[dict]) -> None:
         self.skeletons = [deepcopy(item) for item in skeletons]
         self.tasks = []
+        self._round = -1
+        self._current = self.skeletons[0]
 
     async def run(self, task, ctx, on_event=None):
         del ctx, on_event
         self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.skeletons[min(len(self.tasks) - 1, len(self.skeletons) - 1)]
+        if task.output_path.name == "skeleton.json":
+            self._round += 1
+            self._current = self.skeletons[min(self._round, len(self.skeletons) - 1)]
+            payload = {
+                "goals": [
+                    {
+                        "title": goal["title"],
+                        "objective": goal["objective"],
+                        "depends_on": goal["depends_on"],
+                    }
+                    for goal in self._current["goals"]
+                ]
+            }
+        else:
+            number = int(task.output_path.stem.removeprefix("goal-"))
+            goal = self._current["goals"][number - 1]
+            payload = {
+                "deliverable": goal["deliverable"],
+                "acceptance": goal["acceptance"],
+                "agents": goal["agents"],
+            }
         task.output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return SimpleNamespace(succeeded=True)
 
@@ -126,7 +148,7 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
 
     plan, store, engine = _generate(tmp_path, [skeleton])
 
-    assert len(engine.tasks) == 1
+    assert len(engine.tasks) == 4
     assert engine.tasks[0].agent_kind == "planning"
     assert plan.status == "awaiting_review"
     assert plan.baseline_source == "generated"
@@ -137,6 +159,15 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
         for error in lint(plan, for_approval=True)["errors"]
     )
     assert store.saved[0][0::2] == (RESEARCH_ID, 0)
+    segment_root = store.runs_root / RESEARCH_ID / "plan-segments"
+    assert sorted(path.name for path in segment_root.iterdir()) == [
+        "assembled.json",
+        "goal-1.json",
+        "goal-2.json",
+        "goal-3.json",
+        "skeleton.json",
+    ]
+    assert not list(segment_root.glob("*.partial"))
     raw = plan.to_dict()
     assert "estimated_cost" not in raw
     assert "estimated_minutes" not in raw["goals"][0]
@@ -152,6 +183,11 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
             assert agent["prompt"]["preamble_ref"] == "common/v1"
             assert agent["prompt"]["assumptions_policy"] == "assume_and_declare"
             assert set(agent["origin"].values()) == {"generated"}
+    report_writer = raw["goals"][-1]["agents"][-1]
+    assert {
+        "citation_marks_resolvable",
+        "no_orphan_citation",
+    } <= set(report_writer["output"]["validators"])
 
 
 @pytest.mark.parametrize(
@@ -261,10 +297,10 @@ def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:
     plan, store, engine = _generate(tmp_path, [invalid, invalid, _valid_skeleton()])
 
     assert plan.status == "awaiting_review"
-    assert len(engine.tasks) == 3
-    assert "[规则4]" in engine.tasks[1].body
-    assert "结果质量良好" in engine.tasks[1].body
-    assert "[规则4]" in engine.tasks[2].body
+    assert len(engine.tasks) == 12
+    assert "[规则4]" in engine.tasks[4].body
+    assert "结果质量良好" in engine.tasks[4].body
+    assert "[规则4]" in engine.tasks[8].body
     assert len(store.events) == 2
     assert all(isinstance(event, NormalizedEvent) for event in store.events)
     assert all(event.outcome == "retrying" for event in store.events)
@@ -283,7 +319,7 @@ def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
     with pytest.raises(PlanGenerationError, match="连续 3 次") as captured:
         asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
-    assert len(engine.tasks) == 3
+    assert len(engine.tasks) == 12
     assert "[规则4]" in str(captured.value)
     assert store.saved == []
 
@@ -310,7 +346,7 @@ def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_pat
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
     assert plan.status == "awaiting_review"
-    assert len(engine.tasks) == 2
+    assert len(engine.tasks) == 5
     assert "owli-result.summary 必须是 200 字以内字符串" in engine.tasks[1].body
     assert len(store.events) == 1 and store.events[0].outcome == "retrying"
 
@@ -331,7 +367,9 @@ def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> 
             self.existed_at_run: list[bool] = []
 
         async def run(self, task, ctx, on_event=None):
-            self.existed_at_run.append(task.output_path.exists())
+            if task.output_path.name == "skeleton.json":
+                partial = Path(f"{task.output_path}.partial")
+                self.existed_at_run.append(partial.exists())
             return await super().run(task, ctx, on_event)
 
     engine = RecordingEngine([invalid, _valid_skeleton()])
@@ -413,13 +451,13 @@ def test_decision_balance_选项式引用合法且_baseline_深拷贝独立(tmp_
 
 def test_规划_prompt_固定四段与_HN_可复现参数(tmp_path) -> None:
     _, _, engine = _generate(tmp_path, [_valid_skeleton()])
-    body = engine.tasks[0].body
+    body = engine.tasks[1].body
 
     assert all(label in body for label in ("目标：", "方法要点：", "产物结构：", "边界与降级："))
     assert "created_at_i>" in body
     assert "7776000" in body
     assert "points>50" in body
-    assert "3–7" in body
+    assert "3–7" in engine.tasks[0].body
 
 
 def test_store_只返回同需求且尚未保存计划的最新报告(tmp_path) -> None:

@@ -17,9 +17,15 @@ from app.adapters.capability import (
 )
 from app.adapters.events import NormalizedEvent, normalize_claude_event
 from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
-from app.adapters.ratelimit import route
+from app.adapters.ratelimit import classify_transport_error, route
 from app.adapters import validation as artifact_validation
-from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
+from app.adapters.contracts import (
+    EngineRunResult,
+    EngineTask,
+    OwliResult,
+    PlanningSegmentRequest,
+    PlanningSegmentResult,
+)
 from app.adapters.source_mcp import (
     exposed_tool_name,
     source_event_path,
@@ -346,6 +352,75 @@ class ClaudeAdapter:
             except Exception:
                 pass
         return healthy and not failed
+
+    async def generate_plan_segment(
+        self,
+        request: PlanningSegmentRequest,
+        *,
+        on_text: Any = None,
+    ) -> PlanningSegmentResult:
+        """通过 Agent SDK 无工具短流生成单段；续写仍使用 user 请求。"""
+
+        try:
+            sdk = self._sdk or _load_sdk()
+            options = sdk.ClaudeAgentOptions(
+                cwd=str(PROJECT_ROOT),
+                setting_sources=[],
+                tools=[],
+                allowed_tools=[],
+                disallowed_tools=sorted(CLAUDE_TOOL_UNIVERSE),
+                permission_mode="dontAsk",
+            )
+            client = sdk.ClaudeSDKClient(options)
+        except Exception as exc:
+            return PlanningSegmentResult("", False, error=str(exc))
+
+        prompt = request.prompt
+        if request.continuation:
+            prompt = (
+                f"{request.prompt}\n\n"
+                "上次响应在传输中断前已收到以下精确前缀：\n"
+                f"{request.continuation}\n"
+                "请从断点继续，只输出尚未收到的 JSON 后缀；不要重写说明文字。"
+            )
+        chunks: list[str] = []
+        completed = False
+        failed = False
+        try:
+            await client.connect(_prompt_stream(prompt))
+            async for message in client.receive_response():
+                if isinstance(message, sdk.AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, sdk.TextBlock) and block.text:
+                            chunks.append(block.text)
+                            if on_text is not None:
+                                callback_result = on_text(block.text)
+                                if inspect.isawaitable(callback_result):
+                                    await callback_result
+                if isinstance(message, sdk.ResultMessage):
+                    failed = (
+                        bool(getattr(message, "is_error", False))
+                        or getattr(message, "api_error_status", None) is not None
+                    )
+                    completed = not failed
+        except Exception as exc:
+            message = str(exc)
+            return PlanningSegmentResult(
+                "".join(chunks),
+                False,
+                transport_interrupted=classify_transport_error(message),
+                error=message,
+            )
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        return PlanningSegmentResult(
+            "".join(chunks),
+            completed and bool(chunks),
+            error="规划短流返回错误" if failed else None,
+        )
 
     async def run(
         self,

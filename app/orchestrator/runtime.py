@@ -498,6 +498,23 @@ class RuntimeCoordinator:
         state = self.researches[research_id]
         kind = payload.get("type")
         data = payload.get("data", {})
+        adapter = self._adapters.get(research_id)
+        if kind == "route_override_requested" and adapter is not None:
+            requester = getattr(adapter, "request_alternate", None)
+            if requester is not None:
+                requester(
+                    research_id,
+                    agent_id=(
+                        str(data["agent_id"])
+                        if data.get("scope") == "agent" and data.get("agent_id")
+                        else None
+                    ),
+                    after_attempt=int(data.get("after_attempt", 0)),
+                )
+        elif kind == "route_gate_release_requested" and adapter is not None:
+            release = getattr(adapter, "release_route_gate", None)
+            if release is not None:
+                release(research_id)
         if kind == "goal_update":
             goal = next(item for item in state["goals"] if item["id"] == data["goal_id"])
             goal["status"] = data["status"]

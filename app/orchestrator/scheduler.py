@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Awaitable, Callable, Mapping
 
@@ -20,7 +20,6 @@ from app.plan.cards import (
 from app.plan.model import Agent, Goal, Plan
 
 
-BACKOFF_SECONDS = (60, 120, 240, 480, 900)
 R8_CONFIRM_SECONDS = 15 * 60
 
 
@@ -131,7 +130,6 @@ class Scheduler:
             agent.agent_id: "queued" for goal in plan.goals for agent in goal.agents
         }
         self.status = "ready"
-        self.future_engine: str | None = None
         self.emitted_events: list[Any] = []
         self._paused = False
         self._started = False
@@ -139,11 +137,8 @@ class Scheduler:
         self._state_lock = asyncio.Lock()
         self._goal_started_at: dict[str, datetime] = {}
         self._attempts: dict[str, int] = {}
-        self._switch_targets: dict[str, str] = {}
         self._cards: dict[str, dict[str, Any]] = {}
         self._card_sequence = 0
-        self._gated_engines: dict[str, datetime | None] = {}
-        self._backoff_counts: dict[str, int] = {}
         self._agent_feedback: dict[str, str | None] = {}
 
     def _validate_graphs(self) -> None:
@@ -262,18 +257,6 @@ class Scheduler:
         self._paused = True
         await self._emit({"type": "scheduler_update", "data": {"status": "stopped"}})
 
-    def _effective_engine(self, goal_id: str, agent: Agent, attempt: int) -> str:
-        per_round = int(self._goals[goal_id].retry_policy["max_attempts_per_round"])
-        if attempt > per_round and agent.agent_id in self._switch_targets:
-            return self._switch_targets[agent.agent_id]
-        return self.future_engine or agent.engine
-
-    def _engine_available(self, engine: str) -> bool:
-        if engine not in self._gated_engines:
-            return True
-        release_at = self._gated_engines[engine]
-        return release_at is not None and self._clock() >= release_at
-
     async def _drive(self) -> None:
         while self._started and self.status != "stopped":
             async with self._state_lock:
@@ -329,9 +312,7 @@ class Scheduler:
             return False
         if not all(self.agent_statuses[item] == "done" for item in agent.depends_on):
             return False
-        attempt = self._attempts.get(agent.agent_id, 0) + 1
-        engine = self._effective_engine(goal.goal_id, agent, attempt)
-        return self._engine_available(engine)
+        return True
 
     async def _launch_ready_agents(self) -> None:
         for goal in self.plan.goals:
@@ -423,8 +404,7 @@ class Scheduler:
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
                 return
             attempt = self._attempts.get(agent.agent_id, 0) + 1
-            engine = self._effective_engine(goal.goal_id, agent, attempt)
-            if self._paused or not self._engine_available(engine):
+            if self._paused:
                 await self._set_agent_status(agent.agent_id, "retrying")
                 return
             self._attempts[agent.agent_id] = attempt
@@ -436,10 +416,8 @@ class Scheduler:
                 goal_id=goal.goal_id,
                 attempt=attempt,
                 round_number=((attempt - 1) // per_round) + 1,
-                engine=engine,
-                on_event=lambda event, selected=engine: self._consume_signal(
-                    event, selected
-                ),
+                engine=agent.engine,
+                on_event=self._consume_signal,
                 failure_feedback=self._agent_feedback.get(agent.agent_id),
             )
             try:
@@ -447,7 +425,7 @@ class Scheduler:
             except asyncio.CancelledError:
                 return
             except Exception as exc:
-                result = TaskRunResult(False, engine)
+                result = TaskRunResult(False, agent.engine)
                 await self._emit({
                     "type": "agent_error",
                     "data": {
@@ -457,7 +435,7 @@ class Scheduler:
                     },
                 })
             for decision in result.route_decisions:
-                await self._consume_signal(decision, result.engine or engine)
+                await self._consume_signal(decision)
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
                 return
             if result.succeeded:
@@ -465,14 +443,14 @@ class Scheduler:
                 return
             self._agent_feedback[agent.agent_id] = result.failure_feedback
             if attempt == ask_at:
-                await self._create_engine_switch_card(goal, agent, engine)
+                await self._create_engine_switch_card(goal, agent, per_round)
             if attempt < total:
                 continue
             await self._set_agent_status(agent.agent_id, "failed")
             await self._fail_goal(goal.goal_id, "retry_exhausted")
             return
 
-    async def _consume_signal(self, signal: Any, default_engine: str) -> None:
+    async def _consume_signal(self, signal: Any) -> None:
         raw_state = _field(signal, "route_state", "state")
         if isinstance(raw_state, Enum):
             raw_state = raw_state.value
@@ -482,77 +460,21 @@ class Scheduler:
             state = RouteState(str(raw_state))
         except ValueError:
             return
-        engine = str(_field(signal, "engine", default=default_engine) or default_engine)
+        source = str(_field(signal, "engine", default="Owli") or "Owli")
         reason = str(_field(signal, "reason", "text", default=""))
         target = _field(signal, "failover_target")
         await self._emit({
             "type": "route_update",
             "data": {
-                "engine": engine,
+                "source": source,
                 "state": state.value,
                 "reason": reason,
                 "failover_target": target,
+                "outcome": _field(signal, "outcome"),
             },
         })
-        if state is RouteState.WARN:
-            if "继续跑会计费" in reason:
-                await self._begin_r8_confirmation(signal, engine)
-                return
-            self._gated_engines[engine] = None
-            if target is not None:
-                self.future_engine = str(target)
-            return
-        if state is RouteState.BACKOFF:
-            self._schedule_backoff(engine, signal)
-            return
-        if state is RouteState.FAILOVER and target is not None:
-            self.future_engine = str(target)
-
-    def _schedule_backoff(self, engine: str, signal: Any) -> None:
-        reset_at = self._reset_at(signal)
-        count = self._backoff_counts.get(engine, 0)
-        if reset_at is None:
-            delay = BACKOFF_SECONDS[min(count, len(BACKOFF_SECONDS) - 1)]
-            reset_at = self._clock() + timedelta(seconds=delay)
-        else:
-            delay = max(0.0, (reset_at - self._clock()).total_seconds())
-        self._backoff_counts[engine] = count + 1
-        self._gated_engines[engine] = reset_at
-        self._timer(delay, lambda: self._release_engine(engine, reset_at))
-
-    def _reset_at(self, signal: Any) -> datetime | None:
-        raw = _field(signal, "raw", default={}) or {}
-        info = _field(raw, "rate_limit_info", "rateLimitInfo", default=raw)
-        value = _field(
-            info, "resets_at", "resetsAt", "reset_at", "resetAt",
-            "five_hour_resets_at", "fiveHourResetsAt",
-        )
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(value, tz=timezone.utc)
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                return None
-        return None
-
-    async def _release_engine(self, engine: str, release_at: datetime) -> None:
-        if self._gated_engines.get(engine) != release_at:
-            return
-        self._gated_engines.pop(engine, None)
-        self._backoff_counts[engine] = 0
-        await self._emit({
-            "type": "route_update",
-            "data": {"engine": engine, "state": "CONTINUE", "reason": "退避结束"},
-        })
-        await self._drive()
-
-    def _alternate_engine(self, engine: str) -> str:
-        return {"claude": "codex", "codex": "claude"}.get(
-            engine.casefold(), "alternate"
-        )
+        if state is RouteState.WARN and "继续跑会计费" in reason:
+            await self._begin_r8_confirmation()
 
     def _new_card_id(self) -> str:
         self._card_sequence += 1
@@ -562,19 +484,18 @@ class Scheduler:
         return (value or self._clock()).isoformat()
 
     async def _publish_card(
-        self, card: Card, *, kind: str, suggested_engine: str | None = None
+        self, card: Card, *, kind: str, route_after_attempt: int | None = None
     ) -> None:
         self._cards[card.card_id] = {
             "card": card,
             "kind": kind,
-            "suggested_engine": suggested_engine,
+            "route_after_attempt": route_after_attempt,
         }
         await self._emit(card.to_event())
 
     async def _create_engine_switch_card(
-        self, goal: Goal, agent: Agent, engine: str
+        self, goal: Goal, agent: Agent, route_after_attempt: int
     ) -> None:
-        suggested = self._alternate_engine(engine)
         card = Card(
             card_id=self._new_card_id(),
             card_type=CardType.ENGINE_SWITCH_CONFIRM,
@@ -586,7 +507,7 @@ class Scheduler:
             target={},
             actions=[{
                 "type": CardActionType.CHOICE_2.value,
-                "options": [f"切换为 {suggested}", "保持不变"],
+                "options": ["切换引擎", "保持不变"],
             }],
             blocking=CardBlocking.NONE,
             deadline=None,
@@ -595,7 +516,11 @@ class Scheduler:
             created_at=self._timestamp(),
             resolved_at=None,
         )
-        await self._publish_card(card, kind="c3", suggested_engine=suggested)
+        await self._publish_card(
+            card,
+            kind="c3",
+            route_after_attempt=route_after_attempt,
+        )
 
     async def _create_intervention_card(self, goal: Goal) -> None:
         card = Card(
@@ -620,19 +545,14 @@ class Scheduler:
         )
         await self._publish_card(card, kind="intervene")
 
-    async def _begin_r8_confirmation(self, signal: Any, engine: str) -> None:
+    async def _begin_r8_confirmation(self) -> None:
         if any(
             item["kind"] == "r8"
             and item["card"].status is CardStatus.PENDING
-            and item["card"].target.get("engine") == engine
             for item in self._cards.values()
         ):
             return
         deadline = self._clock() + timedelta(seconds=R8_CONFIRM_SECONDS)
-        suggested = str(
-            _field(signal, "failover_target") or self._alternate_engine(engine)
-        )
-        self._gated_engines[engine] = None
         card = Card(
             card_id=self._new_card_id(),
             card_type=CardType.EXTRA_QUOTA_CONFIRM,
@@ -641,7 +561,7 @@ class Scheduler:
             agent_id=None,
             title="是否接受额外额度计费？",
             body="该引擎套餐额度已用完；15 分钟未答将默认切换引擎。",
-            target={"engine": engine},
+            target={},
             actions=[{
                 "type": CardActionType.CHOICE_2.value,
                 "options": ["接受计费继续", "不接受，切换引擎"],
@@ -653,10 +573,10 @@ class Scheduler:
             created_at=self._timestamp(),
             resolved_at=None,
         )
-        await self._publish_card(card, kind="r8", suggested_engine=suggested)
+        await self._publish_card(card, kind="r8")
         self._timer(
             R8_CONFIRM_SECONDS,
-            lambda: self._expire_r8(card.card_id, engine, suggested),
+            lambda: self._expire_r8(card.card_id),
         )
 
     async def _resolve_card(
@@ -686,9 +606,14 @@ class Scheduler:
                 token in choice for token in ("switch", "切换")
             )
             if switch and card.agent_id is not None:
-                self._switch_targets[card.agent_id] = str(
-                    result.get("engine") or entry["suggested_engine"]
-                )
+                await self._emit({
+                    "type": "route_override_requested",
+                    "data": {
+                        "scope": "agent",
+                        "agent_id": card.agent_id,
+                        "after_attempt": entry["route_after_attempt"],
+                    },
+                })
             return
         if kind == "intervene":
             adjusts = any(token in choice for token in ("adjust", "调整"))
@@ -705,7 +630,6 @@ class Scheduler:
             await self._drive()
             return
         if kind == "r8":
-            engine = str(card.target["engine"])
             rejects = any(
                 token in choice for token in ("reject", "不接受", "切换")
             )
@@ -714,14 +638,18 @@ class Scheduler:
                     token in choice for token in ("accept", "接受")
                 )
             )
-            self._gated_engines.pop(engine, None)
             if not accepts:
-                self.future_engine = str(entry["suggested_engine"])
+                await self._emit({
+                    "type": "route_override_requested",
+                    "data": {"scope": "research", "after_attempt": 0},
+                })
+            await self._emit({
+                "type": "route_gate_release_requested",
+                "data": {"scope": "research"},
+            })
             await self._drive()
 
-    async def _expire_r8(
-        self, card_id: str, engine: str, suggested_engine: str
-    ) -> None:
+    async def _expire_r8(self, card_id: str) -> None:
         entry = self._cards.get(card_id)
         if entry is None:
             return
@@ -730,9 +658,15 @@ class Scheduler:
             return
         await self._resolve_card(
             entry,
-            {"choice": "switch", "engine": suggested_engine, "defaulted": True},
+            {"choice": "switch", "defaulted": True},
             CardStatus.EXPIRED_DEFAULTED,
         )
-        self._gated_engines.pop(engine, None)
-        self.future_engine = suggested_engine
+        await self._emit({
+            "type": "route_override_requested",
+            "data": {"scope": "research", "after_attempt": 0},
+        })
+        await self._emit({
+            "type": "route_gate_release_requested",
+            "data": {"scope": "research"},
+        })
         await self._drive()

@@ -59,3 +59,30 @@ class EngineRunResult:
             and self.conclusion.status == "done"
             and self.validation.verdict is artifact_validation.Verdict.PASS
         )
+
+
+@dataclass(frozen=True)
+class PlanningSegmentRequest:
+    """规划短流请求；continuation 是上轮已确认落盘的原始前缀。"""
+
+    research_id: str
+    segment_name: str
+    prompt: str
+    continuation: str = ""
+    output_path: Path | None = None
+
+    @property
+    def body(self) -> str:
+        """兼容测试替身与事件观测中的任务正文命名。"""
+
+        return self.prompt
+
+
+@dataclass(frozen=True)
+class PlanningSegmentResult:
+    """规划短流结果；成功由协议完成信号和后续 JSON 校验共同判定。"""
+
+    text: str
+    completed: bool
+    transport_interrupted: bool = False
+    error: str | None = None
