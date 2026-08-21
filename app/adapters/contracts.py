@@ -86,3 +86,4 @@ class PlanningSegmentResult:
     completed: bool
     transport_interrupted: bool = False
     error: str | None = None
+    cause: str | None = None

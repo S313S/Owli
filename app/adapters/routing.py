@@ -93,8 +93,10 @@ class RoutedAdapter:
         self._probe_sleep = probe_sleep
         self._backoff_sleep = backoff_sleep
         self._recovery_tasks: set[asyncio.Task[None]] = set()
+        self._trip_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._backoff_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._backoff_counts: dict[tuple[str, str], int] = {}
+        self._backoff_causes: dict[tuple[str, str], str] = {}
         self._quota_gates: dict[str, asyncio.Event] = {}
         self._manual_research_alternates: set[str] = set()
         self._manual_agent_alternates: dict[tuple[str, str], int] = {}
@@ -152,8 +154,10 @@ class RoutedAdapter:
         if gate is not None:
             gate.set()
 
-    async def _await_route_gates(self, research_id: str, engine: str) -> bool:
-        backoff_released = False
+    async def _await_route_gates(
+        self, research_id: str, engine: str
+    ) -> str | None:
+        released_cause = None
         quota_gate = self._quota_gates.get(research_id)
         if quota_gate is not None:
             await quota_gate.wait()
@@ -161,10 +165,11 @@ class RoutedAdapter:
         backoff = self._backoff_tasks.get(key)
         if backoff is not None:
             await backoff
-            backoff_released = True
+            released_cause = self._backoff_causes.get(key)
             if self._backoff_tasks.get(key) is backoff:
                 self._backoff_tasks.pop(key, None)
-        return backoff_released
+                self._backoff_causes.pop(key, None)
+        return released_cause
 
     @staticmethod
     def _reset_at(event: Any) -> datetime | None:
@@ -215,7 +220,15 @@ class RoutedAdapter:
                 (reset_at - datetime.now(timezone.utc)).total_seconds(),
             )
         self._backoff_counts[key] = count + 1
-        self._backoff_tasks[key] = asyncio.create_task(self._backoff_sleep(delay))
+        self._backoff_causes[key] = self._event_cause(event) or "normal"
+
+        async def sleep_then_release() -> None:
+            try:
+                await self._backoff_sleep(delay)
+            finally:
+                self._backoff_counts.pop(key, None)
+
+        self._backoff_tasks[key] = asyncio.create_task(sleep_then_release())
 
     @staticmethod
     def _event_cause(event: Any) -> str | None:
@@ -319,29 +332,37 @@ class RoutedAdapter:
         engine: str,
         on_event: Any,
     ) -> None:
-        planning = task.agent_kind in _PLANNING_KINDS
-        breaker = self._breaker(task.research_id)
-        transition = breaker.record_transport_failure(
-            engine, planning=planning
-        )
-        if transition is None:
-            return
-        target = next(item for item in _ENGINES if item != engine)
-        if not await self._probe(target):
-            breaker.reject_failover(engine)
-            return
-        activated = breaker.activate_failover(engine, target)
-        self._route_overrides[task.research_id] = target
-        self._start_recovery_probe(
-            research_id=task.research_id,
-            engine=engine,
-            on_event=on_event,
-        )
-        await self._emit(on_event, self._health_event(activated))
+        key = (task.research_id, engine)
+        lock = self._trip_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            planning = task.agent_kind in _PLANNING_KINDS
+            breaker = self._breaker(task.research_id)
+            transition = breaker.record_transport_failure(
+                engine, planning=planning
+            )
+            if transition is None:
+                return
+            target = next(item for item in _ENGINES if item != engine)
+            if not await self._probe(target):
+                breaker.reject_failover(engine)
+                return
+            activated = breaker.activate_failover(engine, target)
+            self._route_overrides[task.research_id] = target
+            self._start_recovery_probe(
+                research_id=task.research_id,
+                engine=engine,
+                on_event=on_event,
+            )
+            await self._emit(on_event, self._health_event(activated))
 
     async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
         self._last_research_id = task.research_id
-        selection = pick_engine(task.agent_kind, task.user_override)
+        planning = task.agent_kind in _PLANNING_KINDS
+        selection = (
+            EngineSelection("claude", "system")
+            if planning
+            else pick_engine(task.agent_kind, task.user_override)
+        )
         run_key = (task.research_id, task.agent_id)
         run_number = self._agent_runs.get(run_key, 0) + 1
         self._agent_runs[run_key] = run_number
@@ -351,16 +372,22 @@ class RoutedAdapter:
             or (after_attempt is not None and run_number > after_attempt)
         )
         preferred = (
-            self._alternate(selection.engine) if manual_alternate else selection.engine
+            self._alternate(selection.engine)
+            if manual_alternate and not planning
+            else selection.engine
         )
-        selected_engine = self._route_overrides.get(task.research_id, preferred)
-        backoff_released = await self._await_route_gates(
+        selected_engine = (
+            preferred
+            if planning
+            else self._route_overrides.get(task.research_id, preferred)
+        )
+        backoff_cause = await self._await_route_gates(
             task.research_id, selected_engine
         )
         adapter = self._adapters[selected_engine]
         saw_transport = False
 
-        if backoff_released:
+        if backoff_cause is not None:
             await self._emit(on_event, NormalizedEvent(
                 engine=selected_engine,
                 thread_id=task.research_id,
@@ -370,8 +397,7 @@ class RoutedAdapter:
                 is_error=False,
                 raw={"event": "BACKOFF_RELEASED"},
                 route_state="CONTINUE",
-                outcome="BACKOFF_RELEASED",
-                cause="rate_limit",
+                cause=backoff_cause,
             ))
 
         async def routed_event(event: Any) -> None:
@@ -380,7 +406,7 @@ class RoutedAdapter:
                 saw_transport = True
             route_state = getattr(event, "route_state", None)
             state_value = getattr(route_state, "value", route_state)
-            if state_value == "BACKOFF" and self._is_rate_limit(event):
+            if state_value == "BACKOFF":
                 self._start_backoff(task.research_id, selected_engine, event)
             reason = str(getattr(event, "reason", None) or getattr(event, "text", ""))
             if state_value == "WARN" and "继续跑会计费" in reason:
@@ -405,13 +431,14 @@ class RoutedAdapter:
             finally:
                 await replay_source_events(task, routed_event)
             breaker = self._breaker(task.research_id)
-            if saw_transport:
+            succeeded = bool(getattr(result, "succeeded", False))
+            if saw_transport and not succeeded:
                 await self._trip_if_needed(
                     task=task,
                     engine=selected_engine,
                     on_event=on_event,
                 )
-            elif bool(getattr(result, "succeeded", False)):
+            elif succeeded:
                 breaker.record_success(selected_engine)
             else:
                 breaker.record_non_transport(selected_engine)
@@ -481,6 +508,18 @@ class RoutedAdapter:
                 self._event_cause(event) == "transport"
                 for event in getattr(result, "events", [])
             )
+            causes = [
+                self._event_cause(event)
+                for event in getattr(result, "events", [])
+            ]
+            cause = next(
+                (
+                    item
+                    for item in ("rate_limit", "transport", "service")
+                    if item in causes
+                ),
+                None,
+            )
             error = (
                 getattr(result, "engine_error", None)
                 or getattr(result, "conclusion_error", None)
@@ -504,6 +543,7 @@ class RoutedAdapter:
                 completed=bool(getattr(result, "succeeded", False)),
                 transport_interrupted=transport,
                 error=str(error) if error else None,
+                cause=cause,
             )
         result = generator(request, on_text=on_text)
         if inspect.isawaitable(result):

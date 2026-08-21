@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -36,9 +37,17 @@ def merge_continuation(prefix: str, suffix: str) -> str:
 class PlanSegmentWorkspace:
     """管理单个 research 下 plan-segments 的正式文件与 partial。"""
 
-    def __init__(self, research_root: Path, config: ResilienceConfig) -> None:
+    def __init__(
+        self,
+        research_root: Path,
+        config: ResilienceConfig,
+        *,
+        retry_sleep: Any = asyncio.sleep,
+    ) -> None:
         self.root = Path(research_root) / "plan-segments"
         self.config = config
+        self._retry_sleep = retry_sleep
+        self._attempts: dict[str, int] = {}
 
     @staticmethod
     def _checked_name(name: str) -> str:
@@ -63,21 +72,34 @@ class PlanSegmentWorkspace:
         formal = self.formal_path(name)
         partial = self.partial_path(name)
         self.root.mkdir(parents=True, exist_ok=True)
+        attempts_used = self._attempts.get(name, 0)
+        attempts_left = self.config.plan_segment_retries - attempts_used
+        if attempts_left <= 0:
+            raise PlanSegmentError(
+                f"规划段 {name} 总尝试预算 "
+                f"{self.config.plan_segment_retries} 次已耗尽"
+            )
         continuation = (
             partial.read_text(encoding="utf-8") if partial.is_file() else ""
         )
         last_error = "规划短流未完成"
         current_prompt = prompt
 
-        for attempt in range(1, self.config.plan_segment_retries + 1):
+        for offset in range(attempts_left):
+            attempt = attempts_used + offset + 1
+            self._attempts[name] = attempt
             # 每轮起跑先移除旧 partial；已收前缀已进内存并随请求续写，
             # 防止 Agent Write/Edit 因残留文件进入覆盖死锁。
             partial.unlink(missing_ok=True)
+            received = ""
             assembled = continuation
 
             async def on_text(chunk: str) -> None:
-                nonlocal assembled
-                assembled = merge_continuation(assembled, str(chunk))
+                nonlocal assembled, received
+                # 同一次 SDK 流的 delta 是互不重叠的增量，只能原样追加；
+                # 最长重叠只用于上一轮 partial 与本轮完整响应之间。
+                received += str(chunk)
+                assembled = merge_continuation(continuation, received)
                 partial.write_text(assembled, encoding="utf-8")
 
             request = PlanningSegmentRequest(
@@ -90,7 +112,8 @@ class PlanSegmentWorkspace:
             result = adapter.run_planning_segment(request, on_text=on_text)
             if inspect.isawaitable(result):
                 result = await result
-            assembled = merge_continuation(assembled, str(result.text or ""))
+            generated = str(result.text or "") or received
+            assembled = merge_continuation(continuation, generated)
             partial.write_text(assembled, encoding="utf-8")
             if result.completed:
                 try:
@@ -108,9 +131,13 @@ class PlanSegmentWorkspace:
                     return value
             else:
                 last_error = result.error or "规划短流未收到完成信号"
+            cause = str(getattr(result, "cause", "") or "").casefold()
+            effective_cause = (
+                "transport" if result.transport_interrupted else cause
+            )
             continuation = (
                 assembled
-                if not result.completed or result.transport_interrupted
+                if effective_cause == "transport"
                 else ""
             )
             current_prompt = (
@@ -121,10 +148,15 @@ class PlanSegmentWorkspace:
                     else "请保持原结构契约并重新输出完整 JSON。"
                 )
             )
-            if attempt < self.config.plan_segment_retries and on_retry is not None:
-                callback_result = on_retry(attempt + 1, last_error)
-                if inspect.isawaitable(callback_result):
-                    await callback_result
+            if attempt < self.config.plan_segment_retries:
+                if effective_cause in {"rate_limit", "transport", "service"}:
+                    await self._retry_sleep(
+                        self.config.backoff_seconds(attempt - 1)
+                    )
+                if on_retry is not None:
+                    callback_result = on_retry(attempt + 1, last_error)
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
 
         raise PlanSegmentError(
             f"规划段 {name} 连续 {self.config.plan_segment_retries} 次失败："

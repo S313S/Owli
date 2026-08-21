@@ -235,6 +235,7 @@ def test_执行期第三次传输故障让路并在真实探活后复位(tmp_pat
         adapters={"claude": claude, "codex": codex},
         resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
         probe_sleep=controlled_sleep,
+        backoff_sleep=lambda seconds: asyncio.sleep(0),
     )
 
     def observe(event):
@@ -324,6 +325,143 @@ def test_规划期和限流事件都不触发传输断路(tmp_path):
 
     assert planning == (4, 0, None)
     assert limited == (4, 0, None)
+
+
+def test_传输事件后本轮成功不得累计断路故障(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    class Engine:
+        probes = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            event = NormalizedEvent(
+                engine="claude", thread_id="t", turn_id="u",
+                item_kind=ItemKind.ERROR, text="瞬时断连后 SDK 已恢复",
+                is_error=True, raw={}, route_state="BACKOFF",
+                suspend_new_tasks=True, cause="transport",
+            )
+            emitted = on_event(event)
+            if inspect.isawaitable(emitted):
+                await emitted
+            return SimpleNamespace(succeeded=True)
+
+        async def probe(self):
+            self.probes += 1
+            return True
+
+    async def no_wait(seconds):
+        del seconds
+
+    claude = Engine()
+    codex = Engine()
+    adapter = RoutedAdapter(
+        adapters={"claude": claude, "codex": codex},
+        resilience_config=ResilienceConfig(2, 3, 60, 900, 300),
+        backoff_sleep=no_wait,
+    )
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.md", output_format="markdown",
+        research_id="r-recovered", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+
+    async def scenario():
+        for _ in range(4):
+            await adapter.run(task, object())
+
+    asyncio.run(scenario())
+
+    assert codex.probes == 0
+    assert adapter.route_override is None
+
+
+def test_并发传输故障只触发一次升级探测(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    candidate_waiting = asyncio.Event()
+    release_candidate = asyncio.Event()
+    recovery_wait = asyncio.Event()
+    observed = []
+
+    class Failing:
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            event = NormalizedEvent(
+                engine="claude", thread_id="t", turn_id="u",
+                item_kind=ItemKind.ERROR, text="stream disconnected",
+                is_error=True, raw={}, route_state="BACKOFF",
+                suspend_new_tasks=True, cause="transport",
+            )
+            emitted = on_event(event)
+            if inspect.isawaitable(emitted):
+                await emitted
+            return SimpleNamespace(succeeded=False)
+
+        async def probe(self):
+            return True
+
+    class Healthy:
+        probes = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx, on_event
+            return SimpleNamespace(succeeded=True)
+
+        async def probe(self):
+            self.probes += 1
+            candidate_waiting.set()
+            await release_candidate.wait()
+            return True
+
+    async def no_wait(seconds):
+        del seconds
+
+    async def wait_recovery(seconds):
+        del seconds
+        await recovery_wait.wait()
+
+    healthy = Healthy()
+    adapter = RoutedAdapter(
+        adapters={"claude": Failing(), "codex": healthy},
+        resilience_config=ResilienceConfig(1, 3, 60, 900, 300),
+        backoff_sleep=no_wait,
+        probe_sleep=wait_recovery,
+    )
+    task = EngineTask(
+        body="执行", output_path=tmp_path / "result.md", output_format="markdown",
+        research_id="r-concurrent", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"], capability=Capability(),
+    )
+
+    async def scenario():
+        runs = [
+            asyncio.create_task(adapter.run(task, object(), on_event=observed.append))
+            for _ in range(2)
+        ]
+        await candidate_waiting.wait()
+        release_candidate.set()
+        await asyncio.gather(*runs)
+        assert healthy.probes == 1
+        assert sum(event.outcome == "ENGINE_DOWN" for event in observed) == 1
+        recovery_wait.set()
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
 
 
 def test_claude_probe_只认真实模型健康标记且不用工具():
@@ -844,6 +982,74 @@ def test_claude_adapter_feeds_native_messages_into_rate_route(tmp_path, monkeypa
         "WARN", "BACKOFF", "FAILOVER"
     ]
     assert route_events[2].no_fallback_left is True
+
+
+def test_claude_真实执行流异常会投影传输_backoff_事件(tmp_path, monkeypatch):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    class Client:
+        def __init__(self, options):
+            self.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self):
+            if False:
+                yield None
+            raise RuntimeError("Stream idle timeout")
+
+        async def disconnect(self):
+            pass
+
+    class Options:
+        def __init__(self, **values):
+            self.values = values
+
+    class Sdk:
+        ClaudeSDKClient = Client
+        ClaudeAgentOptions = Options
+        ResultMessage = type("ResultMessage", (), {})
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        ToolUseBlock = type("ToolUseBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-stream" / "goals" / "goal-1" / "result.md"
+    task = EngineTask(
+        body="执行", output_path=output_path, output_format="markdown",
+        research_id="r-stream", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+    observed = []
+
+    result = asyncio.run(ClaudeAdapter(
+        sdk=Sdk, log_root=tmp_path / "logs"
+    ).run(task, _ctx(validation, output_path), on_event=observed.append))
+
+    transport = [event for event in observed if event.cause == "transport"]
+    assert result.succeeded is False
+    assert len(transport) == 1
+    assert transport[0].route_state == "BACKOFF"
 
 
 def test_codex_adapter_feeds_jsonl_into_rate_route(tmp_path, monkeypatch):

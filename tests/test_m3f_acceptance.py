@@ -63,6 +63,7 @@ def test_验收_三次传输故障让路完成并探活复位(tmp_path):
         adapters={"claude": claude, "codex": codex},
         resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
         probe_sleep=probe_sleep,
+        backoff_sleep=lambda seconds: asyncio.sleep(0),
     )
     source = make_plan_dict()
     source["goals"] = source["goals"][:1]
@@ -206,6 +207,7 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
         store,
         adapter,
         ResilienceConfig(3, 3, 60, 900, 300),
+        segment_retry_sleep=lambda seconds: asyncio.sleep(0),
     ))
     segment_root = store.runs_root / research_id / "plan-segments"
     names = sorted(path.name for path in segment_root.iterdir())

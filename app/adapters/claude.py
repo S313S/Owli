@@ -15,7 +15,7 @@ from app.adapters.capability import (
     ClaudeOptions,
     to_claude_options,
 )
-from app.adapters.events import NormalizedEvent, normalize_claude_event
+from app.adapters.events import ItemKind, NormalizedEvent, normalize_claude_event
 from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
 from app.adapters.ratelimit import classify_transport_error, route
 from app.adapters import validation as artifact_validation
@@ -370,6 +370,7 @@ class ClaudeAdapter:
                 allowed_tools=[],
                 disallowed_tools=sorted(CLAUDE_TOOL_UNIVERSE),
                 permission_mode="dontAsk",
+                include_partial_messages=True,
             )
             client = sdk.ClaudeSDKClient(options)
         except Exception as exc:
@@ -384,12 +385,32 @@ class ClaudeAdapter:
                 "请从断点继续，只输出尚未收到的 JSON 后缀；不要重写说明文字。"
             )
         chunks: list[str] = []
+        saw_stream_delta = False
         completed = False
         failed = False
+        cause: str | None = None
         try:
             await client.connect(_prompt_stream(prompt))
             async for message in client.receive_response():
-                if isinstance(message, sdk.AssistantMessage):
+                stream_type = getattr(sdk, "StreamEvent", ())
+                if stream_type and isinstance(message, stream_type):
+                    event = getattr(message, "event", None)
+                    delta = event.get("delta", {}) if isinstance(event, dict) else {}
+                    if (
+                        isinstance(event, dict)
+                        and event.get("type") == "content_block_delta"
+                        and isinstance(delta, dict)
+                        and delta.get("type") == "text_delta"
+                        and delta.get("text")
+                    ):
+                        text = str(delta["text"])
+                        saw_stream_delta = True
+                        chunks.append(text)
+                        if on_text is not None:
+                            callback_result = on_text(text)
+                            if inspect.isawaitable(callback_result):
+                                await callback_result
+                elif isinstance(message, sdk.AssistantMessage) and not saw_stream_delta:
                     for block in message.content:
                         if isinstance(block, sdk.TextBlock) and block.text:
                             chunks.append(block.text)
@@ -398,18 +419,32 @@ class ClaudeAdapter:
                                 if inspect.isawaitable(callback_result):
                                     await callback_result
                 if isinstance(message, sdk.ResultMessage):
+                    api_status = getattr(message, "api_error_status", None)
+                    if api_status == 429:
+                        cause = "rate_limit"
+                    elif api_status in {500, 529}:
+                        cause = "service"
+                    elif bool(getattr(message, "is_error", False)):
+                        message_text = str(message)
+                        cause = (
+                            "transport"
+                            if classify_transport_error(message_text)
+                            else "engine_error"
+                        )
                     failed = (
                         bool(getattr(message, "is_error", False))
-                        or getattr(message, "api_error_status", None) is not None
+                        or api_status is not None
                     )
                     completed = not failed
         except Exception as exc:
             message = str(exc)
+            interrupted = classify_transport_error(message)
             return PlanningSegmentResult(
                 "".join(chunks),
                 False,
-                transport_interrupted=classify_transport_error(message),
+                transport_interrupted=interrupted,
                 error=message,
+                cause="transport" if interrupted else "engine_error",
             )
         finally:
             try:
@@ -420,6 +455,7 @@ class ClaudeAdapter:
             "".join(chunks),
             completed and bool(chunks),
             error="规划短流返回错误" if failed else None,
+            cause=cause,
         )
 
     async def run(
@@ -492,6 +528,29 @@ class ClaudeAdapter:
                         if inspect.isawaitable(callback_result):
                             await callback_result
         except Exception as exc:
+            message = str(exc)
+            if classify_transport_error(message):
+                event = NormalizedEvent(
+                    engine="Claude",
+                    thread_id=fallback_thread_id,
+                    turn_id=run_turn_id,
+                    item_kind=ItemKind.ERROR,
+                    text=message,
+                    is_error=True,
+                    raw={
+                        "exception": type(exc).__name__,
+                        "message": message,
+                    },
+                    route_state="BACKOFF",
+                    suspend_new_tasks=True,
+                    cause="transport",
+                )
+                events.append(event)
+                append_engine_error(event, log_root=self._log_root)
+                if on_event is not None:
+                    callback_result = on_event(event)
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
             return _unavailable_run(exc, events, denials)
         finally:
             self._client = None

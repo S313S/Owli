@@ -519,6 +519,8 @@ async def generate_plan(
     store: Any,
     adapter: Any,
     resilience_config: ResilienceConfig | None = None,
+    *,
+    segment_retry_sleep: Any = None,
 ) -> Plan:
     """按骨架、逐 goal、整计划 lint 三阶段生成并原子保存计划。"""
 
@@ -533,7 +535,16 @@ async def generate_plan(
     timestamp = str(extra.get("plan_generated_at") or report["created_at"])
     runs_root = Path(getattr(store, "runs_root", validation.RUNS_ROOT))
     config = resilience_config or load_resilience_config()
-    workspace = PlanSegmentWorkspace(runs_root / research_id, config)
+    workspace_kwargs = (
+        {"retry_sleep": segment_retry_sleep}
+        if segment_retry_sleep is not None
+        else {}
+    )
+    workspace = PlanSegmentWorkspace(
+        runs_root / research_id,
+        config,
+        **workspace_kwargs,
+    )
     skeleton_errors: list[str] = []
     scaffolds: list[dict[str, Any]] | None = None
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
