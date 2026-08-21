@@ -10,9 +10,10 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 
-__all__ = ["PlanSnapshotConflict", "Store"]
+__all__ = ["PlanSnapshotConflict", "Store", "normalize_permalink"]
 
 _EXTRA_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _NORM_METHODS = {
@@ -91,6 +92,24 @@ _USAGE_TOKEN_FIELDS = (
 
 class PlanSnapshotConflict(RuntimeError):
     """reports.plan_snapshot 的乐观锁版本不匹配。"""
+
+
+def normalize_permalink(value: str) -> str:
+    """生成稳定追溯链接：保留 query，只消除无语义 URL 差异。"""
+
+    raw = str(value).strip()
+    parsed = urlsplit(raw)
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("permalink 必须是 HTTP(S) 绝对链接")
+    hostname = parsed.hostname.casefold()
+    port = parsed.port
+    if port is not None and not (
+        scheme == "http" and port == 80 or scheme == "https" and port == 443
+    ):
+        hostname = f"{hostname}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((scheme, hostname, path, parsed.query, ""))
 
 
 def _json_text(value: Any) -> str | None:
@@ -213,6 +232,7 @@ def _prepare_evidence(values: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError(f"evidence 缺必填字段：{missing}")
     payload = {**_EVIDENCE_DEFAULTS, **{key: value for key, value in values.items() if key in _EVIDENCE_FIELDS}}
+    payload["permalink"] = normalize_permalink(str(payload["permalink"]))
     payload["extra"] = {} if payload["extra"] is None else payload["extra"]
     payload["raw_metrics"] = {} if payload["raw_metrics"] is None else payload["raw_metrics"]
     if not isinstance(payload["raw_metrics"], dict):
@@ -446,6 +466,39 @@ class Store:
         with self._connect() as connection:
             for payload in payloads:
                 self._insert_evidence(connection, payload)
+
+    def upsert_evidence_batch(
+        self, evidence_items: Iterable[Mapping[str, Any]]
+    ) -> None:
+        """按报告+平台原生 ID，缺 ID 时按归一化 permalink 幂等写入。"""
+
+        payloads = [_prepare_evidence(dict(item)) for item in evidence_items]
+        with self._connect() as connection:
+            for payload in payloads:
+                existing_id = self._evidence_identity(connection, payload)
+                if existing_id is None:
+                    self._insert_evidence(connection, payload)
+                else:
+                    self._update_evidence(connection, existing_id, payload)
+
+    def _evidence_identity(
+        self, connection: sqlite3.Connection, payload: dict[str, Any]
+    ) -> str | None:
+        platform_item_id = payload["platform_item_id"]
+        if platform_item_id:
+            row = connection.execute(
+                """
+                SELECT id FROM evidence
+                WHERE report_id = ? AND platform = ? AND platform_item_id = ?
+                """,
+                (payload["report_id"], payload["platform"], platform_item_id),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                "SELECT id FROM evidence WHERE report_id = ? AND permalink = ?",
+                (payload["report_id"], payload["permalink"]),
+            ).fetchone()
+        return None if row is None else str(row["id"])
 
     def _insert_evidence(
         self, connection: sqlite3.Connection, payload: dict[str, Any]
@@ -806,6 +859,48 @@ class Store:
             for row in self.list_chapters(research_id)
             if row["status"] in {"pending", "deferred"}
         }
+    def _update_evidence(
+        self,
+        connection: sqlite3.Connection,
+        existing_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        normalized_extra = payload["extra"]
+        existing_keys = self._existing_evidence_extra_keys(
+            connection, payload["report_id"], normalized_extra
+        )
+        connection.execute(
+            """
+            UPDATE evidence SET
+              goal_id = ?, agent_name = ?, engine = ?, platform = ?,
+              source_type = ?, platform_item_id = ?, permalink = ?, title = ?,
+              content_excerpt = ?, author_name = ?, author_meta = ?,
+              source_keyword = ?, fetch_method = ?, published_at = ?, fetched_at = ?,
+              raw_metrics = ?, normalized_score = ?, norm_method = ?, norm_context = ?,
+              score_authority = ?, score_freshness = ?, score_crossref = ?,
+              score_completeness = ?, score_independence = ?, rating_notes = ?,
+              rated_by = ?, citation_no = COALESCE(?, citation_no), extra = ?
+            WHERE id = ?
+            """,
+            (
+                payload["goal_id"], payload["agent_name"], payload["engine"],
+                payload["platform"], payload["source_type"],
+                payload["platform_item_id"], payload["permalink"], payload["title"],
+                payload["content_excerpt"], payload["author_name"],
+                _json_text(payload["author_meta"]), payload["source_keyword"],
+                payload["fetch_method"], payload["published_at"],
+                payload["fetched_at"], _json_text(payload["raw_metrics"]),
+                payload["normalized_score"], payload["norm_method"],
+                _json_text(payload["norm_context"]), payload["score_authority"],
+                payload["score_freshness"], payload["score_crossref"],
+                payload["score_completeness"], payload["score_independence"],
+                payload["rating_notes"], payload["rated_by"],
+                payload["citation_no"], _extra_text(normalized_extra), existing_id,
+            ),
+        )
+        self._register_extra(
+            connection, "evidence", payload["report_id"], normalized_extra, existing_keys
+        )
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

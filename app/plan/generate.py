@@ -43,6 +43,10 @@ _SOURCE_LIMIT_PARAMETERS = {
 _LINT_GOAL_HEADER = re.compile(
     r"^\[(?:规则\d+|结构)\]\s+goal-([1-9][0-9]*)(?=[./\s：:]|$)"
 )
+_FINDINGS_FIELDS = frozenset({
+    "competitor", "pros", "cons", "statement", "supporting_evidence",
+    "evidence_id", "is_singleton", "conflicts", "gaps",
+})
 
 
 class PlanGenerationError(RuntimeError):
@@ -442,6 +446,18 @@ def _output(
                 "each_item_has:permalink,fetched_at",
             ],
         }
+    elif (
+        agent_kind in {"cross_validation", "reliability_audit"}
+        and _target_is_findings(target)
+    ):
+        result = {
+            "format": "json", "shape": shape, "path": f"{base}.json",
+            "validators": [
+                "file_exists",
+                "json_array_min_items:1",
+                "each_item_has:competitor,pros,cons,conflicts,gaps",
+            ],
+        }
     elif agent_kind == "cross_validation":
         # 节化章走 §2.3.1 信封形：验证器查信封结构；逐条评级类数组验证器
         # 只属于非节化的 reliability_audit 章。shape 保留模型声明，非 object
@@ -490,6 +506,15 @@ def _output(
                     result["validators"].append("openpyxl_reload_ok")
         result.update(format=target["format"], path=target["path"])
     return result
+
+
+def _target_is_findings(target: Mapping[str, Any] | None) -> bool:
+    if target is None:
+        return False
+    identifiers = set(re.findall(
+        r"[A-Za-z][A-Za-z0-9_]*", str(target.get("description", ""))
+    ))
+    return len(identifiers & _FINDINGS_FIELDS) >= 2
 
 
 def _agent_prompt(
@@ -563,6 +588,18 @@ def _agent_prompt(
                 "undisclosed_interest；判据分别是无可见利益关系、利益关系已披露、"
                 "利益关系明显但未披露。不得输出闭集外近义词；"
                 "goal 验收若描述对象结构，属于其他产物，不适用本文件。"
+            )
+        elif any(
+            str(item).startswith("each_item_has:competitor,pros,cons")
+            for item in output["validators"]
+        ):
+            evidence_rule += (
+                "本文件顶层必须是 findings JSON 数组；每个竞品对象带齐 "
+                "competitor、pros、cons、conflicts、gaps。pros/cons 中每条结论"
+                "必须含非空 statement、supporting_evidence；每条支撑证据保留 "
+                "evidence_id 与 permalink，并显式写 is_singleton。来源矛盾写入 "
+                "conflicts，证据不足写入 gaps；可靠度复核只能在该结构内补字段，"
+                "不得把 findings 改写成逐证据评级数组。"
             )
     return (
         f"目标：{task}；把可复核结果写入 {output['path']}。\n"

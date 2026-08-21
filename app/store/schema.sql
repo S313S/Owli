@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 8;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 9;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -128,6 +128,9 @@ CREATE INDEX idx_evidence_report    ON evidence(report_id);
 CREATE INDEX idx_evidence_platform  ON evidence(platform, published_at);
 CREATE INDEX idx_evidence_grade     ON evidence(grade);
 CREATE INDEX idx_evidence_permalink ON evidence(permalink);
+CREATE UNIQUE INDEX idx_evidence_native_identity
+  ON evidence(report_id, platform, platform_item_id)
+  WHERE platform_item_id IS NOT NULL AND platform_item_id <> '';
 
 -- ═══════════════════════════════════════════
 -- 反馈表：用户对报告的修正、标签调整，及 C1 要求的变更记录

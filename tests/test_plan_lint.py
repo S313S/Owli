@@ -458,3 +458,65 @@ def test_goal_acceptance_只交给_deliverable_路径所属_agent(tmp_path) -> N
 
     assert "Goal 验收条件" not in non_owner_task.body
     assert "Goal 验收条件" in owner_task.body
+
+
+def _m3e_goal6_contract_plan() -> dict:
+    """提取 r-4d3a8896a30a goal-6 的最小契约冲突素材。"""
+
+    plan = make_plan_dict()
+    goal = plan["goals"][1]
+    goal["title"] = "竞品优缺点的一致性与可靠度交叉验证"
+    goal["deliverable"] = {
+        "format": "json",
+        "path": "goals/goal-2/competitor-findings.json",
+        "description": (
+            "findings 数组；每条含 competitor、pros、cons、statement、"
+            "supporting_evidence、evidence_id、is_singleton、conflicts、gaps"
+        ),
+    }
+    goal["acceptance"] = [
+        "每条 statement 都关联 evidence_id",
+        "单一来源结论标记 is_singleton=true",
+        "来源冲突写入 conflicts，证据不足写入 gaps",
+    ]
+    agent = goal["agents"][0]
+    agent["agent_id"] = "cross-validation"
+    agent["task"] = "聚合 findings 并识别冲突与缺口。"
+    agent["output"] = {
+        "format": "json",
+        "path": "goals/goal-2/competitor-findings.json",
+        "validators": [
+            "file_exists",
+            "no_item_missing_rating",
+            "field_domain_whitelist:reliability_closed_set",
+            "rating_notes_matches_regex",
+            "rating_notes_scores_match_columns",
+        ],
+    }
+    return plan
+
+
+def test_M3e真实goal6_findings验收与ratings校验器冲突被拦截() -> None:
+    from app.plan.lint import lint
+
+    errors = lint(_m3e_goal6_contract_plan())["errors"]
+
+    conflict = next(item for item in errors if item.startswith("[规则28]"))
+    assert "goal-2/cross-validation" in conflict
+    assert "findings" in conflict and "ratings" in conflict
+    assert "evidence_id" in conflict and "score_authority" in conflict
+
+
+def test_M3e修正后的findings字段校验契约通过() -> None:
+    from app.plan.lint import lint
+
+    plan = _m3e_goal6_contract_plan()
+    plan["goals"][1]["agents"][0]["output"]["validators"] = [
+        "file_exists",
+        "json_array_min_items:1",
+        "each_item_has:competitor,pros,cons,conflicts,gaps",
+    ]
+
+    assert not any(
+        item.startswith("[规则28]") for item in lint(plan)["errors"]
+    )

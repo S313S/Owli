@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 27 条阻断校验和 7 类质量提示。"""
+"""计划树保存与批准前的 28 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -52,6 +52,21 @@ _VALIDATORS: dict[str, tuple[int, int | None, bool]] = {
     "norm_method_in_enum": (0, 0, False),
     "norm_context_required_keys": (0, 0, False),
     "xlsx_sheets_exact": (1, None, False),
+}
+
+_FINDINGS_FIELDS = frozenset({
+    "competitor", "pros", "cons", "statement", "supporting_evidence",
+    "evidence_id", "is_singleton", "conflicts", "gaps",
+})
+_RATINGS_FIELDS = frozenset({
+    "score_authority", "score_freshness", "score_crossref",
+    "score_completeness", "score_independence", "rating_notes", "rated_by",
+})
+_VALIDATOR_FIELDS: dict[str, frozenset[str]] = {
+    "no_item_missing_rating": _RATINGS_FIELDS,
+    "rating_notes_matches_regex": frozenset({"rating_notes"}),
+    "rating_notes_scores_match_columns": _RATINGS_FIELDS,
+    "field_domain_whitelist": frozenset({"rating_notes", "rated_by"}),
 }
 
 
@@ -918,6 +933,66 @@ def _rule_27(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _identifier_signals(values: Iterable[Any]) -> set[str]:
+    """只提取字段标识符，不识别或放行任何自然语言措辞。"""
+
+    signals: set[str] = set()
+    for value in values:
+        signals.update(re.findall(r"[A-Za-z][A-Za-z0-9_]*", str(value)))
+    return signals
+
+
+def _validator_signals(specifications: Iterable[Any]) -> set[str]:
+    signals: set[str] = set()
+    for specification in specifications:
+        name, arguments = _parse_validator_spec(str(specification))
+        signals.update(_VALIDATOR_FIELDS.get(name, ()))
+        if name == "each_item_has":
+            signals.update(arguments)
+    return signals
+
+
+def _parse_validator_spec(specification: str) -> tuple[str, list[str]]:
+    name, separator, raw = specification.partition(":")
+    return name, raw.split(",") if separator else []
+
+
+def _rule_28(goals: list[dict[str, Any]]) -> list[str]:
+    """goal 验收字段族与 agent validators 的产物对象必须一致。"""
+
+    messages: list[str] = []
+    for goal, agent in _agents(goals):
+        deliverable = goal.get("deliverable", {})
+        expected = _identifier_signals([
+            deliverable.get("description", ""),
+            *goal.get("acceptance", []),
+        ])
+        actual = _validator_signals(
+            agent.get("output", {}).get("validators", [])
+        )
+        expected_findings = expected & _FINDINGS_FIELDS
+        expected_ratings = expected & _RATINGS_FIELDS
+        actual_findings = actual & _FINDINGS_FIELDS
+        actual_ratings = actual & _RATINGS_FIELDS
+        conflict = (
+            len(expected_findings) >= 2 and len(actual_ratings) >= 2
+            or len(expected_ratings) >= 2 and len(actual_findings) >= 2
+        )
+        if not conflict:
+            continue
+        expected_family = "findings" if expected_findings else "ratings"
+        actual_family = "ratings" if actual_ratings else "findings"
+        expected_fields = expected_findings or expected_ratings
+        actual_fields = actual_ratings or actual_findings
+        messages.append(
+            f"[规则28] {goal.get('goal_id')}/{agent.get('agent_id')} 产物契约不自洽："
+            f"goal deliverable/acceptance 描述 {expected_family} 字段 "
+            f"{sorted(expected_fields)}，但 output.validators 校验 {actual_family} 字段 "
+            f"{sorted(actual_fields)}。请让验收文本、产物结构与 validators 描述同一对象"
+        )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -1020,4 +1095,5 @@ def lint(
     errors.extend(_rule_25(raw, goals))
     errors.extend(_rule_26(goals))
     errors.extend(_rule_27(goals))
+    errors.extend(_rule_28(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

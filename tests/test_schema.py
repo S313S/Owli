@@ -40,7 +40,7 @@ class SchemaSqlTest(unittest.TestCase):
         self.assertIn("recall_fts", tables)
         self.assertEqual(journal_mode, "wal")
 
-    def test_v6数据库迁移到_v8_且保留既有报告(self) -> None:
+    def test_v6数据库迁移到_v9_且保留既有报告(self) -> None:
         from app.store.schema import initialize_database_if_empty
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -48,6 +48,7 @@ class SchemaSqlTest(unittest.TestCase):
             with sqlite3.connect(database_path) as connection:
                 connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
                 connection.execute("DROP TABLE IF EXISTS events")
+                connection.execute("DROP INDEX IF EXISTS idx_evidence_native_identity")
                 connection.execute("PRAGMA user_version = 6")
                 connection.execute(
                     "INSERT INTO reports(id,title,research_question,created_at) "
@@ -69,13 +70,29 @@ class SchemaSqlTest(unittest.TestCase):
                     for row in connection.execute("PRAGMA table_xinfo(chapter_progress)")
                 }
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
         self.assertEqual(report, ("既有报告",))
         self.assertEqual(
             event_columns,
             {"research_id", "sequence", "type", "payload", "created_at"},
         )
         self.assertIn("extra", chapter_columns)
+
+    def test_evidence_原生平台键有非空唯一索引(self) -> None:
+        with sqlite3.connect(":memory:") as connection:
+            connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            indexes = connection.execute(
+                "SELECT name, sql FROM sqlite_master "
+                "WHERE type = 'index' AND tbl_name = 'evidence'"
+            ).fetchall()
+
+        definition = next(
+            sql for name, sql in indexes
+            if name == "idx_evidence_native_identity"
+        )
+        self.assertIn("UNIQUE", definition)
+        self.assertIn("report_id, platform, platform_item_id", definition)
+        self.assertIn("platform_item_id IS NOT NULL", definition)
 
 
 if __name__ == "__main__":

@@ -310,6 +310,62 @@ def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_p
     assert generated.capability["profile"] == profile
 
 
+def test_交叉验证保留节化契约且末级可靠度审计沿用findings契约(tmp_path) -> None:
+    from app.plan.lint import lint
+
+    skeleton = _valid_skeleton()
+    goal = skeleton["goals"][1]
+    goal["deliverable"] = {
+        "format": "json",
+        "shape": "array",
+        "path": "competitor-findings.json",
+        "description": (
+            "findings 数组，每项含 competitor、pros、cons、statement、"
+            "supporting_evidence、evidence_id、is_singleton、conflicts、gaps"
+        ),
+    }
+    goal["acceptance"] = [
+        "每条 statement 关联 evidence_id",
+        "单一来源写 is_singleton，冲突与缺口分别写 conflicts、gaps",
+    ]
+    goal["agents"] = [
+        _agent("Product Hunt 数据抓取·飞书", "采集 Product Hunt 证据"),
+        _agent("交叉验证", "聚合 pros/cons，识别 conflicts 与 gaps"),
+        _agent("可靠度审计", "复核 findings 的支撑证据与 confidence"),
+    ]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+    generated = plan.goals[1].agents
+
+    assert lint(plan)["errors"] == []
+    assert generated[1].output["validators"] == [
+        "file_exists", "sectioned_document_valid",
+    ]
+    validators = generated[2].output["validators"]
+    assert "json_array_min_items:1" in validators
+    assert "each_item_has:competitor,pros,cons,conflicts,gaps" in validators
+    assert "no_item_missing_rating" not in validators
+    assert "七个字段" not in generated[2].prompt["body"]
+    assert "statement" in generated[2].prompt["body"]
+    assert "is_singleton" in generated[2].prompt["body"]
+
+
+def test_纯证据评级goal仍使用ratings契约(tmp_path) -> None:
+    skeleton = _valid_skeleton()
+    goal = skeleton["goals"][1]
+    goal["deliverable"]["description"] = (
+        "评级数组，每条含 score_authority、score_freshness、score_crossref、"
+        "score_completeness、score_independence、rating_notes、rated_by"
+    )
+    goal["acceptance"] = ["每条 evidence 的 score_authority 与 rating_notes 齐全"]
+
+    plan, _, _ = _generate(tmp_path, [skeleton])
+    agent = plan.goals[1].agents[0]
+
+    assert "no_item_missing_rating" in agent.output["validators"]
+    assert "七个字段" in agent.prompt["body"]
+
+
 def test_角色只按封闭名称分类_任务中的_API_不得误派报告_agent(tmp_path) -> None:
     skeleton = _valid_skeleton()
     skeleton["goals"][0]["deliverable"]["shape"] = "object"
