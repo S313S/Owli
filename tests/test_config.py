@@ -13,6 +13,7 @@ def test_韧性配置默认值环境无关() -> None:
     assert config.backoff_initial_seconds == 60
     assert config.backoff_max_seconds == 900
     assert config.engine_probe_interval_seconds == 300
+    assert config.session_stall_timeout_seconds == 600
     assert [config.backoff_seconds(index) for index in range(6)] == [
         60, 120, 240, 480, 900, 900,
     ]
@@ -27,6 +28,7 @@ def test_韧性配置部署环境覆盖全部生效() -> None:
         "OWLI_BACKOFF_INITIAL_SECONDS": "7",
         "OWLI_BACKOFF_MAX_SECONDS": "21",
         "OWLI_ENGINE_PROBE_INTERVAL_SECONDS": "11",
+        "OWLI_SESSION_STALL_TIMEOUT_SECONDS": "13",
     })
 
     assert config.transport_failure_threshold == 2
@@ -34,6 +36,7 @@ def test_韧性配置部署环境覆盖全部生效() -> None:
     assert config.backoff_seconds(0) == 7
     assert config.backoff_seconds(4) == 21
     assert config.engine_probe_interval_seconds == 11
+    assert config.session_stall_timeout_seconds == 13
 
 
 @pytest.mark.parametrize(
@@ -44,6 +47,7 @@ def test_韧性配置部署环境覆盖全部生效() -> None:
         ("OWLI_BACKOFF_INITIAL_SECONDS", "abc"),
         ("OWLI_BACKOFF_MAX_SECONDS", "0"),
         ("OWLI_ENGINE_PROBE_INTERVAL_SECONDS", "-3"),
+        ("OWLI_SESSION_STALL_TIMEOUT_SECONDS", "0"),
     ],
 )
 def test_韧性配置拒绝非正整数(name: str, value: str) -> None:
