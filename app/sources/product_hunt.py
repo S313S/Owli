@@ -36,6 +36,10 @@ except ModuleNotFoundError as error:
         source_id: str
         tool_name: str
         entrypoint: Callable[..., Any]
+        display_name: str = ""
+        collector_name: str = ""
+        capability_description: str = ""
+        prompt_hint: str = ""
 
 
 __all__ = ["SOURCE_SPEC", "search"]
@@ -469,4 +473,8 @@ SOURCE_SPEC = SourceSpec(
     source_id="product_hunt",
     tool_name="source.product_hunt",
     entrypoint=search,
+    display_name="Product Hunt",
+    collector_name="Product Hunt 数据抓取",
+    capability_description="产品 launch、maker 自述、投票与发布评论",
+    prompt_hint="postedAfter 圈定时间窗并按 VOTES 排序",
 )

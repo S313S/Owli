@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -457,6 +457,43 @@ def _citation_sets(ctx: Ctx, name: str) -> tuple[set[str], set[str], Result | No
     return set(_CITATION.findall(body_text)), set(_CITATION.findall(source_text)), None
 
 
+def _source_inventory_offenders(text: str) -> tuple[list[str], list[dict[str, str]]]:
+    score_pattern = re.compile(
+        r"五维=权威([0-2])/时效([0-2])/交叉([0-2])/完整([0-2])/无关([0-2])"
+    )
+    offenders: list[str] = []
+    detail: list[dict[str, str]] = []
+    for title, body, _, _ in _markdown_sections(text):
+        if "信息源" not in title:
+            continue
+        for line in body.splitlines():
+            mark_match = _CITATION.search(line)
+            if mark_match is None:
+                continue
+            mark = mark_match.group(0)
+            score_match = score_pattern.search(line)
+            notes_marker = "rating_notes="
+            notes = line.split(notes_marker, 1)[1].strip() if notes_marker in line else None
+            problem = None
+            link_match = re.search(r"\[[^\]]+\]\((https?://[^)]+)\)", line)
+            if link_match is None:
+                problem = "缺可点击的 HTTP(S) 标题链接"
+            elif "fetched_at=" not in line or score_match is None or notes is None:
+                problem = "缺 fetched_at、五维分或 rating_notes"
+            else:
+                from app.reliability.scoring import SCORE_FIELDS, rating_notes_problem
+
+                scores = {
+                    field: int(score_match.group(index))
+                    for index, field in enumerate(SCORE_FIELDS, start=1)
+                }
+                problem = rating_notes_problem(notes, scores)
+            if problem is not None:
+                offenders.append(mark)
+                detail.append({"mark": mark, "problem": problem})
+    return sorted(set(offenders)), detail
+
+
 @validator("citation_marks_resolvable")
 def citation_marks_resolvable(ctx: Ctx, arguments: list[str]) -> Result:
     name = "citation_marks_resolvable"
@@ -509,6 +546,16 @@ def citation_marks_resolvable(ctx: Ctx, arguments: list[str]) -> Result:
             unresolved,
             {"body_marks": sorted(body), "source_marks": sorted(sources)},
         )
+    if ctx.agent_id == "report-finalizer":
+        source_offenders, source_detail = _source_inventory_offenders(text)
+        if source_offenders:
+            return _result(
+                Verdict.FAIL,
+                name,
+                f"{len(source_offenders)} 个信息源清单条目缺少 fetched_at、五维分或合法 rating_notes",
+                source_offenders,
+                {"items": source_detail},
+            )
     return _result(Verdict.PASS, name, f"正文 {len(body)} 个角标均可解析")
 
 
@@ -671,11 +718,72 @@ def rating_notes_scores_match_columns(ctx: Ctx, arguments: list[str]) -> Result:
     return _result(Verdict.PASS, name, f"{len(items or [])} 条 rating_notes 分数一致")
 
 
+@validator("field_domain_whitelist")
+def field_domain_whitelist(ctx: Ctx, arguments: list[str]) -> Result:
+    """实现 M3 authority / independence 闭集；其他字段域仍显式 UNAVAILABLE。"""
+
+    name = "field_domain_whitelist"
+    if arguments != ["reliability_closed_set"]:
+        return _result(
+            Verdict.UNAVAILABLE,
+            name,
+            "本版 field_domain_whitelist 只实现 reliability_closed_set",
+        )
+    items, error = _read_json_array(ctx, name)
+    if error is not None:
+        return error
+    from app.reliability.audit import AUTHORITY_KINDS, INTEREST_RELATIONS
+    from app.reliability.scoring import PLATFORM_BASELINES, SCORE_FIELDS
+
+    offenders: list[str] = []
+    for index, item in enumerate(items or []):
+        if not isinstance(item, Mapping):
+            offenders.append(f"items[{index}]")
+            continue
+        extra = item.get("extra") if isinstance(item.get("extra"), Mapping) else item
+        degraded = extra.get("reliability_degraded")
+        if degraded is not None:
+            rated_by = str(item.get("rated_by") or "")
+            expected_degraded = {
+                "reason": "closed_set_retry_exhausted",
+                "attempts": 3,
+            }
+            platform = str(item.get("platform") or "web_search")
+            baseline = PLATFORM_BASELINES.get(
+                platform, PLATFORM_BASELINES["web_search"]
+            )
+            scores_are_baseline = all(
+                item.get(field) == baseline[field] for field in SCORE_FIELDS
+            )
+            if (
+                degraded != expected_degraded
+                or rated_by != f"baseline:{platform}@v1:degraded"
+                or not scores_are_baseline
+            ):
+                offenders.append(f"items[{index}].extra.reliability_degraded")
+            continue
+        if extra.get("authority_kind") not in AUTHORITY_KINDS:
+            offenders.append(f"items[{index}].extra.authority_kind")
+        if extra.get("interest_relation") not in INTEREST_RELATIONS:
+            offenders.append(f"items[{index}].extra.interest_relation")
+    if offenders:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"{len(offenders)} 个 authority/independence 标签越出闭集",
+            offenders,
+        )
+    return _result(
+        Verdict.PASS,
+        name,
+        f"{len(items or [])} 条 authority/independence 标签均在闭集或已 degraded",
+    )
+
+
 _UNIMPLEMENTED = (
     "zip_entry_glob_exists",
     "openpyxl_reload_ok",
     "json_array_between",
-    "field_domain_whitelist",
     "list_items_min",
     "each_insight_has_citation",
     "table_rows_min",

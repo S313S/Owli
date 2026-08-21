@@ -17,6 +17,7 @@ from app.adapters.routing import pick_engine
 from app.plan.lint import lint
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan
 from app.plan.question import make_questions
+from app.sources.registry import planning_catalog
 
 
 MAX_ATTEMPTS = 3
@@ -47,9 +48,15 @@ _ROLE_MAP = {
 }
 
 
+def _source_specs() -> dict[str, Any]:
+    return {spec.collector_name.casefold(): spec for spec in planning_catalog()}
+
+
 def _classify(name: str, task: str) -> tuple[str, str]:
     del task
     normalized = " ".join(name.casefold().split())
+    if normalized in _source_specs():
+        return "data_collection", "web-collector"
     try:
         return _ROLE_MAP[normalized]
     except KeyError as exc:
@@ -60,18 +67,25 @@ def _planning_prompt(query: str, output_path: Path, errors: list[str]) -> str:
     retry = ""
     if errors:
         retry = "\n上一轮 plan_lint 错误原文（逐条修正）：\n" + "\n".join(errors)
+    sources = planning_catalog()
+    source_lines = "；".join(
+        f"{item.display_name}（name={item.collector_name}，source={item.source_id}："
+        f"{item.capability_description}；{item.prompt_hint}）"
+        for item in sources
+    )
+    source_names = "、".join(item.collector_name for item in sources)
     return (
         f"目标：为用户原始需求《{query}》生成一棵 3–7 个 goal 的三层计划骨架，"
         f"写入 {output_path}；"
         "按证据链自然断点拆分，每个 goal 同时满足独立产物、验收可判定、值得干预、失败可局部化。\n"
-        "方法要点：当前可使用 Hacker News 与 X；HN 查询为 Algolia /api/v1/search，"
-        "tags=story，numericFilters=created_at_i>执行时点UTC epoch-7776000,points>50，"
-        "hitsPerPage=1000；X 查询为 recent search 且强制 -is:retweet -is:reply 与本地互动量过滤。"
+        f"方法要点：信息源能力只取共享注册表：{source_lines}。"
+        "飞书竞品优缺点类调研优先安排至少三个不同 source 的采集 agent；"
+        "每个采集 agent 的 name 唯一确定 capability.sources 与 source.* 工具，必须自洽。"
         "禁止按搜索/阅读/总结工种拆 goal。\n"
         f"产物结构：只输出 JSON object 到 {output_path}，顶层只能有 goals。每个 goal 只能含 "
         "title、objective、depends_on、deliverable、acceptance、agents；agents 每项只能含 "
         "name、task，name 应从规划、计划仲裁、可靠度审计、交叉验证、一致性检查、报告撰写、"
-        "摘要、标签、API 数据抓取、HN 数据抓取、X 数据抓取、MediaCrawler、浏览器自动化、"
+        f"摘要、标签、API 数据抓取、{source_names}、MediaCrawler、浏览器自动化、"
         "代码执行、Excel 生成、数据清洗中选。"
         "depends_on 用 goal-<n>；deliverable 含 format/path/description，format 只能取 "
         "table、markdown、excel、json，path 只写文件名；"
@@ -156,7 +170,13 @@ def _output(
     elif agent_kind in {"audit", "reliability_audit", "cross_validation"}:
         result = {
             "format": "json", "path": f"{base}.json",
-            "validators": ["file_exists", "no_item_missing_rating"],
+            "validators": [
+                "file_exists",
+                "no_item_missing_rating",
+                "field_domain_whitelist:reliability_closed_set",
+                "rating_notes_matches_regex",
+                "rating_notes_scores_match_columns",
+            ],
         }
     elif agent_kind == "excel_generation":
         result = {
@@ -177,7 +197,14 @@ def _output(
     return result
 
 
-def _agent_prompt(query: str, task: str, output: Mapping[str, Any], agent_kind: str) -> str:
+def _agent_prompt(
+    query: str,
+    task: str,
+    output: Mapping[str, Any],
+    agent_kind: str,
+    *,
+    source_id: str | None = None,
+) -> str:
     structure = "、".join(output["validators"])
     chart_rule = ""
     if agent_kind in {"report", "report_writing", "excel_generation"}:
@@ -186,13 +213,19 @@ def _agent_prompt(query: str, task: str, output: Mapping[str, Any], agent_kind: 
         chart_rule += (
             "引用契约：「结论」章节必须用 Markdown 列表，每条结论列表项末尾带 [SNN] 角标"
             "（S01 起编号）；「信息源」章节逐条以“- [SNN] [标题](permalink)（fetched_at=…）”"
-            "列出；正文角标与信息源条目双向一致，不得有悬空角标或未被引用的信息源。"
+            "列出；每条继续写“ · 五维=权威N/时效N/交叉N/完整N/无关N · "
+            "rating_notes=<五段式原文>”；正文角标与信息源条目双向一致，"
+            "不得有悬空角标或未被引用的信息源。"
         )
     if agent_kind in {"data_collection", "browser_automation"}:
+        spec = next(
+            (item for item in planning_catalog() if item.source_id == source_id),
+            None,
+        )
         method = (
-            f"查询式={query}；HN Algolia 时间窗=近90天，"
-            "numericFilters=created_at_i>执行时点UTC epoch-7776000,points>50，"
-            "hitsPerPage=1000。"
+            f"查询式={query}；调用 {spec.tool_name}；{spec.prompt_hint}。"
+            if spec is not None
+            else f"查询式={query}；按 capability 声明的信息源执行采集。"
         )
         evidence_rule = (
             "所有事实保留 permalink 与 fetched_at。"
@@ -213,6 +246,14 @@ def _agent_prompt(query: str, task: str, output: Mapping[str, Any], agent_kind: 
                 "score_authority、score_freshness、score_crossref、score_completeness、"
                 "score_independence、rating_notes、rated_by 七个字段（评分为整数，"
                 "rating_notes 说明依据，rated_by 填 agent_id）；"
+                "extra.authority_kind 只能取 first_party_official、verified_principal、"
+                "institutional_primary、named_secondary、community_high_signal、"
+                "anonymous_or_unverifiable、content_farm；判据分别是主体官方域名、"
+                "认证议题当事方、具名机构一手披露、具名二手来源、社区热度达批内P75或"
+                "作者历史可查、作者不可核验、内容农场。"
+                "extra.interest_relation 只能取 arms_length、disclosed_interest、"
+                "undisclosed_interest；判据分别是无可见利益关系、利益关系已披露、"
+                "利益关系明显但未披露。不得输出闭集外近义词；"
                 "goal 验收若描述对象结构，属于其他产物，不适用本文件。"
             )
     return (
@@ -372,7 +413,8 @@ def _build_agent(
         raise ValueError(f"{goal_id}.agents 的 name/task 不能为空")
     agent_kind, profile = _classify(name, task)
     normalized_name = " ".join(name.casefold().split())
-    source_id = "x" if normalized_name == "x 数据抓取" else "hacker_news"
+    source_spec = _source_specs().get(normalized_name)
+    source_id = source_spec.source_id if source_spec is not None else "hacker_news"
     counters[agent_kind] += 1
     suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
     agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
@@ -394,7 +436,13 @@ def _build_agent(
         ),
         "prompt": {
             "preamble_ref": "common/v1",
-            "body": _agent_prompt(query, task, output, agent_kind),
+            "body": _agent_prompt(
+                query,
+                task,
+                output,
+                agent_kind,
+                source_id=source_id if profile == "web-collector" else None,
+            ),
             "assumptions_policy": "assume_and_declare",
         },
         "output": output,

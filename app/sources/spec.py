@@ -17,6 +17,10 @@ class SourceSpec:
     source_id: str
     tool_name: str
     entrypoint: Callable[..., Any]
+    display_name: str = ""
+    collector_name: str = ""
+    capability_description: str = ""
+    prompt_hint: str = ""
 
     def __post_init__(self) -> None:
         if not _SOURCE_ID_PATTERN.fullmatch(self.source_id):
@@ -26,6 +30,8 @@ class SourceSpec:
             raise ValueError(f"工具名必须是 {expected}")
         if not callable(self.entrypoint):
             raise TypeError("entrypoint 必须可调用")
+        if self.collector_name and not self.collector_name.endswith("数据抓取"):
+            raise ValueError("collector_name 必须以‘数据抓取’结尾")
 
 
 __all__ = ["SourceSpec"]

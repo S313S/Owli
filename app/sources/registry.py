@@ -57,4 +57,18 @@ def get_tool(tool_name: str):
     raise KeyError(f"未注册的信息源工具：{tool_name}")
 
 
-__all__ = ["discover_sources", "get_source", "get_tool"]
+def planning_catalog() -> tuple[SourceSpec, ...]:
+    """返回计划生成可用源；展示与能力描述只取注册表，不另建枚举。"""
+
+    specs = tuple(discover_sources().values())
+    missing = [
+        spec.source_id
+        for spec in specs
+        if not all((spec.display_name, spec.collector_name, spec.capability_description))
+    ]
+    if missing:
+        raise ValueError(f"信息源缺少计划元数据：{','.join(sorted(missing))}")
+    return tuple(sorted(specs, key=lambda item: item.source_id))
+
+
+__all__ = ["discover_sources", "get_source", "get_tool", "planning_catalog"]

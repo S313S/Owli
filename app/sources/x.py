@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -66,6 +67,46 @@ class XSourceConfig:
             raise ValueError("X 单价配置必须大于 0")
         if any(value < 0 for value in money[:-1]):
             raise ValueError("X 预算配置不能为负数")
+
+
+_RUNTIME_MONEY_ENV = {
+    "weekly_budget_usd": "OWLI_X_WEEKLY_BUDGET_USD",
+    "balance_usd": "OWLI_X_BALANCE_USD",
+    "billing_cycle_cap_usd": "OWLI_X_BILLING_CYCLE_CAP_USD",
+    "billing_cycle_spent_usd": "OWLI_X_BILLING_CYCLE_SPENT_USD",
+    "price_per_read_usd": "OWLI_X_PRICE_PER_READ_USD",
+}
+
+
+def load_runtime_config(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[XSourceConfig, SourceUsageStore]:
+    """从运行时配置构造 X 工具；金额和 Console 现值不进代码常量。"""
+
+    values = os.environ if environ is None else environ
+    required = [*_RUNTIME_MONEY_ENV.values(), "OWLI_X_USAGE_DB_PATH"]
+    missing = [name for name in required if not str(values.get(name, "")).strip()]
+    if missing:
+        raise ValueError("X 运行时配置缺失：" + ",".join(missing))
+    try:
+        money = {
+            field: Decimal(str(values[name]).strip())
+            for field, name in _RUNTIME_MONEY_ENV.items()
+        }
+        config = XSourceConfig(
+            api_base_url=str(values.get("OWLI_X_API_BASE_URL", "https://api.x.com/2")),
+            **money,
+            bearer_token_env=str(values.get("OWLI_X_BEARER_TOKEN_ENV", "X_BEARER_TOKEN")),
+        )
+    except (ArithmeticError, ValueError) as exc:
+        raise ValueError("X 运行时金额配置非法") from exc
+    database_path = Path(str(values["OWLI_X_USAGE_DB_PATH"])).expanduser()
+    from app.store.schema import initialize_database_if_empty
+
+    initialize_database_if_empty(
+        database_path, Path(__file__).resolve().parents[1] / "store" / "schema.sql"
+    )
+    return config, SourceUsageStore(database_path)
 
 
 @dataclass(frozen=True)
@@ -579,18 +620,44 @@ def search(
     query: str,
     window: str,
     *,
-    config: XSourceConfig,
-    usage_store: SourceUsageStore,
-    lang: str,
-    max_results: int,
-    min_likes: int,
-    min_retweets: int,
+    config: XSourceConfig | None = None,
+    usage_store: SourceUsageStore | None = None,
+    lang: str = "zh",
+    max_results: int = 10,
+    min_likes: int = 0,
+    min_retweets: int = 0,
     token_loader: Callable[[], str] | None = None,
     http_get: HttpGet = _default_http_get,
     clock: Clock = _now_utc,
     sleeper: Sleeper = time.sleep,
     on_event: EventCallback | None = None,
 ) -> XSearchResult:
+    if config is None or usage_store is None:
+        try:
+            runtime_config, runtime_store = load_runtime_config()
+            config = config or runtime_config
+            usage_store = usage_store or runtime_store
+        except ValueError as exc:
+            missing = str(exc).partition("：")[2].split(",")
+            event = {
+                "type": "source_unavailable",
+                "data": {
+                    "source": "x",
+                    "reason": "runtime_config_missing",
+                    "missing": missing,
+                    "task_continues": True,
+                },
+            }
+            if on_event is not None:
+                on_event(event)
+            return XSearchResult(
+                evidence=[],
+                conclusion={
+                    "status": "unavailable",
+                    "reason": "runtime_config_missing",
+                    "task_continues": True,
+                },
+            )
     loader = token_loader or (
         lambda: load_bearer_token(variable_name=config.bearer_token_env)
     )
@@ -616,4 +683,8 @@ SOURCE_SPEC = SourceSpec(
     source_id="x",
     tool_name="source.x",
     entrypoint=search,
+    display_name="X",
+    collector_name="X 数据抓取",
+    capability_description="近7天公开短帖与互动指标，受读取预算软护栏约束",
+    prompt_hint="recent search，排除转推/回复，互动阈值取回后本地过滤",
 )

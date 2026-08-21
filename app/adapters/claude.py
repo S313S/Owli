@@ -20,6 +20,11 @@ from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
 from app.adapters.ratelimit import route
 from app.adapters import validation as artifact_validation
 from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
+from app.adapters.source_mcp import (
+    exposed_tool_name,
+    source_event_path,
+    stdio_server_config,
+)
 
 
 _RESULT_BLOCK = re.compile(
@@ -121,8 +126,12 @@ def make_permission_callback(task: TaskSpec, denials: list[str], *, sdk=None):
     write_tools = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
     read_tools = {"Read", "Glob", "Grep"}
     translated = _claude_capability(task)
+    source_tools = {
+        exposed_tool_name(source_id)
+        for source_id in (translated.registered_sources if translated is not None else ())
+    }
     allowed_tools = (
-        CLAUDE_TOOL_UNIVERSE - set(translated.disallowed_tools)
+        (CLAUDE_TOOL_UNIVERSE - set(translated.disallowed_tools)) | source_tools
         if translated is not None
         else task.tools
     )
@@ -199,7 +208,10 @@ def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
         permission_mode = "dontAsk"
     else:
         disallowed_tools = list(translated.disallowed_tools)
-        declared_tools = sorted(CLAUDE_TOOL_UNIVERSE - set(disallowed_tools))
+        declared_tools = sorted(
+            (CLAUDE_TOOL_UNIVERSE - set(disallowed_tools))
+            | {exposed_tool_name(item) for item in translated.registered_sources}
+        )
         setting_sources = list(translated.setting_sources)
         permission_mode = translated.permission_mode
     values: dict[str, Any] = {
@@ -214,6 +226,17 @@ def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
             "PreToolUse": [make_pre_tool_hook(permission_callback, sdk=sdk)],
         },
     }
+    if translated is not None and translated.registered_sources:
+        values["mcp_servers"] = {
+            "owli_sources": stdio_server_config(
+                translated.registered_sources,
+                event_path=source_event_path(task),
+                research_id=task.research_id,
+                goal_id=task.goal_id,
+                agent_id=task.agent_id,
+            )
+        }
+        values["strict_mcp_config"] = True
     if task.model:
         values["model"] = task.model
     return sdk.ClaudeAgentOptions(**values)
@@ -287,7 +310,9 @@ class ClaudeAdapter:
         task: TaskSpec,
         ctx: artifact_validation.Ctx,
         on_event=None,
+        source_adapter=None,
     ) -> ClaudeRunResult:
+        del source_adapter
         denials: list[str] = []
         events: list[NormalizedEvent] = []
         output_text: list[str] = []

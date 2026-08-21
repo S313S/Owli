@@ -176,6 +176,13 @@ SOURCE_SPEC = SourceSpec(
     source_id="hacker_news",
     tool_name="source.hacker_news",
     entrypoint=search,
+    display_name="Hacker News",
+    collector_name="HN 数据抓取",
+    capability_description="社区长讨论与完整评论树，适合采集真实使用反馈和技术抱怨",
+    prompt_hint=(
+        "Algolia 近90天，created_at_i>执行时点UTC epoch-7776000，"
+        "points>50，hitsPerPage=1000"
+    ),
 )
 
 

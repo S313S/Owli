@@ -15,7 +15,7 @@ from app.adapters import validation
 from app.adapters.capability import Capability
 from app.adapters.contracts import EngineTask
 from app.adapters.routing import RoutedAdapter
-from app.orchestrator.scheduler import Scheduler
+from app.orchestrator.scheduler import Scheduler, TaskRunResult
 from app.plan.cards import (
     Card,
     CardActionType,
@@ -27,6 +27,8 @@ from app.plan.generate import generate_plan
 from app.plan.editing import apply_edit, approve
 from app.plan.model import Plan
 from app.plan.store import load_plan
+from app.report.markdown import enrich_source_section, load_evidence_artifacts
+from app.reliability.audit import degrade_after_closed_set_retry
 
 
 AdapterFactory = Callable[[], Any]
@@ -386,10 +388,20 @@ class RuntimeCoordinator:
         return repr(value)
 
     async def _run_task(self, plan: Plan, agent: Any, context: Any) -> Any:
+        kind = self._agent_kind(agent)
         task = self._task(plan, agent, context)
         adapter = self._adapters[plan.research_id]
 
         async def on_event(event: Any) -> None:
+            if isinstance(event, dict):
+                payload = dict(event)
+                if payload.get("type") == "card_update":
+                    await self._emit_scheduler_event(plan.research_id, payload)
+                    return
+                await self.events.publish(plan.research_id, payload)
+                signal = payload.get("data")
+                await context.on_event(signal if isinstance(signal, dict) else payload)
+                return
             await self.events.publish(
                 plan.research_id,
                 {
@@ -406,7 +418,50 @@ class RuntimeCoordinator:
             )
             await context.on_event(event)
 
-        return await adapter.run(task, self._ctx(task), on_event=on_event)
+        result = await adapter.run(task, self._ctx(task), on_event=on_event)
+        if (
+            kind == "reliability_audit"
+            and not bool(getattr(result, "succeeded", False))
+            and task.output_path.is_file()
+        ):
+            closed_set_report = validation.validate(
+                self._ctx(task), ["field_domain_whitelist:reliability_closed_set"]
+            )
+            closed_set_failed = closed_set_report.verdict is validation.Verdict.FAIL
+            if closed_set_failed and context.attempt < 3:
+                return TaskRunResult(
+                    False,
+                    engine=context.engine,
+                    failure_feedback=(
+                        "authority_kind / interest_relation 越出 source-reliability "
+                        "§1.1/§1.5 闭集；必须逐条改为闭集字面值"
+                    ),
+                )
+            if closed_set_failed and context.attempt >= 3:
+                try:
+                    items = json.loads(task.output_path.read_text(encoding="utf-8"))
+                    if not isinstance(items, list):
+                        return result
+                    degraded = degrade_after_closed_set_retry(items)
+                    task.output_path.write_text(
+                        json.dumps(degraded, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    repaired = validation.validate(self._ctx(task), task.validators)
+                except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+                    return result
+                if repaired.verdict is validation.Verdict.PASS:
+                    conclusion = getattr(result, "conclusion", None)
+                    if conclusion is not None and not getattr(result, "conclusion_error", None):
+                        from dataclasses import replace
+
+                        try:
+                            return replace(result, validation=repaired)
+                        except TypeError:
+                            pass
+                    # 只修复产物腿；缺 owli-result 结构化结论时仍保留原失败。
+                    return result
+        return result
 
     def _expanded_actions(self, card: dict[str, Any]) -> list[dict[str, Any]]:
         actions = list(card.get("actions", []))
@@ -586,6 +641,9 @@ class RuntimeCoordinator:
     def _append_decision_notes(self, path: Path, plan: Plan, scheduler: Any) -> None:
         if path.is_file():
             text = path.read_text(encoding="utf-8").rstrip()
+            evidence = load_evidence_artifacts(self.runs_root / plan.research_id)
+            if evidence:
+                text = enrich_source_section(text, evidence).rstrip()
         else:
             text = "# 结论\n\n- 本次运行未生成完整结论。\n\n# 信息源\n\n- 无可用信息源。"
         failed = [

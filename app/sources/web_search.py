@@ -454,4 +454,8 @@ SOURCE_SPEC = SourceSpec(
     source_id="web_search",
     tool_name="source.web_search",
     entrypoint=search,
+    display_name="网页搜索",
+    collector_name="网页搜索数据抓取",
+    capability_description="跨站官方文档、评测与报道原文，Exa 主、Tavily 错误降级",
+    prompt_hint="按时间窗检索并保留落地页 permalink，不把搜索摘要当原文",
 )

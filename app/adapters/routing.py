@@ -6,6 +6,12 @@ from dataclasses import dataclass
 import inspect
 from typing import Any, Mapping
 
+from app.adapters.source_mcp import (
+    SourceToolAdapter,
+    prepare_source_events,
+    replay_source_events,
+)
+
 
 _DEFAULT_ENGINES = {
     "planning": "claude",
@@ -53,7 +59,12 @@ def pick_engine(agent_kind: str, user_override: str | None) -> EngineSelection:
 class RoutedAdapter:
     """在适配层内完成路由并把统一结果交回编排层。"""
 
-    def __init__(self, *, adapters: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        adapters: Mapping[str, Any] | None = None,
+        source_tools: Mapping[str, Any] | None = None,
+    ) -> None:
         if adapters is None:
             from app.adapters.claude import ClaudeAdapter
             from app.adapters.codex import CodexAdapter
@@ -65,6 +76,7 @@ class RoutedAdapter:
         self._adapters = dict(adapters)
         self._active: Any = None
         self._future_engine: str | None = None
+        self._source_adapter = SourceToolAdapter(source_tools)
 
     @property
     def future_engine(self) -> str | None:
@@ -90,10 +102,45 @@ class RoutedAdapter:
                     await callback_result
 
         self._active = adapter
+        prepare_source_events(task)
         try:
-            return await adapter.run(task, ctx, on_event=routed_event)
+            try:
+                parameters = inspect.signature(adapter.run).parameters
+                kwargs = {"on_event": routed_event}
+                if "source_adapter" in parameters:
+                    kwargs["source_adapter"] = self._source_adapter
+                return await adapter.run(task, ctx, **kwargs)
+            finally:
+                await replay_source_events(task, routed_event)
         finally:
             self._active = None
+
+    async def call_source(
+        self,
+        tool_name: str,
+        query: str,
+        window: str,
+        *,
+        research_id: str,
+        goal_id: str,
+        agent_id: str,
+        capability: Any,
+        on_event: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """在适配层解析 source.* 工具并转发源事件，不向编排层泄漏实现。"""
+
+        return await self._source_adapter.call(
+            tool_name,
+            query,
+            window,
+            research_id=research_id,
+            goal_id=goal_id,
+            agent_id=agent_id,
+            capability=capability,
+            on_event=on_event,
+            **kwargs,
+        )
 
     async def interrupt(self) -> None:
         if self._active is None:

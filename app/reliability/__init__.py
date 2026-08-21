@@ -9,6 +9,12 @@ from .scoring import (
     rating_notes_problem,
     score_evidence,
 )
+from .audit import (
+    AUTHORITY_KINDS,
+    INTEREST_RELATIONS,
+    classify_and_score,
+    degrade_after_closed_set_retry,
+)
 
 __all__ = [
     "PLATFORM_BASELINES",
@@ -19,4 +25,8 @@ __all__ = [
     "normalize_evidence_metrics",
     "rating_notes_problem",
     "score_evidence",
+    "AUTHORITY_KINDS",
+    "INTEREST_RELATIONS",
+    "classify_and_score",
+    "degrade_after_closed_set_retry",
 ]

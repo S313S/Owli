@@ -29,6 +29,7 @@ from app.adapters.logging import (
     append_outcome_event,
 )
 from app.adapters.ratelimit import route
+from app.adapters.source_mcp import codex_mcp_args, source_event_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -231,6 +232,16 @@ def build_codex_command(
     if translated is not None:
         for directory in _writable_directories(task, translated.writable_roots):
             command.extend(["--add-dir", str(directory)])
+        if translated.injected_sources:
+            command.extend(
+                codex_mcp_args(
+                    translated.injected_sources,
+                    event_path=source_event_path(task),
+                    research_id=task.research_id,
+                    goal_id=task.goal_id,
+                    agent_id=task.agent_id,
+                )
+            )
     if network:
         command.extend([
             "-c", "sandbox_workspace_write.network_access=true"
@@ -602,7 +613,9 @@ class CodexAdapter:
         task: TaskSpec,
         ctx: artifact_validation.Ctx,
         on_event: Any = None,
+        source_adapter: Any = None,
     ) -> CodexRunResult:
+        del source_adapter
         events: list[NormalizedEvent] = []
         self._interrupted = False
         contract_failure = _task_contract_failure(task, ctx)
