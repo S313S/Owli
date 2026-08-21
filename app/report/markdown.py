@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from app.reliability.scoring import SCORE_FIELDS, rating_notes_problem
+from app.store.dao import normalize_permalink
 
 
 _LABELS = ("权威", "时效", "交叉", "完整", "无关")
@@ -222,6 +223,31 @@ def merge_sectioned_markdown(
     return "\n".join(blocks).rstrip() + "\n"
 
 
+def source_citations(markdown: str) -> dict[str, int]:
+    """从成稿信息源章节提取归一化 permalink 与角标编号。"""
+
+    citations: dict[str, int] = {}
+    seen_numbers: set[int] = set()
+    in_sources = False
+    for line in markdown.splitlines():
+        heading = _HEADING.match(line)
+        if heading:
+            in_sources = "信息源" in heading.group(2)
+            continue
+        if not in_sources:
+            continue
+        matched = _SOURCE_LINE.match(line)
+        if matched is None:
+            continue
+        permalink = normalize_permalink(matched.group("url"))
+        number = int(matched.group("number"))
+        if permalink in citations or number in seen_numbers:
+            raise ValueError("信息源清单含重复 permalink 或 citation_no")
+        citations[permalink] = number
+        seen_numbers.add(number)
+    return citations
+
+
 def _report_ready(item: Mapping[str, Any]) -> dict[str, Any] | None:
     if not item.get("permalink") or not item.get("fetched_at"):
         return None
@@ -245,7 +271,7 @@ def _report_ready(item: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def load_evidence_artifacts(research_root: str | Path) -> list[dict[str, Any]]:
-    """只读调研根下 JSON 数组，汇总可用于清单的数据；不接触裸 SQL。"""
+    """只读调研根下 JSON 证据数组/三件套对象，汇总清单候选。"""
 
     root = Path(research_root)
     by_url: dict[str, dict[str, Any]] = {}
@@ -256,15 +282,23 @@ def load_evidence_artifacts(research_root: str | Path) -> list[dict[str, Any]]:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
-        if not isinstance(value, list):
+        if isinstance(value, list):
+            items = value
+        elif isinstance(value, Mapping) and isinstance(value.get("evidence"), list):
+            items = value["evidence"]
+        else:
             continue
-        for raw in value:
+        for raw in items:
             if not isinstance(raw, Mapping):
                 continue
             item = _report_ready(raw)
             if item is None:
                 continue
-            url = str(item["permalink"])
+            try:
+                url = normalize_permalink(str(item["permalink"]))
+            except ValueError:
+                continue
+            item["permalink"] = url
             current = by_url.get(url)
             def priority(value: Mapping[str, Any]) -> int:
                 rated_by = str(value.get("rated_by") or "")

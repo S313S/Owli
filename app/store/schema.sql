@@ -248,4 +248,4 @@ CREATE VIRTUAL TABLE recall_fts USING fts5(
   tokenize = 'trigram'
 );
 
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;

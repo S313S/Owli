@@ -537,7 +537,8 @@ def _agent_prompt(
             "（S01 起编号）；「信息源」章节逐条以“- [SNN] [标题](permalink)（fetched_at=…）”"
             "列出；每条继续写“ · 五维=权威N/时效N/交叉N/完整N/无关N · "
             "rating_notes=<五段式原文>”；正文角标与信息源条目双向一致，"
-            "不得有悬空角标或未被引用的信息源。"
+            "不得有悬空角标或未被引用的信息源；在满足双向一致的引用子集里，"
+            "每个实际消费的平台至少选入一条证据，不得整体遗漏某个平台。"
         )
     if agent_kind in {"data_collection", "browser_automation"}:
         spec = next(

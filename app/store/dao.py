@@ -481,6 +481,52 @@ class Store:
                 else:
                     self._update_evidence(connection, existing_id, payload)
 
+    def replace_evidence_citations(
+        self, report_id: str, citations: Mapping[str, int]
+    ) -> None:
+        """用成稿引用子集替换角标；未引用行保留且 citation_no 置 NULL。"""
+
+        if not isinstance(citations, Mapping):
+            raise TypeError("citations 必须是 permalink 到 citation_no 的映射")
+        normalized: dict[str, int] = {}
+        for permalink, citation_no in citations.items():
+            url = normalize_permalink(str(permalink))
+            if url in normalized:
+                raise ValueError(f"重复 permalink：{url}")
+            if (
+                not isinstance(citation_no, int)
+                or isinstance(citation_no, bool)
+                or not 1 <= citation_no <= 99
+            ):
+                raise ValueError("citation_no 必须是 1–99 整数")
+            normalized[url] = citation_no
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("citation_no 不得重复")
+
+        with self._connect() as connection:
+            stored = {
+                str(row["permalink"])
+                for row in connection.execute(
+                    "SELECT permalink FROM evidence WHERE report_id = ?",
+                    (report_id,),
+                )
+            }
+            unknown = sorted(set(normalized) - stored)
+            if unknown:
+                raise KeyError(f"引用 permalink 不属于该报告：{unknown}")
+            connection.execute(
+                "UPDATE evidence SET citation_no = NULL WHERE report_id = ?",
+                (report_id,),
+            )
+            for permalink, citation_no in normalized.items():
+                connection.execute(
+                    """
+                    UPDATE evidence SET citation_no = ?
+                    WHERE report_id = ? AND permalink = ?
+                    """,
+                    (citation_no, report_id, permalink),
+                )
+
     def _evidence_identity(
         self, connection: sqlite3.Connection, payload: dict[str, Any]
     ) -> str | None:
@@ -1048,6 +1094,19 @@ class Store:
 
     def read_validation_path(self, path: str, report_id: str) -> Any:
         """按封闭路径读取校验数据；调用方不能传 SQL 或表名片段。"""
+        if path == "evidence_platform_citations":
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT platform, citation_no FROM evidence
+                    WHERE report_id = ? ORDER BY citation_no, id
+                    """,
+                    (report_id,),
+                ).fetchall()
+            return [
+                {"platform": row["platform"], "citation_no": row["citation_no"]}
+                for row in rows
+            ]
         if path == "evidence":
             with self._connect() as connection:
                 rows = connection.execute(

@@ -605,6 +605,31 @@ def _source_inventory_offenders(text: str) -> tuple[list[str], list[dict[str, st
     return sorted(set(offenders)), detail
 
 
+def _missing_consumed_platforms(ctx: Ctx, text: str) -> list[str]:
+    if ctx.runs_root is None:
+        return []
+    from app.store.dao import normalize_permalink
+    from app.store.evidence_artifacts import consumed_platform_index
+
+    consumed = consumed_platform_index(ctx.runs_root / ctx.research_id)
+    if not consumed:
+        return []
+    listed_urls: set[str] = set()
+    for title, body, _, _ in _markdown_sections(text):
+        if "信息源" not in title:
+            continue
+        for url in re.findall(r"\[[^\]]+\]\((https?://[^)]+)\)", body):
+            try:
+                listed_urls.add(normalize_permalink(url))
+            except ValueError:
+                continue
+    consumed_platforms = set(consumed.values())
+    listed_platforms = {
+        consumed[url] for url in listed_urls if url in consumed
+    }
+    return sorted(consumed_platforms - listed_platforms)
+
+
 @validator("citation_marks_resolvable")
 def citation_marks_resolvable(ctx: Ctx, arguments: list[str]) -> Result:
     name = "citation_marks_resolvable"
@@ -666,6 +691,15 @@ def citation_marks_resolvable(ctx: Ctx, arguments: list[str]) -> Result:
                 f"{len(source_offenders)} 个信息源清单条目缺少 fetched_at、五维分或合法 rating_notes",
                 source_offenders,
                 {"items": source_detail},
+            )
+        missing_platforms = _missing_consumed_platforms(ctx, text)
+        if missing_platforms:
+            return _result(
+                Verdict.FAIL,
+                name,
+                f"信息源清单整体遗漏 {len(missing_platforms)} 个已消费平台",
+                missing_platforms,
+                {"missing_platforms": missing_platforms},
             )
     return _result(Verdict.PASS, name, f"正文 {len(body)} 个角标均可解析")
 

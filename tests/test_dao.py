@@ -195,6 +195,94 @@ class StoreTest(unittest.TestCase):
             ).fetchall()
         self.assertEqual(rows, [("https://example.com/path", "归一化后更新")])
 
+    def test_成稿回填只给引用子集编号且未引用证据保持null(self) -> None:
+        from app.store.dao import Store
+
+        store = Store(self.database_path)
+        self._create_report(store)
+        evidence = [
+            self._evidence(
+                id=f"ev-{index}",
+                platform_item_id=f"item-{index}",
+                permalink=f"https://example.com/item/{index}",
+            )
+            for index in range(1, 4)
+        ]
+        store.upsert_evidence_batch(evidence)
+
+        store.replace_evidence_citations(
+            "r-upsert",
+            {
+                "https://example.com/item/1": 1,
+                "https://example.com/item/3": 2,
+            },
+        )
+
+        with sqlite3.connect(self.database_path) as connection:
+            rows = connection.execute(
+                "SELECT permalink, citation_no FROM evidence "
+                "WHERE report_id = ? ORDER BY permalink",
+                ("r-upsert",),
+            ).fetchall()
+        self.assertEqual(rows, [
+            ("https://example.com/item/1", 1),
+            ("https://example.com/item/2", None),
+            ("https://example.com/item/3", 2),
+        ])
+
+        store.replace_evidence_citations(
+            "r-upsert", {"https://example.com/item/2": 3}
+        )
+        with sqlite3.connect(self.database_path) as connection:
+            rows = connection.execute(
+                "SELECT permalink, citation_no FROM evidence "
+                "WHERE report_id = ? ORDER BY permalink",
+                ("r-upsert",),
+            ).fetchall()
+        self.assertEqual(rows, [
+            ("https://example.com/item/1", None),
+            ("https://example.com/item/2", 3),
+            ("https://example.com/item/3", None),
+        ])
+
+    def test_成稿回填校验失败时整批不变(self) -> None:
+        from app.store.dao import Store
+
+        store = Store(self.database_path)
+        self._create_report(store)
+        store.upsert_evidence_batch([
+            self._evidence(
+                id="ev-1",
+                platform_item_id="item-1",
+                permalink="https://example.com/item/1",
+                citation_no=7,
+            ),
+        ])
+
+        with self.assertRaisesRegex(KeyError, "不属于该报告"):
+            store.replace_evidence_citations(
+                "r-upsert", {"https://example.com/not-stored": 1}
+            )
+        with self.assertRaisesRegex(ValueError, "1–99"):
+            store.replace_evidence_citations(
+                "r-upsert", {"https://example.com/item/1": 0}
+            )
+        with self.assertRaisesRegex(ValueError, "不得重复"):
+            store.replace_evidence_citations(
+                "r-upsert",
+                {
+                    "https://example.com/item/1": 1,
+                    "https://example.com/not-stored": 1,
+                },
+            )
+
+        with sqlite3.connect(self.database_path) as connection:
+            citation = connection.execute(
+                "SELECT citation_no FROM evidence WHERE report_id = ?",
+                ("r-upsert",),
+            ).fetchone()[0]
+        self.assertEqual(citation, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

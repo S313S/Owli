@@ -371,6 +371,21 @@ def test_既有报告信息源章节按_permalink_补入五维数据() -> None:
     assert evidence["rating_notes"] in enriched
 
 
+def test_成稿信息源清单可解析为_permalink_到citation_no_映射() -> None:
+    from app.report.markdown import source_citations
+
+    report = (
+        "# 结论\n\n- 结论一 [S01]\n- 结论二 [S02]\n\n# 信息源\n\n"
+        "- [S01] [HN](https://NEWS.YCOMBINATOR.com:443/item?id=1#top)\n"
+        "- [S02] [PH](https://www.producthunt.com/posts/lark/)\n"
+    )
+
+    assert source_citations(report) == {
+        "https://news.ycombinator.com/item?id=1": 1,
+        "https://www.producthunt.com/posts/lark": 2,
+    }
+
+
 def test_同_permalink_报告清单优先可靠度审计产物(tmp_path: Path) -> None:
     from app.report.markdown import load_evidence_artifacts
 
@@ -472,6 +487,86 @@ def test_报告finalizer拒绝不可点回原文的清单条目(tmp_path: Path) 
 
     assert report.verdict is validation.Verdict.FAIL
     assert "可点击" in report.failures[0].detail["items"][0]["problem"]
+
+
+def test_报告清单不得整体遗漏已消费平台_product_hunt(tmp_path: Path) -> None:
+    from app.adapters import validation
+    from app.report.markdown import load_evidence_artifacts, render_report
+
+    root = tmp_path / "runs" / RESEARCH_ID
+    evidence_path = root / "goals" / "goal-2" / "normalized.json"
+    evidence_path.parent.mkdir(parents=True)
+    platforms = ["hacker_news", "x", "product_hunt"]
+    evidence = [
+        {
+            "platform": platform,
+            "platform_item_id": str(index),
+            "permalink": f"https://example.com/{platform}/{index}",
+            "title": platform,
+            "fetched_at": NOW,
+            "score_authority": 1,
+            "score_freshness": 2,
+            "score_crossref": 1,
+            "score_completeness": 2,
+            "score_independence": 2,
+            "rating_notes": (
+                "权威1:来源可核 · 时效2:时间窗内 · 交叉1:已有弱交叉 · "
+                "完整2:字段齐全 · 无关2:无利益关系"
+            ),
+            "rated_by": f"baseline:{platform}@v1",
+        }
+        for index, platform in enumerate(platforms, start=1)
+    ]
+    raw_unconsumed = {
+        "platform": "reddit",
+        "permalink": "https://example.com/reddit/raw",
+        "fetched_at": NOW,
+    }
+    evidence_path.write_text(
+        json.dumps(
+            {"evidence": [*evidence, raw_unconsumed]}, ensure_ascii=False
+        ),
+        encoding="utf-8",
+    )
+    assert {
+        item["platform"] for item in load_evidence_artifacts(root)
+    } == {"hacker_news", "x", "product_hunt"}
+    report_path = root / "goals" / "goal-3" / "report.md"
+    report_path.parent.mkdir(parents=True)
+
+    def check(selected: list[dict]):
+        report_path.write_text(
+            render_report(
+                [
+                    f"平台证据形成可执行结论 [S{index:02d}]"
+                    for index in range(1, len(selected) + 1)
+                ],
+                [item | {"citation_no": index}
+                 for index, item in enumerate(selected, start=1)],
+            ),
+            encoding="utf-8",
+        )
+        ctx = validation.Ctx(
+            output_path=report_path,
+            output_format="markdown",
+            research_id=RESEARCH_ID,
+            goal_id="goal-3",
+            agent_id="report-finalizer",
+            read_text=lambda: report_path.read_text(encoding="utf-8"),
+            read_json=lambda: None,
+            store=None,
+            source_domains=frozenset(),
+            runs_root=tmp_path / "runs",
+        )
+        return validation.validate(ctx, ["citation_marks_resolvable"])
+
+    missing = check(evidence[:2])
+    assert missing.verdict is validation.Verdict.FAIL
+    assert missing.failures[0].offenders == ["product_hunt"]
+    assert "已消费平台" in missing.failures[0].message
+
+    complete = check(evidence)
+    assert complete.verdict is validation.Verdict.PASS
 
 
 def test_X_超预算软提示经_source工具进入事件流且调用不断链() -> None:

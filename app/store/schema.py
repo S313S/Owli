@@ -51,6 +51,12 @@ def _apply_migrations(
             connection.execute("PRAGMA user_version = 4")
         elif version == 8 and "extra" in chapter_columns:
             connection.execute("PRAGMA user_version = 8")
+        elif version == 9 and connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'evidence'"
+        ).fetchone() is None:
+            # 历史单元测试会只造章账本的稀疏库；先完成既有章迁移，
+            # 但不能伪称 v9；停在 v8，完整结构仍由启动 selfcheck 拒绝缺表。
+            return
         else:
             connection.executescript(matches[0].read_text(encoding="utf-8"))
         migrated_version = connection.execute("PRAGMA user_version").fetchone()[0]

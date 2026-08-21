@@ -661,6 +661,19 @@ def test_非采集_agent_prompt_明确禁止新抓取(tmp_path) -> None:
     assert "不发起新抓取" in auditor.prompt["body"]
 
 
+def test_报告agent生成时装配双向引用与已消费平台覆盖契约(tmp_path) -> None:
+    plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
+
+    reporter = plan.goals[-1].agents[0]
+    assert reporter.output["validators"] == [
+        "file_exists",
+        "sections_exist:结论,信息源",
+        "citation_marks_resolvable",
+        "no_orphan_citation",
+    ]
+    assert "每个实际消费的平台至少选入一条" in reporter.prompt["body"]
+
+
 def test_decision_balance_选项式引用合法且_baseline_深拷贝独立(tmp_path) -> None:
     plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
     questions = plan.decision_balance

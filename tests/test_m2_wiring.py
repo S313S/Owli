@@ -16,6 +16,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from app.store.evidence_artifacts import load_evidence_payloads
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "app" / "store" / "schema.sql"
@@ -187,13 +189,34 @@ class RecordingEngine:
             task.output_path.write_text(
                 json.dumps(
                     [{
+                        "platform": "hacker_news",
+                        "platform_item_id": "1",
                         "permalink": "https://news.ycombinator.com/item?id=1",
+                        "title": "Hacker News",
                         "fetched_at": "2026-08-19T00:00:00Z",
+                        "raw_metrics": {"points": 42},
+                        "normalized_score": None,
+                        "norm_method": "none",
+                        "norm_context": {
+                            "scope": "batch",
+                            "platform": "hacker_news",
+                            "metric": "points",
+                            "n": 1,
+                            "formula": "none",
+                            "stats": {},
+                            "computed_at": "2026-08-19T00:00:00Z",
+                            "reason": "insufficient_sample",
+                        },
                         "score_authority": 2,
                         "score_freshness": 2,
                         "score_crossref": 1,
                         "score_completeness": 2,
                         "score_independence": 2,
+                        "rating_notes": (
+                            "权威2:平台原帖 · 时效2:时间窗内 · 交叉1:弱交叉 · "
+                            "完整2:字段齐全 · 无关2:无利益关系"
+                        ),
+                        "rated_by": "baseline:hacker_news@v1",
                     }],
                     ensure_ascii=False,
                 ),
@@ -332,6 +355,11 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
         )
         chapters = chapters_response.json()["data"]["chapters"]
         replay = await application.state.event_buffer.replay_after(research_id, None)
+        with sqlite3.connect(tmp_path / "owli.db") as connection:
+            stored_citations = connection.execute(
+                "SELECT platform, citation_no FROM evidence WHERE report_id = ?",
+                (research_id,),
+            ).fetchall()
 
     assert [task.agent_kind for task in engine.tasks] == [
         "planning", "planning", "planning", "planning", "planning", "planning", "planning",
@@ -350,6 +378,7 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
     assert "[^q-1]" in text
     assert plan["decision_balance"][0]["question"] in text
     assert str(plan["decision_balance"][0]["answer"]) in text
+    assert stored_citations == [("hacker_news", 1)]
     card_updates = [
         event.payload["data"]["card"]
         for event in replay.events
@@ -716,6 +745,179 @@ async def test_调整后继续_停在干预点_编辑下游后再由继续卡推
 
     assert still_waiting["status"] == "running"
     assert "依据干预点反馈调整审计口径" in audit_task.body
+
+
+def _six_goal_evidence_skeleton() -> dict[str, Any]:
+    goals = []
+    for number in range(1, 6):
+        agent = (
+            {
+                "name": "HN 数据抓取·飞书",
+                "task": "采集飞书相关证据",
+                "output": {"shape": "array"},
+            }
+            if number == 1
+            else {
+                "name": "数据清洗",
+                "task": "清洗并规范证据字段",
+                "output": {"shape": "array"},
+            }
+        )
+        goals.append({
+            "title": f"证据处理阶段 {number}",
+            "objective": f"形成阶段 {number} 可复核产物。",
+            "depends_on": [] if number == 1 else [f"goal-{number - 1}"],
+            "deliverable": {
+                "format": "json",
+                "shape": "array",
+                "path": f"evidence-{number}.json",
+                "description": "标准 evidence 数组。",
+            },
+            "acceptance": ["文件存在且为非空 JSON"],
+            "agents": [agent],
+        })
+    goals.append({
+        "title": "故意失败的下游报告",
+        "objective": "验证失败 run 保留上游证据。",
+        "depends_on": ["goal-5"],
+        "deliverable": {
+            "format": "markdown",
+            "shape": "object",
+            "path": "report.md",
+            "description": "最终报告。",
+        },
+        "acceptance": ["报告包含结论与信息源章节"],
+        "agents": [{
+            "name": "报告撰写",
+            "task": "本测试注入失败",
+            "output": {"shape": "object"},
+        }],
+    })
+    return {
+        "market_profile": "global_product",
+        "market_profile_justification": "测试对象面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "飞书是本测试的研究主体。",
+        "goals": goals,
+    }
+
+
+def _persistable_evidence(platform: str, item_id: str) -> dict[str, Any]:
+    metric = {
+        "hacker_news": "points",
+        "product_hunt": "votes_count",
+        "x": "like_count",
+    }[platform]
+    context = {
+        "scope": "batch",
+        "platform": platform,
+        "metric": metric,
+        "n": 1,
+        "formula": "none",
+        "stats": {},
+        "computed_at": "2026-08-21T04:00:00+00:00",
+        "reason": "insufficient_sample",
+    }
+    if platform == "x":
+        context["sampling"] = "post_filtered_local"
+    return {
+        "platform": platform,
+        "platform_item_id": item_id,
+        "permalink": f"https://example.com/{platform}/{item_id}",
+        "fetched_at": "2026-08-21T04:00:00+00:00",
+        "raw_metrics": {metric: 1},
+        "normalized_score": None,
+        "norm_method": "none",
+        "norm_context": context,
+        "score_authority": 1,
+        "score_freshness": 2,
+        "score_crossref": 0,
+        "score_completeness": 1,
+        "score_independence": 2,
+        "rating_notes": (
+            "权威1:平台基线 · 时效2:时间窗内 · 交叉0:单一来源 · "
+            "完整1:摘要可追溯 · 无关2:无利益关系"
+        ),
+        "rated_by": f"baseline:{platform}@v1",
+        "citation_no": 7,
+    }
+
+
+def test_原始采集证据可用章节能力补平台并投影入库字段(tmp_path: Path):
+    artifact = tmp_path / "web-search.json"
+    artifact.write_text(
+        json.dumps([{
+            "permalink": "https://example.com/product/?utm_source=test",
+            "fetched_at": "2026-08-25T04:00:00+00:00",
+            "source_type": "product_page",
+            "title": "OpenAI product",
+            "summary": "原始采集摘要",
+        }], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    payloads = load_evidence_payloads(
+        artifact,
+        report_id="r-raw",
+        goal_id="goal-1",
+        agent_name="data-collection",
+        platform_hint="web_search",
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["platform"] == "web_search"
+    assert payloads[0]["permalink"] == "https://example.com/product?utm_source=test"
+    assert payloads[0]["source_type"] == "other"
+    assert payloads[0]["extra"]["artifact_source_type"] == "product_page"
+    assert payloads[0]["extra"]["summary"] == "原始采集摘要"
+
+
+class GoalFiveEvidenceEngine(RecordingEngine):
+    def __init__(self) -> None:
+        super().__init__(skeleton=_six_goal_evidence_skeleton())
+        self.fail_kind = "report_writing"
+
+    async def run(self, task, ctx, on_event=None):
+        result = await super().run(task, ctx, on_event=on_event)
+        if task.goal_id == "goal-5" and result.succeeded:
+            task.output_path.write_text(
+                json.dumps([
+                    _persistable_evidence("hacker_news", "1"),
+                    _persistable_evidence("product_hunt", "ph-1"),
+                    _persistable_evidence("x", "x-1"),
+                ], ensure_ascii=False),
+                encoding="utf-8",
+            )
+        return result
+
+
+@async_test
+async def test_goal5完成后下游run缺失_已入库三平台证据仍保留(tmp_path: Path):
+    engine = GoalFiveEvidenceEngine()
+    async with api_client(
+        tmp_path, auto_confirm=True, engine=engine
+    ) as (application, client, _):
+        created = await client.post(
+            "/api/researches",
+            json={"query": "失败 run 证据保留"},
+            headers={"X-Request-ID": "create-evidence-survives-failure"},
+        )
+        research_id = created.json()["data"]["research_id"]
+        await wait_for_status(client, research_id, "completed")
+        report = application.state.store.get_report(research_id)
+        with sqlite3.connect(tmp_path / "owli.db") as connection:
+            rows = connection.execute(
+                "SELECT platform, citation_no FROM evidence "
+                "WHERE report_id = ? ORDER BY platform",
+                (research_id,),
+            ).fetchall()
+
+    assert report["status"] == "completed"
+    assert rows == [
+        ("hacker_news", None),
+        ("product_hunt", None),
+        ("x", None),
+    ]
 
 
 def test_t_m2_脚本输出两_goal_依赖_必失败与状态迁移序列() -> None:

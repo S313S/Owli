@@ -38,6 +38,11 @@ SOURCE_URLS = {
     "web_search": "https://www.feishu.cn/product/base",
     "product_hunt": "https://www.producthunt.com/posts/notion",
 }
+SOURCE_METRICS = {
+    "hacker_news": "points",
+    "web_search": None,
+    "product_hunt": "votes_count",
+}
 
 
 def _goals_root(path: Path) -> Path:
@@ -55,6 +60,7 @@ def _source_tool(source_id: str):
         index = SOURCE_ORDER.index(source_id) + 1
         return [{
             "platform": source_id,
+            "platform_item_id": f"demo-{index}",
             "permalink": SOURCE_URLS[source_id],
             "title": SOURCE_TITLES[source_id],
             "author_name": "具名作者",
@@ -64,7 +70,22 @@ def _source_tool(source_id: str):
             "fetched_at": NOW,
             "has_body": True,
             "permalink_reachable": True,
-            "normalized_score": 0.9,
+            "raw_metrics": (
+                {SOURCE_METRICS[source_id]: 1}
+                if SOURCE_METRICS[source_id] is not None else {}
+            ),
+            "normalized_score": None,
+            "norm_method": "none",
+            "norm_context": {
+                "scope": "batch",
+                "platform": source_id,
+                "metric": SOURCE_METRICS[source_id],
+                "n": 1,
+                "formula": "none",
+                "stats": {},
+                "computed_at": NOW,
+                "reason": "insufficient_sample",
+            },
             "citation_no": index,
             "extra": {"content_kind": "user_opinion"},
         }]
@@ -303,10 +324,16 @@ async def main() -> int:
             )
         )
         counts = Counter(item["platform"] for item in audit)
+        stored_rows = application.state.store.read_validation_path(
+            "evidence_platform_citations", research_id
+        )
+        stored_counts = Counter(row["platform"] for row in stored_rows)
         marks = sorted(set(re.findall(r"\[S\d{2}\]", text)))
         passed = (
             state["status"] == "completed"
             and all(counts[source_id] >= 1 for source_id in SOURCE_ORDER)
+            and all(stored_counts[source_id] >= 1 for source_id in SOURCE_ORDER)
+            and [row["citation_no"] for row in stored_rows] == [1, 2, 3]
             and marks == ["[S01]", "[S02]", "[S03]"]
             and all("rating_notes=" in line for line in text.splitlines() if line.startswith("- [S"))
         )
@@ -315,6 +342,10 @@ async def main() -> int:
             f"{'PASS' if passed else 'FAIL'}（status={state['status']}，auto_confirm=1）"
         )
         print("各源证据计数：" + "，".join(f"{item}={counts[item]}" for item in SOURCE_ORDER))
+        print(
+            "evidence 表平台计数："
+            + "，".join(f"{item}={stored_counts[item]}" for item in SOURCE_ORDER)
+        )
         print("信息源清单角标：" + " ".join(marks))
         return 0 if passed else 1
 

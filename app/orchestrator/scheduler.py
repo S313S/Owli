@@ -69,6 +69,7 @@ RunTask = Callable[[Agent, TaskContext], Awaitable[TaskRunResult | Any]]
 Emit = Callable[[Any], Any]
 Clock = Callable[[], datetime]
 Timer = Callable[[float, Callable[[], Any]], Any]
+BeforeGoalComplete = Callable[[Goal], Any]
 
 
 def _assert_acyclic(nodes: Mapping[str, list[str]], label: str) -> None:
@@ -164,6 +165,7 @@ class Scheduler:
         clock: Clock,
         timer: Timer,
         chapter_ledger: Any | None = None,
+        before_goal_complete: BeforeGoalComplete | None = None,
     ) -> None:
         self.plan = plan
         self._run_task = run_task
@@ -171,6 +173,7 @@ class Scheduler:
         self._clock = clock
         self._timer = timer
         self._chapter_ledger = chapter_ledger
+        self._before_goal_complete = before_goal_complete
         self._goals = {goal.goal_id: goal for goal in plan.goals}
         self._agents = {
             agent.agent_id: (goal, agent)
@@ -591,6 +594,17 @@ class Scheduler:
                     continue
                 if goal_status == "pending":
                     await self._set_goal_status(goal.goal_id, "running")
+                if self._before_goal_complete is not None:
+                    try:
+                        result = self._before_goal_complete(goal)
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as exc:
+                        await self._fail_goal(
+                            goal.goal_id,
+                            f"goal_persistence_failed:{type(exc).__name__}",
+                        )
+                        continue
                 await self._set_goal_status(goal.goal_id, "awaiting_intervention")
                 await self._create_intervention_card(goal)
 

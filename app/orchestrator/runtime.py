@@ -33,10 +33,15 @@ from app.plan.cards import (
 )
 from app.plan.generate import generate_plan
 from app.plan.editing import apply_edit, approve
-from app.plan.model import Plan, agent_kind_of
+from app.plan.model import Goal, Plan, agent_kind_of
 from app.plan.store import load_plan
-from app.report.markdown import enrich_source_section, load_evidence_artifacts
+from app.report.markdown import (
+    enrich_source_section,
+    load_evidence_artifacts,
+    source_citations,
+)
 from app.reliability.audit import degrade_after_closed_set_retry
+from app.store.evidence_artifacts import load_evidence_payloads
 
 
 AdapterFactory = Callable[[], Any]
@@ -938,6 +943,9 @@ class RuntimeCoordinator:
             self.timer,
             chapter_ledger=self.store,
         )
+        scheduler._before_goal_complete = (
+            lambda goal: self._persist_goal_evidence(scheduler.plan, goal)
+        )
         return scheduler
 
     async def start_research(self, plan: Plan) -> None:
@@ -1002,6 +1010,26 @@ class RuntimeCoordinator:
             state["actions"] = self.resume_actions(plan.research_id)
             restored.append(plan.research_id)
         return restored
+
+    def _persist_goal_evidence(self, plan: Plan, goal: Goal) -> None:
+        """在 goal 成功闸门内，把其 JSON 证据产物幂等写入 Store。"""
+
+        payloads: list[dict[str, Any]] = []
+        for agent in goal.agents:
+            if str(agent.output.get("format")) != "json":
+                continue
+            sources = list(agent.capability.get("sources", []))
+            platform_hint = str(sources[0]) if len(sources) == 1 else None
+            path = self.runs_root / plan.research_id / str(agent.output["path"])
+            payloads.extend(load_evidence_payloads(
+                path,
+                report_id=plan.research_id,
+                goal_id=goal.goal_id,
+                agent_name=agent.agent_id,
+                platform_hint=platform_hint,
+            ))
+        if payloads:
+            self.store.upsert_evidence_batch(payloads)
 
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]
@@ -1248,6 +1276,10 @@ class RuntimeCoordinator:
         plan = load_plan(self.store, research_id)
         if plan is None:
             raise RuntimeError("终态计划不存在")
+        # 兼容升级前已经越过 goal 闸门、但原始采集项尚未投影入库的运行。
+        # upsert 使用稳定身份键，因此终态补扫与逐 goal 写入可以安全并存。
+        for goal in plan.goals:
+            self._persist_goal_evidence(plan, goal)
         report_path, report_format, report_declared = self._report_target(plan)
         # 收尾**之前**报告产物是否已存在，是「报告到底生成了没有」的唯一依据；
         # _append_decision_notes 之后文件必然存在，那时再判就永远判不出来。
@@ -1279,23 +1311,45 @@ class RuntimeCoordinator:
             runs_root=self.runs_root,
         )
         validation_report = validation.validate(validation_ctx, report_validators)
+        citation_error: str | None = None
+        if validation_report.verdict is validation.Verdict.PASS:
+            try:
+                self.store.replace_evidence_citations(
+                    research_id,
+                    source_citations(report_path.read_text(encoding="utf-8")),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                citation_error = f"成稿角标回填失败：{exc}"
         failures = [
             {"validator": item.name, "message": item.message, "offenders": item.offenders}
             for item in validation_report.results
             if item.verdict is not validation.Verdict.PASS
         ]
+        if citation_error is not None:
+            failures.append({
+                "validator": "evidence_citation_backfill",
+                "message": citation_error,
+                "offenders": [],
+            })
         await self.events.publish(
             research_id,
             {
                 "type": "report_validation",
                 "data": {
-                    "verdict": validation_report.verdict.value,
+                    "verdict": (
+                        validation.Verdict.FAIL.value
+                        if citation_error is not None
+                        else validation_report.verdict.value
+                    ),
                     "validators": report_validators,
                     "failures": failures,
                 },
             },
         )
-        validation_failed = validation_report.verdict is not validation.Verdict.PASS
+        validation_failed = (
+            validation_report.verdict is not validation.Verdict.PASS
+            or citation_error is not None
+        )
         # 硬约束 4：报告能生成就 completed，failed 只留给「报告根本没生成」。
         # 校验没过是报告质量告警（已随 report_validation 事件发出），不是研究失败。
         report_missing = report_declared and not report_ready
