@@ -166,6 +166,235 @@ def test_routed_adapter_moves_only_future_tasks_to_codex_after_warning(tmp_path)
     assert adapter.future_engine == "codex"
 
 
+def test_执行期第三次传输故障让路并在真实探活后复位(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    calls: list[str] = []
+    observed: list[NormalizedEvent] = []
+    probe_waiting = asyncio.Event()
+    release_probe = asyncio.Event()
+
+    async def controlled_sleep(seconds: float) -> None:
+        assert seconds == 300
+        probe_waiting.set()
+        await release_probe.wait()
+
+    class FakeAdapter:
+        def __init__(self, name: str, *, transport: bool = False) -> None:
+            self.name = name
+            self.transport = transport
+            self.probes = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            calls.append(self.name)
+            if self.transport:
+                event = NormalizedEvent(
+                    engine=self.name,
+                    thread_id="t",
+                    turn_id="u",
+                    item_kind=ItemKind.ERROR,
+                    text="stream disconnected",
+                    is_error=True,
+                    raw={},
+                    route_state="BACKOFF",
+                    suspend_new_tasks=True,
+                    cause="transport",
+                )
+                result = on_event(event)
+                if inspect.isawaitable(result):
+                    await result
+                return SimpleNamespace(succeeded=False)
+            return SimpleNamespace(succeeded=True)
+
+        async def probe(self) -> bool:
+            self.probes += 1
+            return True
+
+    claude = FakeAdapter("claude", transport=True)
+    codex = FakeAdapter("codex")
+    task = EngineTask(
+        body="执行期任务",
+        output_path=tmp_path / "result.md",
+        output_format="markdown",
+        research_id="r-trip",
+        goal_id="goal-1",
+        agent_id="agent-1",
+        agent_kind="report",
+        validators=["file_exists"],
+        capability=Capability(),
+    )
+    adapter = RoutedAdapter(
+        adapters={"claude": claude, "codex": codex},
+        resilience_config=ResilienceConfig(3, 3, 60, 900, 300),
+        probe_sleep=controlled_sleep,
+    )
+
+    async def scenario() -> None:
+        for _ in range(3):
+            await adapter.run(task, object(), on_event=observed.append)
+        assert calls == ["claude", "claude", "claude"]
+        assert adapter.route_override == "codex"
+        assert codex.probes == 1
+        await adapter.run(task, object(), on_event=observed.append)
+        assert calls[-1] == "codex"
+
+        await probe_waiting.wait()
+        release_probe.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert claude.probes == 1
+        assert adapter.route_override is None
+
+    asyncio.run(scenario())
+
+    assert [event.outcome for event in observed if event.outcome] == [
+        "ENGINE_DOWN", "PROBE_OK", "RESET",
+    ]
+
+
+def test_规划期和限流事件都不触发传输断路(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter
+    from app.config import ResilienceConfig
+
+    class FakeAdapter:
+        def __init__(self, cause: str) -> None:
+            self.cause = cause
+            self.calls = 0
+            self.probes = 0
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            self.calls += 1
+            event = NormalizedEvent(
+                engine="claude", thread_id="t", turn_id="u",
+                item_kind=ItemKind.ERROR, text=self.cause, is_error=True, raw={},
+                route_state="BACKOFF", suspend_new_tasks=True, cause=self.cause,
+            )
+            result = on_event(event)
+            if inspect.isawaitable(result):
+                await result
+            return SimpleNamespace(succeeded=False)
+
+        async def probe(self) -> bool:
+            self.probes += 1
+            return True
+
+    async def exercise(kind: str, cause: str) -> tuple[int, int, str | None]:
+        claude = FakeAdapter(cause)
+        codex = FakeAdapter(cause)
+        adapter = RoutedAdapter(
+            adapters={"claude": claude, "codex": codex},
+            resilience_config=ResilienceConfig(2, 3, 60, 900, 300),
+        )
+        task = EngineTask(
+            body="测试", output_path=tmp_path / f"{kind}-{cause}.json",
+            output_format="json", research_id=f"r-{kind}-{cause}",
+            goal_id="goal-1", agent_id="agent-1", agent_kind=kind,
+            validators=["file_exists"], capability=Capability(),
+        )
+        for _ in range(4):
+            await adapter.run(task, object())
+        return claude.calls, codex.probes, adapter.route_override
+
+    planning = asyncio.run(exercise("planning", "transport"))
+    limited = asyncio.run(exercise("report", "rate_limit"))
+
+    assert planning == (4, 0, None)
+    assert limited == (4, 0, None)
+
+
+def test_claude_probe_只认真实模型健康标记且不用工具():
+    from app.adapters.claude import ClaudeAdapter
+
+    class TextBlock:
+        def __init__(self, text):
+            self.text = text
+
+    class AssistantMessage:
+        def __init__(self, text):
+            self.content = [TextBlock(text)]
+
+    class ResultMessage:
+        def __init__(self):
+            self.result = ""
+            self.is_error = False
+            self.api_error_status = None
+
+    class Client:
+        last_options = None
+
+        def __init__(self, options):
+            Client.last_options = options
+
+        async def connect(self, prompt):
+            self.prompt = [item async for item in prompt]
+
+        async def receive_response(self):
+            yield AssistantMessage("OWLI_HEALTHY")
+            yield ResultMessage()
+
+        async def disconnect(self):
+            pass
+
+    class Options:
+        def __init__(self, **values):
+            self.values = values
+
+    class Sdk:
+        pass
+
+    Sdk.ClaudeSDKClient = Client
+    Sdk.ClaudeAgentOptions = Options
+    Sdk.AssistantMessage = AssistantMessage
+    Sdk.ResultMessage = ResultMessage
+    Sdk.TextBlock = TextBlock
+
+    healthy = asyncio.run(ClaudeAdapter(sdk=Sdk).probe())
+
+    assert healthy is True
+    assert Client.last_options.values["tools"] == []
+    assert Client.last_options.values["allowed_tools"] == []
+    assert Client.last_options.values["permission_mode"] == "dontAsk"
+
+
+def test_codex_probe_按结构化输出而非退出码判健康(tmp_path):
+    from app.adapters.codex import CodexAdapter
+
+    executable = tmp_path / "fake-codex-probe"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import json
+print(json.dumps({'type': 'item.completed', 'item': {
+    'type': 'agent_message', 'text': 'OWLI_HEALTHY'
+}}))
+raise SystemExit(7)
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+
+    healthy = asyncio.run(CodexAdapter(
+        executable=str(executable),
+        codex_home=tmp_path / "codex-home",
+    ).probe())
+
+    assert healthy is True
+
+
 def test_capability_is_mounted_on_claude_callback_and_codex_tier(tmp_path, monkeypatch):
     from app.adapters import validation
     from app.adapters.capability import Capability, FileSystemScope

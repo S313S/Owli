@@ -305,6 +305,48 @@ class ClaudeAdapter:
             raise RuntimeError("当前没有运行中的 Claude 任务")
         await self._client.interrupt()
 
+    async def probe(self) -> bool:
+        """发起不带工具的真实短请求；只认模型返回的结构化健康标记。"""
+
+        try:
+            sdk = self._sdk or _load_sdk()
+            options = sdk.ClaudeAgentOptions(
+                cwd=str(PROJECT_ROOT),
+                setting_sources=[],
+                tools=[],
+                allowed_tools=[],
+                disallowed_tools=sorted(CLAUDE_TOOL_UNIVERSE),
+                permission_mode="dontAsk",
+            )
+            client = sdk.ClaudeSDKClient(options)
+        except Exception:
+            return False
+        healthy = False
+        failed = False
+        try:
+            await client.connect(_prompt_stream(
+                "这是 Owli 引擎恢复探测。不要调用工具，只输出 OWLI_HEALTHY。"
+            ))
+            async for message in client.receive_response():
+                if (
+                    bool(getattr(message, "is_error", False))
+                    or getattr(message, "api_error_status", None) is not None
+                ):
+                    failed = True
+                if any(
+                    text.strip() == "OWLI_HEALTHY"
+                    for text in _assistant_text(message, sdk)
+                ):
+                    healthy = True
+        except Exception:
+            return False
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        return healthy and not failed
+
     async def run(
         self,
         task: TaskSpec,

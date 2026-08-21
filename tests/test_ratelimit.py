@@ -159,13 +159,14 @@ def test_api_529_进入_backoff():
 def test_传输层抖动归_backoff_不让路(result_text):
     # r-4908abdb0b9b 实锤：代理掐流被判「非限流错误」让路 Codex，
     # 规划重试连挂三次。网络抖动必须退避重试原引擎，绝不 FAILOVER。
-    from app.adapters.ratelimit import RouteState, route
+    from app.adapters.ratelimit import RouteCause, RouteState, route
 
     decision = route(_result_message(is_error=True, result=result_text))
 
     assert decision.state is RouteState.BACKOFF
     assert decision.failover_target is None
     assert decision.suspend_new_tasks is True
+    assert decision.cause is RouteCause.TRANSPORT
     assert "网络抖动" in decision.reason
 
 
@@ -181,7 +182,7 @@ def test_非限流_is_error_进入_failover():
 
 
 def test_subtype_success_但_api_error_status_429_绝不_continue():
-    from app.adapters.ratelimit import RouteState, route
+    from app.adapters.ratelimit import RouteCause, RouteState, route
 
     decision = route(_result_message(
         is_error=False,
@@ -190,6 +191,20 @@ def test_subtype_success_但_api_error_status_429_绝不_continue():
     ))
 
     assert decision.state is RouteState.BACKOFF
+    assert decision.cause is RouteCause.RATE_LIMIT
+
+
+def test_服务端_529_退避但不冒充传输指纹():
+    from app.adapters.ratelimit import RouteCause, RouteState, route
+
+    decision = route(_result_message(
+        is_error=False,
+        api_error_status=529,
+        subtype="success",
+    ))
+
+    assert decision.state is RouteState.BACKOFF
+    assert decision.cause is RouteCause.SERVICE
 
 
 def test_codex_撞墙文案采用宽容匹配():

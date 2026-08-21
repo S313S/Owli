@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import inspect
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
+from app.adapters.circuitbreaker import CircuitTransition, ResearchCircuitBreaker
+from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.source_mcp import (
     SourceToolAdapter,
     prepare_source_events,
     replay_source_events,
 )
+from app.config import ResilienceConfig, load_resilience_config
 
 
 _DEFAULT_ENGINES = {
@@ -34,6 +38,7 @@ _DEFAULT_ENGINES = {
     "browser_automation": "codex",
 }
 _ENGINES = frozenset({"claude", "codex"})
+_PLANNING_KINDS = frozenset({"planning", "goal_planning", "plan_arbitration"})
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,8 @@ class RoutedAdapter:
         *,
         adapters: Mapping[str, Any] | None = None,
         source_tools: Mapping[str, Any] | None = None,
+        resilience_config: ResilienceConfig | None = None,
+        probe_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if adapters is None:
             from app.adapters.claude import ClaudeAdapter
@@ -75,31 +82,168 @@ class RoutedAdapter:
             raise ValueError(f"缺少引擎适配器：{','.join(sorted(missing))}")
         self._adapters = dict(adapters)
         self._active: Any = None
-        self._future_engine: str | None = None
+        self._route_overrides: dict[str, str] = {}
+        self._breakers: dict[str, ResearchCircuitBreaker] = {}
+        self._last_research_id: str | None = None
+        self._resilience_config = resilience_config or load_resilience_config()
+        self._probe_sleep = probe_sleep
+        self._recovery_tasks: set[asyncio.Task[None]] = set()
         self._source_adapter = SourceToolAdapter(source_tools)
 
     @property
     def future_engine(self) -> str | None:
         """限流事件要求后续新任务让路时的适配层覆盖。"""
 
-        return self._future_engine
+        return self.route_override
+
+    @property
+    def route_override(self) -> str | None:
+        """返回最近一次 research 的适配层路由覆盖，仅用于观测。"""
+
+        if self._last_research_id is None:
+            return None
+        return self._route_overrides.get(self._last_research_id)
+
+    def route_override_for(self, research_id: str) -> str | None:
+        """按 research 查询覆盖，避免跨 research 共享断路状态。"""
+
+        return self._route_overrides.get(research_id)
+
+    def _breaker(self, research_id: str) -> ResearchCircuitBreaker:
+        breaker = self._breakers.get(research_id)
+        if breaker is None:
+            breaker = ResearchCircuitBreaker(research_id, self._resilience_config)
+            self._breakers[research_id] = breaker
+        return breaker
+
+    @staticmethod
+    def _event_cause(event: Any) -> str | None:
+        cause = getattr(event, "cause", None)
+        value = getattr(cause, "value", cause)
+        return value.casefold() if isinstance(value, str) else None
+
+    async def _emit(self, callback: Any, event: NormalizedEvent) -> None:
+        if callback is None:
+            return
+        callback_result = callback(event)
+        if inspect.isawaitable(callback_result):
+            await callback_result
+
+    async def _probe(self, engine: str) -> bool:
+        probe = getattr(self._adapters[engine], "probe", None)
+        if probe is None:
+            return False
+        try:
+            result = probe()
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            return False
+        if isinstance(result, bool):
+            return result
+        for attribute in ("healthy", "ok"):
+            value = getattr(result, attribute, None)
+            if isinstance(value, bool):
+                return value
+        return False
+
+    @staticmethod
+    def _health_event(transition: CircuitTransition) -> NormalizedEvent:
+        is_down = transition.event.value == "ENGINE_DOWN"
+        return NormalizedEvent(
+            engine=transition.engine,
+            thread_id=transition.research_id,
+            turn_id=None,
+            item_kind=ItemKind.ERROR if is_down else ItemKind.THINKING,
+            text=(
+                f"{transition.event.value}: {transition.engine}"
+                + (f" -> {transition.target}" if transition.target else "")
+            ),
+            is_error=is_down,
+            raw={
+                "research_id": transition.research_id,
+                "engine": transition.engine,
+                "target": transition.target,
+                "event": transition.event.value,
+            },
+            route_state="FAILOVER" if is_down else "CONTINUE",
+            failover_target=transition.target if is_down else None,
+            scope="new_tasks" if is_down else None,
+            outcome=transition.event.value,
+            cause="transport",
+        )
+
+    def _start_recovery_probe(
+        self,
+        *,
+        research_id: str,
+        engine: str,
+        on_event: Any,
+    ) -> None:
+        async def recover() -> None:
+            breaker = self._breaker(research_id)
+            while breaker.is_down(engine):
+                await self._probe_sleep(
+                    self._resilience_config.engine_probe_interval_seconds
+                )
+                healthy = await self._probe(engine)
+                transitions = breaker.record_probe(engine, healthy=healthy)
+                for transition in transitions:
+                    if transition.event.value == "RESET":
+                        current = self._route_overrides.get(research_id)
+                        if current == transition.target:
+                            self._route_overrides.pop(research_id, None)
+                    await self._emit(on_event, self._health_event(transition))
+
+        task = asyncio.create_task(recover())
+        self._recovery_tasks.add(task)
+        task.add_done_callback(self._recovery_tasks.discard)
+
+    async def _trip_if_needed(
+        self,
+        *,
+        task: Any,
+        engine: str,
+        on_event: Any,
+    ) -> None:
+        planning = task.agent_kind in _PLANNING_KINDS
+        breaker = self._breaker(task.research_id)
+        transition = breaker.record_transport_failure(
+            engine, planning=planning
+        )
+        if transition is None:
+            return
+        target = next(item for item in _ENGINES if item != engine)
+        if not await self._probe(target):
+            breaker.reject_failover(engine)
+            return
+        activated = breaker.activate_failover(engine, target)
+        self._route_overrides[task.research_id] = target
+        await self._emit(on_event, self._health_event(activated))
+        self._start_recovery_probe(
+            research_id=task.research_id,
+            engine=engine,
+            on_event=on_event,
+        )
 
     async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
+        self._last_research_id = task.research_id
         selection = pick_engine(task.agent_kind, task.user_override)
-        selected_engine = self._future_engine or selection.engine
+        selected_engine = self._route_overrides.get(task.research_id, selection.engine)
         adapter = self._adapters[selected_engine]
+        saw_transport = False
 
         async def routed_event(event: Any) -> None:
+            nonlocal saw_transport
+            if self._event_cause(event) == "transport":
+                saw_transport = True
             target = getattr(event, "failover_target", None)
             scope = getattr(event, "scope", None)
             if target is not None and scope == "new_tasks":
                 if target not in _ENGINES:
                     raise ValueError(f"未知限流让路目标：{target}")
-                self._future_engine = target
-            if on_event is not None:
-                callback_result = on_event(event)
-                if inspect.isawaitable(callback_result):
-                    await callback_result
+                self._route_overrides[task.research_id] = target
+            await self._emit(on_event, event)
 
         self._active = adapter
         prepare_source_events(task)
@@ -109,9 +253,21 @@ class RoutedAdapter:
                 kwargs = {"on_event": routed_event}
                 if "source_adapter" in parameters:
                     kwargs["source_adapter"] = self._source_adapter
-                return await adapter.run(task, ctx, **kwargs)
+                result = await adapter.run(task, ctx, **kwargs)
             finally:
                 await replay_source_events(task, routed_event)
+            breaker = self._breaker(task.research_id)
+            if saw_transport:
+                await self._trip_if_needed(
+                    task=task,
+                    engine=selected_engine,
+                    on_event=on_event,
+                )
+            elif bool(getattr(result, "succeeded", False)):
+                breaker.record_success(selected_engine)
+            else:
+                breaker.record_non_transport(selected_engine)
+            return result
         finally:
             self._active = None
 

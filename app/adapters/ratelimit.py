@@ -25,6 +25,14 @@ class RouteState(str, Enum):
     FAILOVER = "FAILOVER"
 
 
+class RouteCause(str, Enum):
+    NORMAL = "normal"
+    RATE_LIMIT = "rate_limit"
+    TRANSPORT = "transport"
+    SERVICE = "service"
+    ENGINE_ERROR = "engine_error"
+
+
 @dataclass(frozen=True)
 class RouteDecision:
     state: RouteState
@@ -35,6 +43,7 @@ class RouteDecision:
     suspend_new_tasks: bool = False
     scope: str | None = None
     allow_current_task_to_finish: bool = False
+    cause: RouteCause = RouteCause.NORMAL
 
 
 EventCallback = Callable[[NormalizedEvent], Any]
@@ -68,7 +77,13 @@ def _field(value: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
-def _failover(raw: Any, reason: str, target: str | None) -> RouteDecision:
+def _failover(
+    raw: Any,
+    reason: str,
+    target: str | None,
+    *,
+    cause: RouteCause = RouteCause.ENGINE_ERROR,
+) -> RouteDecision:
     # 架构不对称 #4：一旦让路目标是 Codex，它再撞限流就没有下一引擎可退。
     no_fallback_left = bool(target and target.casefold() == "codex")
     return RouteDecision(
@@ -79,6 +94,7 @@ def _failover(raw: Any, reason: str, target: str | None) -> RouteDecision:
         no_fallback_left=no_fallback_left,
         scope="new_tasks",
         allow_current_task_to_finish=True,
+        cause=cause,
     )
 
 
@@ -112,6 +128,7 @@ def _decision_event(
         no_fallback_left=decision.no_fallback_left,
         scope=decision.scope,
         allow_current_task_to_finish=decision.allow_current_task_to_finish,
+        cause=decision.cause.value,
     )
 
 
@@ -209,6 +226,7 @@ def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:
                 "继续跑会计费，等待用户确认",
                 message,
                 suspend_new_tasks=True,
+                cause=RouteCause.RATE_LIMIT,
             )
         disabled_reason = _field(
             info,
@@ -220,6 +238,7 @@ def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:
             message,
             f"{rate_limit_type} 限流，overage 不可用：{disabled_reason}",
             "codex",
+            cause=RouteCause.RATE_LIMIT,
         )
     if status == "allowed_warning":
         utilization = _field(info, "utilization")
@@ -234,6 +253,7 @@ def _route_rate_limit_event(message: Any, info: Any) -> RouteDecision:
             no_fallback_left=True,
             scope="new_tasks",
             allow_current_task_to_finish=True,
+            cause=RouteCause.RATE_LIMIT,
         )
     return RouteDecision(RouteState.CONTINUE, "额度正常", message)
 
@@ -252,6 +272,11 @@ def _route_result_message(message: Any) -> RouteDecision:
             reason,
             message,
             suspend_new_tasks=True,
+            cause=(
+                RouteCause.RATE_LIMIT
+                if api_error_status == 429
+                else RouteCause.SERVICE
+            ),
         )
     if bool(_field(message, "is_error", "isError", default=False)):
         subtype = _field(message, "subtype", default="未知错误")
@@ -262,12 +287,13 @@ def _route_result_message(message: Any) -> RouteDecision:
             str(value)
             for value in (subtype, _field(message, "result", default=""))
         )
-        if _TRANSPORT_JITTER_PATTERN.search(probe):
+        if classify_transport_error(probe):
             return RouteDecision(
                 RouteState.BACKOFF,
                 f"疑似网络抖动（代理/传输层）：{subtype}，原引擎退避重试",
                 message,
                 suspend_new_tasks=True,
+                cause=RouteCause.TRANSPORT,
             )
         return _failover(message, f"非限流错误：{subtype}", "codex")
     return RouteDecision(RouteState.CONTINUE, "消息正常", message)
@@ -314,7 +340,14 @@ def _route_codex_message(message: Any) -> RouteDecision:
         message,
         no_fallback_left=True,
         suspend_new_tasks=True,
+        cause=RouteCause.RATE_LIMIT,
     )
+
+
+def classify_transport_error(text: str) -> bool:
+    """复用 M3-a 指纹判断传输故障；断路器不得复制或改写该正则。"""
+
+    return bool(_TRANSPORT_JITTER_PATTERN.search(str(text or "")))
 
 
 def route(
@@ -422,6 +455,7 @@ class R8Confirm:
             self._pending.raw,
             "15 分钟内未收到额度计费确认，自动切换到 codex",
             "codex",
+            cause=RouteCause.RATE_LIMIT,
         )
 
     def check_timeout(self) -> RouteDecision | None:
@@ -444,11 +478,13 @@ class R8Confirm:
                 RouteState.CONTINUE,
                 "用户确认计费，允许使用 overage 继续",
                 pending.raw,
+                cause=RouteCause.RATE_LIMIT,
             )
         else:
             decision = _failover(
                 pending.raw,
                 "用户不接受 overage 计费，切换到 codex",
                 "codex",
+                cause=RouteCause.RATE_LIMIT,
             )
         return self._resolve(decision)

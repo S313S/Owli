@@ -34,6 +34,7 @@ class NormalizedEvent:
     scope: str | None = None
     allow_current_task_to_finish: bool = False
     outcome: str | None = None
+    cause: str | None = None
 
 
 def _message_ids(
