@@ -375,15 +375,31 @@ def _rule_14(goals: list[dict[str, Any]]) -> list[str]:
             for item in validators
         ):
             continue
+        # 契约点名了具体文件时只约束产出该文件的 agent：goal 验收描述
+        # 最终交付对象契约，不该套在同 goal 的数组中间产物 agent 头上
+        # （6b 实跑 2026-08-21 r-49a84c8c299e：验收点名 deliverable 文件，
+        # 四个采集 agent 全被误拦，模型无解耗尽预算）。agent 自身 task
+        # 文本不做文件归属豁免——它描述的就是本 agent 的产物。
+        agent_basename = PurePosixPath(
+            str(agent.get("output", {}).get("path", "")).replace("\\", "/")
+        ).name
+
+        def _applies(text: str, *, own_text: bool) -> bool:
+            if not object_contract.search(text) or array_contract.search(text):
+                return False
+            if own_text:
+                return True
+            named = re.findall(r"[\w\-.]+\.json", text, re.IGNORECASE)
+            return not named or agent_basename in named
+
         texts = [
-            *(str(item) for item in goal.get("acceptance", [])),
-            str(agent.get("task", "")),
-        ]
+            (str(item), False) for item in goal.get("acceptance", [])
+        ] + [(str(agent.get("task", "")), True)]
         conflict = next(
             (
                 text
-                for text in texts
-                if object_contract.search(text) and not array_contract.search(text)
+                for text, own_text in texts
+                if _applies(text, own_text=own_text)
             ),
             None,
         )

@@ -352,3 +352,27 @@ def test_规则14显式数组声明不再误报object契约() -> None:
     ]
 
     assert not any("[规则14]" in item for item in lint(plan)["errors"])
+
+
+def test_规则14对象契约点名文件时只约束产出该文件的agent() -> None:
+    """6b 实跑取证（2026-08-21 r-49a84c8c299e）：goal 验收点名最终交付
+    文件的对象契约，同 goal 数组中间产物的采集 agent 全被误拦。"""
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["acceptance"] = [
+        "文件 goal-1-competitor-pros-cons.json 存在且为合法 JSON，"
+        "顶层为对象且含键 competitors、evidence_index、gaps"
+    ]
+    agent = goal["agents"][0]
+    agent["task"] = "从 HN 抓取竞品讨论，输出数组 JSON。"
+    agent["output"]["validators"] = ["file_exists", "json_array_min_items:1"]
+
+    # 中间产物 agent（路径不是被点名的文件）→ 不拦
+    agent["output"]["path"] = "goals/goal-1/hn-raw.json"
+    assert not any("[规则14]" in item for item in lint(plan)["errors"])
+
+    # 产出被点名文件的 agent 挂数组校验器 → 仍是真冲突，必须拦
+    agent["output"]["path"] = "goals/goal-1/goal-1-competitor-pros-cons.json"
+    assert any("[规则14]" in item for item in lint(plan)["errors"])
