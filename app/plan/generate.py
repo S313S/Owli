@@ -59,7 +59,15 @@ def _classify(name: str, task: str) -> tuple[str, str]:
     try:
         return _ROLE_MAP[normalized]
     except KeyError as exc:
-        raise ValueError(f"未知 agent 职能名称：{name}") from exc
+        # 回灌必须自带闭集：只报「未知」不给合法值，模型重试轮无从自纠
+        # （6b 实跑取证：hn_competitor_scope_collector 连拒三轮，2026-08-21）。
+        roles = "、".join(_ROLE_MAP)
+        collectors = "、".join(sorted(_source_specs()))
+        raise ValueError(
+            f"未知 agent 职能名称：{name}；非采集 agent 的 name 只能逐字取职能闭集："
+            f"{roles}；采集 agent 的 name 只能逐字取共享注册表 collector_name："
+            f"{collectors}"
+        ) from exc
 
 
 def _skeleton_prompt(query: str, errors: list[str]) -> str:
@@ -95,7 +103,8 @@ def _goal_prompt(
         f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
         f"注册表选择：{sources}；采集 agent 的 name 必须唯一确定 capability.sources "
-        "与 source.* 工具。\n"
+        "与 source.* 工具；非采集 agent 的 name 只能逐字取职能闭集："
+        f"{'、'.join(_ROLE_MAP)}，不得自造名称。\n"
         "产物结构：只输出一个 JSON object，只含 deliverable、acceptance、agents。"
         "deliverable 含 format/path/description，path 只写文件名；acceptance 是逐条"
         "可判定字符串数组；agents 每项只含 name、task，不得输出 id、engine、"
@@ -451,7 +460,11 @@ def _build_agent(
     task = str(raw.get("task", "")).strip()
     if not name or not task:
         raise ValueError(f"{goal_id}.agents 的 name/task 不能为空")
-    agent_kind, profile = _classify(name, task)
+    try:
+        agent_kind, profile = _classify(name, task)
+    except ValueError as exc:
+        # 带上 goal_id 才能让段级重试只重跑涉事段，而不是整份计划全重跑。
+        raise ValueError(f"{goal_id} {exc}") from exc
     normalized_name = " ".join(name.casefold().split())
     source_spec = _source_specs().get(normalized_name)
     source_id = source_spec.source_id if source_spec is not None else "hacker_news"

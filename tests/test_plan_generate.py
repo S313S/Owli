@@ -519,3 +519,39 @@ def test_真实_store_保留_normalized_plan_event(tmp_path) -> None:
     store.on_plan_event(event)
 
     assert store.plan_events == (event,)
+
+
+def test_未知职能报错自带双闭集且goal定位可用于段级重试() -> None:
+    """6b 实跑取证（2026-08-21）：模型自造 hn_competitor_scope_collector，
+    报错不带合法值清单，回灌三轮无法自纠。"""
+    from app.plan.generate import _build_agent, _classify
+    from collections import Counter
+
+    with pytest.raises(ValueError) as exc_info:
+        _classify("hn_competitor_scope_collector", "采集 HN 竞品讨论")
+    message = str(exc_info.value)
+    assert "未知 agent 职能名称：hn_competitor_scope_collector" in message
+    assert "计划仲裁" in message and "报告撰写" in message  # 职能闭集
+    assert "网页搜索数据抓取" in message  # 注册表 collector_name 闭集
+
+    with pytest.raises(ValueError) as goal_exc:
+        _build_agent(
+            {"name": "hn_competitor_scope_collector", "task": "采集"},
+            "goal-3",
+            [],
+            "查询",
+            Counter(),
+            previous_agent_id=None,
+            upstream_artifacts={},
+            target=None,
+        )
+    assert str(goal_exc.value).startswith("goal-3 ")  # 段级重试可定位涉事段
+
+
+def test_goal段提示词自带非采集职能闭集() -> None:
+    from app.plan.generate import _goal_prompt
+
+    prompt = _goal_prompt("飞书竞品优缺点", "goal-2", {"title": "t"}, [])
+    assert "职能闭集" in prompt
+    assert "计划仲裁" in prompt and "一致性检查" in prompt
+    assert "不得自造名称" in prompt
