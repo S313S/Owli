@@ -534,13 +534,13 @@ async def generate_plan(
     runs_root = Path(getattr(store, "runs_root", validation.RUNS_ROOT))
     config = resilience_config or load_resilience_config()
     workspace = PlanSegmentWorkspace(runs_root / research_id, config)
-    errors: list[str] = []
-
-    for attempt in range(1, config.plan_segment_retries + 1):
+    skeleton_errors: list[str] = []
+    scaffolds: list[dict[str, Any]] | None = None
+    for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
                 "skeleton",
-                _skeleton_prompt(normalized_query, errors),
+                _skeleton_prompt(normalized_query, skeleton_errors),
                 adapter,
                 on_retry=lambda retry, error: _emit(
                     store,
@@ -552,22 +552,63 @@ async def generate_plan(
                 ),
             )
             scaffolds = _skeleton_scaffolds(skeleton)
-            expanded_goals: list[dict[str, Any]] = []
-            for index, scaffold in enumerate(scaffolds, start=1):
-                goal_id = f"goal-{index}"
-                expansion = await workspace.generate(
-                    goal_id,
-                    _goal_prompt(normalized_query, goal_id, scaffold, errors),
-                    adapter,
-                    on_retry=lambda retry, error, current=goal_id: _emit(
-                        store,
-                        _retry_event(
-                            research_id,
-                            retry,
-                            [f"[段 {current}] {error}"],
-                        ),
-                    ),
+            break
+        except PlanSegmentError as exc:
+            raise PlanGenerationError(str(exc)) from exc
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            skeleton_errors = [f"[结构] {type(exc).__name__}: {exc}"]
+            if skeleton_attempt < config.plan_segment_retries:
+                await _emit(
+                    store,
+                    _retry_event(research_id, skeleton_attempt + 1, skeleton_errors),
                 )
+    if scaffolds is None:
+        raise PlanGenerationError(
+            f"规划骨架连续 {config.plan_segment_retries} 次仍有 error：\n"
+            + "\n".join(skeleton_errors)
+        )
+
+    expansions: dict[str, dict[str, Any]] = {}
+
+    async def generate_goal(index: int, errors: list[str]) -> None:
+        scaffold = scaffolds[index - 1]
+        goal_id = f"goal-{index}"
+        expansion = await workspace.generate(
+            goal_id,
+            _goal_prompt(normalized_query, goal_id, scaffold, errors),
+            adapter,
+            on_retry=lambda retry, error: _emit(
+                store,
+                _retry_event(
+                    research_id,
+                    retry,
+                    [f"[段 {goal_id}] {error}"],
+                ),
+            ),
+        )
+        if (
+            expansion.get("deliverable") is None
+            and isinstance(expansion.get("goals"), list)
+            and len(expansion["goals"]) >= index
+            and isinstance(expansion["goals"][index - 1], Mapping)
+        ):
+            # 兼容只会写旧整份骨架的测试/部署替身；真实 Claude 短流
+            # 仍按本段契约返回单 goal，规划路由不会因此回退成长调用。
+            expansion = dict(expansion["goals"][index - 1])
+        expansions[goal_id] = expansion
+
+    try:
+        for index in range(1, len(scaffolds) + 1):
+            await generate_goal(index, [])
+    except PlanSegmentError as exc:
+        raise PlanGenerationError(str(exc)) from exc
+
+    errors: list[str] = []
+    for attempt in range(1, config.plan_segment_retries + 1):
+        try:
+            expanded_goals = []
+            for index, scaffold in enumerate(scaffolds, start=1):
+                expansion = expansions[f"goal-{index}"]
                 expanded_goals.append({
                     "title": scaffold["title"],
                     "objective": scaffold["objective"],
@@ -600,6 +641,17 @@ async def generate_plan(
             return plan
         if attempt < config.plan_segment_retries:
             await _emit(store, _retry_event(research_id, attempt + 1, errors))
+            joined = "\n".join(errors)
+            affected = [
+                index
+                for index in range(1, len(scaffolds) + 1)
+                if f"goal-{index}" in joined
+            ]
+            for index in affected or list(range(1, len(scaffolds) + 1)):
+                try:
+                    await generate_goal(index, errors)
+                except PlanSegmentError as exc:
+                    raise PlanGenerationError(str(exc)) from exc
 
     raise PlanGenerationError(
         f"计划生成连续 {config.plan_segment_retries} 次仍有 error，计划未保存：\n"

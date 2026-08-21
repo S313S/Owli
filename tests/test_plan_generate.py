@@ -69,16 +69,14 @@ class FakeEngine:
     def __init__(self, skeletons: list[dict]) -> None:
         self.skeletons = [deepcopy(item) for item in skeletons]
         self.tasks = []
-        self._round = -1
         self._current = self.skeletons[0]
+        self._goal_calls: dict[int, int] = {}
 
     async def run(self, task, ctx, on_event=None):
         del ctx, on_event
         self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         if task.output_path.name == "skeleton.json":
-            self._round += 1
-            self._current = self.skeletons[min(self._round, len(self.skeletons) - 1)]
             payload = {
                 "goals": [
                     {
@@ -91,7 +89,10 @@ class FakeEngine:
             }
         else:
             number = int(task.output_path.stem.removeprefix("goal-"))
-            goal = self._current["goals"][number - 1]
+            call = self._goal_calls.get(number, 0)
+            self._goal_calls[number] = call + 1
+            source = self.skeletons[min(call, len(self.skeletons) - 1)]
+            goal = source["goals"][number - 1]
             payload = {
                 "deliverable": goal["deliverable"],
                 "acceptance": goal["acceptance"],
@@ -297,10 +298,10 @@ def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:
     plan, store, engine = _generate(tmp_path, [invalid, invalid, _valid_skeleton()])
 
     assert plan.status == "awaiting_review"
-    assert len(engine.tasks) == 12
+    assert len(engine.tasks) == 6
     assert "[规则4]" in engine.tasks[4].body
     assert "结果质量良好" in engine.tasks[4].body
-    assert "[规则4]" in engine.tasks[8].body
+    assert "[规则4]" in engine.tasks[5].body
     assert len(store.events) == 2
     assert all(isinstance(event, NormalizedEvent) for event in store.events)
     assert all(event.outcome == "retrying" for event in store.events)
@@ -319,7 +320,7 @@ def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
     with pytest.raises(PlanGenerationError, match="连续 3 次") as captured:
         asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
-    assert len(engine.tasks) == 12
+    assert len(engine.tasks) == 6
     assert "[规则4]" in str(captured.value)
     assert store.saved == []
 
@@ -367,9 +368,8 @@ def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> 
             self.existed_at_run: list[bool] = []
 
         async def run(self, task, ctx, on_event=None):
-            if task.output_path.name == "skeleton.json":
-                partial = Path(f"{task.output_path}.partial")
-                self.existed_at_run.append(partial.exists())
+            partial = Path(f"{task.output_path}.partial")
+            self.existed_at_run.append(partial.exists())
             return await super().run(task, ctx, on_event)
 
     engine = RecordingEngine([invalid, _valid_skeleton()])
@@ -379,7 +379,7 @@ def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> 
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
     assert plan.status == "awaiting_review"
-    assert engine.existed_at_run == [False, False]
+    assert engine.existed_at_run == [False] * 5
 
 
 def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None:
