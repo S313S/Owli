@@ -83,6 +83,30 @@ def test_段级重试次数由配置覆盖(tmp_path):
     assert workspace.partial_path("goal-1").is_file()
 
 
+def test_完整但非法_json_重试必须清空前缀而非误续写(tmp_path):
+    from app.adapters.contracts import PlanningSegmentResult
+    from app.config import ResilienceConfig
+    from app.plan.segments import PlanSegmentWorkspace
+
+    continuations = []
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            continuations.append(request.continuation)
+            text = "{invalid" if len(continuations) == 1 else '{"ok":true}'
+            await on_text(text)
+            return PlanningSegmentResult(text=text, completed=True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / "r-invalid-json",
+        ResilienceConfig(3, 2, 60, 900, 300),
+    )
+    value = asyncio.run(workspace.generate("goal-1", "生成合法 JSON", Adapter()))
+
+    assert value == {"ok": True}
+    assert continuations == ["", ""]
+
+
 def test_规划短流路由固定_claude_且忽略执行期覆盖():
     from app.adapters.contracts import PlanningSegmentRequest, PlanningSegmentResult
     from app.adapters.routing import RoutedAdapter

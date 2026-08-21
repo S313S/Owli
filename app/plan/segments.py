@@ -108,10 +108,18 @@ class PlanSegmentWorkspace:
                     return value
             else:
                 last_error = result.error or "规划短流未收到完成信号"
-            continuation = assembled
+            continuation = (
+                assembled
+                if not result.completed or result.transport_interrupted
+                else ""
+            )
             current_prompt = (
                 f"{prompt}\n\n上一轮本段失败原文：{last_error}。"
-                "请保持原结构契约并从已有前缀继续。"
+                + (
+                    "请保持原结构契约并从已有前缀继续。"
+                    if continuation
+                    else "请保持原结构契约并重新输出完整 JSON。"
+                )
             )
             if attempt < self.config.plan_segment_retries and on_retry is not None:
                 callback_result = on_retry(attempt + 1, last_error)

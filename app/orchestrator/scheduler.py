@@ -467,6 +467,7 @@ class Scheduler:
             "type": "route_update",
             "data": {
                 "source": source,
+                "engine": source,
                 "state": state.value,
                 "reason": reason,
                 "failover_target": target,
