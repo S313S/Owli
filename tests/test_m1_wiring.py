@@ -569,6 +569,125 @@ def test_执行期会话停滞会中断_发取证事件并累计一次传输故�
     assert healthy.probes == 1
 
 
+def test_并发会话停滞只中断本轮_run_token(tmp_path):
+    import inspect
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+    from app.adapters.routing import RoutedAdapter, SessionStallError
+    from app.config import ResilienceConfig
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    a_started = asyncio.Event()
+    b_started = asyncio.Event()
+    release_b = asyncio.Event()
+
+    def retry_event():
+        return NormalizedEvent(
+            engine="Claude", thread_id="r-concurrent-stall", turn_id="turn-1",
+            item_kind=ItemKind.THINKING, text="api_retry", is_error=False,
+            raw={}, outcome="API_RETRY",
+        )
+
+    class SharedEngine:
+        def __init__(self):
+            self.tokens = {}
+            self.interrupted_tokens = []
+
+        async def run(self, task, ctx, on_event=None, *, run_token):
+            del ctx
+            self.tokens[task.agent_id] = run_token
+            if task.agent_id == "agent-a":
+                clock.value = 0
+                emitted = on_event(retry_event())
+                if inspect.isawaitable(emitted):
+                    await emitted
+                a_started.set()
+                await b_started.wait()
+                clock.value = 600
+                emitted = on_event(retry_event())
+                if inspect.isawaitable(emitted):
+                    await emitted
+                return SimpleNamespace(succeeded=True)
+            b_started.set()
+            await release_b.wait()
+            return SimpleNamespace(succeeded=True)
+
+        async def interrupt(self, *, run_token):
+            self.interrupted_tokens.append(run_token)
+
+        async def probe(self):
+            return False
+
+    async def no_wait(seconds):
+        del seconds
+
+    engine = SharedEngine()
+    adapter = RoutedAdapter(
+        clock=clock,
+        adapters={"claude": engine, "codex": SharedEngine()},
+        resilience_config=ResilienceConfig(3, 3, 60, 900, 300, 600),
+        backoff_sleep=no_wait,
+    )
+
+    def task(agent_id):
+        return EngineTask(
+            body="执行", output_path=tmp_path / f"{agent_id}.md",
+            output_format="markdown", research_id="r-concurrent-stall",
+            goal_id="goal-1", agent_id=agent_id, agent_kind="report",
+            validators=["file_exists"], capability=Capability(),
+        )
+
+    async def scenario():
+        run_a = asyncio.create_task(adapter.run(task("agent-a"), object()))
+        await asyncio.wait_for(a_started.wait(), timeout=1)
+        run_b = asyncio.create_task(adapter.run(task("agent-b"), object()))
+        await asyncio.wait_for(b_started.wait(), timeout=1)
+        with pytest.raises(SessionStallError):
+            await run_a
+        release_b.set()
+        result_b = await run_b
+        return result_b
+
+    result_b = asyncio.run(scenario())
+
+    assert result_b.succeeded is True
+    assert engine.tokens["agent-a"] != engine.tokens["agent-b"]
+    assert engine.interrupted_tokens == [engine.tokens["agent-a"]]
+
+
+def test_claude_interrupt_可按_run_token_定位并发会话():
+    from app.adapters.claude import ClaudeAdapter
+
+    class Client:
+        def __init__(self):
+            self.interrupts = 0
+
+        async def interrupt(self):
+            self.interrupts += 1
+
+    first = Client()
+    second = Client()
+    adapter = ClaudeAdapter(sdk=object())
+    adapter._clients = {"run-a": first, "run-b": second}
+    adapter._client = second
+
+    asyncio.run(adapter.interrupt(run_token="run-a"))
+
+    assert first.interrupts == 1
+    assert second.interrupts == 0
+
+
 def test_会话活动复位且限流与规划任务不触发停滞(tmp_path):
     import inspect
     from types import SimpleNamespace

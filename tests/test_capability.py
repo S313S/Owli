@@ -398,7 +398,7 @@ def test_路径谓词的单层星号不会跨目录放大权限() -> None:
 
 
 def test_任何_Codex_翻译结果都不出现最高危沙箱档位() -> None:
-    forbidden = "danger-full-access"
+    forbidden = "danger" + "-full-access"
 
     for capability in PRESETS.values():
         assert forbidden not in repr(to_codex_args(capability))

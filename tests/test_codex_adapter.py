@@ -501,6 +501,28 @@ def test_主动_interrupt_归任务_fail_且要求整任务重跑(tmp_path, monk
     assert "整任务重跑" in (result.conclusion_error or "")
 
 
+def test_interrupt_可按_run_token_定位并发_codex_进程(monkeypatch):
+    from app.adapters.codex import CodexAdapter
+
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+    first = Process(101)
+    second = Process(202)
+    adapter = CodexAdapter()
+    adapter._processes = {"run-a": first, "run-b": second}
+    adapter._process = second
+    signals = []
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+
+    asyncio.run(adapter.interrupt(run_token="run-a"))
+
+    assert signals == [(101, signal.SIGINT)]
+    assert "run-a" in adapter._interrupted_runs
+    assert "run-b" not in adapter._interrupted_runs
+
+
 def test_timeout_回收忽略_sigterm_的同组子进程(tmp_path, monkeypatch):
     from app.adapters import validation
     from app.adapters import codex

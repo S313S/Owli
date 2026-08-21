@@ -430,6 +430,7 @@ class RoutedAdapter:
             task.research_id, selected_engine
         )
         adapter = self._adapters[selected_engine]
+        run_token = object()
         saw_transport = False
         stall_evidence: SessionStallEvidence | None = None
         stall_detector = (
@@ -492,7 +493,13 @@ class RoutedAdapter:
             interrupt = getattr(adapter, "interrupt", None)
             if interrupt is not None:
                 try:
-                    interrupted = interrupt()
+                    interrupt_parameters = inspect.signature(interrupt).parameters
+                    interrupt_kwargs = (
+                        {"run_token": run_token}
+                        if "run_token" in interrupt_parameters
+                        else {}
+                    )
+                    interrupted = interrupt(**interrupt_kwargs)
                     if inspect.isawaitable(interrupted):
                         await interrupted
                 except Exception:
@@ -509,6 +516,8 @@ class RoutedAdapter:
                 kwargs = {"on_event": routed_event}
                 if "source_adapter" in parameters:
                     kwargs["source_adapter"] = self._source_adapter
+                if "run_token" in parameters:
+                    kwargs["run_token"] = run_token
                 try:
                     result = await adapter.run(task, ctx, **kwargs)
                 except SessionStallError as exc:

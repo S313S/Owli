@@ -305,11 +305,17 @@ class ClaudeAdapter:
         self._log_root = log_root
         self._on_rate_limited = on_rate_limited
         self._client = None
+        self._clients: dict[object, Any] = {}
 
-    async def interrupt(self) -> None:
-        if self._client is None:
+    async def interrupt(self, *, run_token: object | None = None) -> None:
+        client = (
+            self._clients.get(run_token)
+            if run_token is not None
+            else self._client
+        )
+        if client is None:
             raise RuntimeError("当前没有运行中的 Claude 任务")
-        await self._client.interrupt()
+        await client.interrupt()
 
     async def probe(self) -> bool:
         """发起不带工具的真实短请求；只认模型返回的结构化健康标记。"""
@@ -464,6 +470,7 @@ class ClaudeAdapter:
         ctx: artifact_validation.Ctx,
         on_event=None,
         source_adapter=None,
+        run_token: object | None = None,
     ) -> ClaudeRunResult:
         del source_adapter
         denials: list[str] = []
@@ -488,10 +495,16 @@ class ClaudeAdapter:
                 artifact_validation.Verdict.FAIL, [failure]
             )
             return ClaudeRunResult(None, str(exc), report, events, denials)
+        token = run_token if run_token is not None else object()
+        if token in self._clients:
+            return _unavailable_run(
+                RuntimeError("Claude run_token 正在使用"), events, denials
+            )
         try:
             client = sdk.ClaudeSDKClient(options)
         except Exception as exc:
             return _unavailable_run(exc, events, denials)
+        self._clients[token] = client
         self._client = client
         fallback_thread_id = f"{task.research_id}:{task.goal_id}:{task.agent_id}"
         run_turn_id = f"{fallback_thread_id}:turn-1"
@@ -553,7 +566,9 @@ class ClaudeAdapter:
                         await callback_result
             return _unavailable_run(exc, events, denials)
         finally:
-            self._client = None
+            self._clients.pop(token, None)
+            if self._client is client:
+                self._client = next(reversed(self._clients.values()), None)
             try:
                 await client.disconnect()
             except Exception:

@@ -81,6 +81,24 @@ def test_限流_api_retry_退出计时且不触发停滞():
     assert detector.observe(_event(outcome="API_RETRY")) is None
 
 
+def test_独立限流事件也会退出已开始的_api_retry_计时():
+    from app.adapters.session_stall import SessionStallDetector
+
+    clock = FakeClock()
+    detector = SessionStallDetector(timeout_seconds=600, clock=clock)
+    detector.observe(_event(outcome="API_RETRY"))
+    clock.advance(590)
+    detector.observe(_event(cause="rate_limit"))
+    clock.advance(610)
+
+    # 限流后的首个普通 api_retry 必须重新起计，不得沿用旧起点。
+    assert detector.observe(_event(outcome="API_RETRY")) is None
+    clock.advance(599)
+    assert detector.observe(_event(outcome="API_RETRY")) is None
+    clock.advance(1)
+    assert detector.observe(_event(outcome="API_RETRY")) is not None
+
+
 def test_真实_68_分钟_api_retry_事件重放在_600_秒处仅触发一次():
     from app.adapters.session_stall import SessionStallDetector
 

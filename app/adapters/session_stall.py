@@ -59,13 +59,13 @@ class SessionStallDetector:
             self._reset()
             return None
 
-        outcome = self._value(getattr(event, "outcome", None))
-        if outcome is None or outcome.casefold() != "api_retry":
-            return None
-
         cause = self._value(getattr(event, "cause", None))
         if cause is not None and cause.casefold() == "rate_limit":
             self._reset()
+            return None
+
+        outcome = self._value(getattr(event, "outcome", None))
+        if outcome is None or outcome.casefold() != "api_retry":
             return None
 
         now = float(self._clock())

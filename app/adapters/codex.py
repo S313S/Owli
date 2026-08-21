@@ -387,6 +387,8 @@ class CodexAdapter:
         self._timeout_seconds = timeout_seconds
         self._on_rate_limited = on_rate_limited
         self._process: asyncio.subprocess.Process | None = None
+        self._processes: dict[object, asyncio.subprocess.Process] = {}
+        self._interrupted_runs: set[object] = set()
         self._interrupted = False
 
     async def probe(self) -> bool:
@@ -480,11 +482,29 @@ class CodexAdapter:
             if inspect.isawaitable(callback_result):
                 await callback_result
 
-    async def interrupt(self) -> None:
-        if self._process is None:
+    async def interrupt(self, *, run_token: object | None = None) -> None:
+        process = (
+            self._processes.get(run_token)
+            if run_token is not None
+            else self._process
+        )
+        if process is None:
             raise RuntimeError("当前没有运行中的 Codex 任务")
+        token = run_token
+        if token is None:
+            token = next(
+                (
+                    candidate
+                    for candidate, active in self._processes.items()
+                    if active is process
+                ),
+                None,
+            )
+        if token is None:
+            raise RuntimeError("Codex 运行中进程缺少 run_token")
         self._interrupted = True
-        os.killpg(self._process.pid, signal.SIGINT)
+        self._interrupted_runs.add(token)
+        os.killpg(process.pid, signal.SIGINT)
 
     def _unavailable(
         self,
@@ -672,10 +692,12 @@ class CodexAdapter:
         ctx: artifact_validation.Ctx,
         on_event: Any = None,
         source_adapter: Any = None,
+        run_token: object | None = None,
     ) -> CodexRunResult:
         del source_adapter
         events: list[NormalizedEvent] = []
-        self._interrupted = False
+        token = run_token if run_token is not None else object()
+        process: asyncio.subprocess.Process | None = None
         contract_failure = _task_contract_failure(task, ctx)
         if contract_failure is not None:
             report = artifact_validation.ValidationReport(
@@ -744,11 +766,15 @@ class CodexAdapter:
                 # readline 抛 ValueError 被误判为引擎不可用（r-4878be30ff8c 实锤）。
                 limit=_STREAM_LINE_LIMIT,
             )
+            if token in self._processes:
+                await self._terminate_process(process)
+                raise RuntimeError("Codex run_token 正在使用")
+            self._processes[token] = process
             self._process = process
             await self._run_with_timeout(
                 process, events, on_event
             )
-            if self._interrupted:
+            if token in self._interrupted_runs:
                 result = self._interrupted_result(task, ctx, events)
                 await self._emit_outcome(
                     events,
@@ -762,8 +788,8 @@ class CodexAdapter:
             if infrastructure_error is not None:
                 raise RuntimeError(infrastructure_error)
         except asyncio.TimeoutError:
-            if self._process is not None:
-                await self._terminate_process(self._process)
+            if process is not None:
+                await self._terminate_process(process)
             result = self._timeout_result(task, ctx, events)
             await self._emit_outcome(
                 events,
@@ -774,8 +800,8 @@ class CodexAdapter:
             )
             return result
         except Exception as exc:
-            if self._process is not None:
-                await self._terminate_process(self._process)
+            if process is not None:
+                await self._terminate_process(process)
             result = self._unavailable(exc, events)
             await self._emit_outcome(
                 events,
@@ -786,7 +812,12 @@ class CodexAdapter:
             )
             return result
         finally:
-            self._process = None
+            if process is not None and self._processes.get(token) is process:
+                self._processes.pop(token, None)
+            self._interrupted_runs.discard(token)
+            self._interrupted = bool(self._interrupted_runs)
+            if self._process is process:
+                self._process = next(reversed(self._processes.values()), None)
 
         conclusion: OwliResult | None = None
         conclusion_error: str | None = None
