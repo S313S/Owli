@@ -20,6 +20,14 @@ M3-a 的消息分类增加结构化原因字段。传输指纹仍返回 BACKOFF�
 
 探测调用必须请求真实模型并校验约定标记，不使用 CLI 退出码判定健康。探测任务不参与断路计数，避免自激循环。
 
+## 执行期会话停滞
+
+`RoutedAdapter` 为每次执行期 run 创建独立的纯状态机，状态只由归一化事件和注入时钟推进。规划任务不创建该状态机。首个非限流 `api_retry` 进入 `RETRYING` 并记录起点；后续非限流 `api_retry` 到达时，以注入时钟计算本轮重试循环持续时间。`TOOL_CALL` 或 `OUTPUT` 表示会话恢复活动，立即复位计时；结构化限流信号退出计时且不触发停滞。
+
+持续时间达到配置阈值后只触发一次 `SESSION_STALL`。事件包含 `elapsed_seconds` 和本轮 `api_retry_count`，并标记 `cause=transport`、`route_state=BACKOFF`。`RoutedAdapter` 随即主动 `interrupt()` 当前会话，强制本次 run 失败，向 research 级断路器记录一次传输故障，再交给既有 goal 重试链处理。状态机不进入 Scheduler，Scheduler 只消费事件用于展示。
+
+检测采用纯事件驱动，不创建后台真实计时器。已知边界是：完全静默、连 `api_retry` 事件也不再产生的会话不会触发 `SESSION_STALL`，仍由既有 12 小时单 goal 总闸兜底。该取舍避免后台 watchdog 的取消竞态。
+
 ## 规划分段与续写
 
 计划生成拆成以下短调用：
@@ -54,6 +62,7 @@ M3-a 的消息分类增加结构化原因字段。传输指纹仍返回 BACKOFF�
 | `OWLI_BACKOFF_INITIAL_SECONDS` | 60 | 指数退避起点 |
 | `OWLI_BACKOFF_MAX_SECONDS` | 900 | 指数退避上限 |
 | `OWLI_ENGINE_PROBE_INTERVAL_SECONDS` | 300 | 原引擎恢复探测间隔 |
+| `OWLI_SESSION_STALL_TIMEOUT_SECONDS` | 600 | 执行期连续非限流 `api_retry` 停滞阈值 |
 
 默认值与环境无关。为特定代理、节点或部署调大重试与退避、调短探活，只允许修改部署配置。
 
@@ -61,6 +70,7 @@ M3-a 的消息分类增加结构化原因字段。传输指纹仍返回 BACKOFF�
 
 - 单元测试覆盖传输连续计数、成功复位、限流隔离、阈值升级、候选探测、周期探活与 RESET。
 - 路由集成测试证明执行期让路、规划期不让路、Scheduler 无路由倾向状态。
+- 会话停滞状态机测试覆盖触发、工具/输出复位、限流排除、配置覆盖，并重放每 1–3 分钟一次、持续 68 分钟的 `api_retry` 序列，断言在 600 秒处只触发一次。
 - 规划测试覆盖分段即时落盘、局部重试、partial 清理、重叠去重、JSON token 中断与整计划 lint。
 - 配置测试覆盖默认值、环境覆盖与非法值拒绝。
 - 最终运行专项 pytest、全量 pytest、t-m1、t-m2-orchestrator、t-m3-multi-source、无人值守全链路和审计 grep。
