@@ -95,6 +95,36 @@ def create_app(
     request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
     store = Store(database)
+
+    async def publish_plan_event(event: Any) -> None:
+        """把规划期事件（分段落盘/重试）投进 SSE，规划过程对外可见。
+
+        没有这条线时规划期对工作板与终端监视器完全静默，只能在失败后
+        靠 progress.summary 事后取证（2026-08-21 6b 验收实录）。
+        """
+        research_id = str(getattr(event, "thread_id", "") or "")
+        if not research_id:
+            return
+        item_kind = getattr(getattr(event, "item_kind", None), "value", None) or str(
+            getattr(event, "item_kind", "") or "thinking"
+        )
+        raw = getattr(event, "raw", None)
+        await events.publish(
+            research_id,
+            {
+                "type": "normalized_event",
+                "raw": raw if isinstance(raw, dict) else None,
+                "data": {
+                    "goal_id": "planning",
+                    "agent_id": str(getattr(event, "turn_id", "") or "plan"),
+                    "item_kind": item_kind,
+                    "text": str(getattr(event, "text", "")),
+                    "is_error": bool(getattr(event, "is_error", False)),
+                },
+            },
+        )
+
+    store.on_plan_event = publish_plan_event
     runtime = RuntimeCoordinator(
         store=store,
         event_buffer=events,

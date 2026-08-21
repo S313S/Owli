@@ -305,9 +305,9 @@ def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:
     assert "[规则4]" in engine.tasks[4].body
     assert "结果质量良好" in engine.tasks[4].body
     assert "[规则4]" in engine.tasks[5].body
-    assert len(store.events) == 2
+    retries = [event for event in store.events if event.outcome == "retrying"]
+    assert len(retries) == 2
     assert all(isinstance(event, NormalizedEvent) for event in store.events)
-    assert all(event.outcome == "retrying" for event in store.events)
 
 
 def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
@@ -358,7 +358,8 @@ def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_pat
     assert plan.status == "awaiting_review"
     assert len(engine.tasks) == 5
     assert "owli-result.summary 必须是 200 字以内字符串" in engine.tasks[1].body
-    assert len(store.events) == 1 and store.events[0].outcome == "retrying"
+    retries = [event for event in store.events if event.outcome == "retrying"]
+    assert len(retries) == 1
 
 
 def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> None:

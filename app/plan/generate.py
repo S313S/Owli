@@ -536,6 +536,19 @@ async def _emit(store: Any, event: NormalizedEvent) -> None:
         await result
 
 
+def _progress_event(research_id: str, text: str) -> NormalizedEvent:
+    return NormalizedEvent(
+        engine="Owli",
+        thread_id=research_id,
+        turn_id="plan-progress",
+        item_kind=ItemKind.THINKING,
+        text=text,
+        is_error=False,
+        raw={},
+        outcome="plan_progress",
+    )
+
+
 def _retry_event(research_id: str, attempt: int, errors: list[str]) -> NormalizedEvent:
     return NormalizedEvent(
         engine="Owli",
@@ -598,6 +611,12 @@ async def generate_plan(
                 ),
             )
             scaffolds = _skeleton_scaffolds(skeleton)
+            await _emit(
+                store,
+                _progress_event(
+                    research_id, f"规划骨架落盘：{len(scaffolds)} 个 goal"
+                ),
+            )
             break
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -642,6 +661,9 @@ async def generate_plan(
             # 仍按本段契约返回单 goal，规划路由不会因此回退成长调用。
             expansion = dict(expansion["goals"][index - 1])
         expansions[goal_id] = expansion
+        await _emit(
+            store, _progress_event(research_id, f"规划段 {goal_id} 落盘")
+        )
 
     try:
         for index in range(1, len(scaffolds) + 1):
@@ -683,6 +705,13 @@ async def generate_plan(
         if not errors:
             store.save_plan_snapshot(
                 research_id, snapshot=plan.to_dict(), expected_rev=0
+            )
+            await _emit(
+                store,
+                _progress_event(
+                    research_id,
+                    f"计划通过 lint 并保存：{len(plan.goals)} 个 goal",
+                ),
             )
             return plan
         if attempt < config.plan_segment_retries:

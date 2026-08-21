@@ -330,3 +330,25 @@ def test_report_writer_必须同时具备双向角标校验器() -> None:
         and "no_orphan_citation" in item
         for item in errors
     )
+
+
+def test_规则14显式数组声明不再误报object契约() -> None:
+    """措辞彩票实锤（6b 实跑 2026-08-21 r-9eb208e803ee）：任务写明
+    「输出顶层为数组的 JSON，每条含 permalink…字段」被误判 object 契约，
+    模型无解，goal 段预算被钉死耗尽。"""
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["agents"][0]["task"] = (
+        "针对每个竞品调用 source.producthunt 工具抓取其产品页，"
+        "输出顶层为数组的 JSON，每条含 permalink、fetched_at、字段维度标注。"
+    )
+    goal["acceptance"] = [
+        "所有采集中间产物 JSON 顶层为数组，且每条对象至少含 permalink 与 fetched_at 字段"
+    ]
+    goal["agents"][0]["output"]["validators"] = [
+        "file_exists", "json_array_min_items:1"
+    ]
+
+    assert not any("[规则14]" in item for item in lint(plan)["errors"])

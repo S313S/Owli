@@ -361,6 +361,13 @@ def _rule_14(goals: list[dict[str, Any]]) -> list[str]:
         r"JSON\s*object|顶层[^。；\n]{0,40}(?:含|包含)[^。；\n]{0,40}(?:键|字段)",
         re.IGNORECASE,
     )
+    # 显式数组声明短路：「顶层为数组…每条（对象）含 permalink…字段」描述的是
+    # 数组元素结构，与数组校验器一致，不是 object 契约。措辞彩票实锤：
+    # 6b 实跑（2026-08-21 r-9eb208e803ee）该误报模型无解，goal-2 段预算被
+    # 钉死耗尽——与规则 17/18 同构（M3 回填开口 #6）。
+    array_contract = re.compile(
+        r"顶层[^。；\n]{0,20}数组|JSON\s*arrays?", re.IGNORECASE
+    )
     for goal, agent in _agents(goals):
         validators = agent.get("output", {}).get("validators", [])
         if not any(
@@ -372,7 +379,14 @@ def _rule_14(goals: list[dict[str, Any]]) -> list[str]:
             *(str(item) for item in goal.get("acceptance", [])),
             str(agent.get("task", "")),
         ]
-        conflict = next((text for text in texts if object_contract.search(text)), None)
+        conflict = next(
+            (
+                text
+                for text in texts
+                if object_contract.search(text) and not array_contract.search(text)
+            ),
+            None,
+        )
         if conflict:
             messages.append(
                 f"[规则14] {goal.get('goal_id')}/{agent.get('agent_id')} 使用 "
