@@ -240,6 +240,7 @@ def build_codex_command(
                     research_id=task.research_id,
                     goal_id=task.goal_id,
                     agent_id=task.agent_id,
+                    item_limit=getattr(task, "source_item_limit", None),
                 )
             )
     if network:

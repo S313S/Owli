@@ -53,11 +53,13 @@ class Evidence(TypedDict):
     rated_by: str
 
 
-def search(query: str, window: str) -> list[Evidence]:
+def search(query: str, window: str, *, limit: int = _HITS_PER_PAGE) -> list[Evidence]:
     """按关键词与时间窗搜索 Hacker News。"""
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("limit 必须是正整数")
     match = _WINDOW_PATTERN.fullmatch(window)
     if match is None:
         raise ValueError('window 必须形如 "90d" 或 "30d"')
@@ -70,7 +72,7 @@ def search(query: str, window: str) -> list[Evidence]:
         "numericFilters": (
             f"created_at_i>{window_start},points>{_POINTS_THRESHOLD}"
         ),
-        "hitsPerPage": str(_HITS_PER_PAGE),
+        "hitsPerPage": str(limit),
     }
     payload = _fetch_json(f"{_SEARCH_URL}?{urlencode(params)}")
     hits = payload.get("hits")

@@ -12,7 +12,7 @@ def test_三层字段名与字段表逐字一致() -> None:
 
     assert [field.name for field in fields(Plan)] == [
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "status", "approved_at", "decision_balance", "expert_panel", "goals",
+        "scale", "status", "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     ]
     assert [field.name for field in fields(Goal)] == [
@@ -82,6 +82,19 @@ def test_baseline_source_仅接受三态() -> None:
     source = make_plan_dict()
     source["baseline_source"] = "unknown"
     with pytest.raises(ValueError, match="baseline_source"):
+        Plan.from_dict(source)
+
+
+def test_scale_缺省兼容旧快照且只接受产品档位() -> None:
+    from app.plan.model import Plan
+
+    source = make_plan_dict()
+    del source["scale"]
+    assert Plan.from_dict(source).scale == "standard"
+
+    source = make_plan_dict()
+    source["scale"] = "tiny"
+    with pytest.raises(ValueError, match="scale"):
         Plan.from_dict(source)
 
 

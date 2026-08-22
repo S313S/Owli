@@ -12,8 +12,14 @@ from typing import Any, Mapping
 from app.adapters import validation
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.routing import pick_engine
-from app.config import ResilienceConfig, load_resilience_config
-from app.plan.lint import lint
+from app.config import (
+    ResearchScaleConfig,
+    ResearchScaleProfile,
+    ResilienceConfig,
+    load_research_scale_config,
+    load_resilience_config,
+)
+from app.plan.lint import duplicate_collection_goal_ids, lint
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
@@ -21,6 +27,12 @@ from app.sources.registry import planning_catalog
 
 
 _FORMATS = {"table", "markdown", "excel", "json"}
+_SOURCE_LIMIT_PARAMETERS = {
+    "hacker_news": "hitsPerPage",
+    "product_hunt": "limit",
+    "web_search": "max_results",
+    "x": "max_results",
+}
 
 
 class PlanGenerationError(RuntimeError):
@@ -83,14 +95,29 @@ def _classify(name: str, task: str) -> tuple[str, str]:
         ) from exc
 
 
-def _skeleton_prompt(query: str, errors: list[str]) -> str:
+def _scale_profile(
+    scale: str,
+    scale_config: ResearchScaleConfig | None,
+) -> ResearchScaleProfile:
+    return (scale_config or load_research_scale_config()).profile(scale)
+
+
+def _skeleton_prompt(
+    query: str,
+    errors: list[str],
+    *,
+    scale: str = "standard",
+    scale_config: ResearchScaleConfig | None = None,
+) -> str:
+    profile = _scale_profile(scale, scale_config)
     retry = ""
     if errors:
         retry = "\n上一轮整计划 lint 错误原文（逐条修正结构）：\n" + "\n".join(errors)
     return (
-        f"目标：为《{query}》生成 3–7 个 goal 的短骨架。\n"
+        f"目标：为《{query}》生成 3–{profile.max_goals} 个 goal 的短骨架。\n"
         "方法要点：按证据链自然断点拆分；goal 之间只用 depends_on 表达有向无环依赖，"
-        "禁止按搜索/阅读/总结工种拆 goal。\n"
+        "禁止按搜索/阅读/总结工种拆 goal；同一 source_id 的完整采集链全计划只安排"
+        "一次，需要复用的下游 goal 必须通过 depends_on 连到唯一采集链。\n"
         "产物结构：只输出 JSON object，顶层只能有 goals；每个 goal 只能含 title、"
         "objective、depends_on。depends_on 只能引用在它之前的 goal-<n>。\n"
         "边界与降级：信息不足时做明确假设并继续，JSON 字符串值内部不得出现未转义"
@@ -104,7 +131,12 @@ def _goal_prompt(
     goal_id: str,
     scaffold: Mapping[str, Any],
     errors: list[str],
+    *,
+    upstream_collections: list[Mapping[str, str]] | None = None,
+    scale: str = "standard",
+    scale_config: ResearchScaleConfig | None = None,
 ) -> str:
+    profile = _scale_profile(scale, scale_config)
     retry = ""
     if errors:
         retry = "\n上一轮整计划 lint 错误原文（只修正本 goal 结构）：\n" + "\n".join(errors)
@@ -112,11 +144,45 @@ def _goal_prompt(
         f"{item.display_name}（{item.collector_name}）"
         for item in planning_catalog()
     )
+    inventory = json.dumps(
+        list(upstream_collections or []),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    inventory_locations = "；".join(
+        f"{item.get('goal_id')}/{item.get('agent_id')} "
+        f"source_id={item.get('source_id')} output.path={item.get('output_path')}"
+        for item in upstream_collections or []
+    ) or "无"
+    reuse_rule = (
+        f"上游 goal 已采集源及产物路径={inventory}；定位={inventory_locations}；"
+        "清单内 source_id 禁止重采同源，"
+        "下游必须通过 inputs 消费对应 output_path。"
+    )
+    if scale == "fast":
+        source_limits = "、".join(
+            f"{source_id} {_SOURCE_LIMIT_PARAMETERS.get(source_id, 'limit')}={limit}"
+            for source_id, limit in sorted(profile.source_item_limits.items())
+        )
+        scale_rule = (
+            f"快速档每个 goal 采集源最多 {profile.max_sources_per_goal} 个；"
+            f"每源采集条数参数：{source_limits}；"
+        )
+        hn_rule = (
+            "HN 查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、"
+            f"hitsPerPage={profile.source_item_limits['hacker_news']}；"
+        )
+    else:
+        scale_rule = ""
+        hn_rule = (
+            "HN 查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、"
+            "hitsPerPage=1000；"
+        )
     return (
         f"目标：扩展《{query}》中的 {goal_id}；骨架字段固定为："
         f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
-        f"注册表选择：{sources}；采集 agent 的 name 必须唯一确定 capability.sources "
+        f"注册表选择：{sources}；{reuse_rule}{scale_rule}采集 agent 的 name 必须唯一确定 capability.sources "
         "与 source.* 工具；非采集 agent 的 name 只能逐字取职能闭集："
         f"{'、'.join(_ROLE_MAP)}，不得自造名称。\n"
         "产物结构：只输出一个 JSON object，只含 deliverable、acceptance、agents。"
@@ -125,19 +191,26 @@ def _goal_prompt(
         "capability、prompt、状态、重试或时间字段。\n"
         "边界与降级：JSON 字符串值内部不得出现未转义的英文双引号，引用名称一律"
         "用中文引号「」；采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
-        "HN 查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、"
-        "hitsPerPage=1000；"
+        f"{hn_rule}"
         "数据不足时用结构化缺口口径，不得写死上游无法保证的实体最小条数；"
         f"不输出 Markdown 围栏或说明。{retry}"
     )
 
 
-def _skeleton_scaffolds(value: Any) -> list[dict[str, Any]]:
+def _skeleton_scaffolds(
+    value: Any,
+    *,
+    scale: str = "standard",
+    scale_config: ResearchScaleConfig | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(value, Mapping) or not isinstance(value.get("goals"), list):
         raise ValueError("骨架顶层必须是含 goals 数组的 object")
     goals = value["goals"]
-    if not 3 <= len(goals) <= 7:
-        raise ValueError(f"goal 数必须在 3–7，实际为 {len(goals)}")
+    profile = _scale_profile(scale, scale_config)
+    if not 3 <= len(goals) <= profile.max_goals:
+        raise ValueError(
+            f"goal 数必须在 3–{profile.max_goals}，实际为 {len(goals)}"
+        )
     result: list[dict[str, Any]] = []
     for index, raw in enumerate(goals, start=1):
         goal_id = f"goal-{index}"
@@ -268,6 +341,8 @@ def _agent_prompt(
     agent_kind: str,
     *,
     source_id: str | None = None,
+    source_item_limit: int | None = None,
+    scale: str = "standard",
 ) -> str:
     structure = "、".join(output["validators"])
     chart_rule = ""
@@ -291,6 +366,9 @@ def _agent_prompt(
             if spec is not None
             else f"查询式={query}；按 capability 声明的信息源执行采集。"
         )
+        if scale == "fast" and source_id and source_item_limit is not None:
+            parameter = _SOURCE_LIMIT_PARAMETERS.get(source_id, "limit")
+            method += f"快速档以 {parameter}={source_item_limit} 覆盖默认采集条数。"
         evidence_rule = (
             "所有事实保留 permalink 与 fetched_at。"
             "本文件顶层必须是 JSON 数组，每个元素为一条命中记录；"
@@ -371,12 +449,17 @@ def _build_plan(
     query: str,
     research_id: str,
     timestamp: str,
+    scale: str = "standard",
+    scale_config: ResearchScaleConfig | None = None,
 ) -> Plan:
     if not isinstance(skeleton, Mapping) or not isinstance(skeleton.get("goals"), list):
         raise ValueError("规划产物顶层必须是含 goals 数组的 object")
     raw_goals = skeleton["goals"]
-    if not 3 <= len(raw_goals) <= 7:
-        raise ValueError(f"goal 数必须在 3–7，实际为 {len(raw_goals)}")
+    profile = _scale_profile(scale, scale_config)
+    if not 3 <= len(raw_goals) <= profile.max_goals:
+        raise ValueError(
+            f"goal 数必须在 3–{profile.max_goals}，实际为 {len(raw_goals)}"
+        )
     for index, raw_goal in enumerate(raw_goals, start=1):
         if not isinstance(raw_goal, Mapping):
             raise ValueError(f"goal-{index} 骨架必须是 object")
@@ -392,6 +475,7 @@ def _build_plan(
             structure_errors.append(str(exc))
     counters: Counter[str] = Counter()
     goals: list[dict[str, Any]] = []
+    collection_artifacts: list[dict[str, str]] = []
     for index, raw_goal in enumerate(raw_goals, start=1):
         goal_id = f"goal-{index}"
         if goal_id not in deliverables:
@@ -423,6 +507,26 @@ def _build_plan(
                 for item in depends_on
                 if item in deliverables
             }
+            dependencies_by_goal = {
+                str(item["goal_id"]): list(item.get("depends_on", []))
+                for item in goals
+            }
+            ancestors: set[str] = set()
+            pending = list(depends_on)
+            while pending:
+                dependency = pending.pop()
+                if dependency in ancestors:
+                    continue
+                ancestors.add(dependency)
+                pending.extend(dependencies_by_goal.get(dependency, []))
+            reusable_inputs = [
+                {
+                    "from_goal": item["goal_id"],
+                    "artifact": item["output_path"],
+                }
+                for item in collection_artifacts
+                if item["goal_id"] in ancestors
+            ]
             for agent_index, item in enumerate(raw_agents):
                 agent = _build_agent(
                     item,
@@ -432,10 +536,35 @@ def _build_plan(
                     counters,
                     previous_agent_id=previous_agent_id,
                     upstream_artifacts=upstream_artifacts if agent_index == 0 else {},
+                    reusable_inputs=reusable_inputs if agent_index == 0 else [],
                     target=deliverables[goal_id] if agent_index == len(raw_agents) - 1 else None,
+                    scale=scale,
+                    scale_profile=profile,
                 )
                 agents.append(agent)
                 previous_agent_id = agent["agent_id"]
+            source_ids = {
+                str(source)
+                for agent in agents
+                for source in agent.get("capability", {}).get("sources", [])
+            }
+            if (
+                profile.max_sources_per_goal is not None
+                and len(source_ids) > profile.max_sources_per_goal
+            ):
+                raise ValueError(
+                    f"{goal_id} 在 {scale} 档采集源最多 "
+                    f"{profile.max_sources_per_goal} 个，实际为 {len(source_ids)}："
+                    f"{sorted(source_ids)}"
+                )
+            for agent in agents:
+                for source_id in agent.get("capability", {}).get("sources", []):
+                    collection_artifacts.append({
+                        "goal_id": goal_id,
+                        "agent_id": str(agent["agent_id"]),
+                        "source_id": str(source_id),
+                        "output_path": str(agent["output"]["path"]),
+                    })
             goals.append({
                 "goal_id": goal_id,
                 "title": title[:24],
@@ -464,6 +593,7 @@ def _build_plan(
         "title": query.strip()[:40],
         "research_question": query,
         "use_case": use_case,
+        "scale": scale,
         "status": "awaiting_review",
         "approved_at": None,
         "decision_balance": [],
@@ -488,7 +618,10 @@ def _build_agent(
     *,
     previous_agent_id: str | None,
     upstream_artifacts: Mapping[str, str],
-    target: Mapping[str, Any] | None,
+    reusable_inputs: list[Mapping[str, str]] | None = None,
+    target: Mapping[str, Any] | None = None,
+    scale: str = "standard",
+    scale_profile: ResearchScaleProfile | None = None,
 ) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError(f"{goal_id}.agents 的元素必须是 object")
@@ -508,16 +641,28 @@ def _build_agent(
     suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
     agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
     output = _output(agent_kind, goal_id, agent_id, target)
+    inputs = [
+        {"from_goal": item, "artifact": upstream_artifacts[item]}
+        for item in upstream
+        if item in upstream_artifacts
+    ]
+    known_inputs = {(item["from_goal"], item["artifact"]) for item in inputs}
+    for item in reusable_inputs or []:
+        candidate = {
+            "from_goal": str(item.get("from_goal", "")),
+            "artifact": str(item.get("artifact", "")),
+        }
+        key = (candidate["from_goal"], candidate["artifact"])
+        if all(candidate.values()) and key not in known_inputs:
+            inputs.append(candidate)
+            known_inputs.add(key)
+    profile_config = scale_profile or _scale_profile(scale, None)
     return {
         "agent_id": agent_id,
         "display_name": name,
         "task": task[:200],
         "depends_on": [] if previous_agent_id is None else [previous_agent_id],
-        "inputs": [
-            {"from_goal": item, "artifact": upstream_artifacts[item]}
-            for item in upstream
-            if item in upstream_artifacts
-        ],
+        "inputs": inputs,
         "engine": pick_engine(agent_kind, None).engine,
         "model": None,
         "capability": _capability(
@@ -531,6 +676,8 @@ def _build_agent(
                 output,
                 agent_kind,
                 source_id=source_id if profile == "web-collector" else None,
+                source_item_limit=profile_config.source_item_limits.get(source_id),
+                scale=scale,
             ),
             "assumptions_policy": "assume_and_declare",
         },
@@ -539,6 +686,55 @@ def _build_agent(
         "origin": _origin(),
         "status": "queued",
     }
+
+
+def _upstream_collection_inventory(
+    expansions: Mapping[str, Mapping[str, Any]],
+    stop_before: int,
+) -> list[dict[str, str]]:
+    """从已落盘 goal 段确定性还原其采集源与最终 output.path。"""
+
+    counters: Counter[str] = Counter()
+    inventory: list[dict[str, str]] = []
+    for index in range(1, stop_before):
+        goal_id = f"goal-{index}"
+        expansion = expansions.get(goal_id)
+        if not isinstance(expansion, Mapping):
+            continue
+        raw_agents = expansion.get("agents", [])
+        if not isinstance(raw_agents, list):
+            continue
+        try:
+            deliverable = _deliverable(expansion.get("deliverable"), goal_id)
+        except ValueError:
+            deliverable = None
+        for agent_index, raw in enumerate(raw_agents):
+            if not isinstance(raw, Mapping):
+                continue
+            name = str(raw.get("display_name") or raw.get("name") or "").strip()
+            try:
+                agent_kind, _ = _classify(name, "")
+            except ValueError:
+                continue
+            counters[agent_kind] += 1
+            suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
+            agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
+            source_spec = _source_specs().get(_normalize_name(name))
+            if source_spec is None:
+                continue
+            target = (
+                deliverable
+                if agent_index == len(raw_agents) - 1 and deliverable is not None
+                else None
+            )
+            output = _output(agent_kind, goal_id, agent_id, target)
+            inventory.append({
+                "goal_id": goal_id,
+                "agent_id": agent_id,
+                "source_id": source_spec.source_id,
+                "output_path": str(output["path"]),
+            })
+    return inventory
 
 
 async def _emit(store: Any, event: NormalizedEvent) -> None:
@@ -582,6 +778,8 @@ async def generate_plan(
     adapter: Any,
     resilience_config: ResilienceConfig | None = None,
     *,
+    scale: str = "standard",
+    scale_config: ResearchScaleConfig | None = None,
     segment_retry_sleep: Any = None,
 ) -> Plan:
     """按骨架、逐 goal、整计划 lint 三阶段生成并原子保存计划。"""
@@ -597,6 +795,8 @@ async def generate_plan(
     timestamp = str(extra.get("plan_generated_at") or report["created_at"])
     runs_root = Path(getattr(store, "runs_root", validation.RUNS_ROOT))
     config = resilience_config or load_resilience_config()
+    product_scale_config = scale_config or load_research_scale_config()
+    product_scale_config.profile(scale)
     workspace_kwargs = (
         {"retry_sleep": segment_retry_sleep}
         if segment_retry_sleep is not None
@@ -613,7 +813,12 @@ async def generate_plan(
         try:
             skeleton = await workspace.generate(
                 "skeleton",
-                _skeleton_prompt(normalized_query, skeleton_errors),
+                _skeleton_prompt(
+                    normalized_query,
+                    skeleton_errors,
+                    scale=scale,
+                    scale_config=product_scale_config,
+                ),
                 adapter,
                 on_retry=lambda retry, error: _emit(
                     store,
@@ -624,7 +829,11 @@ async def generate_plan(
                     ),
                 ),
             )
-            scaffolds = _skeleton_scaffolds(skeleton)
+            scaffolds = _skeleton_scaffolds(
+                skeleton,
+                scale=scale,
+                scale_config=product_scale_config,
+            )
             await _emit(
                 store,
                 _progress_event(
@@ -654,7 +863,17 @@ async def generate_plan(
         goal_id = f"goal-{index}"
         expansion = await workspace.generate(
             goal_id,
-            _goal_prompt(normalized_query, goal_id, scaffold, errors),
+            _goal_prompt(
+                normalized_query,
+                goal_id,
+                scaffold,
+                errors,
+                upstream_collections=_upstream_collection_inventory(
+                    expansions, index
+                ),
+                scale=scale,
+                scale_config=product_scale_config,
+            ),
             adapter,
             on_retry=lambda retry, error: _emit(
                 store,
@@ -687,6 +906,7 @@ async def generate_plan(
 
     errors: list[str] = []
     for attempt in range(1, config.plan_segment_retries + 1):
+        plan: Plan | None = None
         try:
             expanded_goals = []
             for index, scaffold in enumerate(scaffolds, start=1):
@@ -710,6 +930,8 @@ async def generate_plan(
                 query=normalized_query,
                 research_id=research_id,
                 timestamp=timestamp,
+                scale=scale,
+                scale_config=product_scale_config,
             )
             errors = lint(plan)["errors"]
         except PlanSegmentError as exc:
@@ -730,11 +952,19 @@ async def generate_plan(
             return plan
         if attempt < config.plan_segment_retries:
             await _emit(store, _retry_event(research_id, attempt + 1, errors))
-            joined = "\n".join(errors)
+            duplicate_goals = (
+                duplicate_collection_goal_ids(plan)
+                if plan is not None
+                else set()
+            )
+            joined = "\n".join(
+                item for item in errors if not item.startswith("[规则21]")
+            )
             affected = [
                 index
                 for index in range(1, len(scaffolds) + 1)
                 if f"goal-{index}" in joined
+                or f"goal-{index}" in duplicate_goals
             ]
             for index in affected or list(range(1, len(scaffolds) + 1)):
                 try:

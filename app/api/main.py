@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Any, Awaitable, Callable, Optional
+from typing import AsyncIterator, Any, Awaitable, Callable, Literal, Optional
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe_engines
 from app.api.events import ResearchEventBuffer
+from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.runtime import RuntimeCoordinator
 from app.plan.cards import Card, CardStatus
 from app.plan.editing import (
@@ -48,6 +49,7 @@ DEFAULT_FRONTEND_DIST = ROOT / "web" / "dist"
 
 class ResearchRequest(BaseModel):
     query: str
+    scale: Literal["fast", "standard"] = "standard"
 
 
 class ResetPlanRequest(BaseModel):
@@ -80,6 +82,7 @@ def create_app(
     enable_test_routes: bool | None = None,
     session_clock: Callable[[], float] = time.monotonic,
     session_utc_clock: Callable[[], datetime] = _utc_now,
+    scale_config: ResearchScaleConfig | None = None,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
@@ -135,6 +138,7 @@ def create_app(
         auto_confirm=auto_confirm,
         session_clock=session_clock,
         session_utc_clock=session_utc_clock,
+        scale_config=scale_config or load_research_scale_config(),
     )
 
     @asynccontextmanager
@@ -295,14 +299,17 @@ def create_app(
             research_question=query,
             created_at=created_at,
             status="running",
-            extra={"plan_generated_at": created_at},
+            extra={"plan_generated_at": created_at, "scale": request.scale},
         )
         await events.publish(
             research_id,
             {"type": "research_snapshot", "data": researches[research_id]},
         )
         task = asyncio.create_task(
-            run_in_background(research_id, runtime.prepare_research(research_id, query)),
+            run_in_background(
+                research_id,
+                runtime.prepare_research(research_id, query, scale=request.scale),
+            ),
             name=f"owli:{research_id}",
         )
         background_tasks.add(task)

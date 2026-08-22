@@ -301,6 +301,7 @@ def search(
     query: str,
     window: str,
     *,
+    max_results: int = 10,
     env_path: str | Path = DEFAULT_ENV_PATH,
     http_post: HttpPost = _http_post,
     on_event: EventSink | None = None,
@@ -311,6 +312,8 @@ def search(
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
+    if not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1:
+        raise ValueError("max_results 必须是正整数")
     matched = _WINDOW_PATTERN.fullmatch(window)
     if matched is None:
         raise ValueError('window 必须形如 "90d" 或 "30d"')
@@ -322,7 +325,7 @@ def search(
     exa_payload = {
         "query": query.strip(),
         "type": "neural",
-        "numResults": 10,
+        "numResults": max_results,
         "startPublishedDate": start.isoformat(),
         "contents": {"text": {"maxCharacters": 1200}},
     }
@@ -362,7 +365,7 @@ def search(
         "search_depth": "advanced",
         "include_answer": True,
         "include_raw_content": "text",
-        "max_results": 10,
+        "max_results": max_results,
         "start_date": start.date().isoformat(),
     }
     response = http_post(

@@ -15,6 +15,7 @@ from app.adapters import validation
 from app.adapters.capability import Capability
 from app.adapters.contracts import EngineTask
 from app.adapters.routing import RoutedAdapter
+from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.scheduler import Scheduler, TaskRunResult
 from app.plan.cards import (
     Card,
@@ -49,6 +50,7 @@ class RuntimeCoordinator:
         auto_confirm: bool | None = None,
         session_clock: Callable[[], float],
         session_utc_clock: Callable[[], datetime],
+        scale_config: ResearchScaleConfig | None = None,
     ) -> None:
         self.store = store
         self.events = event_buffer
@@ -66,6 +68,7 @@ class RuntimeCoordinator:
             if auto_confirm is None
             else auto_confirm
         )
+        self.scale_config = scale_config or load_research_scale_config()
         self._adapters: dict[str, Any] = {}
         self._schedulers: dict[str, Any] = {}
         self._finalized: set[str] = set()
@@ -246,10 +249,18 @@ class RuntimeCoordinator:
                 payload={"choice": first["value"], "auto": True},
             )
 
-    async def prepare_research(self, research_id: str, query: str) -> Plan:
+    async def prepare_research(
+        self, research_id: str, query: str, *, scale: str = "standard"
+    ) -> Plan:
         adapter = self.adapter_factory()
         self._adapters[research_id] = adapter
-        plan = await generate_plan(query, self.store, adapter)
+        plan = await generate_plan(
+            query,
+            self.store,
+            adapter,
+            scale=scale,
+            scale_config=self.scale_config,
+        )
         if plan.research_id != research_id:
             raise RuntimeError(
                 f"计划 research_id 与请求不一致：{plan.research_id} != {research_id}"
@@ -351,6 +362,12 @@ class RuntimeCoordinator:
         goal = next(item for item in plan.goals if item.goal_id == context.goal_id)
         acceptance = "；".join(str(item) for item in goal.acceptance)
         output_path = self.runs_root / plan.research_id / str(agent.output["path"])
+        sources = list(agent.capability.get("sources", []))
+        source_item_limit = (
+            self.scale_config.profile(plan.scale).source_item_limits.get(sources[0])
+            if len(sources) == 1
+            else None
+        )
         body = (
             f"Goal 目标：{goal.objective}\n"
             f"Agent 任务：{agent.task}\n"
@@ -379,6 +396,7 @@ class RuntimeCoordinator:
             capability=Capability(**agent.capability),
             model=agent.model,
             user_override=context.engine,
+            source_item_limit=source_item_limit,
         )
 
     def _plain(self, value: Any) -> Any:

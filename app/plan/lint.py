@@ -158,6 +158,12 @@ def _rule_2(goals: list[dict[str, Any]]) -> list[str]:
 
 def _rule_3(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
+    goal_dependencies = {
+        str(goal.get("goal_id", "")): {
+            str(item) for item in goal.get("depends_on", [])
+        }
+        for goal in goals
+    }
     all_agent_goals = {
         str(agent.get("agent_id", "")): str(goal.get("goal_id", ""))
         for goal, agent in _agents(goals)
@@ -174,13 +180,20 @@ def _rule_3(goals: list[dict[str, Any]]) -> list[str]:
                     f"[规则3] {goal_id}/{agent_id}.depends_on 跨 goal 引用 {dependency}；"
                     "请上升为 goal.depends_on"
                 )
-        upstream = set(goal.get("depends_on", []))
+        upstream: set[str] = set()
+        pending = list(goal_dependencies.get(goal_id, set()))
+        while pending:
+            dependency = pending.pop()
+            if dependency in upstream:
+                continue
+            upstream.add(dependency)
+            pending.extend(goal_dependencies.get(dependency, set()))
         for index, item in enumerate(agent.get("inputs", [])):
             from_goal = item.get("from_goal") if isinstance(item, dict) else None
             if from_goal not in upstream:
                 messages.append(
                     f"[规则3] {goal_id}/{agent_id}.inputs[{index}].from_goal={from_goal!r} "
-                    f"未在 {goal_id}.depends_on 声明"
+                    f"未在 {goal_id} 的 depends_on 祖先链声明"
                 )
     return messages
 
@@ -635,6 +648,74 @@ def _rule_20(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _collection_reuse_violations(
+    goals: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """只按结构化采集能力与产物路径识别跨 goal 同源重采。"""
+
+    first_by_source: dict[str, dict[str, str]] = {}
+    violations: list[dict[str, str]] = []
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        for agent in goal.get("agents", []):
+            sources = agent.get("capability", {}).get("sources", [])
+            output_path = str(agent.get("output", {}).get("path", "")).strip()
+            if not isinstance(sources, list) or not output_path:
+                continue
+            current = {
+                "goal_id": goal_id,
+                "agent_id": str(agent.get("agent_id", "")),
+                "agent_kind": "data_collection",
+                "output_path": output_path,
+            }
+            for source in sources:
+                source_id = str(source).strip()
+                if not source_id:
+                    continue
+                first = first_by_source.get(source_id)
+                if first is None:
+                    first_by_source[source_id] = current
+                elif first["goal_id"] != goal_id:
+                    violations.append({
+                        "source_id": source_id,
+                        "first_goal_id": first["goal_id"],
+                        "first_agent_id": first["agent_id"],
+                        "first_output_path": first["output_path"],
+                        "goal_id": goal_id,
+                        "agent_id": current["agent_id"],
+                        "agent_kind": current["agent_kind"],
+                        "output_path": output_path,
+                    })
+    return violations
+
+
+def duplicate_collection_goal_ids(
+    plan: Plan | Mapping[str, Any],
+) -> set[str]:
+    """返回应重生成的后出现违规段，不把首次采集段算作 offender。"""
+
+    raw = _data(plan)
+    return {
+        item["goal_id"]
+        for item in _collection_reuse_violations(list(raw.get("goals", [])))
+    }
+
+
+def _rule_21(goals: list[dict[str, Any]]) -> list[str]:
+    messages: list[str] = []
+    for item in _collection_reuse_violations(goals):
+        messages.append(
+            f"[规则21] {item['goal_id']}/{item['agent_id']} "
+            f"(agent_kind={item['agent_kind']}) 跨 goal 重复完整采集 "
+            f"source_id={item['source_id']}；首次采集="
+            f"{item['first_goal_id']}/{item['first_agent_id']}，"
+            f"output.path={item['first_output_path']}；本次 output.path="
+            f"{item['output_path']}。请删除重复采集 agent，改为 inputs 引用上游产物 "
+            f"{item['first_output_path']}"
+        )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -721,4 +802,5 @@ def lint(
     errors.extend(_rule_18(goals))
     errors.extend(_rule_19(goals))
     errors.extend(_rule_20(goals))
+    errors.extend(_rule_21(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

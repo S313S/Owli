@@ -37,6 +37,7 @@ class EngineTask:
     capability: Capability
     model: str | None = None
     user_override: str | None = None
+    source_item_limit: int | None = None
 
 
 @dataclass(frozen=True)

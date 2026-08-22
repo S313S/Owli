@@ -65,3 +65,37 @@ def test_退避起点不得超过上限() -> None:
             "OWLI_BACKOFF_INITIAL_SECONDS": "10",
             "OWLI_BACKOFF_MAX_SECONDS": "9",
         })
+
+
+def test_调研规模配置默认值环境无关() -> None:
+    from app.config import load_research_scale_config
+
+    config = load_research_scale_config()
+
+    assert config.standard.max_goals == 7
+    assert config.standard.max_sources_per_goal is None
+    assert config.fast.max_goals == 3
+    assert config.fast.max_sources_per_goal == 2
+    assert config.fast.source_item_limits == {
+        "hacker_news": 100,
+        "product_hunt": 10,
+        "web_search": 5,
+        "x": 10,
+    }
+
+
+def test_调研规模配置可由产品配置覆盖() -> None:
+    from app.config import load_research_scale_config
+
+    config = load_research_scale_config({
+        "fast": {
+            "max_goals": 4,
+            "max_sources_per_goal": 1,
+            "source_item_limits": {"hacker_news": 42},
+        }
+    })
+
+    assert config.fast.max_goals == 4
+    assert config.fast.max_sources_per_goal == 1
+    assert config.fast.source_item_limits["hacker_news"] == 42
+    assert config.fast.source_item_limits["web_search"] == 5

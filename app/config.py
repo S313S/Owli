@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 
 _DEFAULTS = {
@@ -34,6 +34,90 @@ class ResilienceConfig:
             self.backoff_initial_seconds * (2 ** exponent),
             self.backoff_max_seconds,
         )
+
+
+@dataclass(frozen=True)
+class ResearchScaleProfile:
+    """单个调研规模档位；数值是产品配置，不读取部署环境。"""
+
+    max_goals: int
+    max_sources_per_goal: int | None
+    source_item_limits: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        if self.max_goals < 3:
+            raise ValueError("max_goals 不得小于 3")
+        if self.max_sources_per_goal is not None and self.max_sources_per_goal < 1:
+            raise ValueError("max_sources_per_goal 必须是正整数或 None")
+        limits = {str(key): int(value) for key, value in self.source_item_limits.items()}
+        if any(value < 1 for value in limits.values()):
+            raise ValueError("source_item_limits 的值必须是正整数")
+        object.__setattr__(self, "source_item_limits", limits)
+
+
+@dataclass(frozen=True)
+class ResearchScaleConfig:
+    standard: ResearchScaleProfile
+    fast: ResearchScaleProfile
+
+    def profile(self, scale: str) -> ResearchScaleProfile:
+        if scale not in {"fast", "standard"}:
+            raise ValueError(f"scale 只能取 fast 或 standard，实际为 {scale!r}")
+        return getattr(self, scale)
+
+
+_SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "standard": {
+        "max_goals": 7,
+        "max_sources_per_goal": None,
+        "source_item_limits": {
+            "hacker_news": 1000,
+            "product_hunt": 20,
+            "web_search": 10,
+            "x": 10,
+        },
+    },
+    "fast": {
+        "max_goals": 3,
+        "max_sources_per_goal": 2,
+        "source_item_limits": {
+            "hacker_news": 100,
+            "product_hunt": 10,
+            "web_search": 5,
+            "x": 10,
+        },
+    },
+}
+
+
+def load_research_scale_config(
+    overrides: Mapping[str, Mapping[str, Any]] | None = None,
+) -> ResearchScaleConfig:
+    """读取产品级规模配置；不从环境变量分叉默认行为。"""
+
+    values: dict[str, dict[str, Any]] = {
+        name: {
+            **profile,
+            "source_item_limits": dict(profile["source_item_limits"]),
+        }
+        for name, profile in _SCALE_DEFAULTS.items()
+    }
+    for name, override in (overrides or {}).items():
+        if name not in values:
+            raise ValueError(f"未知调研规模档位：{name}")
+        unknown = set(override) - {
+            "max_goals", "max_sources_per_goal", "source_item_limits"
+        }
+        if unknown:
+            raise ValueError(f"{name} 含未知规模配置：{sorted(unknown)}")
+        limits = dict(values[name]["source_item_limits"])
+        limits.update(dict(override.get("source_item_limits", {})))
+        values[name].update(dict(override))
+        values[name]["source_item_limits"] = limits
+    return ResearchScaleConfig(
+        standard=ResearchScaleProfile(**values["standard"]),
+        fast=ResearchScaleProfile(**values["fast"]),
+    )
 
 
 def _positive_int(values: Mapping[str, str], name: str) -> int:
@@ -76,4 +160,10 @@ def load_resilience_config(
     return config
 
 
-__all__ = ["ResilienceConfig", "load_resilience_config"]
+__all__ = [
+    "ResearchScaleConfig",
+    "ResearchScaleProfile",
+    "ResilienceConfig",
+    "load_research_scale_config",
+    "load_resilience_config",
+]

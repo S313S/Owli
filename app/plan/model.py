@@ -168,6 +168,7 @@ class Plan:
     title: str
     research_question: str
     use_case: str
+    scale: str
     status: str
     approved_at: str | None
     decision_balance: list[dict[str, Any]]
@@ -181,13 +182,15 @@ class Plan:
 
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "status", "approved_at", "decision_balance", "expert_panel", "goals",
+        "scale", "status", "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     )
 
     def __post_init__(self) -> None:
         if self.plan_rev < 1:
             raise ValueError("plan_rev 必须从 1 开始")
+        if self.scale not in {"fast", "standard"}:
+            raise ValueError(f"scale 只能取 fast 或 standard：{self.scale!r}")
         if not (
             self.baseline_source in {"generated", "expert_panel"}
             or re.fullmatch(r"reused:r-[A-Za-z0-9-]+", self.baseline_source)
@@ -210,6 +213,7 @@ class Plan:
         values.setdefault("approved_at", None)
         values.setdefault("expert_panel", None)
         values.setdefault("baseline", None)
+        values.setdefault("scale", "standard")
         values["goals"] = [Goal.from_dict(item) for item in values["goals"]]
         return cls(**values)
 

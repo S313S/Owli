@@ -71,6 +71,7 @@ def make_plan_dict() -> dict:
         "title": "飞书竞品优缺点挖掘",
         "research_question": "飞书与主要竞品相比有哪些优缺点？",
         "use_case": "product_competitor",
+        "scale": "standard",
         "status": "awaiting_review",
         "approved_at": None,
         "decision_balance": [{

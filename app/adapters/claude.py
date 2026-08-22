@@ -240,6 +240,7 @@ def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
                 research_id=task.research_id,
                 goal_id=task.goal_id,
                 agent_id=task.agent_id,
+                item_limit=getattr(task, "source_item_limit", None),
             )
         }
         values["strict_mcp_config"] = True

@@ -127,6 +127,7 @@ class SourceToolAdapter:
         goal_id: str,
         agent_id: str,
         capability: Any,
+        item_limit: int | None = None,
         on_event: Any = None,
         **kwargs: Any,
     ) -> Any:
@@ -173,6 +174,17 @@ class SourceToolAdapter:
             for parameter in parameters
         )
         call_kwargs = dict(kwargs)
+        if item_limit is not None:
+            if not isinstance(item_limit, int) or isinstance(item_limit, bool) or item_limit < 1:
+                raise ValueError("item_limit 必须是正整数")
+            parameter = {
+                "hacker_news": "limit",
+                "product_hunt": "limit",
+                "web_search": "max_results",
+                "x": "max_results",
+            }.get(source_id)
+            if parameter is not None:
+                call_kwargs[parameter] = item_limit
         if accepts_events:
             call_kwargs["on_event"] = capture
         try:
@@ -200,6 +212,7 @@ def stdio_server_config(
     research_id: str = "mcp",
     goal_id: str = "mcp",
     agent_id: str = "mcp",
+    item_limit: int | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Claude SDK 可直接消费的 stdio MCP 配置。"""
@@ -219,6 +232,8 @@ def stdio_server_config(
             agent_id,
         ]
     )
+    if item_limit is not None:
+        args.extend(["--item-limit", str(item_limit)])
     parent_env = os.environ if environ is None else environ
     child_env = {"PYTHONPATH": str(PROJECT_ROOT)}
     child_env.update(
@@ -243,6 +258,7 @@ def codex_mcp_args(
     research_id: str = "mcp",
     goal_id: str = "mcp",
     agent_id: str = "mcp",
+    item_limit: int | None = None,
 ) -> list[str]:
     """Codex CLI 单次任务 MCP 配置，不写入隔离 CODEX_HOME。"""
 
@@ -252,6 +268,7 @@ def codex_mcp_args(
         research_id=research_id,
         goal_id=goal_id,
         agent_id=agent_id,
+        item_limit=item_limit,
     )
     env_toml = ",".join(
         f"{name}={json.dumps(value, ensure_ascii=False)}"
@@ -264,6 +281,11 @@ def codex_mcp_args(
         f"mcp_servers.{MCP_SERVER_NAME}.args={json.dumps(config['args'], ensure_ascii=False)}",
         "-c",
         f"mcp_servers.{MCP_SERVER_NAME}.env={{{env_toml}}}",
+        # codex-cli ≥0.149 把 MCP 工具调用挂在逐次审批门后，非交互 exec 的
+        # 审批策略为 never 时一律拒绝；能注入本服务器的源已经过 capability
+        # 层收敛，故显式放行。旧版 codex 忽略未知配置键，不受影响。
+        "-c",
+        f'mcp_servers.{MCP_SERVER_NAME}.default_tools_approval_mode="approve"',
     ]
 
 
@@ -274,6 +296,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--research-id", default="mcp")
     parser.add_argument("--goal-id", default="mcp")
     parser.add_argument("--agent-id", default="mcp")
+    parser.add_argument("--item-limit", type=int)
     return parser
 
 
@@ -284,6 +307,7 @@ async def _serve(
     research_id: str = "mcp",
     goal_id: str = "mcp",
     agent_id: str = "mcp",
+    item_limit: int | None = None,
 ) -> None:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -334,6 +358,7 @@ async def _serve(
                 capability=Capability(
                     tools=(name,), sources=(source_id,), network="sources_only"
                 ),
+                item_limit=item_limit,
                 on_event=events.append,
             )
         except Exception as exc:
@@ -391,6 +416,7 @@ def main(argv: list[str] | None = None) -> None:
             research_id=args.research_id,
             goal_id=args.goal_id,
             agent_id=args.agent_id,
+            item_limit=args.item_limit,
         )
     )
 

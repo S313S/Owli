@@ -247,7 +247,7 @@ def test_每个_goal_最终_agent_产出_deliverable_且下游_inputs_逐字引�
             expected = [] if index == 0 else [goal.agents[index - 1].agent_id]
             assert agent.depends_on == expected
     for goal in plan.goals[1:]:
-        assert goal.agents[0].inputs == [
+        direct_inputs = [
             {
                 "from_goal": upstream,
                 "artifact": next(
@@ -257,6 +257,11 @@ def test_每个_goal_最终_agent_产出_deliverable_且下游_inputs_逐字引�
             }
             for upstream in goal.depends_on
         ]
+        assert all(item in goal.agents[0].inputs for item in direct_inputs)
+        assert len({
+            (item["from_goal"], item["artifact"])
+            for item in goal.agents[0].inputs
+        }) == len(goal.agents[0].inputs)
 
 
 def test_每个落盘_agent_都具有当前_goal_写权限(tmp_path) -> None:
