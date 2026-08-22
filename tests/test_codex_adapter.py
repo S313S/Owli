@@ -103,6 +103,7 @@ result = {{
     "assumptions": [],
     "unmet": [],
     "capability_denials": [],
+    "reason": None,
 }}
 last_message.parent.mkdir(parents=True, exist_ok=True)
 last_message.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
@@ -255,7 +256,8 @@ def test_正常通路按双腿判定并与_claude_结论字段完全一致(tmp_p
     assert {field.name for field in fields(result.conclusion)} == {
         field.name for field in fields(ClaudeOwliResult)
     } == {
-        "status", "output_path", "summary", "assumptions", "unmet", "capability_denials"
+        "status", "output_path", "summary", "assumptions", "unmet",
+        "capability_denials", "reason"
     }
     assert {event.thread_id for event in result.events} == {"thread-fake"}
     assert result.events[-2].item_kind.value == "thinking"

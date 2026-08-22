@@ -64,7 +64,7 @@ def _task() -> EngineTask:
         f"请把且只把『M1 双引擎串线通过』写入 {OUTPUT_PATH}。\n"
         "写完后自检文件存在且非空。最终必须输出 json owli-result 代码块，"
         "status=done，output_path 必须逐字填写上述绝对路径，summary=双引擎最小任务完成，"
-        "assumptions、unmet、capability_denials 均为空数组。"
+        "assumptions、unmet、capability_denials 均为空数组，reason=null。"
     )
     return EngineTask(
         body=body,

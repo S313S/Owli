@@ -69,12 +69,22 @@ class FakeEngine:
     def __init__(self, skeletons: list[dict]) -> None:
         self.skeletons = [deepcopy(item) for item in skeletons]
         self.tasks = []
+        self.chapter_tasks = []
         self._current = self.skeletons[0]
         self._goal_calls: dict[int, int] = {}
+        self._chapter_outputs: list[str] = []
+
+    @staticmethod
+    def _prompt_json(body: str, label: str):
+        tail = body.partition(label)[2]
+        return json.JSONDecoder().raw_decode(tail)[0]
 
     async def run(self, task, ctx, on_event=None):
         del ctx, on_event
-        self.tasks.append(task)
+        if "-ch-" in task.output_path.stem:
+            self.chapter_tasks.append(task)
+        else:
+            self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         if task.output_path.name == "skeleton.json":
             payload = {
@@ -87,7 +97,7 @@ class FakeEngine:
                     for goal in self._current["goals"]
                 ]
             }
-        else:
+        elif "-ch-" not in task.output_path.stem:
             number = int(task.output_path.stem.removeprefix("goal-"))
             call = self._goal_calls.get(number, 0)
             self._goal_calls[number] = call + 1
@@ -98,6 +108,51 @@ class FakeEngine:
                 "acceptance": goal["acceptance"],
                 "agents": goal["agents"],
             }
+        else:
+            goal_text, chapter_text = task.output_path.stem.split("-ch-", 1)
+            goal_number = int(goal_text.removeprefix("goal-"))
+            chapter_number = int(chapter_text)
+            raw_agent = self._current["goals"][goal_number - 1]["agents"][chapter_number - 1]
+            name = str(raw_agent["name"]).casefold()
+            if any(token in name for token in ("数据抓取", "mediacrawler", "浏览器自动化")):
+                chapter_type = "collection"
+            elif "代码执行" in name:
+                chapter_type = "code_execution"
+            elif "excel" in name:
+                chapter_type = "excel_generation"
+            elif "数据清洗" in name:
+                chapter_type = "data_cleaning"
+            elif "交叉验证" in name:
+                chapter_type = "cross_validation"
+            elif "报告" in name:
+                chapter_type = "report"
+            elif "摘要" in name:
+                chapter_type = "summary"
+            elif "标签" in name:
+                chapter_type = "tagging"
+            else:
+                chapter_type = "audit"
+            output_path = self._prompt_json(task.body, "系统声明 output.path=")
+            declared_inputs = self._prompt_json(task.body, "系统声明 inputs=")
+            inputs = list(declared_inputs)
+            if chapter_type in {"comparison", "cross_validation"}:
+                inputs = list(dict.fromkeys([*inputs, *self._chapter_outputs]))
+            payload = {
+                "chapter_type": chapter_type,
+                "opening": {
+                    "inputs": [{"path": path} for path in inputs],
+                    "task": str(raw_agent["task"]),
+                    "acceptance": ["产物按声明路径落盘"],
+                },
+                "closing": {
+                    "output": {"path": output_path},
+                    "entities": ["飞书"],
+                    "expected_count": 1,
+                    "notes": {},
+                },
+            }
+            if chapter_type == "collection":
+                self._chapter_outputs.append(output_path)
         task.output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return SimpleNamespace(succeeded=True)
 
@@ -115,7 +170,6 @@ def _generate(tmp_path: Path, skeletons: list[dict]):
     engine = FakeEngine(skeletons)
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
@@ -166,8 +220,11 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
     segment_root = store.runs_root / RESEARCH_ID / "plan-segments"
     assert sorted(path.name for path in segment_root.iterdir()) == [
         "assembled.json",
+        "goal-1-ch-1.json",
         "goal-1.json",
+        "goal-2-ch-1.json",
         "goal-2.json",
+        "goal-3-ch-1.json",
         "goal-3.json",
         "skeleton.json",
     ]
@@ -324,7 +381,6 @@ def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
     engine = FakeEngine([invalid])
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
 
@@ -354,7 +410,6 @@ def test_规划双腿判定失败也带原文重试且共用三次上限(tmp_pat
     engine = FlakyEngine([_valid_skeleton()])
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
 
@@ -390,14 +445,13 @@ def test_每轮起跑前清除残留骨架避免重试覆盖死锁(tmp_path) -> 
     engine = RecordingEngine([invalid, _valid_skeleton()])
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
 
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
     assert plan.status == "awaiting_review"
-    assert engine.existed_at_run == [False] * 5
+    assert engine.existed_at_run and not any(engine.existed_at_run)
 
 
 def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None:
@@ -428,7 +482,6 @@ def test_规划产物校验失败的原文与_offenders_回灌(tmp_path) -> None
     engine = ValidationFlakyEngine([_valid_skeleton()])
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
 
@@ -586,6 +639,43 @@ def test_display_name别名可作采集agent名称且源id解析正确() -> None
             target=None,
         )
         assert spec.source_id in agent["capability"]["sources"]
+
+
+def test_采集角色允许结构化实体后缀并仍按前缀派生信息源() -> None:
+    from collections import Counter
+
+    from app.plan.generate import _build_agent
+
+    agent = _build_agent(
+        {"name": "网页搜索数据抓取·豆包", "task": "采集豆包资料"},
+        "goal-1",
+        [],
+        "豆包竞品",
+        Counter(),
+        previous_agent_id=None,
+        upstream_artifacts={},
+    )
+    assert agent["display_name"] == "网页搜索数据抓取·豆包"
+    assert agent["capability"]["sources"] == ["web_search"]
+
+
+def test_同_goal_竞品采集章并行且首个汇总章等待全部采集() -> None:
+    from app.plan.generate import _build_plan
+
+    source = _valid_skeleton()
+    source["goals"][0]["agents"] = [
+        _agent("网页搜索数据抓取·豆包", "采集豆包"),
+        _agent("网页搜索数据抓取·讯飞", "采集讯飞"),
+        _agent("数据清洗", "汇总两份采集结果"),
+    ]
+    plan = _build_plan(
+        source, query="豆包竞品", research_id=RESEARCH_ID, timestamp=NOW,
+        scale="fast",
+    )
+    agents = plan.goals[0].agents
+    assert agents[0].depends_on == []
+    assert agents[1].depends_on == []
+    assert agents[2].depends_on == [agents[0].agent_id, agents[1].agent_id]
 
 
 def test_build_plan一次聚合全部goal结构错误() -> None:

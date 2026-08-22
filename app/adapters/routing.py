@@ -9,7 +9,6 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping
 
-from app.adapters.circuitbreaker import CircuitTransition, ResearchCircuitBreaker
 from app.adapters.contracts import PlanningSegmentRequest, PlanningSegmentResult
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.source_mcp import (
@@ -17,7 +16,6 @@ from app.adapters.source_mcp import (
     prepare_source_events,
     replay_source_events,
 )
-from app.adapters.session_stall import SessionStallDetector, SessionStallEvidence
 from app.config import ResilienceConfig, load_resilience_config
 
 
@@ -51,10 +49,6 @@ class EngineSelection:
     origin: str
 
 
-class SessionStallError(RuntimeError):
-    """执行期会话停滞已被主动终止，本轮必须进入 goal 重试链。"""
-
-
 def pick_engine(agent_kind: str, user_override: str | None) -> EngineSelection:
     """按 R2 选默认引擎；显式覆盖保留 origin=user。"""
 
@@ -75,12 +69,10 @@ class RoutedAdapter:
     def __init__(
         self,
         *,
-        clock: Callable[[], float],
         utc_clock: Callable[[], datetime] | None = None,
         adapters: Mapping[str, Any] | None = None,
         source_tools: Mapping[str, Any] | None = None,
         resilience_config: ResilienceConfig | None = None,
-        probe_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         backoff_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if adapters is None:
@@ -92,17 +84,12 @@ class RoutedAdapter:
         if missing:
             raise ValueError(f"缺少引擎适配器：{','.join(sorted(missing))}")
         self._adapters = dict(adapters)
-        self._clock = clock
         self._utc_clock = utc_clock
         self._active: Any = None
         self._route_overrides: dict[str, str] = {}
-        self._breakers: dict[str, ResearchCircuitBreaker] = {}
         self._last_research_id: str | None = None
         self._resilience_config = resilience_config or load_resilience_config()
-        self._probe_sleep = probe_sleep
         self._backoff_sleep = backoff_sleep
-        self._recovery_tasks: set[asyncio.Task[None]] = set()
-        self._trip_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._backoff_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._backoff_counts: dict[tuple[str, str], int] = {}
         self._backoff_causes: dict[tuple[str, str], str] = {}
@@ -130,13 +117,6 @@ class RoutedAdapter:
         """按 research 查询覆盖，避免跨 research 共享断路状态。"""
 
         return self._route_overrides.get(research_id)
-
-    def _breaker(self, research_id: str) -> ResearchCircuitBreaker:
-        breaker = self._breakers.get(research_id)
-        if breaker is None:
-            breaker = ResearchCircuitBreaker(research_id, self._resilience_config)
-            self._breakers[research_id] = breaker
-        return breaker
 
     @staticmethod
     def _alternate(engine: str) -> str:
@@ -254,152 +234,6 @@ class RoutedAdapter:
         if inspect.isawaitable(callback_result):
             await callback_result
 
-    async def _probe(self, engine: str) -> bool:
-        probe = getattr(self._adapters[engine], "probe", None)
-        if probe is None:
-            return False
-        try:
-            result = probe()
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception:
-            return False
-        if isinstance(result, bool):
-            return result
-        for attribute in ("healthy", "ok"):
-            value = getattr(result, attribute, None)
-            if isinstance(value, bool):
-                return value
-        return False
-
-    @staticmethod
-    def _health_event(transition: CircuitTransition) -> NormalizedEvent:
-        is_down = transition.event.value == "ENGINE_DOWN"
-        return NormalizedEvent(
-            engine=transition.engine,
-            thread_id=transition.research_id,
-            turn_id=None,
-            item_kind=ItemKind.ERROR if is_down else ItemKind.THINKING,
-            text=(
-                f"{transition.event.value}: {transition.engine}"
-                + (f" -> {transition.target}" if transition.target else "")
-            ),
-            is_error=is_down,
-            raw={
-                "research_id": transition.research_id,
-                "engine": transition.engine,
-                "target": transition.target,
-                "event": transition.event.value,
-            },
-            route_state="FAILOVER" if is_down else "CONTINUE",
-            failover_target=transition.target if is_down else None,
-            scope="new_tasks" if is_down else None,
-            outcome=transition.event.value,
-            cause="transport",
-        )
-
-    @staticmethod
-    def _session_stall_event(
-        task: Any,
-        engine: str,
-        evidence: SessionStallEvidence,
-        timeout_seconds: int,
-    ) -> NormalizedEvent:
-        raw = {
-            "event": "SESSION_STALL",
-            "research_id": task.research_id,
-            "goal_id": task.goal_id,
-            "agent_id": task.agent_id,
-            "engine": engine,
-            "elapsed_seconds": evidence.elapsed_seconds,
-            "api_retry_count": evidence.api_retry_count,
-            "timeout_seconds": timeout_seconds,
-        }
-        return NormalizedEvent(
-            engine=engine,
-            thread_id=task.research_id,
-            turn_id=None,
-            item_kind=ItemKind.ERROR,
-            text=(
-                "SESSION_STALL: 连续 API retry "
-                f"{evidence.elapsed_seconds:.0f}s，主动终止会话"
-            ),
-            is_error=True,
-            raw=raw,
-            route_state="BACKOFF",
-            suspend_new_tasks=True,
-            outcome="SESSION_STALL",
-            cause="transport",
-        )
-
-    def _start_recovery_probe(
-        self,
-        *,
-        research_id: str,
-        engine: str,
-        on_event: Any,
-    ) -> None:
-        async def recover() -> None:
-            breaker = self._breaker(research_id)
-            while breaker.is_down(engine):
-                await self._probe_sleep(
-                    self._resilience_config.engine_probe_interval_seconds
-                )
-                healthy = await self._probe(engine)
-                transitions = breaker.record_probe(engine, healthy=healthy)
-                reset = next(
-                    (
-                        transition
-                        for transition in transitions
-                        if transition.event.value == "RESET"
-                    ),
-                    None,
-                )
-                if reset is not None:
-                    current = self._route_overrides.get(research_id)
-                    if current == reset.target:
-                        self._route_overrides.pop(research_id, None)
-                for transition in transitions:
-                    try:
-                        await self._emit(on_event, self._health_event(transition))
-                    except Exception:
-                        # 展示/日志投影失败不得反向破坏已完成的健康复位。
-                        continue
-
-        task = asyncio.create_task(recover())
-        self._recovery_tasks.add(task)
-        task.add_done_callback(self._recovery_tasks.discard)
-
-    async def _trip_if_needed(
-        self,
-        *,
-        task: Any,
-        engine: str,
-        on_event: Any,
-    ) -> None:
-        key = (task.research_id, engine)
-        lock = self._trip_locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            planning = task.agent_kind in _PLANNING_KINDS
-            breaker = self._breaker(task.research_id)
-            transition = breaker.record_transport_failure(
-                engine, planning=planning
-            )
-            if transition is None:
-                return
-            target = next(item for item in _ENGINES if item != engine)
-            if not await self._probe(target):
-                breaker.reject_failover(engine)
-                return
-            activated = breaker.activate_failover(engine, target)
-            self._route_overrides[task.research_id] = target
-            self._start_recovery_probe(
-                research_id=task.research_id,
-                engine=engine,
-                on_event=on_event,
-            )
-            await self._emit(on_event, self._health_event(activated))
-
     async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
         self._last_research_id = task.research_id
         planning = task.agent_kind in _PLANNING_KINDS
@@ -430,19 +264,6 @@ class RoutedAdapter:
             task.research_id, selected_engine
         )
         adapter = self._adapters[selected_engine]
-        run_token = object()
-        saw_transport = False
-        stall_evidence: SessionStallEvidence | None = None
-        stall_detector = (
-            None
-            if planning
-            else SessionStallDetector(
-                timeout_seconds=(
-                    self._resilience_config.session_stall_timeout_seconds
-                ),
-                clock=self._clock,
-            )
-        )
 
         if backoff_cause is not None:
             await self._emit(on_event, NormalizedEvent(
@@ -458,9 +279,6 @@ class RoutedAdapter:
             ))
 
         async def routed_event(event: Any) -> None:
-            nonlocal saw_transport, stall_evidence
-            if self._event_cause(event) == "transport":
-                saw_transport = True
             route_state = getattr(event, "route_state", None)
             state_value = getattr(route_state, "value", route_state)
             if state_value == "BACKOFF":
@@ -475,77 +293,18 @@ class RoutedAdapter:
                     raise ValueError(f"未知限流让路目标：{target}")
                 self._route_overrides[task.research_id] = target
             await self._emit(on_event, event)
-            if stall_detector is None:
-                return
-            evidence = stall_detector.observe(event)
-            if evidence is None:
-                return
-            stall_evidence = evidence
-            saw_transport = True
-            stall_event = self._session_stall_event(
-                task,
-                selected_engine,
-                evidence,
-                self._resilience_config.session_stall_timeout_seconds,
-            )
-            self._start_backoff(task.research_id, selected_engine, stall_event)
-            await self._emit(on_event, stall_event)
-            interrupt = getattr(adapter, "interrupt", None)
-            if interrupt is not None:
-                try:
-                    interrupt_parameters = inspect.signature(interrupt).parameters
-                    interrupt_kwargs = (
-                        {"run_token": run_token}
-                        if "run_token" in interrupt_parameters
-                        else {}
-                    )
-                    interrupted = interrupt(**interrupt_kwargs)
-                    if inspect.isawaitable(interrupted):
-                        await interrupted
-                except Exception:
-                    # 即使底层 interrupt 回报失败，本轮也必须强制失败并计数。
-                    pass
-            raise SessionStallError(stall_event.text)
 
         self._active = adapter
         prepare_source_events(task)
         try:
-            stall_error: SessionStallError | None = None
             try:
                 parameters = inspect.signature(adapter.run).parameters
                 kwargs = {"on_event": routed_event}
                 if "source_adapter" in parameters:
                     kwargs["source_adapter"] = self._source_adapter
-                if "run_token" in parameters:
-                    kwargs["run_token"] = run_token
-                try:
-                    result = await adapter.run(task, ctx, **kwargs)
-                except SessionStallError as exc:
-                    stall_error = exc
-                    result = None
+                result = await adapter.run(task, ctx, **kwargs)
             finally:
                 await replay_source_events(task, routed_event)
-            if stall_evidence is not None:
-                await self._trip_if_needed(
-                    task=task,
-                    engine=selected_engine,
-                    on_event=on_event,
-                )
-                raise stall_error or SessionStallError(
-                    "SESSION_STALL: 执行期会话已被主动终止"
-                )
-            breaker = self._breaker(task.research_id)
-            succeeded = bool(getattr(result, "succeeded", False))
-            if saw_transport and not succeeded:
-                await self._trip_if_needed(
-                    task=task,
-                    engine=selected_engine,
-                    on_event=on_event,
-                )
-            elif succeeded:
-                breaker.record_success(selected_engine)
-            else:
-                breaker.record_non_transport(selected_engine)
             return result
         finally:
             self._active = None
@@ -556,7 +315,7 @@ class RoutedAdapter:
         *,
         on_text: Any = None,
     ) -> PlanningSegmentResult:
-        """规划短流固定走 Claude；执行期断路覆盖对此入口无效。"""
+        """规划短流固定走 Claude。"""
 
         generator = getattr(self._adapters["claude"], "generate_plan_segment", None)
         if generator is None:

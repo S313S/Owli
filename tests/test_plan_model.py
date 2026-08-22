@@ -22,7 +22,7 @@ def test_三层字段名与字段表逐字一致() -> None:
     ]
     assert [field.name for field in fields(Agent)] == [
         "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
-        "model", "capability", "prompt", "output", "extra_quota_credits",
+        "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     ]
 

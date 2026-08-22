@@ -20,6 +20,7 @@ class OwliResult:
     assumptions: list[dict[str, str]]
     unmet: list[str]
     capability_denials: list[str]
+    reason: str | None = None
 
 
 @dataclass(frozen=True)

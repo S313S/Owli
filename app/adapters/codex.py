@@ -392,64 +392,6 @@ class CodexAdapter:
         self._interrupted_runs: set[object] = set()
         self._interrupted = False
 
-    async def probe(self) -> bool:
-        """以当前订阅认证发起 read-only 短请求，不用进程退出码判健康。"""
-
-        command = [
-            self._executable,
-            "exec",
-            "--json",
-            "-C",
-            str(PROJECT_ROOT),
-            "-s",
-            "read-only",
-            "--skip-git-repo-check",
-            "这是 Owli 引擎恢复探测。不要调用工具，只输出 OWLI_HEALTHY。",
-        ]
-        process: asyncio.subprocess.Process | None = None
-        try:
-            env = build_codex_env(
-                self._auth_mode,
-                codex_home=self._codex_home,
-                api_key=self._api_key,
-            )
-            Path(env["CODEX_HOME"]).mkdir(parents=True, exist_ok=True)
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=str(PROJECT_ROOT),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
-                limit=_STREAM_LINE_LIMIT,
-            )
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=self._timeout_seconds
-            )
-        except asyncio.TimeoutError:
-            if process is not None:
-                await self._terminate_process(process)
-            return False
-        except Exception:
-            if process is not None:
-                await self._terminate_process(process)
-            return False
-
-        healthy = False
-        failed = False
-        for raw_line in stdout.decode("utf-8", errors="replace").splitlines():
-            try:
-                raw: Any = json.loads(raw_line)
-            except json.JSONDecodeError:
-                raw = raw_line
-            for event in normalize_codex_event(raw):
-                failed = failed or event.is_error
-                healthy = healthy or (
-                    event.item_kind is ItemKind.OUTPUT
-                    and event.text.strip() == "OWLI_HEALTHY"
-                )
-        return healthy and not failed
-
     async def _emit_outcome(
         self,
         events: list[NormalizedEvent],
@@ -842,6 +784,10 @@ class CodexAdapter:
         except OwliResultError as exc:
             conclusion_error = str(exc)
 
+        if conclusion is not None:
+            from dataclasses import replace
+
+            ctx = replace(ctx, missing_reason=conclusion.reason)
         report = artifact_validation.validate(ctx, task.validators)
         if path_failure is not None:
             verdict = (

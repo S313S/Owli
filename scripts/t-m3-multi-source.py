@@ -8,7 +8,6 @@ import json
 import re
 import sys
 import tempfile
-import time
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,8 +118,36 @@ class DemoEngine:
         del ctx
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         if task.agent_kind == "planning":
+            stem = task.output_path.stem
+            skeleton = _skeleton()
+            if stem == "skeleton":
+                payload = {"goals": [
+                    {key: goal[key] for key in ("title", "objective", "depends_on")}
+                    for goal in skeleton["goals"]
+                ]}
+            elif "-ch-" in stem:
+                goal_number = int(stem.split("-ch-", 1)[0].removeprefix("goal-"))
+                output_path = json.loads(
+                    task.body.split("系统声明 output.path=", 1)[1].split("。", 1)[0]
+                )
+                payload = {
+                    "chapter_type": {1: "collection", 2: "audit", 3: "report"}[goal_number],
+                    "opening": {
+                        "inputs": [], "task": "执行本章", "acceptance": ["产物通过校验"],
+                    },
+                    "closing": {
+                        "output": {"path": output_path}, "entities": ["飞书"],
+                        "expected_count": 1, "notes": {},
+                    },
+                }
+            else:
+                goal_number = int(stem.removeprefix("goal-"))
+                goal = skeleton["goals"][goal_number - 1]
+                payload = {
+                    key: goal[key] for key in ("deliverable", "acceptance", "agents")
+                }
             task.output_path.write_text(
-                json.dumps(_skeleton(), ensure_ascii=False), encoding="utf-8"
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
             )
             return SimpleNamespace(succeeded=True)
         if task.agent_kind == "data_collection":
@@ -211,7 +238,6 @@ async def main() -> int:
             for source_id in SOURCE_ORDER
         }
         adapter = RoutedAdapter(
-            clock=time.monotonic,
             adapters={"claude": engine, "codex": engine},
             source_tools=source_tools,
         )

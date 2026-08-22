@@ -7,7 +7,6 @@ import copy
 import json
 import os
 import sys
-import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -80,8 +79,7 @@ def create_app(
     auto_confirm: bool | None = None,
     engine_probe: Callable[[], dict[str, dict[str, Any]]] | None = None,
     enable_test_routes: bool | None = None,
-    session_clock: Callable[[], float] = time.monotonic,
-    session_utc_clock: Callable[[], datetime] = _utc_now,
+    routing_utc_clock: Callable[[], datetime] = _utc_now,
     scale_config: ResearchScaleConfig | None = None,
 ) -> FastAPI:
     database = Path(database_path)
@@ -136,8 +134,7 @@ def create_app(
         adapter_factory=adapter_factory,
         runs_root=runs_root or ROOT / "runs",
         auto_confirm=auto_confirm,
-        session_clock=session_clock,
-        session_utc_clock=session_utc_clock,
+        routing_utc_clock=routing_utc_clock,
         scale_config=scale_config or load_research_scale_config(),
     )
 
@@ -324,6 +321,12 @@ def create_app(
         if state is None:
             raise HTTPException(status_code=404, detail="调研任务不存在")
         return {"ok": True, "data": state, "error": None}
+
+    @application.get("/api/researches/{research_id}/chapters")
+    async def get_research_chapters(research_id: str) -> dict:
+        if research_id not in researches and store.get_report(research_id) is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+        return envelope({"chapters": store.list_chapters(research_id)})
 
     def required_plan(research_id: str) -> Plan | JSONResponse:
         try:

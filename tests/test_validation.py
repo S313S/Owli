@@ -404,9 +404,9 @@ def test_store_提供封闭的校验读取接口(tmp_path):
         store.read_validation_path("evidence; DROP TABLE reports", "research-1")
 
 
-def test_注册表是含别名的_27_个封闭名字(validation_env):
+def test_注册表是含别名的_28_个封闭名字(validation_env):
     validation, _ = validation_env
-    assert len(validation.REGISTRY) == 27
+    assert len(validation.REGISTRY) == 28
     assert "section_exists" in validation.REGISTRY
     assert "xlsx_sheets_exact" in validation.REGISTRY
 
@@ -416,7 +416,7 @@ def test_owli_result_解析最后一个结论块并校验字段(validation_env):
 
     text = """过程输出
 ```json owli-result
-{"status":"partial","output_path":"runs/research-1/goals/goal-1/a.md","summary":"初稿","assumptions":[],"unmet":["缺一项"],"capability_denials":[]}
+{"status":"partial","output_path":"runs/research-1/goals/goal-1/a.md","summary":"初稿","assumptions":[],"unmet":["缺一项"],"capability_denials":[],"reason":"empty_result"}
 ```
 """
     result = parse_owli_result(text)
@@ -665,7 +665,7 @@ def test_claude_sdk_流式读取后以结论块加产物校验判成功(validati
     output_path.write_text("[]", encoding="utf-8")
     FakeClient.sdk_text = f"""完成
 ```json owli-result
-{{"status":"done","output_path":"{output_path}","summary":"完成","assumptions":[],"unmet":[],"capability_denials":[]}}
+    {{"status":"done","output_path":"{output_path}","summary":"完成","assumptions":[],"unmet":[],"capability_denials":[],"reason":null}}
 ```"""
     task = ClaudeTask(
         body="写入产物",

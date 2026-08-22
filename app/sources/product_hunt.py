@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from app.adapters.events import NormalizedEvent
 from app.adapters.logging import DEFAULT_LOG_ROOT
 from app.adapters.ratelimit import (
+    RouteCause,
     RouteDecision,
     RouteState,
     publish_route_decision,
@@ -167,7 +168,16 @@ def _publish_status(
     log_clock: Callable[[], datetime] | None,
 ) -> None:
     publish_route_decision(
-        RouteDecision(state, reason, {"source": "product_hunt", "kind": kind, **raw}),
+        RouteDecision(
+            state,
+            reason,
+            {"source": "product_hunt", "kind": kind, **raw},
+            cause=(
+                RouteCause.RATE_LIMIT
+                if kind in {"http_429", "budget_exhausted"}
+                else RouteCause.NORMAL
+            ),
+        ),
         engine="source.product_hunt",
         on_event=on_event,
         log_root=log_root,

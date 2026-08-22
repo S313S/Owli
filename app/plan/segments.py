@@ -13,11 +13,35 @@ from app.adapters.contracts import PlanningSegmentRequest
 from app.config import ResilienceConfig
 
 
-_SEGMENT_NAME = re.compile(r"(?:skeleton|goal-[1-9][0-9]*)")
+_SEGMENT_NAME = re.compile(
+    r"(?:skeleton|goal-[1-9][0-9]*(?:-ch-[1-9][0-9]*)?)"
+)
 
 
 class PlanSegmentError(RuntimeError):
     """规划段耗尽配置重试预算后仍未形成合法 JSON。"""
+
+
+def _json_payload(text: str) -> str:
+    """剥离 Markdown 代码围栏，只认结构不认措辞。
+
+    接受：```json / ``` 开头；闭合围栏可有可无（6b 实跑取证：
+    r-99fdccf53cae goal-3-ch-2 重写轮只给开头围栏不给闭合，旧实现要求
+    首尾成对导致三连 JSONDecodeError）。围栏外若有前后缀文字，退化为
+    取首个 ``{`` 到末个 ``}`` 之间的片段。
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        stripped = stripped[first_newline + 1:] if first_newline >= 0 else ""
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[: -len("```")]
+        stripped = stripped.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        start, end = stripped.find("{"), stripped.rfind("}")
+        if 0 <= start < end:
+            stripped = stripped[start:end + 1]
+    return stripped
 
 
 def merge_continuation(prefix: str, suffix: str) -> str:
@@ -48,6 +72,12 @@ class PlanSegmentWorkspace:
         self.config = config
         self._retry_sleep = retry_sleep
         self._attempts: dict[str, int] = {}
+
+    def reset_attempts(self, name: str) -> None:
+        """清零某段的尝试计数：章节预算按「lint 轮」独立计，不跨轮累加
+        （r-072721cddbb0 取证：第 1 轮语义退回用掉 2 次，第 2 轮整份重生成
+        时剩 1 次即「预算耗尽」）。"""
+        self._attempts.pop(name, None)
 
     @staticmethod
     def _checked_name(name: str) -> str:
@@ -117,7 +147,7 @@ class PlanSegmentWorkspace:
             partial.write_text(assembled, encoding="utf-8")
             if result.completed:
                 try:
-                    value = json.loads(assembled)
+                    value = json.loads(_json_payload(assembled))
                     if not isinstance(value, dict):
                         raise ValueError("规划段 JSON 顶层必须是 object")
                 except (json.JSONDecodeError, ValueError) as exc:

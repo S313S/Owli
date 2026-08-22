@@ -716,6 +716,50 @@ def _rule_21(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
+    """对比类章必须以结构化 inputs 覆盖全卷全部采集章。"""
+
+    collections: list[dict[str, str]] = []
+    comparisons: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        for agent in goal.get("agents", []):
+            chapter = agent.get("chapter")
+            if not isinstance(chapter, dict):
+                continue
+            chapter_type = chapter.get("chapter_type")
+            if chapter_type == "collection":
+                path = str(
+                    chapter.get("closing", {}).get("output", {}).get("path", "")
+                )
+                if path:
+                    collections.append({
+                        "location": f"{goal_id}/{chapter.get('chapter_id')}",
+                        "path": path,
+                    })
+            elif chapter_type in {"comparison", "cross_validation"}:
+                comparisons.append((goal_id, agent, chapter))
+    messages: list[str] = []
+    for goal_id, agent, chapter in comparisons:
+        inputs = chapter.get("opening", {}).get("inputs", [])
+        paths = {
+            str(item.get("path"))
+            for item in inputs
+            if isinstance(item, dict) and item.get("path")
+        }
+        missing = [item for item in collections if item["path"] not in paths]
+        if missing:
+            detail = "、".join(
+                f"{item['location']} output.path={item['path']}" for item in missing
+            )
+            messages.append(
+                f"[规则22] {goal_id}/{chapter.get('chapter_id')} "
+                f"({agent.get('agent_id')}) inputs 未覆盖全卷采集章：{detail}。"
+                "请把以上 output.path 逐条加入 chapter.opening.inputs"
+            )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -803,4 +847,5 @@ def lint(
     errors.extend(_rule_19(goals))
     errors.extend(_rule_20(goals))
     errors.extend(_rule_21(goals))
+    errors.extend(_rule_22(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

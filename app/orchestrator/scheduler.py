@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -31,6 +32,10 @@ class TaskRunResult:
     engine: str | None = None
     route_decisions: tuple[Any, ...] = field(default_factory=tuple)
     failure_feedback: str | None = None
+    chapter_status: str | None = None
+    reason: str | None = None
+    actual_output_path: str | None = None
+    actual_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +96,13 @@ def _failure_feedback(result: Any) -> str | None:
     status = getattr(conclusion, "status", None)
     if conclusion is not None and status and status != "done":
         parts.append(f"上一轮结构化结论自报 status={status}")
+    for field_name in ("unmet", "capability_denials"):
+        values = getattr(conclusion, field_name, None) if conclusion is not None else None
+        if values:
+            parts.append(
+                f"上一轮 {field_name}："
+                + json.dumps(list(values), ensure_ascii=False)
+            )
     validation = _field(result, "validation", "report")
     for item in getattr(validation, "results", ()) or ():
         verdict = str(getattr(item, "verdict", "")).lower()
@@ -112,12 +124,14 @@ class Scheduler:
         emit: Emit,
         clock: Clock,
         timer: Timer,
+        chapter_ledger: Any | None = None,
     ) -> None:
         self.plan = plan
         self._run_task = run_task
         self._emit_callback = emit
         self._clock = clock
         self._timer = timer
+        self._chapter_ledger = chapter_ledger
         self._goals = {goal.goal_id: goal for goal in plan.goals}
         self._agents = {
             agent.agent_id: (goal, agent)
@@ -140,6 +154,66 @@ class Scheduler:
         self._cards: dict[str, dict[str, Any]] = {}
         self._card_sequence = 0
         self._agent_feedback: dict[str, str | None] = {}
+        self._supplemented: set[str] = set()
+        if self._chapter_ledger is not None:
+            self._chapter_ledger.ensure_chapters(
+                plan.research_id,
+                [
+                    {"goal_id": goal.goal_id, "chapter_id": self._chapter_id(agent)}
+                    for goal in plan.goals
+                    for agent in goal.agents
+                ],
+                updated_at=self._clock().isoformat(),
+            )
+            rows = self._chapter_ledger.list_chapters(plan.research_id)
+            by_key = {
+                (row["goal_id"], row["chapter_id"]): row for row in rows
+            }
+            for goal in plan.goals:
+                for agent in goal.agents:
+                    row = by_key[(goal.goal_id, self._chapter_id(agent))]
+                    if row["status"] in {"done", "missing"}:
+                        self.agent_statuses[agent.agent_id] = row["status"]
+                    elif row["status"] == "deferred":
+                        self._supplemented.add(agent.agent_id)
+
+    @staticmethod
+    def _chapter_id(agent: Agent) -> str:
+        chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+        return str(chapter.get("chapter_id") or agent.agent_id)
+
+    def _finish_ledger(
+        self,
+        goal: Goal,
+        agent: Agent,
+        *,
+        status: str,
+        reason: str | None,
+        output_path: str | None,
+        actual_count: int | None,
+    ) -> None:
+        if self._chapter_ledger is None:
+            return
+        self._chapter_ledger.finish_chapter(
+            self.plan.research_id,
+            goal.goal_id,
+            self._chapter_id(agent),
+            status=status,
+            reason=reason,
+            actual_output_path=output_path,
+            actual_count=actual_count,
+            updated_at=self._clock().isoformat(),
+        )
+
+    async def _emit_chapter_update(self, goal: Goal, agent: Agent) -> None:
+        if self._chapter_ledger is None:
+            return
+        row = next(
+            item for item in self._chapter_ledger.list_chapters(self.plan.research_id)
+            if item["goal_id"] == goal.goal_id
+            and item["chapter_id"] == self._chapter_id(agent)
+        )
+        await self._emit({"type": "chapter_update", "data": row})
 
     def _validate_graphs(self) -> None:
         goal_graph = {
@@ -266,6 +340,17 @@ class Scheduler:
                     await self._launch_ready_agents()
                 running = set(self._tasks)
             if not running:
+                if self._chapter_ledger is not None:
+                    deferred = [
+                        agent_id
+                        for agent_id, status in self.agent_statuses.items()
+                        if status == "deferred" and agent_id not in self._supplemented
+                    ]
+                    if deferred:
+                        for agent_id in deferred:
+                            self._supplemented.add(agent_id)
+                            await self._set_agent_status(agent_id, "queued")
+                        continue
                 self._set_completed_if_terminal()
                 return
             done, _ = await asyncio.wait(
@@ -310,7 +395,10 @@ class Scheduler:
             for _, active_agent in self._tasks.values()
         ):
             return False
-        if not all(self.agent_statuses[item] == "done" for item in agent.depends_on):
+        if not all(
+            self.agent_statuses[item] in {"done", "missing"}
+            for item in agent.depends_on
+        ):
             return False
         return True
 
@@ -355,13 +443,25 @@ class Scheduler:
 
     async def _settle_goals(self) -> None:
         for goal in self.plan.goals:
-            if self.goal_statuses[goal.goal_id] != "running":
+            goal_status = self.goal_statuses[goal.goal_id]
+            if goal_status not in {"pending", "running"}:
                 continue
             statuses = [self.agent_statuses[agent.agent_id] for agent in goal.agents]
-            if any(status == "failed" for status in statuses):
+            if self._chapter_ledger is None and any(
+                status == "failed" for status in statuses
+            ):
                 await self._fail_goal(goal.goal_id, "agent_exhausted")
                 continue
-            if statuses and all(status == "done" for status in statuses):
+            terminal = (
+                {"done"}
+                if self._chapter_ledger is None
+                else {"done", "missing"}
+            )
+            if statuses and all(status in terminal for status in statuses):
+                if goal_status == "pending" and not self._goal_ready(goal):
+                    continue
+                if goal_status == "pending":
+                    await self._set_goal_status(goal.goal_id, "running")
                 await self._set_goal_status(goal.goal_id, "awaiting_intervention")
                 await self._create_intervention_card(goal)
 
@@ -393,6 +493,10 @@ class Scheduler:
             engine=_field(result, "engine"),
             route_decisions=tuple(decisions),
             failure_feedback=None if succeeded else _failure_feedback(result),
+            chapter_status=_field(result, "chapter_status"),
+            reason=_field(result, "reason"),
+            actual_output_path=_field(result, "actual_output_path"),
+            actual_count=_field(result, "actual_count"),
         )
 
     async def _execute_agent(self, goal: Goal, agent: Agent) -> None:
@@ -408,6 +512,16 @@ class Scheduler:
                 await self._set_agent_status(agent.agent_id, "retrying")
                 return
             self._attempts[agent.agent_id] = attempt
+            if self._chapter_ledger is not None:
+                started = self._chapter_ledger.start_chapter(
+                    self.plan.research_id,
+                    goal.goal_id,
+                    self._chapter_id(agent),
+                    engine=agent.engine,
+                    updated_at=self._clock().isoformat(),
+                )
+                if not started:
+                    return
             await self._set_agent_status(
                 agent.agent_id, "running" if attempt == 1 else "retrying"
             )
@@ -439,15 +553,53 @@ class Scheduler:
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
                 return
             if result.succeeded:
+                self._finish_ledger(
+                    goal,
+                    agent,
+                    status="done",
+                    reason=None,
+                    output_path=result.actual_output_path or str(agent.output["path"]),
+                    actual_count=result.actual_count,
+                )
+                await self._emit_chapter_update(goal, agent)
                 await self._set_agent_status(agent.agent_id, "done")
                 return
+            if self._chapter_ledger is not None and result.chapter_status in {
+                "missing", "deferred"
+            }:
+                status = result.chapter_status
+                if status == "deferred" and agent.agent_id in self._supplemented:
+                    status = "missing"
+                self._finish_ledger(
+                    goal,
+                    agent,
+                    status=status,
+                    reason=result.reason,
+                    output_path=result.actual_output_path,
+                    actual_count=result.actual_count,
+                )
+                await self._emit_chapter_update(goal, agent)
+                await self._set_agent_status(agent.agent_id, status)
+                return
             self._agent_feedback[agent.agent_id] = result.failure_feedback
-            if attempt == ask_at:
+            if self._chapter_ledger is None and attempt == ask_at:
                 await self._create_engine_switch_card(goal, agent, per_round)
             if attempt < total:
                 continue
-            await self._set_agent_status(agent.agent_id, "failed")
-            await self._fail_goal(goal.goal_id, "retry_exhausted")
+            if self._chapter_ledger is not None:
+                self._finish_ledger(
+                    goal,
+                    agent,
+                    status="missing",
+                    reason="retry_exhausted",
+                    output_path=result.actual_output_path,
+                    actual_count=result.actual_count,
+                )
+                await self._emit_chapter_update(goal, agent)
+                await self._set_agent_status(agent.agent_id, "missing")
+            else:
+                await self._set_agent_status(agent.agent_id, "failed")
+                await self._fail_goal(goal.goal_id, "retry_exhausted")
             return
 
     async def _consume_signal(self, signal: Any) -> None:

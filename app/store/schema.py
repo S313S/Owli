@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-_LATEST_SCHEMA_VERSION = 2
+_LATEST_SCHEMA_VERSION = 3
 
 
 def initialize_database_if_empty(

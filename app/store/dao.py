@@ -73,6 +73,10 @@ _EVIDENCE_DEFAULTS: dict[str, Any] = {
 }
 _EVIDENCE_REQUIRED = {"id", "report_id", "platform", "permalink", "fetched_at"}
 _EVIDENCE_FIELDS = _EVIDENCE_REQUIRED | set(_EVIDENCE_DEFAULTS)
+_CHAPTER_TERMINAL = {"done", "missing", "deferred"}
+_CHAPTER_REASONS = {
+    "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
+}
 
 
 class PlanSnapshotConflict(RuntimeError):
@@ -381,6 +385,123 @@ class Store:
         self._register_extra(
             connection, "evidence", payload["report_id"], normalized_extra, existing_keys
         )
+
+    def ensure_chapters(
+        self,
+        research_id: str,
+        chapters: Iterable[Mapping[str, Any]],
+        *,
+        updated_at: str,
+    ) -> None:
+        """登记计划章；保留终态，并把上次中断的 running 恢复为 pending。"""
+
+        rows = []
+        for item in chapters:
+            goal_id = str(item.get("goal_id", "")).strip()
+            chapter_id = str(item.get("chapter_id", "")).strip()
+            if not goal_id or not chapter_id:
+                raise ValueError("章节登记必须含 goal_id/chapter_id")
+            rows.append((research_id, goal_id, chapter_id, updated_at))
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO chapter_progress (
+                  research_id, goal_id, chapter_id, updated_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            connection.execute(
+                """
+                UPDATE chapter_progress
+                SET status = 'pending', updated_at = ?
+                WHERE research_id = ? AND status = 'running'
+                """,
+                (updated_at, research_id),
+            )
+
+    def start_chapter(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_id: str,
+        *,
+        engine: str,
+        updated_at: str,
+    ) -> bool:
+        if engine not in {"claude", "codex"}:
+            raise ValueError("chapter engine 只能是 claude 或 codex")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chapter_progress
+                SET status = 'running', attempts = attempts + 1,
+                    engine = ?, reason = NULL, updated_at = ?
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                  AND status IN ('pending','deferred','running')
+                """,
+                (engine, updated_at, research_id, goal_id, chapter_id),
+            )
+        return cursor.rowcount == 1
+
+    def finish_chapter(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_id: str,
+        *,
+        status: str,
+        reason: str | None,
+        actual_output_path: str | None,
+        actual_count: int | None,
+        updated_at: str,
+    ) -> None:
+        if status not in _CHAPTER_TERMINAL:
+            raise ValueError("章终态只能是 done、missing 或 deferred")
+        if status == "done" and reason is not None:
+            raise ValueError("done 章不得带 reason")
+        if status == "missing" and reason not in _CHAPTER_REASONS:
+            raise ValueError("missing 章必须带闭集 reason")
+        if status == "deferred" and reason != "quota_exhausted":
+            raise ValueError("deferred 章 reason 必须是 quota_exhausted")
+        if actual_count is not None and actual_count < 0:
+            raise ValueError("actual_count 不得为负数")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chapter_progress
+                SET status = ?, reason = ?, actual_output_path = ?,
+                    actual_count = ?, updated_at = ?
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                """,
+                (
+                    status, reason, actual_output_path, actual_count, updated_at,
+                    research_id, goal_id, chapter_id,
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(f"章节账本不存在：{research_id}/{goal_id}/{chapter_id}")
+
+    def list_chapters(self, research_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT research_id, goal_id, chapter_id, status, attempts,
+                       engine, reason, actual_output_path, actual_count, updated_at
+                FROM chapter_progress
+                WHERE research_id = ?
+                ORDER BY goal_id, chapter_id
+                """,
+                (research_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def runnable_chapter_keys(self, research_id: str) -> set[tuple[str, str]]:
+        return {
+            (row["goal_id"], row["chapter_id"])
+            for row in self.list_chapters(research_id)
+            if row["status"] in {"pending", "deferred"}
+        }
 
     def get_report(self, report_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

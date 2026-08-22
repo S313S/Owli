@@ -30,6 +30,22 @@ def make_agent(agent_id: str, goal_id: str) -> dict:
             "path": f"goals/{goal_id}/{agent_id}.md",
             "validators": ["file_exists"],
         },
+        "chapter": {
+            "chapter_id": "ch-1",
+            "chapter_type": "audit",
+            "plan_path": f"goals/{goal_id}/ch-1.md",
+            "opening": {
+                "inputs": [],
+                "task": "按固定查询式处理近 30 天资料并输出可复核结果。",
+                "acceptance": ["文件存在且通过 validators"],
+            },
+            "closing": {
+                "output": {"path": f"goals/{goal_id}/{agent_id}.md"},
+                "entities": ["飞书"],
+                "expected_count": 1,
+                "notes": {},
+            },
+        },
         "extra_quota_credits": None,
         "origin": {"_node": "generated"},
         "status": "queued",

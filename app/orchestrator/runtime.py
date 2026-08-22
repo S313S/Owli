@@ -48,8 +48,7 @@ class RuntimeCoordinator:
         adapter_factory: AdapterFactory | None = None,
         runs_root: str | Path = validation.RUNS_ROOT,
         auto_confirm: bool | None = None,
-        session_clock: Callable[[], float],
-        session_utc_clock: Callable[[], datetime],
+        routing_utc_clock: Callable[[], datetime],
         scale_config: ResearchScaleConfig | None = None,
     ) -> None:
         self.store = store
@@ -58,8 +57,7 @@ class RuntimeCoordinator:
         self.cards = cards
         self.adapter_factory = adapter_factory or (
             lambda: RoutedAdapter(
-                clock=session_clock,
-                utc_clock=session_utc_clock,
+                utc_clock=routing_utc_clock,
             )
         )
         self.runs_root = Path(runs_root)
@@ -376,8 +374,37 @@ class RuntimeCoordinator:
             f"产物落盘路径（写文件与 owli-result.output_path 都逐字用它）：{output_path}\n\n"
             f"{agent.prompt['body']}"
         )
+        chapter = agent.chapter if isinstance(agent.chapter, dict) else None
+        if chapter is not None:
+            body = (
+                f"{body}\n\n本章结构化开头："
+                f"{json.dumps(chapter['opening'], ensure_ascii=False)}\n"
+                f"本章计划结尾（不得冒充实际结果）："
+                f"{json.dumps(chapter['closing'], ensure_ascii=False)}"
+            )
+        if kind in {"cross_validation", "comparison", "report", "report_writing"}:
+            rows = self.store.list_chapters(plan.research_id)
+            ledger_inputs = [
+                {
+                    "goal_id": row["goal_id"],
+                    "chapter_id": row["chapter_id"],
+                    "status": row["status"],
+                    "path": row["actual_output_path"] if row["status"] == "done" else None,
+                    "actual_count": row["actual_count"] if row["status"] == "done" else None,
+                    "reason": row["reason"] if row["status"] in {"missing", "deferred"} else None,
+                }
+                for row in rows
+            ]
+            body = (
+                f"{body}\n\n执行账本输入（只按 status/path/reason 读取，不猜测措辞）：\n"
+                f"{json.dumps(ledger_inputs, ensure_ascii=False, indent=2)}"
+            )
         if kind in {"report", "report_writing"}:
-            body = f"{body}\n\n{self._decision_context(plan)}"
+            body = (
+                f"{body}\n\n{self._decision_context(plan)}\n"
+                "报告必须包含标题为‘缺失清单’的小节；逐条写出账本中的 "
+                "missing 章 chapter_id 及其 reason，若没有则明确写‘无’。"
+            )
         feedback = getattr(context, "failure_feedback", None)
         if feedback:
             body = (
@@ -416,8 +443,19 @@ class RuntimeCoordinator:
         kind = self._agent_kind(agent)
         task = self._task(plan, agent, context)
         adapter = self._adapters[plan.research_id]
+        observed_causes: set[str] = set()
 
         async def on_event(event: Any) -> None:
+            if isinstance(event, dict):
+                cause = event.get("cause")
+                raw = event.get("raw")
+            else:
+                cause = getattr(event, "cause", None)
+                raw = getattr(event, "raw", None)
+            if cause is not None:
+                observed_causes.add(str(getattr(cause, "value", cause)))
+            if isinstance(raw, dict) and raw.get("http_status", raw.get("status_code")) == 429:
+                observed_causes.add("rate_limit")
             if isinstance(event, dict):
                 payload = dict(event)
                 if payload.get("type") == "card_update":
@@ -486,6 +524,38 @@ class RuntimeCoordinator:
                             pass
                     # 只修复产物腿；缺 owli-result 结构化结论时仍保留原失败。
                     return result
+        conclusion = getattr(result, "conclusion", None)
+        reason = getattr(conclusion, "reason", None) if conclusion is not None else None
+        causes = {
+            getattr(event, "cause", None)
+            for event in (getattr(result, "events", None) or [])
+        }
+        causes.update(observed_causes)
+        actual_path = str(task.output_path) if task.output_path.is_file() else None
+        actual_count = None
+        if task.output_path.is_file() and task.output_format == "json":
+            try:
+                artifact = json.loads(task.output_path.read_text(encoding="utf-8"))
+                if isinstance(artifact, list):
+                    actual_count = len(artifact)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                pass
+        if reason == "quota_exhausted" or "rate_limit" in causes:
+            return TaskRunResult(
+                False, engine=context.engine, chapter_status="deferred",
+                reason="quota_exhausted", actual_output_path=actual_path,
+                actual_count=actual_count,
+            )
+        if reason in {"empty_result", "tool_unavailable"}:
+            return TaskRunResult(
+                False, engine=context.engine, chapter_status="missing", reason=reason,
+                actual_output_path=actual_path, actual_count=actual_count,
+            )
+        if bool(getattr(result, "succeeded", False)):
+            return TaskRunResult(
+                True, engine=context.engine, actual_output_path=actual_path,
+                actual_count=actual_count,
+            )
         return result
 
     def _expanded_actions(self, card: dict[str, Any]) -> list[dict[str, Any]]:
@@ -593,6 +663,7 @@ class RuntimeCoordinator:
             lambda event: self._emit_scheduler_event(plan.research_id, event),
             self.now,
             self.timer,
+            chapter_ledger=self.store,
         )
         self._schedulers[plan.research_id] = scheduler
         await scheduler.start()
@@ -699,6 +770,18 @@ class RuntimeCoordinator:
         for item in plan.decision_balance:
             answer = json.dumps(item["answer"], ensure_ascii=False)
             block.append(f"[^{item['q_id']}]: 问题：{item['question']}；答案：{answer}")
+        missing = [
+            row for row in self.store.list_chapters(plan.research_id)
+            if row["status"] == "missing"
+        ]
+        block.extend(["", "## 缺失清单"])
+        if missing:
+            block.extend(
+                f"- 此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
+                for row in missing
+            )
+        else:
+            block.append("- 无。")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{text}\n" + "\n".join(block) + "\n", encoding="utf-8")
 
@@ -716,9 +799,10 @@ class RuntimeCoordinator:
         self._append_decision_notes(report_path, plan, scheduler)
         report_validators = [
             "file_exists",
-            "sections_exist:结论,信息源",
+            "sections_exist:结论,信息源,缺失清单",
             "citation_marks_resolvable",
             "no_orphan_citation",
+            "chapter_missing_items_reported",
         ]
         relative = report_path.relative_to(self.runs_root / research_id)
         goal_id = relative.parts[1] if len(relative.parts) > 1 and relative.parts[0] == "goals" else plan.goals[-1].goal_id
@@ -751,10 +835,7 @@ class RuntimeCoordinator:
                 },
             },
         )
-        failed = validation_report.verdict is not validation.Verdict.PASS or any(
-            status in {"failed", "skipped"}
-            for status in scheduler.goal_statuses.values()
-        )
+        failed = validation_report.verdict is not validation.Verdict.PASS
         report_status = "failed" if failed else "completed"
         try:
             stored_path = str(report_path.relative_to(Path(__file__).resolve().parents[2]))

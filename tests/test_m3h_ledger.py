@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from tests.plan_factory import make_plan_dict
+
+
+SCHEMA = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sql"
+
+
+def _store(tmp_path):
+    from app.store.dao import Store
+
+    database = tmp_path / "owli.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(SCHEMA.read_text(encoding="utf-8"))
+    store = Store(database)
+    store.create_report(
+        id="r-ledger", title="章节账本", research_question="测试",
+        created_at="2026-08-22T00:00:00Z",
+    )
+    return store
+
+
+def test_章节账本表与固定接口记录实际结尾(tmp_path):
+    store = _store(tmp_path)
+    store.ensure_chapters("r-ledger", [{
+        "goal_id": "goal-1", "chapter_id": "ch-1",
+    }], updated_at="2026-08-22T00:00:00Z")
+
+    assert store.start_chapter(
+        "r-ledger", "goal-1", "ch-1", engine="codex",
+        updated_at="2026-08-22T00:01:00Z",
+    ) is True
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-1", status="done", reason=None,
+        actual_output_path="goals/goal-1/data.json", actual_count=3,
+        updated_at="2026-08-22T00:02:00Z",
+    )
+
+    row = store.list_chapters("r-ledger")[0]
+    assert row == {
+        "research_id": "r-ledger", "goal_id": "goal-1", "chapter_id": "ch-1",
+        "status": "done", "attempts": 1, "engine": "codex", "reason": None,
+        "actual_output_path": "goals/goal-1/data.json", "actual_count": 3,
+        "updated_at": "2026-08-22T00:02:00Z",
+    }
+    assert store.start_chapter(
+        "r-ledger", "goal-1", "ch-1", engine="claude",
+        updated_at="2026-08-22T00:03:00Z",
+    ) is False
+
+
+@pytest.mark.parametrize("reason", [
+    "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
+])
+def test_missing_reason_闭集(reason, tmp_path):
+    store = _store(tmp_path)
+    store.ensure_chapters("r-ledger", [{"goal_id": "goal-1", "chapter_id": "ch-1"}],
+                          updated_at="2026-08-22T00:00:00Z")
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-1", status="missing", reason=reason,
+        actual_output_path=None, actual_count=0,
+        updated_at="2026-08-22T00:01:00Z",
+    )
+    assert store.list_chapters("r-ledger")[0]["reason"] == reason
+
+
+def test_账本只返回_pending_deferred_供重跑(tmp_path):
+    store = _store(tmp_path)
+    chapters = [
+        {"goal_id": "goal-1", "chapter_id": "ch-1"},
+        {"goal_id": "goal-1", "chapter_id": "ch-2"},
+        {"goal_id": "goal-1", "chapter_id": "ch-3"},
+        {"goal_id": "goal-1", "chapter_id": "ch-4"},
+    ]
+    store.ensure_chapters("r-ledger", chapters, updated_at="2026-08-22T00:00:00Z")
+    for chapter_id, status, reason in (
+        ("ch-1", "done", None),
+        ("ch-2", "missing", "empty_result"),
+        ("ch-3", "deferred", "quota_exhausted"),
+    ):
+        store.finish_chapter(
+            "r-ledger", "goal-1", chapter_id, status=status, reason=reason,
+            actual_output_path=None, actual_count=0,
+            updated_at="2026-08-22T00:01:00Z",
+        )
+
+    assert store.runnable_chapter_keys("r-ledger") == {
+        ("goal-1", "ch-3"), ("goal-1", "ch-4"),
+    }
+
+
+def test_scheduler_跳过_done_章并把重试耗尽写成_missing后仍_completed(tmp_path):
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+
+    store = _store(tmp_path)
+    source = make_plan_dict()
+    source["research_id"] = "r-ledger"
+    source["goals"] = source["goals"][:1]
+    source["baseline"] = None
+    first = source["goals"][0]["agents"][0]
+    first["chapter"]["chapter_id"] = "ch-1"
+    second = {**first, "agent_id": "agent-2", "depends_on": []}
+    second["chapter"] = {
+        **first["chapter"], "chapter_id": "ch-2",
+        "plan_path": "goals/goal-1/ch-2.md",
+        "closing": {**first["chapter"]["closing"],
+                    "output": {"path": "goals/goal-1/agent-2.md"}},
+    }
+    second["output"] = {**first["output"], "path": "goals/goal-1/agent-2.md"}
+    source["goals"][0]["agents"] = [first, second]
+    source["goals"][0]["retry_policy"].update(
+        max_attempts_per_round=1, max_rounds=1, ask_engine_switch_at=1,
+    )
+    plan = Plan.from_dict(source)
+    store.ensure_chapters("r-ledger", [
+        {"goal_id": "goal-1", "chapter_id": "ch-1"},
+        {"goal_id": "goal-1", "chapter_id": "ch-2"},
+    ], updated_at="2026-08-22T00:00:00Z")
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-1", status="done", reason=None,
+        actual_output_path=first["output"]["path"], actual_count=1,
+        updated_at="2026-08-22T00:00:30Z",
+    )
+    calls = []
+    events = []
+
+    async def run_task(agent, context):
+        calls.append(agent.agent_id)
+        return TaskRunResult(False, context.engine)
+
+    async def scenario():
+        scheduler = Scheduler(
+            plan, run_task, events.append,
+            lambda: datetime(2026, 8, 22, tzinfo=timezone.utc),
+            lambda delay, callback: None,
+            chapter_ledger=store,
+        )
+        await scheduler.start()
+        card = next(
+            item["data"]["card"] for item in events
+            if item["type"] == "card_update"
+            and item["data"]["card"]["card_type"] == "INTERVENE"
+        )
+        await scheduler.answer_card(card["card_id"], {"choice": "continue"})
+        return scheduler
+
+    scheduler = asyncio.run(scenario())
+    assert calls == ["agent-2"]
+    assert scheduler.status == "completed"
+    rows = {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+    assert rows["ch-1"]["attempts"] == 0
+    assert rows["ch-2"]["status"] == "missing"
+    assert rows["ch-2"]["reason"] == "retry_exhausted"

@@ -34,6 +34,7 @@ class SchemaSqlTest(unittest.TestCase):
             {
                 "reports", "evidence", "feedback", "report_tags", "ext_key_registry",
                 "source_usage", "source_usage_billed_resource",
+                "chapter_progress",
             },
         )
         self.assertIn("recall_fts", tables)

@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 2;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 3;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -175,6 +175,27 @@ CREATE TABLE source_usage_billed_resource (
   resource_id TEXT NOT NULL,
   PRIMARY KEY (source, utc_date, resource_id)
 ) STRICT;
+
+-- 章节执行账本：计划结尾留在 plan_snapshot，实际结尾只写本表
+CREATE TABLE chapter_progress (
+  research_id       TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  goal_id           TEXT NOT NULL,
+  chapter_id        TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','running','done','missing','deferred')),
+  attempts          INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  engine            TEXT CHECK (engine IN ('claude','codex') OR engine IS NULL),
+  reason            TEXT CHECK (reason IN (
+                      'empty_result','tool_unavailable','quota_exhausted','retry_exhausted'
+                    ) OR reason IS NULL),
+  actual_output_path TEXT,
+  actual_count       INTEGER CHECK (actual_count IS NULL OR actual_count >= 0),
+  updated_at         TEXT NOT NULL,
+  PRIMARY KEY (research_id, goal_id, chapter_id)
+) STRICT;
+
+CREATE INDEX idx_chapter_progress_status
+ON chapter_progress(research_id, status);
 
 -- ═══════════════════════════════════════════
 -- 扩展键登记表：extra JSON 里出现过的键，驱动 §3.3 升级机制

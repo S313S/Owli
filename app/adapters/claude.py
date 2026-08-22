@@ -318,48 +318,6 @@ class ClaudeAdapter:
             raise RuntimeError("当前没有运行中的 Claude 任务")
         await client.interrupt()
 
-    async def probe(self) -> bool:
-        """发起不带工具的真实短请求；只认模型返回的结构化健康标记。"""
-
-        try:
-            sdk = self._sdk or _load_sdk()
-            options = sdk.ClaudeAgentOptions(
-                cwd=str(PROJECT_ROOT),
-                setting_sources=[],
-                tools=[],
-                allowed_tools=[],
-                disallowed_tools=sorted(CLAUDE_TOOL_UNIVERSE),
-                permission_mode="dontAsk",
-            )
-            client = sdk.ClaudeSDKClient(options)
-        except Exception:
-            return False
-        healthy = False
-        failed = False
-        try:
-            await client.connect(_prompt_stream(
-                "这是 Owli 引擎恢复探测。不要调用工具，只输出 OWLI_HEALTHY。"
-            ))
-            async for message in client.receive_response():
-                if (
-                    bool(getattr(message, "is_error", False))
-                    or getattr(message, "api_error_status", None) is not None
-                ):
-                    failed = True
-                if any(
-                    text.strip() == "OWLI_HEALTHY"
-                    for text in _assistant_text(message, sdk)
-                ):
-                    healthy = True
-        except Exception:
-            return False
-        finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-        return healthy and not failed
-
     async def generate_plan_segment(
         self,
         request: PlanningSegmentRequest,
@@ -597,6 +555,10 @@ class ClaudeAdapter:
         except OwliResultError as exc:
             conclusion_error = str(exc)
 
+        if conclusion is not None:
+            from dataclasses import replace
+
+            ctx = replace(ctx, missing_reason=conclusion.reason)
         report = artifact_validation.validate(ctx, task.validators)
         if path_failure is not None:
             verdict = (
@@ -634,7 +596,7 @@ def parse_owli_result(text: str) -> OwliResult:
         raise OwliResultError("owli-result 顶层必须是对象")
     required = {
         "status", "output_path", "summary", "assumptions", "unmet",
-        "capability_denials",
+        "capability_denials", "reason",
     }
     missing = sorted(required - value.keys())
     if missing:
@@ -655,9 +617,20 @@ def parse_owli_result(text: str) -> OwliResult:
         raise OwliResultError("owli-result.assumptions 必须含 item 与 reason")
     unmet = _string_list(value["unmet"], "unmet")
     denials = _string_list(value["capability_denials"], "capability_denials")
+    reason = value["reason"]
+    allowed_reasons = {
+        None, "empty_result", "tool_unavailable", "quota_exhausted",
+        "retry_exhausted",
+    }
+    if reason not in allowed_reasons:
+        raise OwliResultError("owli-result.reason 不在缺失原因闭集")
+    if value["status"] == "done" and reason is not None:
+        raise OwliResultError("done 状态的 owli-result.reason 必须为 null")
+    if reason is not None and value["status"] not in {"partial", "blocked"}:
+        raise OwliResultError("非空 owli-result.reason 只允许 partial 或 blocked")
     if value["status"] in {"partial", "blocked"} and not unmet:
         raise OwliResultError("partial 或 blocked 状态必须填写 unmet")
     return OwliResult(
         value["status"], value["output_path"], value["summary"], assumptions,
-        unmet, denials,
+        unmet, denials, reason,
     )

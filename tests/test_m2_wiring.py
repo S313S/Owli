@@ -81,6 +81,7 @@ class RecordingEngine:
         self.backoff_first_collection = False
         self._backoff_sent = False
         self.fail_kind: str | None = None
+        self.chapter_outputs: list[str] = []
 
     async def run(self, task, ctx, on_event=None):
         del ctx
@@ -98,7 +99,7 @@ class RecordingEngine:
                         for goal in self.skeleton["goals"]
                     ]
                 }
-            else:
+            elif "-ch-" not in task.output_path.stem:
                 number = int(task.output_path.stem.removeprefix("goal-"))
                 goal = self.skeleton["goals"][number - 1]
                 payload = {
@@ -106,6 +107,33 @@ class RecordingEngine:
                     "acceptance": goal["acceptance"],
                     "agents": goal["agents"],
                 }
+            else:
+                goal_text, chapter_text = task.output_path.stem.split("-ch-", 1)
+                goal_number = int(goal_text.removeprefix("goal-"))
+                raw_agent = self.skeleton["goals"][goal_number - 1]["agents"][
+                    int(chapter_text) - 1
+                ]
+                name = str(raw_agent["name"])
+                chapter_type = (
+                    "collection" if "数据抓取" in name
+                    else "report" if "报告" in name
+                    else "audit"
+                )
+                output_tail = task.body.partition("系统声明 output.path=")[2]
+                output_path = json.JSONDecoder().raw_decode(output_tail)[0]
+                payload = {
+                    "chapter_type": chapter_type,
+                    "opening": {
+                        "inputs": [], "task": raw_agent["task"],
+                        "acceptance": ["产物按声明路径落盘"],
+                    },
+                    "closing": {
+                        "output": {"path": output_path}, "entities": ["飞书"],
+                        "expected_count": 1, "notes": {},
+                    },
+                }
+                if chapter_type == "collection":
+                    self.chapter_outputs.append(output_path)
             task.output_path.write_text(
                 json.dumps(payload, ensure_ascii=False), encoding="utf-8"
             )
@@ -173,7 +201,6 @@ async def api_client(
 
     engine = engine or RecordingEngine()
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         utc_clock=lambda: datetime.now(timezone.utc),
         adapters={"claude": engine, "codex": engine},
     )
@@ -235,7 +262,7 @@ async def test_POST_先生成计划停_awaiting_review_批准前不执行_agent(
     assert plan.json()["data"]["status"] == "awaiting_review"
     assert state["progress"]["done"] == 0
     assert state["progress"]["total"] == 3
-    assert [task.agent_kind for task in engine.tasks] == ["planning"] * 4
+    assert [task.agent_kind for task in engine.tasks] == ["planning"] * 7
     assert application.state.runtime.scheduler_for(research_id) is None
     assert state["cards"]
     assert {card["card_type"] for card in state["cards"]} == {"QUESTION"}
@@ -280,12 +307,21 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
         report = application.state.store.get_report(research_id)
         report_path = ROOT / str(report["report_path"])
         text = report_path.read_text(encoding="utf-8")
+        chapters_response = await client.get(
+            f"/api/researches/{research_id}/chapters"
+        )
+        chapters = chapters_response.json()["data"]["chapters"]
         replay = await application.state.event_buffer.replay_after(research_id, None)
 
     assert [task.agent_kind for task in engine.tasks] == [
-        "planning", "planning", "planning", "planning",
+        "planning", "planning", "planning", "planning", "planning", "planning", "planning",
         "data_collection", "reliability_audit", "report_writing",
     ]
+    assert chapters_response.status_code == 200
+    assert chapters and all(
+        {"status", "attempts", "engine", "reason"} <= set(item)
+        for item in chapters
+    )
     assert completed["progress"]["done"] == 3
     assert plan["status"] == "approved" and plan["approved_at"]
     assert plan["decision_balance"][0]["answer"] == plan["decision_balance"][0]["options"][0]
@@ -318,9 +354,10 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
         "verdict": "pass",
         "validators": [
             "file_exists",
-            "sections_exist:结论,信息源",
+            "sections_exist:结论,信息源,缺失清单",
             "citation_marks_resolvable",
             "no_orphan_citation",
+            "chapter_missing_items_reported",
         ],
         "failures": [],
     }]
@@ -376,9 +413,8 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
         for _ in range(20):
             await asyncio.sleep(0)
         assert [task.agent_kind for task in engine.tasks] == [
-            "planning", "planning", "planning", "planning", "data_collection"
+            "planning", "planning", "planning", "planning", "planning", "planning", "planning", "data_collection"
         ]
-
         resumed = await client.post(
             f"/api/researches/{research_id}/resume",
             headers={"X-Request-ID": "resume-running"},
@@ -490,24 +526,24 @@ async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实�
             headers={"X-Request-ID": "create-failure"},
         )
         research_id = created.json()["data"]["research_id"]
-        failed = await wait_for_status(client, research_id, "failed")
+        completed = await wait_for_status(client, research_id, "completed")
         report = application.state.store.get_report(research_id)
         report_path = Path(str(report["report_path"]))
         if not report_path.is_absolute():
             report_path = ROOT / report_path
         text = report_path.read_text(encoding="utf-8")
 
-    statuses = {goal["id"]: goal["status"] for goal in failed["goals"]}
+    statuses = {goal["id"]: goal["status"] for goal in completed["goals"]}
     assert statuses == {
-        "goal-1": "failed",
-        "goal-2": "skipped",
-        "goal-3": "skipped",
+        "goal-1": "done",
+        "goal-2": "done",
+        "goal-3": "done",
         "goal-4": "done",
     }
     assert len([task for task in engine.tasks if task.agent_kind == "data_collection"]) == 20
-    assert not any(task.agent_kind == "reliability_audit" for task in engine.tasks)
+    assert any(task.agent_kind == "reliability_audit" for task in engine.tasks)
     assert any(task.agent_id == "report-writing-2" for task in engine.tasks)
-    assert "未完成 goal：goal-1, goal-2, goal-3" in text
+    assert "retry_exhausted" in text
     assert "# 结论" in text and "# 信息源" in text and "[^q-1]" in text
 
 
@@ -535,7 +571,7 @@ async def test_stop_接_scheduler_终止且在跑结果不再启动后续(tmp_pa
 
     assert snapshot.json()["data"]["status"] == "stopped"
     assert [task.agent_kind for task in engine.tasks] == [
-        "planning", "planning", "planning", "planning", "data_collection"
+        "planning", "planning", "planning", "planning", "planning", "planning", "planning", "data_collection"
     ]
 
 

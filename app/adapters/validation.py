@@ -41,6 +41,7 @@ class Ctx:
     store: Any
     source_domains: frozenset[str]
     runs_root: Path | None = None
+    missing_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -247,6 +248,19 @@ def json_array_min_items(ctx: Ctx, arguments: list[str]) -> Result:
     if error:
         return error
     actual = len(items)
+    if actual == 0 and ctx.missing_reason in {
+        "empty_result", "tool_unavailable", "quota_exhausted",
+    }:
+        return _result(
+            Verdict.PASS,
+            name,
+            f"空数组按结构化缺失原因接收：{ctx.missing_reason}",
+            detail={
+                "expected_minimum": minimum,
+                "actual": actual,
+                "missing_reason": ctx.missing_reason,
+            },
+        )
     if actual < minimum:
         return _result(
             Verdict.FAIL,
@@ -260,6 +274,30 @@ def json_array_min_items(ctx: Ctx, arguments: list[str]) -> Result:
         f"JSON 数组条目数合格：期望至少 {minimum}，实际 {actual}",
         detail={"expected_minimum": minimum, "actual": actual},
     )
+
+
+@validator("chapter_missing_items_reported")
+def chapter_missing_items_reported(ctx: Ctx, arguments: list[str]) -> Result:
+    name = "chapter_missing_items_reported"
+    if arguments:
+        return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    if ctx.store is None or not hasattr(ctx.store, "list_chapters"):
+        return _result(Verdict.UNAVAILABLE, name, "章节账本不可用")
+    text = ctx.read_text()
+    missing = [
+        row for row in ctx.store.list_chapters(ctx.research_id)
+        if row["status"] == "missing"
+    ]
+    offenders = [
+        f"{row['goal_id']}/{row['chapter_id']}:{row['reason']}"
+        for row in missing
+        if str(row["chapter_id"]) not in text or str(row["reason"]) not in text
+    ]
+    if offenders:
+        return _result(
+            Verdict.FAIL, name, "报告未逐条写入章节账本缺失项", offenders,
+        )
+    return _result(Verdict.PASS, name, f"已覆盖 {len(missing)} 条章节缺失")
 
 
 def _is_empty(value: Any) -> bool:
@@ -815,4 +853,4 @@ for _name in _UNIMPLEMENTED:
     validator(_name)(_unimplemented(_name))
 
 
-assert len(REGISTRY) == 27, f"校验器注册表应为 27 项，实际 {len(REGISTRY)} 项"
+assert len(REGISTRY) == 28, f"校验器注册表应为 28 项，实际 {len(REGISTRY)} 项"

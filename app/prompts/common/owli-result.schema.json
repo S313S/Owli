@@ -9,7 +9,8 @@
     "summary",
     "assumptions",
     "unmet",
-    "capability_denials"
+    "capability_denials",
+    "reason"
   ],
   "properties": {
     "status": {
@@ -34,6 +35,10 @@
     "capability_denials": {
       "type": "array",
       "items": {"type": "string"}
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "enum": [null, "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted"]
     }
   }
 }

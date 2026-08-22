@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 
 def test_最长重叠去重并覆盖_json_token_中间断流():
     from app.plan.segments import merge_continuation
@@ -28,7 +30,7 @@ def test_同一轮增量_chunk_不得按重叠去重(tmp_path):
 
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-chunks",
-        ResilienceConfig(3, 3, 60, 900, 300),
+        ResilienceConfig(3, 60, 900),
     )
 
     value = asyncio.run(workspace.generate("goal-1", "生成 JSON", Adapter()))
@@ -61,7 +63,7 @@ def test_partial_即时落盘_重试前清理并续写为正式段(tmp_path):
 
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-1",
-        ResilienceConfig(3, 2, 60, 900, 300),
+        ResilienceConfig(2, 60, 900),
         retry_sleep=lambda seconds: asyncio.sleep(0),
     )
     value = asyncio.run(workspace.generate(
@@ -76,8 +78,13 @@ def test_partial_即时落盘_重试前清理并续写为正式段(tmp_path):
     assert workspace.formal_path("skeleton").is_file()
 
 
+def test_规划短流接受完整_json_围栏() -> None:
+    from app.plan.segments import _json_payload
+
+    assert _json_payload('```json\n{"ok": true}\n```') == '{"ok": true}'
+
+
 def test_段级重试次数由配置覆盖(tmp_path):
-    import pytest
 
     from app.adapters.contracts import PlanningSegmentResult
     from app.config import ResilienceConfig
@@ -96,7 +103,7 @@ def test_段级重试次数由配置覆盖(tmp_path):
     adapter = Adapter()
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-2",
-        ResilienceConfig(3, 4, 60, 900, 300),
+        ResilienceConfig(4, 60, 900),
         retry_sleep=lambda seconds: asyncio.sleep(0),
     )
 
@@ -126,7 +133,7 @@ def test_同一段跨语义重跑也共享配置预算(tmp_path):
     adapter = Adapter()
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-budget",
-        ResilienceConfig(3, 2, 60, 900, 300),
+        ResilienceConfig(2, 60, 900),
     )
 
     assert asyncio.run(workspace.generate("goal-1", "第一次", adapter)) == {}
@@ -152,7 +159,7 @@ def test_完整但非法_json_重试必须清空前缀而非误续写(tmp_path):
 
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-invalid-json",
-        ResilienceConfig(3, 2, 60, 900, 300),
+        ResilienceConfig(2, 60, 900),
     )
     value = asyncio.run(workspace.generate("goal-1", "生成合法 JSON", Adapter()))
 
@@ -186,7 +193,7 @@ def test_规划限流按配置退避且不把_429_当断流续写(tmp_path):
 
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-plan-rate",
-        ResilienceConfig(3, 3, 60, 900, 300),
+        ResilienceConfig(3, 60, 900),
         retry_sleep=retry_sleep,
     )
 
@@ -216,7 +223,6 @@ def test_规划短流路由固定_claude_且忽略执行期覆盖():
 
     claude = Claude()
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": claude, "codex": Codex()},
     )
     adapter._route_overrides["r-3"] = "codex"
@@ -250,7 +256,6 @@ def test_通用运行入口的规划任务也固定_claude_且忽略所有覆盖
             raise AssertionError("规划任务不得进入 Codex")
 
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": Claude(), "codex": Codex()},
     )
     adapter._route_overrides["r-plan-fixed"] = "codex"
@@ -403,7 +408,7 @@ def test_非法json回灌自带出错位置原文与引号指引(tmp_path):
 
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / "r-quote-json",
-        ResilienceConfig(3, 2, 60, 900, 300),
+        ResilienceConfig(2, 60, 900),
     )
     value = asyncio.run(workspace.generate("goal-1", "生成合法 JSON", Adapter()))
 

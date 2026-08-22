@@ -77,13 +77,14 @@ class Agent:
     capability: dict[str, Any]
     prompt: dict[str, Any]
     output: dict[str, Any]
+    chapter: dict[str, Any] | None
     extra_quota_credits: float | int | None
     origin: dict[str, str]
     status: str
 
     _FIELDS: ClassVar[set[str]] = {
         "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
-        "model", "capability", "prompt", "output", "extra_quota_credits",
+        "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     }
 
@@ -105,6 +106,7 @@ class Agent:
         values = dict(data)
         values.setdefault("inputs", [])
         values.setdefault("model", None)
+        values.setdefault("chapter", None)
         values.setdefault("extra_quota_credits", None)
         return cls(**_copy(values))
 
@@ -113,7 +115,7 @@ class Agent:
 
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
         "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
-        "model", "capability", "prompt", "output", "extra_quota_credits",
+        "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     )
 

@@ -83,6 +83,21 @@ class PlanEngine:
                     for goal in self.skeleton["goals"]
                 ]
             }
+        elif "-ch-" in task.output_path.stem:
+            number = int(task.output_path.stem.split("-ch-", 1)[0].removeprefix("goal-"))
+            output_path = json.loads(
+                task.body.split("系统声明 output.path=", 1)[1].split("。", 1)[0]
+            )
+            payload = {
+                "chapter_type": {1: "collection", 2: "audit", 3: "report"}[number],
+                "opening": {
+                    "inputs": [], "task": "执行本章", "acceptance": ["产物通过校验"],
+                },
+                "closing": {
+                    "output": {"path": output_path}, "entities": ["飞书"],
+                    "expected_count": 1, "notes": {},
+                },
+            }
         else:
             number = int(task.output_path.stem.removeprefix("goal-"))
             goal = self.skeleton["goals"][number - 1]
@@ -104,7 +119,6 @@ def test_多源计划生成由注册表补齐能力与产物契约(tmp_path: Pat
     engine = PlanEngine(_multi_source_skeleton())
     store = PlanStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": engine},
     )
 
@@ -165,7 +179,6 @@ def test_LLM_闭集越界经_RoutedAdapter_重试后接受合法值(tmp_path: Pa
         {"authority_kind": "community_high_signal", "interest_relation": "arms_length"},
     ])
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": engine},
     )
 
@@ -195,7 +208,6 @@ def test_LLM_闭集连续三次越界取平台基线并标注_degraded(tmp_path:
         {"authority_kind": "高权威", "interest_relation": "中立"}
     ])
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": engine},
     )
 
@@ -481,7 +493,6 @@ def test_X_超预算软提示经_source工具进入事件流且调用不断链()
         return SimpleNamespace(evidence=[], conclusion={"status": "completed", "task_continues": True})
 
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": object(), "codex": object()},
         source_tools={"source.x": fake_x},
     )
@@ -516,7 +527,6 @@ def test_source工具桥兼容不声明_on_event_的_HN_入口() -> None:
         return [{"platform": "hacker_news", "query": query, "window": window}]
 
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": object(), "codex": object()},
         source_tools={"source.hacker_news": fake_hn},
     )
@@ -543,7 +553,6 @@ def test_source工具桥拒绝调用_capability_未声明的信息源() -> None:
     from app.adapters.routing import RoutedAdapter
 
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": object(), "codex": object()},
         source_tools={"source.x": lambda query, window: []},
     )
@@ -707,7 +716,6 @@ def test_source_MCP_子进程事件经_RoutedAdapter_进入宿主事件流(
     )
     engine = MCPCallingEngine()
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": engine},
     )
     events: list[dict] = []

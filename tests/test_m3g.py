@@ -123,7 +123,6 @@ def test_规则21重试只回灌后出现的违规_goal段(tmp_path) -> None:
     engine = FakeEngine([invalid, corrected])
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
-        clock=lambda: 0.0,
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
 

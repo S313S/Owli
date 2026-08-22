@@ -13,12 +13,14 @@ from app.adapters import validation
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.routing import pick_engine
 from app.config import (
+    ChapterEngineConfig,
     ResearchScaleConfig,
     ResearchScaleProfile,
     ResilienceConfig,
     load_research_scale_config,
     load_resilience_config,
 )
+from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import duplicate_collection_goal_ids, lint
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan
 from app.plan.question import make_questions
@@ -76,9 +78,15 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.casefold().replace("-", " ").replace("_", " ").split())
 
 
+def _role_name(name: str) -> str:
+    """取结构化 `角色·实体` 的角色部分；实体只用于章节颗粒度。"""
+
+    return name.partition("·")[0].strip()
+
+
 def _classify(name: str, task: str) -> tuple[str, str]:
     del task
-    normalized = _normalize_name(name)
+    normalized = _normalize_name(_role_name(name))
     if normalized in _source_specs():
         return "data_collection", "web-collector"
     try:
@@ -183,7 +191,10 @@ def _goal_prompt(
         f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
         f"注册表选择：{sources}；{reuse_rule}{scale_rule}采集 agent 的 name 必须唯一确定 capability.sources "
-        "与 source.* 工具；非采集 agent 的 name 只能逐字取职能闭集："
+        "与 source.* 工具；采集、交叉验证、竞品核对这类重型 goal 必须把 agents 拆到"
+        "一项只负责一个竞品与一个信息源；name 用“注册表原名·竞品名”的结构化格式，"
+        "同一采集角色可为不同竞品重复出现；"
+        "非采集 agent 的 name 只能逐字取职能闭集："
         f"{'、'.join(_ROLE_MAP)}，不得自造名称。\n"
         "产物结构：只输出一个 JSON object，只含 deliverable、acceptance、agents。"
         "deliverable 含 format/path/description，path 只写文件名；acceptance 是逐条"
@@ -438,7 +449,8 @@ def _deliverable(raw: Any, goal_id: str) -> dict[str, str]:
 def _origin() -> dict[str, str]:
     fields = (
         "_node", "display_name", "task", "depends_on", "inputs", "engine",
-        "model", "capability", "prompt.body", "output", "extra_quota_credits",
+        "model", "capability", "prompt.body", "output", "chapter",
+        "extra_quota_credits",
     )
     return {field: "generated" for field in fields}
 
@@ -541,6 +553,16 @@ def _build_plan(
                     scale=scale,
                     scale_profile=profile,
                 )
+                is_collection = agent["capability"]["profile"] == "web-collector"
+                if is_collection:
+                    agent["depends_on"] = []
+                elif agents and all(
+                    item["capability"]["profile"] == "web-collector"
+                    for item in agents
+                ):
+                    # 同一重型 goal 的竞品 × 信息源采集章可并行；首个汇总章
+                    # 必须等齐全部采集章，不能只依赖最后一个。
+                    agent["depends_on"] = [item["agent_id"] for item in agents]
                 agents.append(agent)
                 previous_agent_id = agent["agent_id"]
             source_ids = {
@@ -634,7 +656,7 @@ def _build_agent(
     except ValueError as exc:
         # 带上 goal_id 才能让段级重试只重跑涉事段，而不是整份计划全重跑。
         raise ValueError(f"{goal_id} {exc}") from exc
-    normalized_name = _normalize_name(name)
+    normalized_name = _normalize_name(_role_name(name))
     source_spec = _source_specs().get(normalized_name)
     source_id = source_spec.source_id if source_spec is not None else "hacker_news"
     counters[agent_kind] += 1
@@ -719,7 +741,7 @@ def _upstream_collection_inventory(
             counters[agent_kind] += 1
             suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
             agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
-            source_spec = _source_specs().get(_normalize_name(name))
+            source_spec = _source_specs().get(_normalize_name(_role_name(name)))
             if source_spec is None:
                 continue
             target = (
@@ -780,6 +802,7 @@ async def generate_plan(
     *,
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
+    chapter_engine_config: ChapterEngineConfig | None = None,
     segment_retry_sleep: Any = None,
 ) -> Plan:
     """按骨架、逐 goal、整计划 lint 三阶段生成并原子保存计划。"""
@@ -932,6 +955,12 @@ async def generate_plan(
                 timestamp=timestamp,
                 scale=scale,
                 scale_config=product_scale_config,
+            )
+            await generate_chapter_specs(
+                plan,
+                workspace,
+                adapter,
+                chapter_engine_config or ChapterEngineConfig(),
             )
             errors = lint(plan)["errors"]
         except PlanSegmentError as exc:
