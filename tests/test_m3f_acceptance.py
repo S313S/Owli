@@ -14,6 +14,8 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
 
     research_id = "r-m3f-segment"
     skeleton = {
+        "market_profile": "global_product",
+        "market_profile_justification": "产品面向全球市场。",
         "goals": [
             {"title": "采集", "objective": "形成证据数组。", "depends_on": []},
             {"title": "审计", "objective": "形成可靠度评级。", "depends_on": ["goal-1"]},
@@ -22,19 +24,19 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
     }
     expansions = {
         "goal-1": {
-            "deliverable": {"format": "json", "path": "evidence.json", "description": "证据数组"},
+            "deliverable": {"format": "json", "shape": "array", "path": "evidence.json", "description": "证据数组"},
             "acceptance": ["文件存在且至少包含 1 条 permalink 记录"],
-            "agents": [{"name": "HN 数据抓取", "task": "采集竞品证据"}],
+            "agents": [{"name": "HN 数据抓取", "task": "采集竞品证据", "output": {"shape": "array"}}],
         },
         "goal-2": {
-            "deliverable": {"format": "json", "path": "audit.json", "description": "评级数组"},
+            "deliverable": {"format": "json", "shape": "array", "path": "audit.json", "description": "评级数组"},
             "acceptance": ["文件存在且每条记录包含 5 个评分字段"],
-            "agents": [{"name": "可靠度审计", "task": "完成可靠度评级"}],
+            "agents": [{"name": "可靠度审计", "task": "完成可靠度评级", "output": {"shape": "array"}}],
         },
         "goal-3": {
-            "deliverable": {"format": "markdown", "path": "report.md", "description": "最终报告"},
+            "deliverable": {"format": "markdown", "shape": "object", "path": "report.md", "description": "最终报告"},
             "acceptance": ["文件存在且包含结论、信息源 2 个章节"],
-            "agents": [{"name": "报告撰写", "task": "撰写带双向角标的报告"}],
+            "agents": [{"name": "报告撰写", "task": "撰写带双向角标的报告", "output": {"shape": "object"}}],
         },
     }
 

@@ -16,7 +16,10 @@ SCHEMA_PATH = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sq
 
 
 def _agent(name: str, task: str, **extra) -> dict:
-    return {"name": name, "task": task, **extra}
+    shape = "array" if any(
+        token in name for token in ("数据抓取", "MediaCrawler", "浏览器自动化", "审计")
+    ) else "object"
+    return {"name": name, "task": task, "output": {"shape": shape}, **extra}
 
 
 def _goal(number: int, agents: list[dict], *, acceptance=None) -> dict:
@@ -26,6 +29,7 @@ def _goal(number: int, agents: list[dict], *, acceptance=None) -> dict:
         "depends_on": [] if number == 1 else [f"goal-{number - 1}"],
         "deliverable": {
             "format": "json" if number < 3 else "markdown",
+            "shape": "array" if number < 3 else "object",
             "path": f"stage-{number}.json" if number < 3 else "report.md",
             "description": "可供下游复核的结构化产物。",
         },
@@ -36,6 +40,8 @@ def _goal(number: int, agents: list[dict], *, acceptance=None) -> dict:
 
 def _valid_skeleton() -> dict:
     return {
+        "market_profile": "global_product",
+        "market_profile_justification": "产品面向全球市场。",
         "goals": [
             _goal(1, [_agent("HN 数据抓取", "通过 API 抓取 Hacker News 证据")]),
             _goal(2, [_agent("可靠度审计", "审核证据可靠度并做交叉验证")]),
@@ -88,6 +94,10 @@ class FakeEngine:
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         if task.output_path.name == "skeleton.json":
             payload = {
+                "market_profile": self._current["market_profile"],
+                "market_profile_justification": self._current[
+                    "market_profile_justification"
+                ],
                 "goals": [
                     {
                         "title": goal["title"],
@@ -272,7 +282,9 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
 )
 def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_path) -> None:
     skeleton = _valid_skeleton()
-    skeleton["goals"][0]["agents"] = [_agent(name, task)]
+    agent = _agent(name, task)
+    agent["output"]["shape"] = skeleton["goals"][0]["deliverable"]["shape"]
+    skeleton["goals"][0]["agents"] = [agent]
 
     plan, _, _ = _generate(tmp_path, [skeleton])
     generated = plan.goals[0].agents[0]
@@ -284,7 +296,7 @@ def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_p
 def test_角色只按封闭名称分类_任务中的_API_不得误派报告_agent(tmp_path) -> None:
     skeleton = _valid_skeleton()
     skeleton["goals"][0]["agents"] = [
-        _agent("报告撰写", "撰写 API 竞品报告")
+        _agent("报告撰写", "撰写 API 竞品报告", output={"shape": "array"})
     ]
 
     plan, _, _ = _generate(tmp_path, [skeleton])
@@ -346,7 +358,9 @@ def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) 
 
 def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> None:
     skeleton = _valid_skeleton()
-    skeleton["goals"][0]["agents"] = [_agent("报告撰写", "输出 JSON 摘要")]
+    skeleton["goals"][0]["agents"] = [
+        _agent("报告撰写", "输出 JSON 摘要", output={"shape": "array"})
+    ]
 
     plan, _, _ = _generate(tmp_path, [skeleton])
 
@@ -370,6 +384,75 @@ def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:
     retries = [event for event in store.events if event.outcome == "retrying"]
     assert len(retries) == 2
     assert all(isinstance(event, NormalizedEvent) for event in store.events)
+
+
+def test_lint回灌前明确重置受影响goal段预算(monkeypatch, tmp_path) -> None:
+    from app.plan.segments import PlanSegmentWorkspace
+
+    invalid = _valid_skeleton()
+    invalid["goals"][0]["acceptance"] = ["结果质量良好"]
+    calls = []
+    original = PlanSegmentWorkspace.reset_attempts
+
+    def spy(self, name):
+        calls.append(name)
+        return original(self, name)
+
+    monkeypatch.setattr(PlanSegmentWorkspace, "reset_attempts", spy)
+    _generate(tmp_path, [invalid, _valid_skeleton()])
+
+    assert "goal-1" in calls
+
+
+def test_受影响_goal_只从_lint_消息头提取_引文不误伤(tmp_path) -> None:
+    from app.plan.generate import _affected_goal_indices
+
+    del tmp_path
+    errors = [
+        "[规则18] goal-3/report-writer 引文指向 goal-2 矩阵条目",
+        "[结构] goal-1.deliverable.shape 非法",
+    ]
+    assert _affected_goal_indices(errors, 3) == [3, 1]
+
+
+def test_结构异常只把每行起始_goal_提升为消息头() -> None:
+    from app.plan.generate import _structure_errors
+
+    errors = _structure_errors(ValueError(
+        "goal-3.inputs 引用了路径 goals/goal-2/result.json"
+    ))
+    assert len(errors) == 1
+    assert errors[0].startswith("[结构] goal-3.")
+    assert "goal-2/result.json" in errors[0]
+
+
+def test_段级_lint_失败时先回灌而不生成章(tmp_path) -> None:
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    invalid = _valid_skeleton()
+    invalid["goals"][0]["acceptance"] = ["结果质量良好"]
+
+    class OrderedEngine(FakeEngine):
+        def __init__(self, skeletons):
+            super().__init__(skeletons)
+            self.order = []
+
+        async def run(self, task, ctx, on_event=None):
+            self.order.append(task.output_path.stem)
+            return await super().run(task, ctx, on_event)
+
+    engine = OrderedEngine([invalid, _valid_skeleton()])
+    store = FakeStore(tmp_path)
+    adapter = RoutedAdapter(
+        adapters={"claude": engine, "codex": ForbiddenEngine()},
+    )
+
+    asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+
+    assert engine.order.index("goal-1", 2) < next(
+        index for index, name in enumerate(engine.order) if "-ch-" in name
+    )
 
 
 def test_lint_连续三次失败则不保存计划(tmp_path) -> None:
@@ -594,8 +677,9 @@ def test_未知职能报错自带双闭集且goal定位可用于段级重试() -
     assert "网页搜索数据抓取" in message  # 注册表 collector_name 闭集
 
     with pytest.raises(ValueError) as goal_exc:
-        _build_agent(
-            {"name": "hn_competitor_scope_collector", "task": "采集"},
+            _build_agent(
+                {"name": "hn_competitor_scope_collector", "task": "采集",
+                 "output": {"shape": "array"}},
             "goal-3",
             [],
             "查询",
@@ -629,7 +713,8 @@ def test_display_name别名可作采集agent名称且源id解析正确() -> None
             "data_collection", "web-collector",
         )
         agent = _build_agent(
-            {"name": spec.display_name, "task": "采集"},
+            {"name": spec.display_name, "task": "采集",
+             "output": {"shape": "array"}},
             "goal-1",
             [],
             "查询",
@@ -647,7 +732,8 @@ def test_采集角色允许结构化实体后缀并仍按前缀派生信息源()
     from app.plan.generate import _build_agent
 
     agent = _build_agent(
-        {"name": "网页搜索数据抓取·豆包", "task": "采集豆包资料"},
+        {"name": "网页搜索数据抓取·豆包", "task": "采集豆包资料",
+         "output": {"shape": "array"}},
         "goal-1",
         [],
         "豆包竞品",
@@ -678,10 +764,41 @@ def test_同_goal_竞品采集章并行且首个汇总章等待全部采集() ->
     assert agents[2].depends_on == [agents[0].agent_id, agents[1].agent_id]
 
 
+def test_build_plan保留模型填写的owner_shape供规则17判冲突() -> None:
+    from app.plan.generate import _build_plan
+    from app.plan.lint import lint
+
+    source = _valid_skeleton()
+    source["goals"][2]["agents"][0]["output"]["shape"] = "array"
+    plan = _build_plan(
+        source, query="竞品分析", research_id=RESEARCH_ID, timestamp=NOW,
+    )
+
+    owner = plan.goals[2].agents[0]
+    assert owner.output["path"] == plan.goals[2].deliverable["path"]
+    assert owner.output["shape"] == "array"
+    assert any(error.startswith("[规则17] goal-3/") for error in lint(plan)["errors"])
+
+
+def test_agent_output段契约拒绝shape以外字段() -> None:
+    from collections import Counter
+    from app.plan.generate import _build_agent
+
+    with pytest.raises(ValueError, match="仅含 shape"):
+        _build_agent(
+            {
+                "name": "报告撰写", "task": "写报告",
+                "output": {"shape": "object", "path": "越权路径.md"},
+            },
+            "goal-3", [], "竞品分析", Counter(),
+            previous_agent_id=None, upstream_artifacts={}, target=None,
+        )
+
+
 def test_build_plan一次聚合全部goal结构错误() -> None:
     """6b 实跑取证（2026-08-21 r-e55ddfe36e51）：逐个抛错打地鼠，
     goal-1/2/4 各占一轮吃光 3 次段级预算。"""
-    from app.plan.generate import _build_plan
+    from app.plan.generate import _affected_goal_indices, _build_plan, _structure_errors
 
     raw = {
         "goals": [
@@ -689,13 +806,15 @@ def test_build_plan一次聚合全部goal结构错误() -> None:
                 "title": f"阶段{n}",
                 "objective": "形成独立产物。",
                 "depends_on": [],
-                "deliverable": {
-                    "format": "json",
+                    "deliverable": {
+                        "format": "json",
+                        "shape": "object",
                     "path": f"stage-{n}.json",
                     "description": "结构化产物",
                 },
                 "acceptance": ["条目可判定"],
-                "agents": [{"name": name, "task": "执行"}],
+                    "agents": [{"name": name, "task": "执行",
+                                "output": {"shape": "object"}}],
             }
             for n, name in ((1, "自造名甲"), (2, "hn 数据抓取"), (3, "自造名乙"))
         ]
@@ -706,6 +825,7 @@ def test_build_plan一次聚合全部goal结构错误() -> None:
     assert "goal-1" in message and "自造名甲" in message
     assert "goal-3" in message and "自造名乙" in message
     assert "goal-2" not in message
+    assert _affected_goal_indices(_structure_errors(exc_info.value), 3) == [1, 3]
 
 
 def test_同义变体归一化接受且格式报错带闭集() -> None:
@@ -714,7 +834,8 @@ def test_同义变体归一化接受且格式报错带闭集() -> None:
     from app.plan.generate import _classify, _deliverable
 
     value = _deliverable(
-        {"format": "xlsx", "path": "对比表.xlsx", "description": "竞品对比表"},
+        {"format": "xlsx", "shape": "object", "path": "对比表.xlsx",
+         "description": "竞品对比表"},
         "goal-3",
     )
     assert value["format"] == "excel"

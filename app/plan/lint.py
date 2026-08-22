@@ -17,6 +17,10 @@ _FORBIDDEN_FIELDS = {
     "estimated_minutes", "estimated_tokens", "estimated_cost",
     "planned_steps", "step_count",
 }
+_SOURCE_MARKET_PROFILES = {
+    "cn_product": {"web_search", "x"},
+    "global_product": {"web_search", "x", "hacker_news", "product_hunt"},
+}
 
 # 值为 (最少参数个数, 最多参数个数, 参数是否必须为整数)。
 _VALIDATORS: dict[str, tuple[int, int | None, bool]] = {
@@ -217,15 +221,17 @@ def _rule_4(goals: list[dict[str, Any]]) -> list[str]:
 
 def _rule_5(goals: list[dict[str, Any]]) -> list[str]:
     return [
-        f"[规则5] {agent.get('agent_id')}.output.validators 至少需要 1 个校验器"
-        for _, agent in _agents(goals)
+        f"[规则5] {goal.get('goal_id')}/{agent.get('agent_id')}"
+        ".output.validators 至少需要 1 个校验器"
+        for goal, agent in _agents(goals)
         if not agent.get("output", {}).get("validators")
     ]
 
 
 def _rule_6(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
-    for _, agent in _agents(goals):
+    for goal, agent in _agents(goals):
+        goal_id = str(goal.get("goal_id", ""))
         agent_id = str(agent.get("agent_id", ""))
         capability = agent.get("capability", {})
         tools = set(capability.get("tools", []))
@@ -235,31 +241,34 @@ def _rule_6(goals: list[dict[str, Any]]) -> list[str]:
                 source = tool.split(".", 1)[1]
                 if source != "*" and source not in sources:
                     messages.append(
-                        f"[规则6] {agent_id}.capability.tools 声明 {tool}，"
+                        f"[规则6] {goal_id}/{agent_id}.capability.tools 声明 {tool}，"
                         f"但 capability.sources 未包含 {source}"
                     )
         write_paths = capability.get("fs", {}).get("write", [])
         if write_paths and "fs.write" not in tools:
             messages.append(
-                f"[规则6] {agent_id}.capability.fs.write 非空，但 tools 未声明 fs.write"
+                f"[规则6] {goal_id}/{agent_id}.capability.fs.write 非空，"
+                "但 tools 未声明 fs.write"
             )
         for mode in ("read", "write"):
             for index, path in enumerate(capability.get("fs", {}).get(mode, [])):
                 pure = PurePosixPath(str(path))
                 if pure.is_absolute() or ".." in pure.parts:
                     messages.append(
-                        f"[规则6] {agent_id}.capability.fs.{mode}[{index}] 路径越界：{path}"
+                        f"[规则6] {goal_id}/{agent_id}.capability.fs."
+                        f"{mode}[{index}] 路径越界：{path}"
                     )
     return messages
 
 
 def _rule_7(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
-    for _, agent in _agents(goals):
+    for goal, agent in _agents(goals):
         capability = agent.get("capability", {})
         if capability.get("shell", "none") != "none" and agent.get("engine") != "codex":
             messages.append(
-                f"[规则7] {agent.get('agent_id')}.engine 必须为 codex："
+                f"[规则7] {goal.get('goal_id')}/{agent.get('agent_id')}"
+                ".engine 必须为 codex："
                 f"capability.shell={capability.get('shell')}"
             )
     return messages
@@ -267,8 +276,9 @@ def _rule_7(goals: list[dict[str, Any]]) -> list[str]:
 
 def _rule_8(goals: list[dict[str, Any]]) -> list[str]:
     return [
-        f"[规则8] {agent.get('agent_id')}.capability.justification 不能为空：network=open 需要理由"
-        for _, agent in _agents(goals)
+        f"[规则8] {goal.get('goal_id')}/{agent.get('agent_id')}"
+        ".capability.justification 不能为空：network=open 需要理由"
+        for goal, agent in _agents(goals)
         if agent.get("capability", {}).get("network") == "open"
         and not str(agent.get("capability", {}).get("justification", "")).strip()
     ]
@@ -276,12 +286,13 @@ def _rule_8(goals: list[dict[str, Any]]) -> list[str]:
 
 def _rule_9(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
-    for _, agent in _agents(goals):
+    for goal, agent in _agents(goals):
         body = str(agent.get("prompt", {}).get("body", ""))
         hit = next((word for word in _QUESTION_INSTRUCTIONS if word in body), None)
         if hit:
             messages.append(
-                f"[规则9] {agent.get('agent_id')}.prompt.body 含向用户提问的指令“{hit}”"
+                f"[规则9] {goal.get('goal_id')}/{agent.get('agent_id')}"
+                f".prompt.body 含向用户提问的指令“{hit}”"
             )
     return messages
 
@@ -355,71 +366,32 @@ def _validator_problem(specification: Any) -> str | None:
 
 def _rule_13(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
-    for _, agent in _agents(goals):
+    for goal, agent in _agents(goals):
         validators = agent.get("output", {}).get("validators", [])
         for index, specification in enumerate(validators):
             problem = _validator_problem(specification)
             if problem:
                 messages.append(
-                    f"[规则13] {agent.get('agent_id')}.output.validators[{index}] "
+                    f"[规则13] {goal.get('goal_id')}/{agent.get('agent_id')}"
+                    f".output.validators[{index}] "
                     f"{specification!r} 非法：{problem}"
                 )
     return messages
 
 
 def _rule_14(goals: list[dict[str, Any]]) -> list[str]:
-    """数组校验器不得与同一 agent 的对象型任务/goal 验收互相打架。"""
+    """数组校验器不得与同一 agent 的结构化 object 契约冲突。"""
     messages: list[str] = []
-    object_contract = re.compile(
-        r"JSON\s*object|顶层[^。；\n]{0,40}(?:含|包含)[^。；\n]{0,40}(?:键|字段)",
-        re.IGNORECASE,
-    )
-    # 显式数组声明短路：「顶层为数组…每条（对象）含 permalink…字段」描述的是
-    # 数组元素结构，与数组校验器一致，不是 object 契约。措辞彩票实锤：
-    # 6b 实跑（2026-08-21 r-9eb208e803ee）该误报模型无解，goal-2 段预算被
-    # 钉死耗尽——与规则 17/18 同构（M3 回填开口 #6）。
-    array_contract = re.compile(
-        r"顶层[^。；\n]{0,20}数组|JSON\s*arrays?", re.IGNORECASE
-    )
     for goal, agent in _agents(goals):
         validators = agent.get("output", {}).get("validators", [])
-        if not any(
+        has_array_validator = any(
             str(item).partition(":")[0] == "json_array_min_items"
             for item in validators
-        ):
-            continue
-        # 契约点名了具体文件时只约束产出该文件的 agent：goal 验收描述
-        # 最终交付对象契约，不该套在同 goal 的数组中间产物 agent 头上
-        # （6b 实跑 2026-08-21 r-49a84c8c299e：验收点名 deliverable 文件，
-        # 四个采集 agent 全被误拦，模型无解耗尽预算）。agent 自身 task
-        # 文本不做文件归属豁免——它描述的就是本 agent 的产物。
-        agent_basename = PurePosixPath(
-            str(agent.get("output", {}).get("path", "")).replace("\\", "/")
-        ).name
-
-        def _applies(text: str, *, own_text: bool) -> bool:
-            if not object_contract.search(text) or array_contract.search(text):
-                return False
-            if own_text:
-                return True
-            named = re.findall(r"[\w\-.]+\.json", text, re.IGNORECASE)
-            return not named or agent_basename in named
-
-        texts = [
-            (str(item), False) for item in goal.get("acceptance", [])
-        ] + [(str(agent.get("task", "")), True)]
-        conflict = next(
-            (
-                text
-                for text, own_text in texts
-                if _applies(text, own_text=own_text)
-            ),
-            None,
         )
-        if conflict:
+        if has_array_validator and agent.get("output", {}).get("shape") == "object":
             messages.append(
                 f"[规则14] {goal.get('goal_id')}/{agent.get('agent_id')} 使用 "
-                f"json_array_min_items，但任务或验收要求 JSON object：{conflict}"
+                "json_array_min_items，但 output.shape=object"
             )
     return messages
 
@@ -489,75 +461,33 @@ def _rule_16(goals: list[dict[str, Any]]) -> list[str]:
 
 
 def _rule_17(goals: list[dict[str, Any]]) -> list[str]:
-    """goal 级 JSON 文件契约不得与章节校验器共存而不点名文件。
-
-    真实样本 r-4878be30ff8c：验收写「文件为合法 JSON，顶层恰含 … 三个字段」
-    却未指明是哪个文件，同 goal 的 data-cleaning 输出 format=markdown +
-    sections_exist:结论 —— agent 按验收写纯 JSON，章节校验器必失败。
-
-    点名与否按 goal 级判定，不逐行索要文件名。真实样本 r-29586a489b34：
-    回喂后模型已在首行点名「文件 pros-cons.json 存在且顶层为 JSON object」，
-    次行「顶层 object 含 competitors 字段」描述同一文件的结构却因行内无
-    文件名被逐行误拒，三次重试全灭——契约有归属即视为已点名。
-    """
+    """deliverable 与其确定性归属 agent 的 shape 必须一致。"""
     messages: list[str] = []
-    json_contract = re.compile(
-        r"(?:文件|产物)[^。；\n]{0,10}(?:为|是)[^。；\n]{0,10}合法\s*JSON"
-        r"|JSON\s*object"
-        r"|顶层[^。；\n]{0,40}(?:含|包含)[^。；\n]{0,40}(?:键|字段)",
-        re.IGNORECASE,
-    )
-    names_json_file = re.compile(r"[\w./-]+\.json\b", re.IGNORECASE)
     for goal in goals:
-        section_agents = [
-            agent for agent in goal.get("agents", [])
-            if any(
-                str(item).partition(":")[0] == "sections_exist"
-                for item in agent.get("output", {}).get("validators", [])
-            )
-        ]
-        if not section_agents:
-            continue
-        goal_names_json = any(
-            names_json_file.search(str(item))
-            for item in goal.get("acceptance", [])
-        )
-        if goal_names_json:
-            continue
-        for acceptance in goal.get("acceptance", []):
-            text = str(acceptance)
-            if json_contract.search(text):
-                agent_ids = [str(agent.get("agent_id")) for agent in section_agents]
+        deliverable = goal.get("deliverable", {})
+        path = str(deliverable.get("path", ""))
+        expected_shape = deliverable.get("shape")
+        for agent in goal.get("agents", []):
+            output = agent.get("output", {})
+            if str(output.get("path", "")) != path:
+                continue
+            if output.get("shape") != expected_shape:
                 messages.append(
-                    f"[规则17] {goal.get('goal_id')} 验收要求 JSON 文件契约但未点名"
-                    f"文件，而 agent={agent_ids} 的校验器含 sections_exist（章节契约）"
-                    f"：两者必有一方无法满足。请在验收里写明 .json 文件名，或改"
-                    f"该 agent 的产物格式与校验器：{text}"
+                    f"[规则17] {goal.get('goal_id')}/{agent.get('agent_id')} "
+                    f"output.path 归属 deliverable，但 shape 不一致："
+                    f"deliverable.shape={expected_shape!r}，"
+                    f"output.shape={output.get('shape')!r}"
                 )
-                break
     return messages
 
 
 def _rule_18(goals: list[dict[str, Any]]) -> list[str]:
-    """无采集能力的下游 goal，验收不得按实体写死最小条数。
-
-    真实样本 r-b1b75c7000ab goal-3：验收要求「报告为每个竞品至少列出
-    2 条来自不同 author 的独立证据」，上游 goal-2 契约只保证 distinct
-    competitor_name ≥3、对每竞品条数零承诺；实际 3 个竞品各只剩 1 条，
-    分析 agent 被禁止新抓取，诚实返回 partial 也无济于事，重试与换引擎
-    耗尽后整条调研 failed。数据规模断言只能落在采集 goal 或写成条件式。
-    """
+    """无采集能力的下游 deliverable 不得声明硬最小条数校验。"""
     messages: list[str] = []
-    per_entity_minimum = re.compile(
-        r"(?:每一?[个条组项名位家款]?|各)[^。；\n]{0,20}?"
-        r"(?:至少|不少于|不得少于|≥|>=)[^。；\n]{0,8}?\d+\s*[条个组篇项]"
-    )
-    # 条件式识别不做字面单选：真实样本 r-f14050856779 三轮回灌后模型写
-    # 「若上游数据不足以支撑则标注孤证…即算达标」，完全符合本规则给的
-    # 出路，却因白名单只认「不足时」被拒到重试耗尽。
-    negation = re.compile(
-        r"禁止|不得|不要求|无需|不足|缺口|孤证|即算达标|即视为|视为达标"
-    )
+    minimum_validators = {
+        "json_array_min_items", "json_array_between", "list_items_min",
+        "table_rows_min", "table_rows_between",
+    }
     for goal in goals:
         if not goal.get("depends_on"):
             continue
@@ -568,16 +498,21 @@ def _rule_18(goals: list[dict[str, Any]]) -> list[str]:
         )
         if can_collect:
             continue
-        for index, acceptance in enumerate(goal.get("acceptance", [])):
-            text = str(acceptance)
-            matched = per_entity_minimum.search(text)
-            if matched and not negation.search(text):
+        deliverable_path = str(goal.get("deliverable", {}).get("path", ""))
+        for agent in goal.get("agents", []):
+            output = agent.get("output", {})
+            if str(output.get("path", "")) != deliverable_path:
+                continue
+            validators = {
+                str(item).partition(":")[0]
+                for item in output.get("validators", [])
+            }
+            hard_minimums = sorted(validators & minimum_validators)
+            if hard_minimums:
                 messages.append(
-                    f"[规则18] {goal.get('goal_id')}.acceptance[{index}] 按实体"
-                    f"写死最小条数「{matched.group(0).strip()}」，但该 goal 无"
-                    f"采集能力且依赖上游数据，上游契约不保证每实体条数，数据"
-                    f"不足时永不可满足。请改为条件式（数据不足时在产物中明确"
-                    f"标注孤证或缺口即算达标）：{text}"
+                    f"[规则18] {goal.get('goal_id')}/{agent.get('agent_id')} "
+                    f"无采集能力且依赖上游，deliverable 硬最小条数"
+                    f"校验无法由本 goal 保证：{hard_minimums}"
                 )
     return messages
 
@@ -717,13 +652,22 @@ def _rule_21(goals: list[dict[str, Any]]) -> list[str]:
 
 
 def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
-    """对比类章必须以结构化 inputs 覆盖全卷全部采集章。"""
+    """消费上游的章必须以结构化 inputs 覆盖所消费产物。"""
 
     collections: list[dict[str, str]] = []
-    comparisons: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    agent_outputs: dict[str, str] = {}
+    consumers: list[tuple[str, dict[str, Any], dict[str, Any], list[dict[str, str]]]] = []
     for goal in goals:
         goal_id = str(goal.get("goal_id", ""))
         for agent in goal.get("agents", []):
+            agent_id = str(agent.get("agent_id", ""))
+            output_path = str(agent.get("output", {}).get("path", "")).strip()
+            if output_path:
+                agent_outputs[agent_id] = output_path
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        for agent in goal.get("agents", []):
+            agent_id = str(agent.get("agent_id", ""))
             chapter = agent.get("chapter")
             if not isinstance(chapter, dict):
                 continue
@@ -737,17 +681,36 @@ def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
                         "location": f"{goal_id}/{chapter.get('chapter_id')}",
                         "path": path,
                     })
-            elif chapter_type in {"comparison", "cross_validation"}:
-                comparisons.append((goal_id, agent, chapter))
+            expected = []
+            for dependency in agent.get("depends_on", []):
+                path = agent_outputs.get(str(dependency))
+                if path:
+                    expected.append({
+                        "location": f"{goal_id}/{dependency}",
+                        "path": path,
+                    })
+            for item in agent.get("inputs", []):
+                if isinstance(item, dict) and item.get("artifact"):
+                    expected.append({
+                        "location": f"{goal_id}/{agent_id}.inputs",
+                        "path": str(item["artifact"]),
+                    })
+            if chapter_type in {"comparison", "cross_validation"}:
+                expected.extend(collections)
+            if chapter_type != "collection" and expected:
+                unique: dict[str, dict[str, str]] = {}
+                for item in expected:
+                    unique.setdefault(item["path"], item)
+                consumers.append((goal_id, agent, chapter, list(unique.values())))
     messages: list[str] = []
-    for goal_id, agent, chapter in comparisons:
+    for goal_id, agent, chapter, expected in consumers:
         inputs = chapter.get("opening", {}).get("inputs", [])
         paths = {
             str(item.get("path"))
             for item in inputs
             if isinstance(item, dict) and item.get("path")
         }
-        missing = [item for item in collections if item["path"] not in paths]
+        missing = [item for item in expected if item["path"] not in paths]
         if missing:
             detail = "、".join(
                 f"{item['location']} output.path={item['path']}" for item in missing
@@ -756,6 +719,47 @@ def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
                 f"[规则22] {goal_id}/{chapter.get('chapter_id')} "
                 f"({agent.get('agent_id')}) inputs 未覆盖全卷采集章：{detail}。"
                 "请把以上 output.path 逐条加入 chapter.opening.inputs"
+            )
+    return messages
+
+
+def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
+    profile = str(raw.get("market_profile", ""))
+    justification = str(raw.get("market_profile_justification", "")).strip()
+    if profile not in _SOURCE_MARKET_PROFILES or not justification:
+        return [
+            "[规则23] plan.market_profile 必须取 cn_product/global_product，"
+            "且 market_profile_justification 不能为空"
+        ]
+    applicable = set(_SOURCE_MARKET_PROFILES[profile])
+    messages: list[str] = []
+    for goal, agent in _agents(goals):
+        chapter = agent.get("chapter")
+        if not isinstance(chapter, dict) or chapter.get("chapter_type") != "collection":
+            continue
+        for source in agent.get("capability", {}).get("sources", []):
+            source_id = str(source)
+            if source_id not in applicable:
+                messages.append(
+                    f"[规则23] {goal.get('goal_id')}/{agent.get('agent_id')} "
+                    f"采集章 source_id={source_id} 不适用于题目市场属性 "
+                    f"{profile}；可用源={','.join(sorted(applicable))}"
+                )
+    return messages
+
+
+def _rule_24(
+    goals: list[dict[str, Any]], max_chapters_per_goal: int | None,
+) -> list[str]:
+    if max_chapters_per_goal is None:
+        return []
+    messages: list[str] = []
+    for goal in goals:
+        count = len(goal.get("agents", []))
+        if count > max_chapters_per_goal:
+            messages.append(
+                f"[规则24] {goal.get('goal_id')} 章数上限为 "
+                f"{max_chapters_per_goal}，实际为 {count}；请合并本 goal 的章"
             )
     return messages
 
@@ -819,7 +823,8 @@ def _warnings(goals: list[dict[str, Any]]) -> list[str]:
 
 
 def lint(
-    plan: Plan | Mapping[str, Any], *, for_approval: bool = False
+    plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
+    max_chapters_per_goal: int | None = None,
 ) -> dict[str, list[str]]:
     """按 §10 返回问题；规则 12 是批准闸门，普通保存不阻断。"""
     raw = _data(plan)
@@ -848,4 +853,6 @@ def lint(
     errors.extend(_rule_20(goals))
     errors.extend(_rule_21(goals))
     errors.extend(_rule_22(goals))
+    errors.extend(_rule_23(raw, goals))
+    errors.extend(_rule_24(goals, max_chapters_per_goal))
     return {"errors": errors, "warnings": _warnings(goals)}

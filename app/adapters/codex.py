@@ -817,7 +817,18 @@ class CodexAdapter:
                 outcome="FAIL",
                 message=message,
                 detail={
+                    "conclusion_status": (
+                        conclusion.status if conclusion is not None else None
+                    ),
                     "validation_verdict": report.verdict.value,
+                    "validation_failures": [
+                        {
+                            "name": item.name,
+                            "message": item.message,
+                            "offenders": item.offenders,
+                        }
+                        for item in report.failures
+                    ],
                     "conclusion_error": conclusion_error,
                 },
             )

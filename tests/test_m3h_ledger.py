@@ -47,6 +47,7 @@ def test_章节账本表与固定接口记录实际结尾(tmp_path):
     assert row == {
         "research_id": "r-ledger", "goal_id": "goal-1", "chapter_id": "ch-1",
         "status": "done", "attempts": 1, "engine": "codex", "reason": None,
+        "engine_error": None, "conclusion_error": None,
         "actual_output_path": "goals/goal-1/data.json", "actual_count": 3,
         "updated_at": "2026-08-22T00:02:00Z",
     }
@@ -54,6 +55,55 @@ def test_章节账本表与固定接口记录实际结尾(tmp_path):
         "r-ledger", "goal-1", "ch-1", engine="claude",
         updated_at="2026-08-22T00:03:00Z",
     ) is False
+
+
+def test_章节账本保留引擎与结论错误(tmp_path):
+    store = _store(tmp_path)
+    store.ensure_chapters("r-ledger", [{"goal_id": "goal-1", "chapter_id": "ch-1"}],
+                          updated_at="2026-08-22T00:00:00Z")
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-1", status="missing", reason="retry_exhausted",
+        actual_output_path=None, actual_count=0,
+        engine_error="socket closed", conclusion_error="result missing",
+        updated_at="2026-08-22T00:01:00Z",
+    )
+    row = store.list_chapters("r-ledger")[0]
+    assert row["engine_error"] == "socket closed"
+    assert row["conclusion_error"] == "result missing"
+
+
+def test_v3章节账本迁移后增加错误原文字段(tmp_path):
+    from app.store.schema import initialize_database_if_empty
+
+    database = tmp_path / "owli-v3.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+        CREATE TABLE reports (id TEXT PRIMARY KEY) STRICT;
+        CREATE TABLE chapter_progress (
+          research_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL,
+          chapter_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          engine TEXT,
+          reason TEXT,
+          actual_output_path TEXT,
+          actual_count INTEGER,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (research_id, goal_id, chapter_id)
+        ) STRICT;
+        PRAGMA user_version = 3;
+        """)
+
+    initialize_database_if_empty(database, SCHEMA)
+
+    with sqlite3.connect(database) as connection:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_xinfo(chapter_progress)")
+        }
+    assert version == 4
+    assert {"engine_error", "conclusion_error"} <= columns
 
 
 @pytest.mark.parametrize("reason", [
@@ -159,3 +209,41 @@ def test_scheduler_跳过_done_章并把重试耗尽写成_missing后仍_complet
     assert rows["ch-1"]["attempts"] == 0
     assert rows["ch-2"]["status"] == "missing"
     assert rows["ch-2"]["reason"] == "retry_exhausted"
+
+
+def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_path):
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+
+    store = _store(tmp_path)
+    source = make_plan_dict()
+    source["research_id"] = "r-ledger"
+    source["baseline"] = None
+    source["goals"] = source["goals"][:1]
+    source["goals"][0]["retry_policy"].update(
+        max_attempts_per_round=3,
+        max_rounds=2,
+        ask_engine_switch_at=3,
+        chapter_deadline_seconds=10,
+    )
+    plan = Plan.from_dict(source)
+    current = [datetime(2026, 8, 22, tzinfo=timezone.utc)]
+    calls = []
+
+    async def run_task(agent, context):
+        calls.append(context.attempt)
+        current[0] = current[0].replace(second=current[0].second + 11)
+        return TaskRunResult(False, context.engine, reason="socket_closed")
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: None,
+        lambda: current[0],
+        lambda delay, callback: None,
+        chapter_ledger=store,
+    )
+    asyncio.run(scheduler.start())
+    row = store.list_chapters("r-ledger")[0]
+    assert calls == [1, 2]
+    assert row["status"] == "missing"
+    assert row["reason"] == "retry_exhausted"
+    assert row["attempts"] == 2

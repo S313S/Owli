@@ -27,6 +27,7 @@ def make_agent(agent_id: str, goal_id: str) -> dict:
         },
         "output": {
             "format": "markdown",
+            "shape": "object",
             "path": f"goals/{goal_id}/{agent_id}.md",
             "validators": ["file_exists"],
         },
@@ -61,6 +62,7 @@ def make_goal(number: int) -> dict:
         "depends_on": [] if number == 1 else [f"goal-{number - 1}"],
         "deliverable": {
             "format": "markdown",
+            "shape": "object",
             "path": f"goals/{goal_id}/result.md",
             "description": "带来源与明确数量的阶段结果。",
         },
@@ -87,6 +89,8 @@ def make_plan_dict() -> dict:
         "title": "飞书竞品优缺点挖掘",
         "research_question": "飞书与主要竞品相比有哪些优缺点？",
         "use_case": "product_competitor",
+        "market_profile": "global_product",
+        "market_profile_justification": "产品面向全球市场。",
         "scale": "standard",
         "status": "awaiting_review",
         "approved_at": None,

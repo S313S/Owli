@@ -392,6 +392,7 @@ class Store:
         chapters: Iterable[Mapping[str, Any]],
         *,
         updated_at: str,
+        reset_running: bool = True,
     ) -> None:
         """登记计划章；保留终态，并把上次中断的 running 恢复为 pending。"""
 
@@ -411,14 +412,15 @@ class Store:
                 """,
                 rows,
             )
-            connection.execute(
-                """
-                UPDATE chapter_progress
-                SET status = 'pending', updated_at = ?
-                WHERE research_id = ? AND status = 'running'
-                """,
-                (updated_at, research_id),
-            )
+            if reset_running:
+                connection.execute(
+                    """
+                    UPDATE chapter_progress
+                    SET status = 'pending', updated_at = ?
+                    WHERE research_id = ? AND status = 'running'
+                    """,
+                    (updated_at, research_id),
+                )
 
     def start_chapter(
         self,
@@ -436,7 +438,8 @@ class Store:
                 """
                 UPDATE chapter_progress
                 SET status = 'running', attempts = attempts + 1,
-                    engine = ?, reason = NULL, updated_at = ?
+                    engine = ?, reason = NULL, engine_error = NULL,
+                    conclusion_error = NULL, updated_at = ?
                 WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
                   AND status IN ('pending','deferred','running')
                 """,
@@ -454,6 +457,8 @@ class Store:
         reason: str | None,
         actual_output_path: str | None,
         actual_count: int | None,
+        engine_error: str | None = None,
+        conclusion_error: str | None = None,
         updated_at: str,
     ) -> None:
         if status not in _CHAPTER_TERMINAL:
@@ -462,8 +467,8 @@ class Store:
             raise ValueError("done 章不得带 reason")
         if status == "missing" and reason not in _CHAPTER_REASONS:
             raise ValueError("missing 章必须带闭集 reason")
-        if status == "deferred" and reason != "quota_exhausted":
-            raise ValueError("deferred 章 reason 必须是 quota_exhausted")
+        if status == "deferred" and reason not in _CHAPTER_REASONS:
+            raise ValueError("deferred 章必须带闭集 reason")
         if actual_count is not None and actual_count < 0:
             raise ValueError("actual_count 不得为负数")
         with self._connect() as connection:
@@ -471,23 +476,57 @@ class Store:
                 """
                 UPDATE chapter_progress
                 SET status = ?, reason = ?, actual_output_path = ?,
-                    actual_count = ?, updated_at = ?
+                    actual_count = ?, engine_error = ?, conclusion_error = ?,
+                    updated_at = ?
                 WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
                 """,
                 (
-                    status, reason, actual_output_path, actual_count, updated_at,
+                    status, reason, actual_output_path, actual_count,
+                    engine_error, conclusion_error, updated_at,
                     research_id, goal_id, chapter_id,
                 ),
             )
         if cursor.rowcount != 1:
             raise KeyError(f"章节账本不存在：{research_id}/{goal_id}/{chapter_id}")
 
+    def reset_done_chapters(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_ids: Iterable[str],
+        *,
+        updated_at: str,
+    ) -> None:
+        """父章拼装校验失败时，只恢复明确列出的 done 子节供下一轮重写。"""
+
+        rows = [
+            (updated_at, research_id, goal_id, str(chapter_id))
+            for chapter_id in chapter_ids
+            if str(chapter_id).strip()
+        ]
+        if not rows:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                UPDATE chapter_progress
+                SET status = 'pending', reason = NULL,
+                    actual_output_path = NULL, actual_count = NULL,
+                    engine_error = NULL, conclusion_error = NULL,
+                    updated_at = ?
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                  AND status = 'done'
+                """,
+                rows,
+            )
+
     def list_chapters(self, research_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT research_id, goal_id, chapter_id, status, attempts,
-                       engine, reason, actual_output_path, actual_count, updated_at
+                       engine, reason, engine_error, conclusion_error,
+                       actual_output_path, actual_count, updated_at
                 FROM chapter_progress
                 WHERE research_id = ?
                 ORDER BY goal_id, chapter_id

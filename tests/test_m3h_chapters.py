@@ -58,7 +58,7 @@ def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落
         async def run_planning_segment(self, request, on_text=None):
             from app.adapters.contracts import PlanningSegmentResult
 
-            calls.append((request.segment_name, request.prompt))
+            calls.append((request.segment_name, request.prompt, request.output_schema))
             agent = plan.goals[0].agents[len(calls) - 1]
             if len(calls) == 1:
                 value = _chapter_value(
@@ -83,16 +83,64 @@ def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落
         plan, workspace, Adapter(), ChapterEngineConfig(),
     ))
 
-    assert [name for name, _ in calls] == ["goal-1-ch-1", "goal-1-ch-2"]
+    assert [name for name, _, _ in calls] == ["goal-1-ch-1", "goal-1-ch-2"]
     assert "产品定位" not in calls[0][1]
     assert "产品定位" in calls[1][1]
     assert "正文" not in calls[1][1]
+    assert all(call[2]["required"] == ["chapter_type", "opening", "closing"]
+               for call in calls)
     chapter_root = tmp_path / "runs" / plan.research_id / "goals" / "goal-1"
     assert (chapter_root / "ch-1.md").is_file()
     assert (chapter_root / "ch-2.md").is_file()
     assert plan.goals[0].agents[0].chapter["chapter_id"] == "ch-1"
     assert plan.goals[0].agents[0].engine == "codex"
     assert plan.goals[0].agents[1].engine == "claude"
+
+
+def test_同_goal_无依赖章并发生成(tmp_path):
+    from app.config import ChapterEngineConfig, ResilienceConfig
+    from app.plan.chapters import generate_chapter_specs
+    from app.plan.model import Plan
+    from app.plan.segments import PlanSegmentWorkspace
+
+    source = make_plan_dict()
+    source["goals"] = source["goals"][:1]
+    first = source["goals"][0]["agents"][0]
+    second = {**first, "agent_id": "agent-parallel", "depends_on": []}
+    second["output"] = {
+        **first["output"], "path": "goals/goal-1/agent-parallel.md",
+    }
+    source["goals"][0]["agents"] = [first, second]
+    plan = Plan.from_dict(source)
+    active = 0
+    max_active = 0
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            nonlocal active, max_active
+            from app.adapters.contracts import PlanningSegmentResult
+
+            index = int(request.segment_name.rsplit("-", 1)[1]) - 1
+            agent = plan.goals[0].agents[index]
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            value = _chapter_value(
+                agent, chapter_type="audit", inputs=[], entities=["竞品"],
+            )
+            text = json.dumps(value, ensure_ascii=False)
+            await on_text(text)
+            active -= 1
+            return PlanningSegmentResult(text, True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / plan.research_id, ResilienceConfig(3, 60, 900),
+    )
+    asyncio.run(generate_chapter_specs(
+        plan, workspace, Adapter(), ChapterEngineConfig(),
+    ))
+
+    assert max_active == 2
 
 
 def test_对比章必须覆盖全卷全部采集章_错误列出缺章与路径():
@@ -121,6 +169,90 @@ def test_对比章必须覆盖全卷全部采集章_错误列出缺章与路径(
                for item in errors)
 
     compare["chapter"]["opening"]["inputs"] = [{"path": first["output"]["path"]}]
+    assert not any("规则22" in item for item in lint(plan)["errors"])
+
+
+def test_章_inputs_由_depends_on_output_path_确定性派生(tmp_path):
+    from app.config import ChapterEngineConfig, ResilienceConfig
+    from app.plan.chapters import generate_chapter_specs
+    from app.plan.model import Plan
+    from app.plan.segments import PlanSegmentWorkspace
+
+    source = make_plan_dict()
+    source["goals"] = source["goals"][:1]
+    first = source["goals"][0]["agents"][0]
+    second = dict(first)
+    second["agent_id"] = "data-cleaning"
+    second["display_name"] = "数据清洗"
+    second["depends_on"] = [first["agent_id"]]
+    second["output"] = {
+        "format": "json",
+        "path": "goals/goal-1/cleaned.json",
+        "validators": ["file_exists"],
+    }
+    source["goals"][0]["agents"] = [first, second]
+    plan = Plan.from_dict(source)
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            from app.adapters.contracts import PlanningSegmentResult
+
+            agent = plan.goals[0].agents[0 if request.segment_name.endswith("1") else 1]
+            value = _chapter_value(
+                agent,
+                chapter_type="collection" if agent.agent_id == first["agent_id"] else "data_cleaning",
+                inputs=[],
+                entities=["豆包"],
+            )
+            text = json.dumps(value, ensure_ascii=False)
+            await on_text(text)
+            return PlanningSegmentResult(text, True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / plan.research_id, ResilienceConfig(3, 60, 900),
+    )
+    asyncio.run(generate_chapter_specs(
+        plan, workspace, Adapter(), ChapterEngineConfig(),
+    ))
+
+    assert plan.goals[0].agents[1].chapter["opening"]["inputs"] == [
+        {"path": first["output"]["path"]}
+    ]
+
+
+def test_规则22_扩到所有消费上游的章类型():
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    first = plan["goals"][0]["agents"][0]
+    second = dict(first)
+    second["agent_id"] = "summary"
+    second["output"] = {
+        "format": "markdown",
+        "path": "goals/goal-1/summary.md",
+        "validators": ["file_exists"],
+    }
+    second["depends_on"] = [first["agent_id"]]
+    first["chapter"] = {
+        "chapter_id": "ch-1", "chapter_type": "collection",
+        "plan_path": "goals/goal-1/ch-1.md",
+        "opening": {"inputs": [], "task": first["task"], "acceptance": ["完成"]},
+        "closing": {"output": {"path": first["output"]["path"]}, "entities": ["豆包"],
+                    "expected_count": 1, "notes": {}},
+    }
+    second["chapter"] = {
+        "chapter_id": "ch-2", "chapter_type": "summary",
+        "plan_path": "goals/goal-1/ch-2.md",
+        "opening": {"inputs": [], "task": second["task"], "acceptance": ["完成"]},
+        "closing": {"output": {"path": second["output"]["path"]}, "entities": ["豆包"],
+                    "expected_count": 1, "notes": {}},
+    }
+    plan["goals"][0]["agents"] = [first, second]
+
+    errors = lint(plan)["errors"]
+    assert any("规则22" in item and first["output"]["path"] in item for item in errors)
+
+    second["chapter"]["opening"]["inputs"] = [{"path": first["output"]["path"]}]
     assert not any("规则22" in item for item in lint(plan)["errors"])
 
 
@@ -231,11 +363,64 @@ def test_章节重试预算按轮独立_跨轮重生成不累加(tmp_path):
     workspace = PlanSegmentWorkspace(
         tmp_path / "runs" / plan.research_id, ResilienceConfig(3, 60, 900),
     )
-    for _ in range(2):  # 模拟 lint 失败后整份章节重生成两轮
+    for _ in range(2):  # 模拟 lint 失败后整份章节重生成两轮；hash 未变应复用
         asyncio.run(generate_chapter_specs(
             plan, workspace, Adapter(), ChapterEngineConfig(),
         ))
-    assert calls == ["goal-1-ch-1"] * 6
+    assert calls == ["goal-1-ch-1"] * 3
+
+
+def test_上游结构化结尾变化会使依赖章缓存失效(tmp_path):
+    from app.config import ChapterEngineConfig, ResilienceConfig
+    from app.plan.chapters import generate_chapter_specs
+    from app.plan.model import Plan
+    from app.plan.segments import PlanSegmentWorkspace
+
+    source = make_plan_dict()
+    source["goals"] = source["goals"][:1]
+    first = source["goals"][0]["agents"][0]
+    second = {**first, "agent_id": "summary", "display_name": "摘要"}
+    second["depends_on"] = [first["agent_id"]]
+    second["output"] = {
+        "format": "markdown", "shape": "object",
+        "path": "goals/goal-1/summary.md", "validators": ["file_exists"],
+    }
+    source["goals"][0]["agents"] = [first, second]
+    plan = Plan.from_dict(source)
+    calls = []
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            from app.adapters.contracts import PlanningSegmentResult
+
+            calls.append(request.segment_name)
+            index = int(request.segment_name.rsplit("-", 1)[1]) - 1
+            agent = plan.goals[0].agents[index]
+            value = _chapter_value(
+                agent,
+                chapter_type="collection" if index == 0 else "summary",
+                inputs=[], entities=["初版实体"],
+            )
+            text = json.dumps(value, ensure_ascii=False)
+            await on_text(text)
+            return PlanningSegmentResult(text, True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / plan.research_id, ResilienceConfig(3, 60, 900),
+    )
+    asyncio.run(generate_chapter_specs(
+        plan, workspace, Adapter(), ChapterEngineConfig(),
+    ))
+    upstream = workspace.formal_path("goal-1-ch-1")
+    value = json.loads(upstream.read_text(encoding="utf-8"))
+    value["closing"]["entities"] = ["新版实体"]
+    upstream.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+    asyncio.run(generate_chapter_specs(
+        plan, workspace, Adapter(), ChapterEngineConfig(),
+    ))
+
+    assert calls == ["goal-1-ch-1", "goal-1-ch-2", "goal-1-ch-2"]
 
 
 def test_有shell能力的章引擎强制codex_章级默认不覆盖规则7(tmp_path):

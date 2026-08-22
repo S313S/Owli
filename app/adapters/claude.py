@@ -328,14 +328,22 @@ class ClaudeAdapter:
 
         try:
             sdk = self._sdk or _load_sdk()
+            option_values: dict[str, Any] = {
+                "cwd": str(PROJECT_ROOT),
+                "setting_sources": [],
+                "tools": [],
+                "allowed_tools": [],
+                "disallowed_tools": sorted(CLAUDE_TOOL_UNIVERSE),
+                "permission_mode": "dontAsk",
+                "include_partial_messages": True,
+            }
+            if request.output_schema is not None:
+                option_values["output_format"] = {
+                    "type": "json_schema",
+                    "schema": request.output_schema,
+                }
             options = sdk.ClaudeAgentOptions(
-                cwd=str(PROJECT_ROOT),
-                setting_sources=[],
-                tools=[],
-                allowed_tools=[],
-                disallowed_tools=sorted(CLAUDE_TOOL_UNIVERSE),
-                permission_mode="dontAsk",
-                include_partial_messages=True,
+                **option_values,
             )
             client = sdk.ClaudeSDKClient(options)
         except Exception as exc:
@@ -354,6 +362,7 @@ class ClaudeAdapter:
         completed = False
         failed = False
         cause: str | None = None
+        error_text: str | None = None
         try:
             await client.connect(_prompt_stream(prompt))
             async for message in client.receive_response():
@@ -384,20 +393,34 @@ class ClaudeAdapter:
                                 if inspect.isawaitable(callback_result):
                                     await callback_result
                 if isinstance(message, sdk.ResultMessage):
+                    structured = getattr(message, "structured_output", None)
+                    if structured is not None:
+                        text = json.dumps(structured, ensure_ascii=False)
+                        chunks[:] = [text]
+                        if on_text is not None and not saw_stream_delta:
+                            callback_result = on_text(text)
+                            if inspect.isawaitable(callback_result):
+                                await callback_result
                     api_status = getattr(message, "api_error_status", None)
+                    is_error = bool(getattr(message, "is_error", False))
                     if api_status == 429:
                         cause = "rate_limit"
                     elif api_status in {500, 529}:
                         cause = "service"
-                    elif bool(getattr(message, "is_error", False)):
+                    elif is_error:
                         message_text = str(message)
                         cause = (
                             "transport"
                             if classify_transport_error(message_text)
                             else "engine_error"
                         )
+                    if is_error or api_status is not None:
+                        error_text = (
+                            f"is_error={is_error}; "
+                            f"api_error_status={api_status}; raw={message}"
+                        )
                     failed = (
-                        bool(getattr(message, "is_error", False))
+                        is_error
                         or api_status is not None
                     )
                     completed = not failed
@@ -419,7 +442,7 @@ class ClaudeAdapter:
         return PlanningSegmentResult(
             "".join(chunks),
             completed and bool(chunks),
-            error="规划短流返回错误" if failed else None,
+            error=error_text if failed else None,
             cause=cause,
         )
 

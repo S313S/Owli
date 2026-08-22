@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,7 @@ def test_规划短流接受完整_json_围栏() -> None:
     assert _json_payload('```json\n{"ok": true}\n```') == '{"ok": true}'
 
 
-def test_段级重试次数由配置覆盖(tmp_path):
+def test_语义类段级重试次数由配置覆盖(tmp_path):
 
     from app.adapters.contracts import PlanningSegmentResult
     from app.config import ResilienceConfig
@@ -97,7 +98,7 @@ def test_段级重试次数由配置覆盖(tmp_path):
             del request, on_text
             self.calls += 1
             return PlanningSegmentResult(
-                text="{", completed=False, transport_interrupted=True
+                text="{", completed=False, cause="engine_error"
             )
 
     adapter = Adapter()
@@ -202,6 +203,78 @@ def test_规划限流按配置退避且不把_429_当断流续写(tmp_path):
     }
     assert continuations == ["", ""]
     assert delays == [60]
+
+
+def test_传输类失败只退避不消耗段预算(tmp_path):
+    from app.adapters.contracts import PlanningSegmentResult
+    from app.config import ResilienceConfig
+    from app.plan.segments import PlanSegmentWorkspace
+
+    calls = 0
+    delays = []
+
+    async def retry_sleep(seconds):
+        delays.append(seconds)
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            nonlocal calls
+            del request
+            calls += 1
+            if calls <= 2:
+                return PlanningSegmentResult(
+                    text="", completed=False, cause="transport",
+                    transport_interrupted=True, error="socket closed",
+                )
+            await on_text('{"ok":true}')
+            return PlanningSegmentResult(text='{"ok":true}', completed=True)
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / "r-transport-budget",
+        ResilienceConfig(1, 1, 1),
+        retry_sleep=retry_sleep,
+    )
+
+    assert asyncio.run(workspace.generate("goal-1", "生成", Adapter())) == {
+        "ok": True
+    }
+    assert calls == 3
+    assert delays == [1, 1]
+    assert workspace._attempts["goal-1"] == 1
+
+
+def test_传输类永久失败由独立配置上限终止_不污染语义预算(tmp_path):
+    from app.adapters.contracts import PlanningSegmentResult
+    from app.config import ResilienceConfig
+    from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
+
+    calls = 0
+    delays = []
+
+    async def retry_sleep(seconds):
+        delays.append(seconds)
+
+    class Adapter:
+        async def run_planning_segment(self, request, on_text=None):
+            nonlocal calls
+            del request, on_text
+            calls += 1
+            return PlanningSegmentResult(
+                text="", completed=False, cause="service", error="service 529",
+            )
+
+    workspace = PlanSegmentWorkspace(
+        tmp_path / "runs" / "r-transport-terminal",
+        ResilienceConfig(3, 1, 1, plan_transport_retries=3),
+        retry_sleep=retry_sleep,
+    )
+
+    with pytest.raises(PlanSegmentError, match="传输类失败连续 3 次"):
+        asyncio.run(workspace.generate("goal-1", "生成", Adapter()))
+
+    assert calls == 3
+    assert delays == [1, 1]
+    assert "goal-1" not in workspace._attempts
 
 
 def test_规划短流路由固定_claude_且忽略执行期覆盖():
@@ -334,6 +407,55 @@ def test_claude_规划续写走_user_continuation_且不注入_assistant_role():
     assert Client.options.values["tools"] == []
     assert Client.options.values["include_partial_messages"] is True
     assert result.text == '品"}' and result.completed is True
+
+
+def test_claude_章节短流使用SDK结构化输出():
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import PlanningSegmentRequest
+
+    class ResultMessage:
+        is_error = False
+        api_error_status = None
+        structured_output = {"chapter_type": "report", "opening": {}, "closing": {}}
+
+    class Options:
+        def __init__(self, **values):
+            self.values = values
+
+    class Client:
+        options = None
+
+        def __init__(self, options):
+            Client.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self):
+            yield ResultMessage()
+
+        async def disconnect(self):
+            pass
+
+    class Sdk:
+        ClaudeAgentOptions = Options
+        ClaudeSDKClient = Client
+        AssistantMessage = type("AssistantMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+
+    Sdk.ResultMessage = ResultMessage
+
+    schema = {"type": "object", "required": ["chapter_type"]}
+    result = asyncio.run(ClaudeAdapter(sdk=Sdk).generate_plan_segment(
+        PlanningSegmentRequest("r-structured", "goal-1-ch-1", "只输出 JSON", output_schema=schema)
+    ))
+
+    assert Client.options.values["output_format"] == {
+        "type": "json_schema", "schema": schema,
+    }
+    assert json.loads(result.text)["chapter_type"] == "report"
+    assert result.completed is True
 
 
 def test_claude_规划短流从_stream_event_即时保留断流前缀():

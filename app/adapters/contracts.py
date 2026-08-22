@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.adapters import validation as artifact_validation
 from app.adapters.capability import Capability
@@ -54,11 +55,15 @@ class EngineRunResult:
 
     @property
     def succeeded(self) -> bool:
+        status = self.conclusion.status if self.conclusion is not None else None
         return (
             self.engine_error is None
             and self.conclusion_error is None
             and self.conclusion is not None
-            and self.conclusion.status == "done"
+            and (
+                status == "done"
+                or (status == "partial" and bool(self.conclusion.unmet))
+            )
             and self.validation.verdict is artifact_validation.Verdict.PASS
         )
 
@@ -72,6 +77,7 @@ class PlanningSegmentRequest:
     prompt: str
     continuation: str = ""
     output_path: Path | None = None
+    output_schema: dict[str, Any] | None = None
 
     @property
     def body(self) -> str:

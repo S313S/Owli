@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 _DEFAULTS = {
     "OWLI_PLAN_SEGMENT_RETRIES": 3,
+    "OWLI_PLAN_TRANSPORT_RETRIES": 3,
     "OWLI_BACKOFF_INITIAL_SECONDS": 60,
     "OWLI_BACKOFF_MAX_SECONDS": 900,
 }
@@ -19,6 +20,7 @@ class ResilienceConfig:
     plan_segment_retries: int
     backoff_initial_seconds: int
     backoff_max_seconds: int
+    plan_transport_retries: int = 3
 
     def backoff_seconds(self, failure_count: int) -> int:
         """返回第 failure_count 次退避时长，按指数增长并封顶。"""
@@ -66,12 +68,21 @@ class ResearchScaleProfile:
     max_goals: int
     max_sources_per_goal: int | None
     source_item_limits: Mapping[str, int]
+    max_chapters_per_goal: int | None = None
+    chapter_wall_clock_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_goals < 3:
             raise ValueError("max_goals 不得小于 3")
         if self.max_sources_per_goal is not None and self.max_sources_per_goal < 1:
             raise ValueError("max_sources_per_goal 必须是正整数或 None")
+        if self.max_chapters_per_goal is not None and self.max_chapters_per_goal < 1:
+            raise ValueError("max_chapters_per_goal 必须是正整数或 None")
+        if (
+            self.chapter_wall_clock_seconds is not None
+            and self.chapter_wall_clock_seconds < 1
+        ):
+            raise ValueError("chapter_wall_clock_seconds 必须是正整数或 None")
         limits = {str(key): int(value) for key, value in self.source_item_limits.items()}
         if any(value < 1 for value in limits.values()):
             raise ValueError("source_item_limits 的值必须是正整数")
@@ -93,22 +104,26 @@ _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
     "standard": {
         "max_goals": 7,
         "max_sources_per_goal": None,
+        "max_chapters_per_goal": None,
         "source_item_limits": {
             "hacker_news": 1000,
             "product_hunt": 20,
             "web_search": 10,
             "x": 10,
         },
+        "chapter_wall_clock_seconds": None,
     },
     "fast": {
         "max_goals": 3,
         "max_sources_per_goal": 2,
+        "max_chapters_per_goal": 4,
         "source_item_limits": {
             "hacker_news": 100,
             "product_hunt": 10,
             "web_search": 5,
             "x": 10,
         },
+        "chapter_wall_clock_seconds": 300,
     },
 }
 
@@ -129,7 +144,8 @@ def load_research_scale_config(
         if name not in values:
             raise ValueError(f"未知调研规模档位：{name}")
         unknown = set(override) - {
-            "max_goals", "max_sources_per_goal", "source_item_limits"
+            "max_goals", "max_sources_per_goal", "source_item_limits",
+            "max_chapters_per_goal", "chapter_wall_clock_seconds",
         }
         if unknown:
             raise ValueError(f"{name} 含未知规模配置：{sorted(unknown)}")
@@ -166,6 +182,9 @@ def load_resilience_config(
             values, "OWLI_BACKOFF_INITIAL_SECONDS"
         ),
         backoff_max_seconds=_positive_int(values, "OWLI_BACKOFF_MAX_SECONDS"),
+        plan_transport_retries=_positive_int(
+            values, "OWLI_PLAN_TRANSPORT_RETRIES"
+        ),
     )
     if config.backoff_initial_seconds > config.backoff_max_seconds:
         raise ValueError(

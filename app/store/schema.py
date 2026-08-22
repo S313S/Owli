@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-_LATEST_SCHEMA_VERSION = 3
+_LATEST_SCHEMA_VERSION = 4
 
 
 def initialize_database_if_empty(
@@ -42,7 +42,15 @@ def _apply_migrations(
         matches = sorted(migrations_dir.glob(f"v{version}_*.sql"))
         if len(matches) != 1:
             raise RuntimeError(f"schema v{version} 迁移文件数量必须为 1，实际 {len(matches)}")
-        connection.executescript(matches[0].read_text(encoding="utf-8"))
+        chapter_columns = {
+            row[1] for row in connection.execute(
+                "PRAGMA table_xinfo(chapter_progress)"
+            ).fetchall()
+        }
+        if version == 4 and {"engine_error", "conclusion_error"} <= chapter_columns:
+            connection.execute("PRAGMA user_version = 4")
+        else:
+            connection.executescript(matches[0].read_text(encoding="utf-8"))
         migrated_version = connection.execute("PRAGMA user_version").fetchone()[0]
         if migrated_version != version:
             raise RuntimeError(

@@ -98,13 +98,13 @@ class PlanSegmentWorkspace:
         adapter: Any,
         *,
         on_retry: Any = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         formal = self.formal_path(name)
         partial = self.partial_path(name)
         self.root.mkdir(parents=True, exist_ok=True)
-        attempts_used = self._attempts.get(name, 0)
-        attempts_left = self.config.plan_segment_retries - attempts_used
-        if attempts_left <= 0:
+        counted_attempts = self._attempts.get(name, 0)
+        if counted_attempts >= self.config.plan_segment_retries:
             raise PlanSegmentError(
                 f"规划段 {name} 总尝试预算 "
                 f"{self.config.plan_segment_retries} 次已耗尽"
@@ -115,9 +115,9 @@ class PlanSegmentWorkspace:
         last_error = "规划短流未完成"
         current_prompt = prompt
 
-        for offset in range(attempts_left):
-            attempt = attempts_used + offset + 1
-            self._attempts[name] = attempt
+        transport_failures = 0
+        while counted_attempts < self.config.plan_segment_retries:
+            attempt = counted_attempts + 1
             # 每轮起跑先移除旧 partial；已收前缀已进内存并随请求续写，
             # 防止 Agent Write/Edit 因残留文件进入覆盖死锁。
             partial.unlink(missing_ok=True)
@@ -138,6 +138,7 @@ class PlanSegmentWorkspace:
                 prompt=current_prompt,
                 continuation=continuation,
                 output_path=formal,
+                output_schema=output_schema,
             )
             result = adapter.run_planning_segment(request, on_text=on_text)
             if inspect.isawaitable(result):
@@ -145,6 +146,18 @@ class PlanSegmentWorkspace:
             generated = str(result.text or "") or received
             assembled = merge_continuation(continuation, generated)
             partial.write_text(assembled, encoding="utf-8")
+            cause = str(getattr(result, "cause", "") or "").casefold()
+            effective_cause = (
+                "transport" if result.transport_interrupted else cause
+            )
+            does_not_consume_budget = effective_cause in {
+                "rate_limit", "transport", "service",
+            }
+            if does_not_consume_budget:
+                transport_failures += 1
+            else:
+                counted_attempts += 1
+                self._attempts[name] = counted_attempts
             if result.completed:
                 try:
                     value = json.loads(_json_payload(assembled))
@@ -173,10 +186,6 @@ class PlanSegmentWorkspace:
                     return value
             else:
                 last_error = result.error or "规划短流未收到完成信号"
-            cause = str(getattr(result, "cause", "") or "").casefold()
-            effective_cause = (
-                "transport" if result.transport_interrupted else cause
-            )
             continuation = (
                 assembled
                 if effective_cause == "transport"
@@ -190,13 +199,18 @@ class PlanSegmentWorkspace:
                     else "请保持原结构契约并重新输出完整 JSON。"
                 )
             )
-            if attempt < self.config.plan_segment_retries:
-                if effective_cause in {"rate_limit", "transport", "service"}:
-                    await self._retry_sleep(
-                        self.config.backoff_seconds(attempt - 1)
+            if does_not_consume_budget:
+                if transport_failures >= self.config.plan_transport_retries:
+                    raise PlanSegmentError(
+                        f"规划段 {name} 传输类失败连续 {transport_failures} 次："
+                        f"{last_error}"
                     )
+                await self._retry_sleep(
+                    self.config.backoff_seconds(transport_failures - 1)
+                )
+            if counted_attempts < self.config.plan_segment_retries:
                 if on_retry is not None:
-                    callback_result = on_retry(attempt + 1, last_error)
+                    callback_result = on_retry(counted_attempts + 1, last_error)
                     if inspect.isawaitable(callback_result):
                         await callback_result
 

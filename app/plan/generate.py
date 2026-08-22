@@ -29,16 +29,55 @@ from app.sources.registry import planning_catalog
 
 
 _FORMATS = {"table", "markdown", "excel", "json"}
+_SHAPES = {"object", "array"}
+_MARKET_SOURCES = {
+    "cn_product": {"web_search", "x"},
+    "global_product": {"web_search", "x", "hacker_news", "product_hunt"},
+}
 _SOURCE_LIMIT_PARAMETERS = {
     "hacker_news": "hitsPerPage",
     "product_hunt": "limit",
     "web_search": "max_results",
     "x": "max_results",
 }
+_LINT_GOAL_HEADER = re.compile(
+    r"^\[(?:规则\d+|结构)\]\s+goal-([1-9][0-9]*)(?=[./\s：:]|$)"
+)
 
 
 class PlanGenerationError(RuntimeError):
     """规划引擎或计划产物未通过协议。"""
+
+
+def _affected_goal_indices(errors: list[str], goal_count: int) -> list[int]:
+    """只从 lint 消息头提取受影响 goal，引文中的 goal-N 不参与判定。"""
+
+    affected: list[int] = []
+    for message in errors:
+        matched = _LINT_GOAL_HEADER.match(str(message))
+        if matched is None:
+            continue
+        index = int(matched.group(1))
+        if 1 <= index <= goal_count and index not in affected:
+            affected.append(index)
+    return affected
+
+
+def _structure_errors(exc: Exception) -> list[str]:
+    """把可归属的结构错误统一改成可机读的 goal 消息头。"""
+
+    messages: list[str] = []
+    for line in str(exc).splitlines() or [str(exc)]:
+        matched = re.match(
+            r"^\s*(goal-[1-9][0-9]*)(?=[./\s：:]|$)", line,
+        )
+        if matched is not None:
+            messages.append(
+                f"[结构] {matched.group(1)}. {type(exc).__name__}: {line.strip()}"
+            )
+    if messages:
+        return list(dict.fromkeys(messages))
+    return [f"[结构] {type(exc).__name__}: {exc}"]
 
 
 _ROLE_MAP = {
@@ -126,7 +165,10 @@ def _skeleton_prompt(
         "方法要点：按证据链自然断点拆分；goal 之间只用 depends_on 表达有向无环依赖，"
         "禁止按搜索/阅读/总结工种拆 goal；同一 source_id 的完整采集链全计划只安排"
         "一次，需要复用的下游 goal 必须通过 depends_on 连到唯一采集链。\n"
-        "产物结构：只输出 JSON object，顶层只能有 goals；每个 goal 只能含 title、"
+        "产物结构：只输出 JSON object，顶层只含 market_profile、"
+        "market_profile_justification、goals。market_profile 只能取 "
+        "cn_product/global_product，justification 用一句可复核理由；"
+        "每个 goal 只能含 title、"
         "objective、depends_on。depends_on 只能引用在它之前的 goal-<n>。\n"
         "边界与降级：信息不足时做明确假设并继续，JSON 字符串值内部不得出现未转义"
         "的英文双引号（引用名称用中文引号「」），不输出 Markdown 围栏、说明或任何"
@@ -141,6 +183,7 @@ def _goal_prompt(
     errors: list[str],
     *,
     upstream_collections: list[Mapping[str, str]] | None = None,
+    market_profile: str = "global_product",
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
 ) -> str:
@@ -154,6 +197,17 @@ def _goal_prompt(
     )
     inventory = json.dumps(
         list(upstream_collections or []),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if market_profile not in _MARKET_SOURCES:
+        raise ValueError(f"market_profile 不在闭集：{market_profile!r}")
+    applicable_sources = _MARKET_SOURCES[market_profile]
+    coverage = json.dumps(
+        {
+            "market_profile": market_profile,
+            "applicable_sources": sorted(applicable_sources),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -190,15 +244,19 @@ def _goal_prompt(
         f"目标：扩展《{query}》中的 {goal_id}；骨架字段固定为："
         f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
-        f"注册表选择：{sources}；{reuse_rule}{scale_rule}采集 agent 的 name 必须唯一确定 capability.sources "
+        f"注册表选择：{sources}；源 × 市场属性覆盖表={coverage}；"
+        f"采集章只能选择 applicable_sources 中的 source_id；{reuse_rule}{scale_rule}"
+        "采集 agent 的 name 必须唯一确定 capability.sources "
         "与 source.* 工具；采集、交叉验证、竞品核对这类重型 goal 必须把 agents 拆到"
         "一项只负责一个竞品与一个信息源；name 用“注册表原名·竞品名”的结构化格式，"
         "同一采集角色可为不同竞品重复出现；"
         "非采集 agent 的 name 只能逐字取职能闭集："
         f"{'、'.join(_ROLE_MAP)}，不得自造名称。\n"
         "产物结构：只输出一个 JSON object，只含 deliverable、acceptance、agents。"
-        "deliverable 含 format/path/description，path 只写文件名；acceptance 是逐条"
-        "可判定字符串数组；agents 每项只含 name、task，不得输出 id、engine、"
+        "deliverable 含 format/path/description/shape，path 只写文件名，shape "
+        "只能取 object/array；acceptance 是逐条可判定字符串数组；"
+        "agents 每项只含 name、task、output，output 只含 shape 且只能取 "
+        "object/array，不得输出 id、engine、"
         "capability、prompt、状态、重试或时间字段。\n"
         "边界与降级：JSON 字符串值内部不得出现未转义的英文双引号，引用名称一律"
         "用中文引号「」；采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
@@ -216,6 +274,7 @@ def _skeleton_scaffolds(
 ) -> list[dict[str, Any]]:
     if not isinstance(value, Mapping) or not isinstance(value.get("goals"), list):
         raise ValueError("骨架顶层必须是含 goals 数组的 object")
+    _skeleton_market_profile(value)
     goals = value["goals"]
     profile = _scale_profile(scale, scale_config)
     if not 3 <= len(goals) <= profile.max_goals:
@@ -246,6 +305,18 @@ def _skeleton_scaffolds(
             "depends_on": list(depends_on),
         })
     return result
+
+
+def _skeleton_market_profile(value: Mapping[str, Any]) -> tuple[str, str]:
+    profile = str(value.get("market_profile", ""))
+    justification = str(value.get("market_profile_justification", "")).strip()
+    if profile not in _MARKET_SOURCES:
+        raise ValueError(
+            "骨架 market_profile 只能取 cn_product 或 global_product"
+        )
+    if not justification:
+        raise ValueError("骨架 market_profile_justification 不能为空")
+    return profile, justification
 
 
 def _capability(
@@ -298,12 +369,14 @@ def _output(
     agent_kind: str,
     goal_id: str,
     agent_id: str,
+    shape: str,
     target: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     base = f"goals/{goal_id}/{agent_id}"
     if agent_kind in {"data_collection", "browser_automation"}:
         result = {
             "format": "json",
+            "shape": shape,
             "path": f"{base}.json",
             "validators": [
                 "file_exists", "json_array_min_items:1",
@@ -312,7 +385,7 @@ def _output(
         }
     elif agent_kind in {"audit", "reliability_audit", "cross_validation"}:
         result = {
-            "format": "json", "path": f"{base}.json",
+            "format": "json", "shape": shape, "path": f"{base}.json",
             "validators": [
                 "file_exists",
                 "no_item_missing_rating",
@@ -323,7 +396,7 @@ def _output(
         }
     elif agent_kind == "excel_generation":
         result = {
-            "format": "excel", "path": f"{base}.xlsx",
+            "format": "excel", "shape": shape, "path": f"{base}.xlsx",
             "validators": ["file_exists", "openpyxl_reload_ok"],
         }
     else:
@@ -335,7 +408,10 @@ def _output(
                 "citation_marks_resolvable",
                 "no_orphan_citation",
             ]
-        result = {"format": "markdown", "path": f"{base}.md", "validators": validators}
+        result = {
+            "format": "markdown", "shape": shape,
+            "path": f"{base}.md", "validators": validators,
+        }
     if target is not None:
         if target["format"] != result["format"]:
             result["validators"] = ["file_exists"]
@@ -439,8 +515,15 @@ def _deliverable(raw: Any, goal_id: str) -> dict[str, str]:
     description = str(raw.get("description", "")).strip()
     if not description:
         raise ValueError(f"{goal_id}.deliverable.description 不能为空")
+    shape = str(raw.get("shape", "")).strip().casefold()
+    if shape not in _SHAPES:
+        raise ValueError(
+            f"{goal_id}.deliverable.shape 非法：{shape!r}；"
+            "只能取 object/array"
+        )
     return {
         "format": format_name,
+        "shape": shape,
         "path": f"goals/{goal_id}/{leaf}",
         "description": description,
     }
@@ -463,6 +546,8 @@ def _build_plan(
     timestamp: str,
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
+    market_profile: str = "global_product",
+    market_profile_justification: str = "兼容旧调用的全球产品默认。",
 ) -> Plan:
     if not isinstance(skeleton, Mapping) or not isinstance(skeleton.get("goals"), list):
         raise ValueError("规划产物顶层必须是含 goals 数组的 object")
@@ -587,6 +672,11 @@ def _build_plan(
                         "source_id": str(source_id),
                         "output_path": str(agent["output"]["path"]),
                     })
+            retry_policy = dict(DEFAULT_RETRY_POLICY)
+            if profile.chapter_wall_clock_seconds is not None:
+                retry_policy["chapter_deadline_seconds"] = (
+                    profile.chapter_wall_clock_seconds
+                )
             goals.append({
                 "goal_id": goal_id,
                 "title": title[:24],
@@ -595,7 +685,7 @@ def _build_plan(
                 "deliverable": deliverables[goal_id],
                 "acceptance": [str(item) for item in acceptance],
                 "intervention": {"on_complete": True, "prompt": f"请核对《{title[:24]}》产物，是否继续？"},
-                "retry_policy": dict(DEFAULT_RETRY_POLICY),
+                "retry_policy": retry_policy,
                 "on_upstream_failure": "skip",
                 "agents": agents,
                 "status": "pending",
@@ -603,7 +693,7 @@ def _build_plan(
         except ValueError as exc:
             structure_errors.append(str(exc))
     if structure_errors:
-        raise ValueError("；".join(structure_errors))
+        raise ValueError("\n".join(structure_errors))
     use_case = "other"
     if any(word in query for word in ("竞品", "优缺点", "对比")):
         use_case = "product_competitor"
@@ -615,6 +705,8 @@ def _build_plan(
         "title": query.strip()[:40],
         "research_question": query,
         "use_case": use_case,
+        "market_profile": market_profile,
+        "market_profile_justification": market_profile_justification,
         "scale": scale,
         "status": "awaiting_review",
         "approved_at": None,
@@ -651,6 +743,15 @@ def _build_agent(
     task = str(raw.get("task", "")).strip()
     if not name or not task:
         raise ValueError(f"{goal_id}.agents 的 name/task 不能为空")
+    raw_output = raw.get("output")
+    if not isinstance(raw_output, Mapping) or set(raw_output) != {"shape"}:
+        raise ValueError(f"{goal_id}.agents 的 output 必须是仅含 shape 的 object")
+    shape = str(raw_output.get("shape", "")).strip().casefold()
+    if shape not in _SHAPES:
+        raise ValueError(
+            f"{goal_id}.agents.output.shape 非法：{shape!r}；"
+            "只能取 object/array"
+        )
     try:
         agent_kind, profile = _classify(name, task)
     except ValueError as exc:
@@ -662,7 +763,7 @@ def _build_agent(
     counters[agent_kind] += 1
     suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
     agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
-    output = _output(agent_kind, goal_id, agent_id, target)
+    output = _output(agent_kind, goal_id, agent_id, shape, target)
     inputs = [
         {"from_goal": item, "artifact": upstream_artifacts[item]}
         for item in upstream
@@ -749,7 +850,15 @@ def _upstream_collection_inventory(
                 if agent_index == len(raw_agents) - 1 and deliverable is not None
                 else None
             )
-            output = _output(agent_kind, goal_id, agent_id, target)
+            raw_output = raw.get("output")
+            shape = (
+                str(raw_output.get("shape", ""))
+                if isinstance(raw_output, Mapping)
+                else ""
+            )
+            if shape not in _SHAPES:
+                continue
+            output = _output(agent_kind, goal_id, agent_id, shape, target)
             inventory.append({
                 "goal_id": goal_id,
                 "agent_id": agent_id,
@@ -832,6 +941,8 @@ async def generate_plan(
     )
     skeleton_errors: list[str] = []
     scaffolds: list[dict[str, Any]] | None = None
+    market_profile = ""
+    market_profile_justification = ""
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
@@ -856,6 +967,9 @@ async def generate_plan(
                 skeleton,
                 scale=scale,
                 scale_config=product_scale_config,
+            )
+            market_profile, market_profile_justification = (
+                _skeleton_market_profile(skeleton)
             )
             await _emit(
                 store,
@@ -894,6 +1008,7 @@ async def generate_plan(
                 upstream_collections=_upstream_collection_inventory(
                     expansions, index
                 ),
+                market_profile=market_profile,
                 scale=scale,
                 scale_config=product_scale_config,
             ),
@@ -955,18 +1070,35 @@ async def generate_plan(
                 timestamp=timestamp,
                 scale=scale,
                 scale_config=product_scale_config,
+                market_profile=market_profile,
+                market_profile_justification=market_profile_justification,
             )
-            await generate_chapter_specs(
-                plan,
-                workspace,
-                adapter,
-                chapter_engine_config or ChapterEngineConfig(),
-            )
-            errors = lint(plan)["errors"]
+            max_chapters = product_scale_config.profile(
+                scale
+            ).max_chapters_per_goal
+            errors = lint(
+                plan, max_chapters_per_goal=max_chapters,
+            )["errors"]
+            if not errors:
+                await generate_chapter_specs(
+                    plan,
+                    workspace,
+                    adapter,
+                    chapter_engine_config or ChapterEngineConfig(),
+                    on_chapter=lambda goal_id, chapter_id: _emit(
+                        store,
+                        _progress_event(
+                            research_id, f"章 {goal_id}/{chapter_id} 落盘"
+                        ),
+                    ),
+                )
+                errors = lint(
+                    plan, max_chapters_per_goal=max_chapters,
+                )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            errors = [f"[结构] {type(exc).__name__}: {exc}"]
+            errors = _structure_errors(exc)
         if not errors:
             store.save_plan_snapshot(
                 research_id, snapshot=plan.to_dict(), expected_rev=0
@@ -986,17 +1118,18 @@ async def generate_plan(
                 if plan is not None
                 else set()
             )
-            joined = "\n".join(
-                item for item in errors if not item.startswith("[规则21]")
+            affected = _affected_goal_indices(
+                [item for item in errors if not item.startswith("[规则21]")],
+                len(scaffolds),
             )
-            affected = [
+            affected.extend(
                 index
                 for index in range(1, len(scaffolds) + 1)
-                if f"goal-{index}" in joined
-                or f"goal-{index}" in duplicate_goals
-            ]
+                if f"goal-{index}" in duplicate_goals and index not in affected
+            )
             for index in affected or list(range(1, len(scaffolds) + 1)):
                 try:
+                    workspace.reset_attempts(f"goal-{index}")
                     await generate_goal(index, errors)
                 except PlanSegmentError as exc:
                     raise PlanGenerationError(str(exc)) from exc

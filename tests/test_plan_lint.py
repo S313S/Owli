@@ -154,7 +154,10 @@ def test_M3a验收真实矛盾_JSON契约未点名文件遇章节校验器报_er
     goal["acceptance"] = [
         "文件为合法 JSON，顶层恰含 columns、rows、competitor_set 三个字段"
     ]
-    goal["agents"][0]["output"]["validators"] = ["file_exists", "sections_exist:结论"]
+    goal["deliverable"].update(format="json", shape="object")
+    goal["agents"][0]["output"].update(
+        path=goal["deliverable"]["path"], format="json", shape="array",
+    )
 
     errors = lint(plan)["errors"]
     assert any("[规则17]" in item and "agent-1" in item for item in errors)
@@ -243,6 +246,12 @@ def test_M3a验收真实矛盾_无采集能力goal按实体写死最小条数报
     plan["goals"][1]["acceptance"] = [
         "报告为每个竞品至少列出 2 条来自不同 author 的独立证据"
     ]
+    goal = plan["goals"][1]
+    goal["deliverable"].update(format="json", shape="array")
+    goal["agents"][0]["output"].update(
+        path=goal["deliverable"]["path"], format="json", shape="array",
+        validators=["file_exists", "json_array_min_items:2"],
+    )
 
     errors = lint(plan)["errors"]
     assert any("[规则18]" in item and "goal-2" in item for item in errors)
@@ -350,6 +359,7 @@ def test_规则14显式数组声明不再误报object契约() -> None:
     goal["agents"][0]["output"]["validators"] = [
         "file_exists", "json_array_min_items:1"
     ]
+    goal["agents"][0]["output"]["shape"] = "array"
 
     assert not any("[规则14]" in item for item in lint(plan)["errors"])
 
@@ -368,6 +378,7 @@ def test_规则14对象契约点名文件时只约束产出该文件的agent() -
     agent = goal["agents"][0]
     agent["task"] = "从 HN 抓取竞品讨论，输出数组 JSON。"
     agent["output"]["validators"] = ["file_exists", "json_array_min_items:1"]
+    agent["output"]["shape"] = "array"
 
     # 中间产物 agent（路径不是被点名的文件）→ 不拦
     agent["output"]["path"] = "goals/goal-1/hn-raw.json"
@@ -375,4 +386,73 @@ def test_规则14对象契约点名文件时只约束产出该文件的agent() -
 
     # 产出被点名文件的 agent 挂数组校验器 → 仍是真冲突，必须拦
     agent["output"]["path"] = "goals/goal-1/goal-1-competitor-pros-cons.json"
+    agent["output"]["shape"] = "object"
     assert any("[规则14]" in item for item in lint(plan)["errors"])
+
+
+def test_规则14_17_18_只读_shape_路径与_validator_不读措辞() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][1]
+    goal["deliverable"] = {
+        "format": "json",
+        "shape": "object",
+        "path": "goals/goal-2/result.json",
+        "description": "结构化产物",
+    }
+    owner = goal["agents"][0]
+    owner["output"] = {
+        "format": "json",
+        "shape": "object",
+        "path": goal["deliverable"]["path"],
+        "validators": ["file_exists", "json_array_min_items:3"],
+    }
+    goal["acceptance"] = [
+        "顶层说成数组还是对象都不得影响结构判定"
+    ]
+
+    errors = lint(plan)["errors"]
+    assert any(item.startswith("[规则14] goal-2/") for item in errors)
+    assert any(item.startswith("[规则18] goal-2") for item in errors)
+
+    owner["output"]["validators"] = ["file_exists"]
+    owner["output"]["shape"] = "array"
+    errors = lint(plan)["errors"]
+    assert any(item.startswith("[规则17] goal-2") for item in errors)
+
+    owner["output"]["shape"] = "object"
+    assert not any(
+        item.startswith(("[规则14]", "[规则17]", "[规则18]"))
+        for item in lint(plan)["errors"]
+    )
+
+
+def test_goal_acceptance_只交给_deliverable_路径所属_agent(tmp_path) -> None:
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from app.plan.model import Plan
+
+    source = make_plan_dict()
+    source["baseline"] = None
+    goal = source["goals"][0]
+    owner = make_agent("owner", "goal-1")
+    owner["output"]["path"] = goal["deliverable"]["path"]
+    goal["agents"] = [goal["agents"][0], owner]
+    plan = Plan.from_dict(source)
+    coordinator = RuntimeCoordinator(
+        store=type("Store", (), {})(), event_buffer=object(), researches={}, cards={},
+        adapter_factory=lambda: object(), runs_root=tmp_path / "runs",
+        routing_utc_clock=lambda: None,
+    )
+
+    non_owner_task = coordinator._task(
+        plan, plan.goals[0].agents[0],
+        type("Ctx", (), {"goal_id": "goal-1", "engine": "claude"})(),
+    )
+    owner_task = coordinator._task(
+        plan, plan.goals[0].agents[1],
+        type("Ctx", (), {"goal_id": "goal-1", "engine": "claude"})(),
+    )
+
+    assert "Goal 验收条件" not in non_owner_task.body
+    assert "Goal 验收条件" in owner_task.body

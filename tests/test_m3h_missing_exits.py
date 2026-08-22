@@ -52,6 +52,32 @@ def test_执行失败回灌原样保留_unmet_与_capability_denials():
     assert '["source.web_search 不可用"]' in feedback
 
 
+def test_partial_合法产物视为章_done_并保留_unmet(tmp_path: Path):
+    from app.adapters import validation
+    from app.adapters.contracts import EngineRunResult, OwliResult
+
+    output = tmp_path / "runs" / "r" / "goals" / "goal-1" / "audit.md"
+    output.parent.mkdir(parents=True)
+    output.write_text("# 结论\n\n存在上游缺口。\n", encoding="utf-8")
+    report = validation.ValidationReport(
+        validation.Verdict.PASS,
+        [validation.Result(validation.Verdict.PASS, "file_exists", "ok", [])],
+    )
+    result = EngineRunResult(
+        conclusion=OwliResult(
+            "partial", str(output), "部分完成", [], ["缺少 HN 样本"], [],
+            "empty_result",
+        ),
+        conclusion_error=None,
+        validation=report,
+        events=[],
+        permission_denials=[],
+    )
+
+    assert result.succeeded is True
+    assert result.conclusion.unmet == ["缺少 HN 样本"]
+
+
 @pytest.mark.parametrize("reason", ["empty_result", "tool_unavailable"])
 def test_空结果与工具不可用立即_missing_且不烧重试(tmp_path: Path, reason: str):
     from app.orchestrator.scheduler import Scheduler, TaskRunResult

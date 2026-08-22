@@ -12,22 +12,26 @@ RESEARCH_ID = "r-m3-wiring"
 
 
 def _goal(number: int, agents: list[dict], *, format_name: str = "json") -> dict:
+    shape = "object" if format_name == "markdown" else "array"
     return {
         "title": f"阶段{number}",
         "objective": f"形成阶段{number}可独立复核的产物。",
         "depends_on": [] if number == 1 else [f"goal-{number - 1}"],
         "deliverable": {
             "format": format_name,
+            "shape": shape,
             "path": f"stage-{number}.{'md' if format_name == 'markdown' else 'json'}",
             "description": "可供下游复核的结构化产物。",
         },
         "acceptance": ["文件存在且至少包含 1 条可判定记录"],
-        "agents": agents,
+        "agents": [{**agent, "output": {"shape": shape}} for agent in agents],
     }
 
 
 def _multi_source_skeleton() -> dict:
     return {
+        "market_profile": "global_product",
+        "market_profile_justification": "产品面向全球市场。",
         "goals": [
             _goal(1, [
                 {"name": "HN 数据抓取", "task": "采集 Hacker News 讨论"},
@@ -74,6 +78,10 @@ class PlanEngine:
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         if task.output_path.name == "skeleton.json":
             payload = {
+                "market_profile": self.skeleton["market_profile"],
+                "market_profile_justification": self.skeleton[
+                    "market_profile_justification"
+                ],
                 "goals": [
                     {
                         "title": goal["title"],

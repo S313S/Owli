@@ -20,6 +20,7 @@ DEFAULT_RETRY_POLICY = {
     "goal_deadline_hours": 12,
     "on_exhausted": "fail_goal",
 }
+OPTIONAL_RETRY_POLICY_FIELDS = frozenset({"chapter_deadline_seconds"})
 
 
 def _strict_fields(data: Mapping[str, Any], allowed: set[str], location: str) -> None:
@@ -143,7 +144,9 @@ class Goal:
     def __post_init__(self) -> None:
         if not _GOAL_ID_PATTERN.fullmatch(self.goal_id):
             raise ValueError(f"goal_id 必须符合 goal-<n>：{self.goal_id}")
-        unknown_policy = set(self.retry_policy) - set(DEFAULT_RETRY_POLICY)
+        unknown_policy = set(self.retry_policy) - (
+            set(DEFAULT_RETRY_POLICY) | OPTIONAL_RETRY_POLICY_FIELDS
+        )
         if unknown_policy:
             raise ValueError(f"{self.goal_id}.retry_policy 含未知字段：{unknown_policy}")
 
@@ -170,6 +173,8 @@ class Plan:
     title: str
     research_question: str
     use_case: str
+    market_profile: str
+    market_profile_justification: str
     scale: str
     status: str
     approved_at: str | None
@@ -184,7 +189,8 @@ class Plan:
 
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "scale", "status", "approved_at", "decision_balance", "expert_panel", "goals",
+        "market_profile", "market_profile_justification", "scale", "status",
+        "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     )
 
@@ -193,6 +199,13 @@ class Plan:
             raise ValueError("plan_rev 必须从 1 开始")
         if self.scale not in {"fast", "standard"}:
             raise ValueError(f"scale 只能取 fast 或 standard：{self.scale!r}")
+        if self.market_profile not in {"cn_product", "global_product"}:
+            raise ValueError(
+                "market_profile 只能取 cn_product 或 global_product："
+                f"{self.market_profile!r}"
+            )
+        if not self.market_profile_justification.strip():
+            raise ValueError("market_profile_justification 不能为空")
         if not (
             self.baseline_source in {"generated", "expert_panel"}
             or re.fullmatch(r"reused:r-[A-Za-z0-9-]+", self.baseline_source)
@@ -216,6 +229,10 @@ class Plan:
         values.setdefault("expert_panel", None)
         values.setdefault("baseline", None)
         values.setdefault("scale", "standard")
+        values.setdefault("market_profile", "global_product")
+        values.setdefault(
+            "market_profile_justification", "历史计划未记录市场属性，按全球产品兼容。"
+        )
         values["goals"] = [Goal.from_dict(item) for item in values["goals"]]
         return cls(**values)
 

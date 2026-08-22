@@ -30,6 +30,8 @@ def async_test(function):
 
 def _skeleton() -> dict[str, Any]:
     return {
+        "market_profile": "global_product",
+        "market_profile_justification": "产品面向全球市场。",
         "goals": [
             {
                 "title": "采集竞品证据",
@@ -37,11 +39,13 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": [],
                 "deliverable": {
                     "format": "json",
+                    "shape": "array",
                     "path": "evidence.json",
                     "description": "带永久链接的证据数组。",
                 },
                 "acceptance": ["文件存在且至少包含 1 条 permalink 记录"],
-                "agents": [{"name": "HN 数据抓取", "task": "采集 Hacker News 证据"}],
+                "agents": [{"name": "HN 数据抓取", "task": "采集 Hacker News 证据",
+                            "output": {"shape": "array"}}],
             },
             {
                 "title": "审计证据可靠度",
@@ -49,11 +53,13 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": ["goal-1"],
                 "deliverable": {
                     "format": "json",
+                    "shape": "array",
                     "path": "audit.json",
                     "description": "包含评级结论的结构化数据。",
                 },
                 "acceptance": ["文件存在且每条记录包含 5 个评分字段"],
-                "agents": [{"name": "可靠度审计", "task": "审计证据可靠度"}],
+                "agents": [{"name": "可靠度审计", "task": "审计证据可靠度",
+                            "output": {"shape": "array"}}],
             },
             {
                 "title": "撰写调研报告",
@@ -61,11 +67,13 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": ["goal-2"],
                 "deliverable": {
                     "format": "markdown",
+                    "shape": "object",
                     "path": "report.md",
                     "description": "包含结论与信息源双章的 Markdown 报告。",
                 },
                 "acceptance": ["文件存在且包含结论、信息源 2 个章节"],
-                "agents": [{"name": "报告撰写", "task": "撰写最终 Markdown 报告"}],
+                "agents": [{"name": "报告撰写", "task": "撰写最终 Markdown 报告",
+                            "output": {"shape": "object"}}],
             },
         ]
     }
@@ -90,6 +98,10 @@ class RecordingEngine:
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
             if task.output_path.name == "skeleton.json":
                 payload = {
+                    "market_profile": self.skeleton["market_profile"],
+                    "market_profile_justification": self.skeleton[
+                        "market_profile_justification"
+                    ],
                     "goals": [
                         {
                             "title": goal["title"],
@@ -315,7 +327,8 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
 
     assert [task.agent_kind for task in engine.tasks] == [
         "planning", "planning", "planning", "planning", "planning", "planning", "planning",
-        "data_collection", "reliability_audit", "report_writing",
+        "data_collection", "reliability_audit",
+        "report_writing", "report_writing", "report_writing",
     ]
     assert chapters_response.status_code == 200
     assert chapters and all(
@@ -423,8 +436,8 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
         completed = await wait_for_status(client, research_id, "completed")
 
     assert completed["progress"]["done"] == 3
-    assert [task.agent_kind for task in engine.tasks][-2:] == [
-        "reliability_audit", "report_writing"
+    assert [task.agent_kind for task in engine.tasks][-4:] == [
+        "reliability_audit", "report_writing", "report_writing", "report_writing"
     ]
 
 
@@ -432,7 +445,8 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
 async def test_BACKOFF_样本挂起同引擎后续_agent_并沿_SSE_恢复(tmp_path: Path):
     skeleton = _skeleton()
     skeleton["goals"][0]["agents"].append(
-        {"name": "HN 数据抓取", "task": "第二批采集，必须等待限流恢复"}
+        {"name": "HN 数据抓取", "task": "第二批采集，必须等待限流恢复",
+         "output": {"shape": "array"}}
     )
     engine = RecordingEngine(skeleton=skeleton)
     engine.backoff_first_collection = True
@@ -511,11 +525,13 @@ async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实�
         "depends_on": [],
         "deliverable": {
             "format": "markdown",
+            "shape": "object",
             "path": "independent-report.md",
             "description": "如实列出成功与失败阶段的独立报告。",
         },
         "acceptance": ["文件存在且包含结论、信息源 2 个章节"],
-        "agents": [{"name": "报告撰写", "task": "独立撰写失败说明报告"}],
+        "agents": [{"name": "报告撰写", "task": "独立撰写失败说明报告",
+                    "output": {"shape": "object"}}],
     })
     engine = RecordingEngine(skeleton=skeleton)
     engine.fail_kind = "data_collection"
@@ -542,7 +558,7 @@ async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实�
     }
     assert len([task for task in engine.tasks if task.agent_kind == "data_collection"]) == 20
     assert any(task.agent_kind == "reliability_audit" for task in engine.tasks)
-    assert any(task.agent_id == "report-writing-2" for task in engine.tasks)
+    assert any(task.agent_id.startswith("report-writing-2-sec-") for task in engine.tasks)
     assert "retry_exhausted" in text
     assert "# 结论" in text and "# 信息源" in text and "[^q-1]" in text
 

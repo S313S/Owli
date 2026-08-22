@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 3;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 4;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -188,6 +188,8 @@ CREATE TABLE chapter_progress (
   reason            TEXT CHECK (reason IN (
                       'empty_result','tool_unavailable','quota_exhausted','retry_exhausted'
                     ) OR reason IS NULL),
+  engine_error      TEXT,
+  conclusion_error  TEXT,
   actual_output_path TEXT,
   actual_count       INTEGER CHECK (actual_count IS NULL OR actual_count >= 0),
   updated_at         TEXT NOT NULL,
@@ -227,3 +229,5 @@ CREATE VIRTUAL TABLE recall_fts USING fts5(
   summary_line,
   tokenize = 'trigram'
 );
+
+PRAGMA user_version = 4;

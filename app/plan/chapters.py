@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import hashlib
+import inspect
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -15,6 +18,53 @@ CHAPTER_TYPES = frozenset({
     "excel_generation", "comparison", "cross_validation", "audit",
     "report", "summary", "tagging",
 })
+
+CHAPTER_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["chapter_type", "opening", "closing"],
+    "properties": {
+        "chapter_type": {"type": "string", "enum": sorted(CHAPTER_TYPES)},
+        "opening": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["inputs", "task", "acceptance"],
+            "properties": {
+                "inputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["path"],
+                        "properties": {"path": {"type": "string", "minLength": 1}},
+                    },
+                },
+                "task": {"type": "string", "minLength": 1},
+                "acceptance": {
+                    "type": "array", "minItems": 1,
+                    "items": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+        "closing": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["output", "entities", "expected_count", "notes"],
+            "properties": {
+                "output": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string", "minLength": 1}},
+                },
+                "entities": {
+                    "type": "array", "items": {"type": "string", "minLength": 1},
+                },
+                "expected_count": {"type": ["integer", "null"], "minimum": 0},
+                "notes": {"type": "object"},
+            },
+        },
+    },
+}
 
 
 def _input_paths(value: Any) -> list[str]:
@@ -144,27 +194,112 @@ def _render_chapter(chapter: Mapping[str, Any], agent: Agent) -> str:
     )
 
 
-async def generate_chapter_specs(
+def _chapter_input_hash(
+    agent: Agent, prior_closings: list[dict[str, Any]],
+) -> str:
+    data = agent.to_dict()
+    data.pop("chapter", None)
+    data.pop("engine", None)
+    encoded = json.dumps(
+        {"agent": data, "prior_closings": prior_closings},
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _derived_input_paths(goal_agents: list[Agent], agent: Agent) -> list[str]:
+    outputs = {
+        item.agent_id: str(item.output.get("path", ""))
+        for item in goal_agents
+        if item.output.get("path")
+    }
+    paths: list[str] = []
+    for dependency in agent.depends_on:
+        path = outputs.get(str(dependency))
+        if path:
+            paths.append(path)
+    for item in agent.inputs:
+        artifact = str(item.get("artifact", "")).strip()
+        if artifact:
+            paths.append(artifact)
+    return list(dict.fromkeys(paths))
+
+
+def _merge_inputs(model_inputs: list[dict[str, str]], derived: list[str]) -> list[dict[str, str]]:
+    paths = [*derived, *(str(item.get("path", "")) for item in model_inputs)]
+    return [{"path": path} for path in dict.fromkeys(item for item in paths if item)]
+
+
+async def _generate_selected_chapter_specs(
     plan: Plan,
     workspace: Any,
     adapter: Any,
     engine_config: ChapterEngineConfig,
-) -> None:
-    """按计划顺序逐章调用 Claude；每章校验后立刻写入 goal 目录。"""
+    *,
+    on_chapter: Any = None,
+    prior_closings: list[dict[str, Any]] | None = None,
+    only_agent_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """生成指定 agent 的章，供依赖波次并发调度。"""
 
-    prior_closings: list[dict[str, Any]] = []
+    history = list(prior_closings or [])
+    generated_closings: list[dict[str, Any]] = []
     research_root = Path(workspace.root).parent
     for goal in plan.goals:
         for index, agent in enumerate(goal.agents, start=1):
+            if only_agent_ids is not None and agent.agent_id not in only_agent_ids:
+                continue
             segment_name = f"{goal.goal_id}-ch-{index}"
+            chapter_path = research_root / f"goals/{goal.goal_id}/ch-{index}.md"
+            hash_path = research_root / f"goals/{goal.goal_id}/.{segment_name}.sha256"
+            input_hash = _chapter_input_hash(agent, history)
+            if (
+                workspace.formal_path(segment_name).is_file()
+                and chapter_path.is_file()
+                and hash_path.is_file()
+                and hash_path.read_text(encoding="utf-8").strip() == input_hash
+            ):
+                raw_value = json.loads(
+                    workspace.formal_path(segment_name).read_text(encoding="utf-8")
+                )
+                value = validate_chapter_value(raw_value, agent)
+                value["opening"]["inputs"] = _merge_inputs(
+                    value["opening"]["inputs"],
+                    _derived_input_paths(goal.agents, agent),
+                )
+                chapter = {
+                    "chapter_id": f"ch-{index}",
+                    "chapter_type": value["chapter_type"],
+                    "plan_path": f"goals/{goal.goal_id}/ch-{index}.md",
+                    "opening": value["opening"],
+                    "closing": value["closing"],
+                }
+                shell = str((agent.capability or {}).get("shell", "none"))
+                agent.engine = (
+                    "codex" if shell != "none"
+                    else engine_config.engine_for(value["chapter_type"])
+                )
+                agent.chapter = chapter
+                generated_closings.append({
+                    "goal_id": goal.goal_id,
+                    "chapter_id": chapter["chapter_id"],
+                    **value["closing"],
+                })
+                if on_chapter is not None:
+                    callback_result = on_chapter(goal.goal_id, f"ch-{index}")
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
+                continue
             workspace.reset_attempts(segment_name)
             semantic_errors: list[str] = []
             value = None
             for _ in range(workspace.config.plan_segment_retries):
                 raw = await workspace.generate(
                     segment_name,
-                    _prompt(agent, prior_closings, semantic_errors),
+                    _prompt(agent, history, semantic_errors),
                     adapter,
+                    output_schema=CHAPTER_OUTPUT_SCHEMA,
                 )
                 try:
                     value = validate_chapter_value(raw, agent)
@@ -176,6 +311,10 @@ async def generate_chapter_specs(
                     f"章节 {segment_name} 连续语义校验失败："
                     + "；".join(semantic_errors)
                 )
+            value["opening"]["inputs"] = _merge_inputs(
+                value["opening"]["inputs"],
+                _derived_input_paths(goal.agents, agent),
+            )
             chapter = {
                 "chapter_id": f"ch-{index}",
                 "chapter_type": value["chapter_type"],
@@ -195,11 +334,63 @@ async def generate_chapter_specs(
             path = research_root / chapter["plan_path"]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(_render_chapter(chapter, agent), encoding="utf-8")
-            prior_closings.append({
+            hash_path.parent.mkdir(parents=True, exist_ok=True)
+            hash_path.write_text(input_hash + "\n", encoding="utf-8")
+            generated_closings.append({
                 "goal_id": goal.goal_id,
                 "chapter_id": chapter["chapter_id"],
                 **value["closing"],
             })
+            if on_chapter is not None:
+                callback_result = on_chapter(goal.goal_id, f"ch-{index}")
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+    return generated_closings
+
+
+async def generate_chapter_specs(
+    plan: Plan,
+    workspace: Any,
+    adapter: Any,
+    engine_config: ChapterEngineConfig,
+    *,
+    on_chapter: Any = None,
+) -> None:
+    """按依赖波次生成章；同 goal 内无依赖章并发。"""
+
+    prior_closings: list[dict[str, Any]] = []
+    for goal in plan.goals:
+        indexed = list(enumerate(goal.agents, start=1))
+        local_ids = {agent.agent_id for _, agent in indexed}
+        completed: set[str] = set()
+        remaining = list(indexed)
+        while remaining:
+            ready = [
+                (index, agent) for index, agent in remaining
+                if {item for item in agent.depends_on if item in local_ids} <= completed
+            ]
+            if not ready:
+                raise ValueError(f"{goal.goal_id} 章依赖无法拓扑排序")
+            history = list(prior_closings)
+            results = await asyncio.gather(*(
+                _generate_selected_chapter_specs(
+                    plan,
+                    workspace,
+                    adapter,
+                    engine_config,
+                    on_chapter=on_chapter,
+                    prior_closings=history,
+                    only_agent_ids={agent.agent_id},
+                )
+                for _, agent in ready
+            ))
+            for closings in results:
+                prior_closings.extend(closings)
+            completed.update(agent.agent_id for _, agent in ready)
+            ready_ids = {agent.agent_id for _, agent in ready}
+            remaining = [
+                item for item in remaining if item[1].agent_id not in ready_ids
+            ]
 
 
 __all__ = [

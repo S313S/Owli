@@ -12,7 +12,8 @@ def test_三层字段名与字段表逐字一致() -> None:
 
     assert [field.name for field in fields(Plan)] == [
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "scale", "status", "approved_at", "decision_balance", "expert_panel", "goals",
+        "market_profile", "market_profile_justification", "scale", "status",
+        "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     ]
     assert [field.name for field in fields(Goal)] == [

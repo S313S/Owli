@@ -150,6 +150,7 @@ class Scheduler:
         self._tasks: dict[asyncio.Task[Any], tuple[str, str]] = {}
         self._state_lock = asyncio.Lock()
         self._goal_started_at: dict[str, datetime] = {}
+        self._agent_started_at: dict[str, datetime] = {}
         self._attempts: dict[str, int] = {}
         self._cards: dict[str, dict[str, Any]] = {}
         self._card_sequence = 0
@@ -504,6 +505,10 @@ class Scheduler:
         per_round = int(policy["max_attempts_per_round"])
         total = per_round * int(policy["max_rounds"])
         ask_at = int(policy["ask_engine_switch_at"])
+        deadline_seconds = policy.get("chapter_deadline_seconds")
+        if deadline_seconds is not None:
+            deadline_seconds = int(deadline_seconds)
+        self._agent_started_at.setdefault(agent.agent_id, self._clock())
         while self._attempts.get(agent.agent_id, 0) < total:
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
                 return
@@ -551,6 +556,29 @@ class Scheduler:
             for decision in result.route_decisions:
                 await self._consume_signal(decision)
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
+                return
+            if (
+                self._chapter_ledger is not None
+                and deadline_seconds is not None
+                and (self._clock() - self._agent_started_at[agent.agent_id]).total_seconds()
+                >= deadline_seconds
+                and not result.succeeded
+                and result.chapter_status not in {"missing", "deferred"}
+            ):
+                status = (
+                    "missing" if agent.agent_id in self._supplemented
+                    else "deferred"
+                )
+                self._finish_ledger(
+                    goal,
+                    agent,
+                    status=status,
+                    reason="retry_exhausted",
+                    output_path=result.actual_output_path,
+                    actual_count=result.actual_count,
+                )
+                await self._emit_chapter_update(goal, agent)
+                await self._set_agent_status(agent.agent_id, status)
                 return
             if result.succeeded:
                 self._finish_ledger(

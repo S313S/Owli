@@ -9,6 +9,7 @@ def test_韧性配置默认值环境无关() -> None:
     config = load_resilience_config({})
 
     assert config.plan_segment_retries == 3
+    assert config.plan_transport_retries == 3
     assert config.backoff_initial_seconds == 60
     assert config.backoff_max_seconds == 900
     assert [config.backoff_seconds(index) for index in range(6)] == [
@@ -21,11 +22,13 @@ def test_韧性配置部署环境覆盖全部生效() -> None:
 
     config = load_resilience_config({
         "OWLI_PLAN_SEGMENT_RETRIES": "5",
+        "OWLI_PLAN_TRANSPORT_RETRIES": "4",
         "OWLI_BACKOFF_INITIAL_SECONDS": "7",
         "OWLI_BACKOFF_MAX_SECONDS": "21",
     })
 
     assert config.plan_segment_retries == 5
+    assert config.plan_transport_retries == 4
     assert config.backoff_seconds(0) == 7
     assert config.backoff_seconds(4) == 21
 
@@ -34,6 +37,7 @@ def test_韧性配置部署环境覆盖全部生效() -> None:
     ("name", "value"),
     [
         ("OWLI_PLAN_SEGMENT_RETRIES", "-1"),
+        ("OWLI_PLAN_TRANSPORT_RETRIES", "0"),
         ("OWLI_BACKOFF_INITIAL_SECONDS", "abc"),
         ("OWLI_BACKOFF_MAX_SECONDS", "0"),
     ],

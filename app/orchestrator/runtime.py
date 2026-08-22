@@ -17,6 +17,7 @@ from app.adapters.contracts import EngineTask
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.scheduler import Scheduler, TaskRunResult
+from app.orchestrator.sectioning import run_sectioned_task, should_section
 from app.plan.cards import (
     Card,
     CardActionType,
@@ -66,6 +67,7 @@ class RuntimeCoordinator:
             if auto_confirm is None
             else auto_confirm
         )
+        self.unattended = os.getenv("OWLI_UNATTENDED") == "1"
         self.scale_config = scale_config or load_research_scale_config()
         self._adapters: dict[str, Any] = {}
         self._schedulers: dict[str, Any] = {}
@@ -358,7 +360,6 @@ class RuntimeCoordinator:
     def _task(self, plan: Plan, agent: Any, context: Any) -> EngineTask:
         kind = self._agent_kind(agent)
         goal = next(item for item in plan.goals if item.goal_id == context.goal_id)
-        acceptance = "；".join(str(item) for item in goal.acceptance)
         output_path = self.runs_root / plan.research_id / str(agent.output["path"])
         sources = list(agent.capability.get("sources", []))
         source_item_limit = (
@@ -369,11 +370,12 @@ class RuntimeCoordinator:
         body = (
             f"Goal 目标：{goal.objective}\n"
             f"Agent 任务：{agent.task}\n"
-            f"Goal 验收条件（由本 goal 全部 agent 协同满足；描述其他 agent 产物的条目"
-            f"不属于你的职责，不要为此自报 partial 或写入 unmet）：{acceptance}\n"
             f"产物落盘路径（写文件与 owli-result.output_path 都逐字用它）：{output_path}\n\n"
             f"{agent.prompt['body']}"
         )
+        if str(agent.output.get("path")) == str(goal.deliverable.get("path")):
+            acceptance = "；".join(str(item) for item in goal.acceptance)
+            body = f"{body}\nGoal 验收条件：{acceptance}"
         chapter = agent.chapter if isinstance(agent.chapter, dict) else None
         if chapter is not None:
             body = (
@@ -481,6 +483,19 @@ class RuntimeCoordinator:
             )
             await context.on_event(event)
 
+        if should_section(kind, task.output_format):
+            return await run_sectioned_task(
+                plan=plan,
+                agent=agent,
+                context=context,
+                base_task=task,
+                adapter=adapter,
+                store=self.store,
+                runs_root=self.runs_root,
+                now_iso=self.now_iso,
+                on_event=on_event,
+            )
+
         result = await adapter.run(task, self._ctx(task), on_event=on_event)
         if (
             kind == "reliability_audit"
@@ -552,11 +567,50 @@ class RuntimeCoordinator:
                 actual_output_path=actual_path, actual_count=actual_count,
             )
         if bool(getattr(result, "succeeded", False)):
+            if (
+                conclusion is not None
+                and getattr(conclusion, "status", None) == "partial"
+                and getattr(conclusion, "unmet", None)
+            ):
+                self._record_unmet(plan.research_id, context.goal_id, agent, conclusion)
             return TaskRunResult(
                 True, engine=context.engine, actual_output_path=actual_path,
                 actual_count=actual_count,
             )
         return result
+
+    def _record_unmet(
+        self, research_id: str, goal_id: str, agent: Any, conclusion: Any
+    ) -> None:
+        root = self.runs_root / research_id / "goals" / goal_id
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f".owli-unmet-{agent.agent_id}.json"
+        chapter = agent.chapter if isinstance(agent.chapter, dict) else {}
+        payload = {
+            "goal_id": goal_id,
+            "chapter_id": str(chapter.get("chapter_id") or agent.agent_id),
+            "agent_id": agent.agent_id,
+            "unmet": list(getattr(conclusion, "unmet", []) or []),
+            "reason": getattr(conclusion, "reason", None),
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _unmet_items(self, research_id: str) -> list[dict[str, Any]]:
+        root = self.runs_root / research_id
+        items: list[dict[str, Any]] = []
+        if not root.exists():
+            return items
+        for path in sorted(root.glob("goals/goal-*/.owli-unmet-*.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(value, dict) and isinstance(value.get("unmet"), list):
+                items.append(value)
+        return items
 
     def _expanded_actions(self, card: dict[str, Any]) -> list[dict[str, Any]]:
         actions = list(card.get("actions", []))
@@ -637,7 +691,18 @@ class RuntimeCoordinator:
                 ],
             ]
             payload = card.to_event()
-            if self.auto_confirm and card.card_type is CardType.INTERVENE and card.status is CardStatus.PENDING:
+            current_plan = load_plan(self.store, research_id)
+            auto_intervene = self.auto_confirm or self.unattended or (
+                current_plan is not None
+                and current_plan.scale == "fast"
+                and state.get("status") == "running"
+                and any(
+                    goal.get("status") == "awaiting_intervention"
+                    and goal.get("id") == card.goal_id
+                    for goal in state.get("goals", [])
+                )
+            )
+            if auto_intervene and card.card_type is CardType.INTERVENE and card.status is CardStatus.PENDING:
                 task = asyncio.create_task(self.respond_card(
                     card.card_id,
                     action="continue",
@@ -774,12 +839,19 @@ class RuntimeCoordinator:
             row for row in self.store.list_chapters(plan.research_id)
             if row["status"] == "missing"
         ]
+        unmet = self._unmet_items(plan.research_id)
         block.extend(["", "## 缺失清单"])
-        if missing:
+        if missing or unmet:
             block.extend(
                 f"- 此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
                 for row in missing
             )
+            for item in unmet:
+                for index, text_item in enumerate(item["unmet"], start=1):
+                    block.append(
+                        f"- 此处缺失：{item['goal_id']}/{item['chapter_id']}/unmet-{index}"
+                        f"；原因：{text_item}"
+                    )
         else:
             block.append("- 无。")
         path.parent.mkdir(parents=True, exist_ok=True)

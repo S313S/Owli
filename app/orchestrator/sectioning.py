@@ -1,0 +1,350 @@
+"""执行期判断章节化：短调用落节文件，确定性拼装父章产物。"""
+
+from __future__ import annotations
+
+import inspect
+import json
+import re
+from dataclasses import replace
+from pathlib import Path
+from typing import Any, Mapping
+
+from app.adapters import validation
+from app.adapters.contracts import EngineTask
+from app.adapters.ratelimit import classify_transport_error
+from app.orchestrator.scheduler import TaskRunResult
+
+
+SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
+
+
+def should_section(kind: str, output_format: str) -> bool:
+    return kind in SECTIONED_KINDS and output_format in {"markdown", "json"}
+
+
+def _chapter_id(agent: Any) -> str:
+    chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+    return str(chapter.get("chapter_id") or agent.agent_id)
+
+
+def _section_specs(plan: Any, agent: Any) -> list[dict[str, Any]]:
+    parent = _chapter_id(agent)
+    specs: list[dict[str, Any]] = []
+    for index, goal in enumerate(plan.goals, start=1):
+        specs.append({
+            "section_id": f"{parent}/sec-{index}",
+            "filename": f"sec-{index}.md",
+            "title": goal.title,
+            "goal_id": goal.goal_id,
+        })
+    return specs
+
+
+def _ledger_inputs(rows: list[dict[str, Any]], goal_id: str) -> dict[str, list[dict[str, Any]]]:
+    done = []
+    missing = []
+    for row in rows:
+        if row["goal_id"] != goal_id:
+            continue
+        if "/" in str(row["chapter_id"]):
+            continue
+        if row["status"] == "done":
+            done.append({
+                "goal_id": row["goal_id"],
+                "chapter_id": row["chapter_id"],
+                "path": row["actual_output_path"],
+                "actual_count": row["actual_count"],
+            })
+        elif row["status"] in {"missing", "deferred"}:
+            missing.append({
+                "goal_id": row["goal_id"],
+                "chapter_id": row["chapter_id"],
+                "reason": row["reason"],
+            })
+    return {"done": done, "missing": missing}
+
+
+def _ctx(task: EngineTask, runs_root: Path, store: Any) -> validation.Ctx:
+    return validation.Ctx(
+        output_path=task.output_path,
+        output_format=task.output_format,
+        research_id=task.research_id,
+        goal_id=task.goal_id,
+        agent_id=task.agent_id,
+        read_text=lambda: task.output_path.read_text(encoding="utf-8"),
+        read_json=lambda: json.loads(task.output_path.read_text(encoding="utf-8")),
+        store=store,
+        source_domains=frozenset({"news.ycombinator.com"}),
+        runs_root=runs_root,
+    )
+
+
+def _placeholder(section: dict[str, Any], reason: str) -> str:
+    return (
+        f"## {section['goal_id']}｜{section['title']}\n\n"
+        f"- 此处缺失：{section['goal_id']}/{section['section_id']}；原因：{reason}\n"
+    )
+
+
+def section_failure_reason(
+    result: Any, output_path: Path | None = None,
+) -> str:
+    """把适配器失败归一为章账本闭集，不用统一的重试耗尽掩盖死因。"""
+
+    conclusion = getattr(result, "conclusion", None)
+    declared = str(getattr(conclusion, "reason", "") or "").casefold()
+    denials = [
+        *list(getattr(result, "permission_denials", None) or []),
+        *list(getattr(conclusion, "capability_denials", None) or []),
+    ]
+    if declared == "tool_unavailable" or denials:
+        return "tool_unavailable"
+    if declared in {"empty_result", "quota_exhausted", "retry_exhausted"}:
+        return declared
+    errors = " ".join(filter(None, (
+        str(getattr(result, "engine_error", "") or ""),
+        str(getattr(result, "conclusion_error", "") or ""),
+    )))
+    if re.search(r"quota|rate.?limit|429|额度|限流", errors, re.IGNORECASE):
+        return "quota_exhausted"
+    if errors and classify_transport_error(errors):
+        return "retry_exhausted"
+    if output_path is not None:
+        try:
+            if (
+                not output_path.is_file()
+                or not output_path.read_text(encoding="utf-8").strip()
+            ):
+                return "empty_result"
+        except (OSError, UnicodeError):
+            return "empty_result"
+    output_path = str(getattr(conclusion, "output_path", "") or "").strip()
+    if conclusion is None or not output_path:
+        return "empty_result"
+    return "retry_exhausted"
+
+
+def _assemble(
+    *,
+    plan: Any,
+    agent: Any,
+    output_path: Path,
+    section_root: Path,
+    sections: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> None:
+    section_texts: list[str] = []
+    for section in sections:
+        path = section_root / section["filename"]
+        if path.is_file():
+            section_texts.append(path.read_text(encoding="utf-8").strip())
+        else:
+            chapter_id = section["section_id"]
+            row = next(
+                (item for item in rows if item["chapter_id"] == chapter_id), None,
+            )
+            reason = str(row["reason"] if row else "empty_result")
+            section_texts.append(_placeholder(section, reason).strip())
+    has_conclusion_section = any(
+        re.search(r"(?m)^#{1,6}\s+结论\s*$", text) for text in section_texts
+    )
+    blocks = [f"# {plan.title}", ""]
+    if not has_conclusion_section:
+        blocks.extend(["# 结论", ""])
+    has_source_section = False
+    for text in section_texts:
+        if re.search(r"(?m)^#{1,6}\s+.*信息源", text):
+            has_source_section = True
+        blocks.append(text)
+        blocks.append("")
+    if not has_source_section:
+        blocks.extend(["# 信息源", "", "- 无可用信息源。", ""])
+    blocks.append("## 缺失清单")
+    missing = [
+        row for row in rows
+        if row["status"] == "missing" or (
+            row["status"] == "deferred" and "/" in str(row["chapter_id"])
+        )
+    ]
+    if missing:
+        for row in missing:
+            blocks.append(
+                f"- 此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
+            )
+    else:
+        blocks.append("- 无。")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(blocks).rstrip() + "\n", encoding="utf-8")
+
+
+async def run_sectioned_task(
+    *,
+    plan: Any,
+    agent: Any,
+    context: Any,
+    base_task: EngineTask,
+    adapter: Any,
+    store: Any,
+    runs_root: Path,
+    now_iso: Any,
+    on_event: Any,
+) -> TaskRunResult:
+    sections = _section_specs(plan, agent)
+    store.ensure_chapters(
+        plan.research_id,
+        [
+            {"goal_id": context.goal_id, "chapter_id": section["section_id"]}
+            for section in sections
+        ],
+        updated_at=now_iso(),
+        reset_running=False,
+    )
+    existing = {
+        row["chapter_id"]: row
+        for row in store.list_chapters(plan.research_id)
+        if row["goal_id"] == context.goal_id
+    }
+    section_root = base_task.output_path.parent / Path(base_task.output_path.stem)
+    section_root.mkdir(parents=True, exist_ok=True)
+    for section in sections:
+        row = existing.get(section["section_id"])
+        if row and row["status"] in {"done", "missing"}:
+            continue
+        started = store.start_chapter(
+            plan.research_id,
+            context.goal_id,
+            section["section_id"],
+            engine=context.engine,
+            updated_at=now_iso(),
+        )
+        if not started:
+            continue
+        current_rows = store.list_chapters(plan.research_id)
+        inputs = _ledger_inputs(current_rows, section["goal_id"])
+        section_path = section_root / section["filename"]
+        body = (
+            f"{base_task.body}\n\n"
+            "本次只写一个报告节；禁止生成整份报告。\n"
+            "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
+            f"{section_path}\n"
+            f"节目标={json.dumps(section, ensure_ascii=False)}\n"
+            "节输入只含该 goal 下 done 章 output.path 与 missing 章 reason：\n"
+            f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
+        )
+        section_task = replace(
+            base_task,
+            body=body,
+            output_path=section_path,
+            output_format="markdown",
+            agent_id=f"{base_task.agent_id}-{section['filename'].removesuffix('.md')}",
+            validators=["file_exists"],
+            capability=base_task.capability,
+        )
+        result = adapter.run(
+            section_task, _ctx(section_task, runs_root, store), on_event=on_event,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        try:
+            artifact_empty = (
+                not section_path.is_file()
+                or not section_path.read_text(encoding="utf-8").strip()
+            )
+        except (OSError, UnicodeError):
+            artifact_empty = True
+        succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
+        if succeeded:
+            store.finish_chapter(
+                plan.research_id,
+                context.goal_id,
+                section["section_id"],
+                status="done",
+                reason=None,
+                actual_output_path=str(section_path),
+                actual_count=1,
+                updated_at=now_iso(),
+            )
+        else:
+            reason = section_failure_reason(result, section_path)
+            engine_error = getattr(result, "engine_error", None)
+            conclusion_error = getattr(result, "conclusion_error", None)
+            section_path.write_text(_placeholder(section, reason), encoding="utf-8")
+            store.finish_chapter(
+                plan.research_id,
+                context.goal_id,
+                section["section_id"],
+                status="missing",
+                reason=reason,
+                actual_output_path=str(section_path),
+                actual_count=0,
+                engine_error=engine_error,
+                conclusion_error=conclusion_error,
+                updated_at=now_iso(),
+            )
+            event_result = on_event({
+                "type": "section_error",
+                "data": {
+                    "goal_id": context.goal_id,
+                    "chapter_id": section["section_id"],
+                    "reason": reason,
+                    "engine_error": engine_error,
+                    "conclusion_error": conclusion_error,
+                },
+                "is_error": True,
+            })
+            if inspect.isawaitable(event_result):
+                await event_result
+    rows = store.list_chapters(plan.research_id)
+    _assemble(
+        plan=plan,
+        agent=agent,
+        output_path=base_task.output_path,
+        section_root=section_root,
+        sections=sections,
+        rows=rows,
+    )
+    final_validation = validation.validate(
+        _ctx(base_task, runs_root, store), base_task.validators,
+    )
+    if final_validation.verdict is not validation.Verdict.PASS:
+        failures = [
+            {
+                "name": item.name,
+                "message": item.message,
+                "offenders": list(item.offenders),
+            }
+            for item in final_validation.failures
+        ]
+        store.reset_done_chapters(
+            plan.research_id,
+            context.goal_id,
+            [section["section_id"] for section in sections],
+            updated_at=now_iso(),
+        )
+        event_result = on_event({
+            "type": "section_assembly_error",
+            "data": {
+                "goal_id": context.goal_id,
+                "chapter_id": _chapter_id(agent),
+                "validation_failures": failures,
+            },
+            "is_error": True,
+        })
+        if inspect.isawaitable(event_result):
+            await event_result
+        return TaskRunResult(
+            False,
+            engine=context.engine,
+            failure_feedback=json.dumps(failures, ensure_ascii=False),
+            actual_output_path=str(base_task.output_path),
+            actual_count=len(sections),
+        )
+    return TaskRunResult(
+        True,
+        engine=context.engine,
+        actual_output_path=str(base_task.output_path),
+        actual_count=len(sections),
+    )
+
+
+__all__ = ["run_sectioned_task", "section_failure_reason", "should_section"]

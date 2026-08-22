@@ -22,6 +22,7 @@ from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.runtime import RuntimeCoordinator
+from app.plan.generate import PlanGenerationError
 from app.plan.cards import Card, CardStatus
 from app.plan.editing import (
     PlanApprovalRejected,
@@ -197,12 +198,15 @@ def create_app(
         except Exception as exc:
             state = researches[research_id]
             raw = {"exception": type(exc).__name__, "message": str(exc)}
+            planning_failed = isinstance(exc, PlanGenerationError)
             try:
                 if store.get_report(research_id) is not None:
                     store.finish_report(
                         research_id,
                         status="failed",
                         completed_at=runtime.now_iso(),
+                        summary="规划失败",
+                        summary_line=str(exc),
                     )
             except Exception as storage_exc:
                 raw = {
@@ -212,8 +216,8 @@ def create_app(
                         "message": str(storage_exc),
                     },
                 }
-            state["status"] = "unavailable"
-            state["status_label"] = "引擎不可用"
+            state["status"] = "failed" if planning_failed else "unavailable"
+            state["status_label"] = "规划失败" if planning_failed else "引擎不可用"
             state["actions"] = []
             state["progress"]["summary"] = (
                 f"后台编排异常：{type(exc).__name__}: {exc}"
@@ -242,7 +246,12 @@ def create_app(
                     "data": {
                         "goal_id": "goal-1",
                         "agent_id": "orchestrator",
-                        "status": "unavailable",
+                        "status": state["status"],
+                        "reason": {
+                            "phase": "planning",
+                            "kind": type(exc).__name__,
+                            "message": str(exc),
+                        },
                         "summary": state["progress"]["summary"],
                     },
                 },

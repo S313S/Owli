@@ -27,6 +27,7 @@ def _collector(agent_id: str, goal_id: str, source_id: str) -> dict:
     })
     agent["output"] = {
         "format": "json",
+        "shape": "array",
         "path": f"goals/{goal_id}/{agent_id}.json",
         "validators": [
             "file_exists",
@@ -106,6 +107,78 @@ def test_goal段提示词注入上游源与产物路径且明确_inputs_复用()
     assert "禁止重采同源" in prompt
 
 
+def test_中文市场选源覆盖表进入规划提示且_lint_拦_HN_PH() -> None:
+    from app.config import load_research_scale_config
+    from app.plan.generate import _goal_prompt
+    from app.plan.lint import lint
+
+    prompt = _goal_prompt(
+        "豆包语音输入法的竞品分析",
+        "goal-1",
+        {"title": "采集", "objective": "采集", "depends_on": []},
+        [],
+        market_profile="cn_product",
+        scale="fast",
+        scale_config=load_research_scale_config(),
+    )
+
+    assert '"market_profile":"cn_product"' in prompt
+    assert '"applicable_sources":["web_search","x"]' in prompt
+
+    plan = make_plan_dict()
+    plan["market_profile"] = "cn_product"
+    plan["market_profile_justification"] = "产品主要面向中国大陆用户。"
+    bad = _collector("hn-collector", "goal-1", "hacker_news")
+    bad["chapter"] = {
+        "chapter_id": "ch-1",
+        "chapter_type": "collection",
+        "plan_path": "goals/goal-1/ch-1.md",
+        "opening": {"inputs": [], "task": bad["task"], "acceptance": ["完成"]},
+        "closing": {
+            "output": {"path": bad["output"]["path"]},
+            "entities": ["豆包"],
+            "expected_count": 1,
+            "notes": {},
+        },
+    }
+    plan["goals"][0]["agents"] = [bad]
+
+    errors = lint(plan)["errors"]
+    assert any("规则23" in item and "hacker_news" in item and "web_search,x" in item
+               for item in errors)
+
+    ok = _collector("web-collector", "goal-1", "web_search")
+    ok["chapter"] = {**bad["chapter"], "closing": {**bad["chapter"]["closing"],
+                     "output": {"path": ok["output"]["path"]}}}
+    plan["goals"][0]["agents"] = [ok]
+    assert not any("规则23" in item for item in lint(plan)["errors"])
+
+
+def test_规则23_只读骨架_market_profile_不从题目措辞猜测() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["research_question"] = "Notion competitor landscape"
+    plan["market_profile"] = "cn_product"
+    plan["market_profile_justification"] = "主要分发和用户社区在中国大陆。"
+    bad = _collector("hn-collector", "goal-1", "hacker_news")
+    bad["chapter"] = {
+        "chapter_id": "ch-1", "chapter_type": "collection",
+        "plan_path": "goals/goal-1/ch-1.md",
+        "opening": {"inputs": [], "task": bad["task"], "acceptance": ["完成"]},
+        "closing": {
+            "output": {"path": bad["output"]["path"]}, "entities": ["Notion"],
+            "expected_count": 1, "notes": {},
+        },
+    }
+    plan["goals"][0]["agents"] = [bad]
+
+    assert any("规则23" in item and "hacker_news" in item for item in lint(plan)["errors"])
+
+    plan["market_profile"] = "global_product"
+    assert not any("规则23" in item for item in lint(plan)["errors"])
+
+
 def test_规则21重试只回灌后出现的违规_goal段(tmp_path) -> None:
     from app.adapters.routing import RoutedAdapter
     from app.plan.generate import generate_plan
@@ -141,10 +214,12 @@ def test_fast_骨架_goal与单_goal采集源上限均为配置硬约束() -> No
     from app.plan.generate import _build_plan, _skeleton_scaffolds
 
     config = load_research_scale_config()
+    assert config.fast.max_chapters_per_goal == 4
     four_goals = {"goals": [
         {"title": str(index), "objective": "产出", "depends_on": []}
         for index in range(4)
-    ]}
+    ], "market_profile": "global_product",
+        "market_profile_justification": "面向全球市场。"}
     with pytest.raises(ValueError, match="goal 数必须在 3–3"):
         _skeleton_scaffolds(four_goals, scale="fast", scale_config=config)
 
@@ -163,6 +238,28 @@ def test_fast_骨架_goal与单_goal采集源上限均为配置硬约束() -> No
             scale="fast",
             scale_config=config,
         )
+
+
+def test_fast_单_goal_超过四章在段级_lint_拦截() -> None:
+    from app.config import load_research_scale_config
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    goal["agents"] = [
+        {**make_agent(f"agent-fast-{index}", "goal-1"), "chapter": None}
+        for index in range(5)
+    ]
+    profile = load_research_scale_config().fast
+
+    errors = lint(
+        plan, max_chapters_per_goal=profile.max_chapters_per_goal,
+    )["errors"]
+
+    assert any(
+        item.startswith("[规则24] goal-1") and "5" in item and "4" in item
+        for item in errors
+    )
 
 
 def test_fast_prompt使用配置条数且默认与显式standard逐字一致() -> None:
