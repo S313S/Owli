@@ -679,15 +679,11 @@ def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
             output_path = str(agent.get("output", {}).get("path", "")).strip()
             if output_path:
                 agent_outputs[agent_id] = output_path
-    for goal in goals:
-        goal_id = str(goal.get("goal_id", ""))
-        for agent in goal.get("agents", []):
-            agent_id = str(agent.get("agent_id", ""))
             chapter = agent.get("chapter")
-            if not isinstance(chapter, dict):
-                continue
-            chapter_type = chapter.get("chapter_type")
-            if chapter_type == "collection":
+            if (
+                isinstance(chapter, dict)
+                and chapter.get("chapter_type") == "collection"
+            ):
                 path = str(
                     chapter.get("closing", {}).get("output", {}).get("path", "")
                 )
@@ -696,6 +692,14 @@ def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
                         "location": f"{goal_id}/{chapter.get('chapter_id')}",
                         "path": path,
                     })
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        for agent in goal.get("agents", []):
+            agent_id = str(agent.get("agent_id", ""))
+            chapter = agent.get("chapter")
+            if not isinstance(chapter, dict):
+                continue
+            chapter_type = chapter.get("chapter_type")
             expected = []
             for dependency in agent.get("depends_on", []):
                 path = agent_outputs.get(str(dependency))

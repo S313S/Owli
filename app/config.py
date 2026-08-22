@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 _DEFAULTS = {
     "OWLI_PLAN_SEGMENT_RETRIES": 3,
+    "OWLI_PLAN_CHAPTER_LINT_RETRIES": 2,
     "OWLI_PLAN_TRANSPORT_RETRIES": 3,
     "OWLI_BACKOFF_INITIAL_SECONDS": 60,
     "OWLI_BACKOFF_MAX_SECONDS": 900,
@@ -21,6 +22,7 @@ class ResilienceConfig:
     backoff_initial_seconds: int
     backoff_max_seconds: int
     plan_transport_retries: int = 3
+    plan_chapter_lint_retries: int = 2
 
     def backoff_seconds(self, failure_count: int) -> int:
         """返回第 failure_count 次退避时长，按指数增长并封顶。"""
@@ -123,7 +125,7 @@ _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
             "web_search": 5,
             "x": 10,
         },
-        "chapter_wall_clock_seconds": 300,
+        "chapter_wall_clock_seconds": 600,
     },
 }
 
@@ -184,6 +186,9 @@ def load_resilience_config(
         backoff_max_seconds=_positive_int(values, "OWLI_BACKOFF_MAX_SECONDS"),
         plan_transport_retries=_positive_int(
             values, "OWLI_PLAN_TRANSPORT_RETRIES"
+        ),
+        plan_chapter_lint_retries=_positive_int(
+            values, "OWLI_PLAN_CHAPTER_LINT_RETRIES"
         ),
     )
     if config.backoff_initial_seconds > config.backoff_max_seconds:

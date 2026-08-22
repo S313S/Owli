@@ -12,6 +12,10 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Mapping
 
 from app.adapters.ratelimit import RouteState
+from app.orchestrator.chapter_failure import (
+    CHAPTER_FAILURE_REASONS,
+    chapter_failure_reason,
+)
 from app.plan.cards import (
     Card,
     CardActionType,
@@ -25,13 +29,7 @@ from app.plan.model import Agent, Goal, Plan
 R8_CONFIRM_SECONDS = 15 * 60
 repeat_cause_limit = 3
 CHAPTER_RETRY_INTERVAL_SECONDS = {"fast": 5.0, "standard": 15.0}
-_MISSING_REASONS = frozenset({
-    "empty_result",
-    "tool_unavailable",
-    "quota_exhausted",
-    "retry_exhausted",
-    "conclusion_invalid",
-})
+_MISSING_REASONS = CHAPTER_FAILURE_REASONS
 _ISO_TIMESTAMP_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})"
 )
@@ -664,10 +662,9 @@ class Scheduler:
                     repeat_count >= repeat_cause_limit
                     and result.chapter_status not in {"missing", "deferred"}
                 ):
-                    reason = (
-                        result.reason
-                        if result.reason in _MISSING_REASONS
-                        else "retry_exhausted"
+                    reason = chapter_failure_reason(
+                        result,
+                        fallback="retry_exhausted",
                     )
                     self._finish_ledger(
                         goal,
@@ -698,7 +695,10 @@ class Scheduler:
                     goal,
                     agent,
                     status=status,
-                    reason="retry_exhausted",
+                    reason=chapter_failure_reason(
+                        result,
+                        fallback="retry_exhausted",
+                    ),
                     output_path=result.actual_output_path,
                     actual_count=result.actual_count,
                     engine_error=result.engine_error,

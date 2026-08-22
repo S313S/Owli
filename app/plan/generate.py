@@ -48,6 +48,10 @@ _LINT_GOAL_HEADER = re.compile(
 class PlanGenerationError(RuntimeError):
     """规划引擎或计划产物未通过协议。"""
 
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+
 
 def _affected_goal_indices(errors: list[str], goal_count: int) -> list[int]:
     """只从 lint 消息头提取受影响 goal，引文中的 goal-N 不参与判定。"""
@@ -60,6 +64,27 @@ def _affected_goal_indices(errors: list[str], goal_count: int) -> list[int]:
         index = int(matched.group(1))
         if 1 <= index <= goal_count and index not in affected:
             affected.append(index)
+    return affected
+
+
+def _affected_chapter_refs(errors: list[str]) -> set[str]:
+    """只按 lint 消息头的结构化 goal-N/ch-M 定位章，不解析正文。"""
+
+    affected: set[str] = set()
+    for message in errors:
+        _, separator, body = str(message).partition("] ")
+        if not separator:
+            continue
+        location = body.split(maxsplit=1)[0]
+        goal_id, slash, chapter_id = location.partition("/")
+        if (
+            slash
+            and goal_id.startswith("goal-")
+            and goal_id.removeprefix("goal-").isdigit()
+            and chapter_id.startswith("ch-")
+            and chapter_id.removeprefix("ch-").isdigit()
+        ):
+            affected.add(f"{goal_id}/{chapter_id}")
     return affected
 
 
@@ -1086,9 +1111,10 @@ async def generate_plan(
     except PlanSegmentError as exc:
         raise PlanGenerationError(str(exc)) from exc
 
+    max_chapters = product_scale_config.profile(scale).max_chapters_per_goal
     errors: list[str] = []
+    plan: Plan | None = None
     for attempt in range(1, config.plan_segment_retries + 1):
-        plan: Plan | None = None
         try:
             expanded_goals = []
             for index, scaffold in enumerate(scaffolds, start=1):
@@ -1119,44 +1145,15 @@ async def generate_plan(
                 subjects=subjects,
                 subjects_justification=subjects_justification,
             )
-            max_chapters = product_scale_config.profile(
-                scale
-            ).max_chapters_per_goal
             errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
             )["errors"]
-            if not errors:
-                await generate_chapter_specs(
-                    plan,
-                    workspace,
-                    adapter,
-                    chapter_engine_config or ChapterEngineConfig(),
-                    on_chapter=lambda goal_id, chapter_id: _emit(
-                        store,
-                        _progress_event(
-                            research_id, f"章 {goal_id}/{chapter_id} 落盘"
-                        ),
-                    ),
-                )
-                errors = lint(
-                    plan, max_chapters_per_goal=max_chapters,
-                )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             errors = _structure_errors(exc)
         if not errors:
-            store.save_plan_snapshot(
-                research_id, snapshot=plan.to_dict(), expected_rev=0
-            )
-            await _emit(
-                store,
-                _progress_event(
-                    research_id,
-                    f"计划通过 lint 并保存：{len(plan.goals)} 个 goal",
-                ),
-            )
-            return plan
+            break
         if attempt < config.plan_segment_retries:
             await _emit(store, _retry_event(research_id, attempt + 1, errors))
             duplicate_goals = (
@@ -1180,9 +1177,66 @@ async def generate_plan(
                 except PlanSegmentError as exc:
                     raise PlanGenerationError(str(exc)) from exc
 
+    if errors or plan is None:
+        raise PlanGenerationError(
+            f"计划段级 lint 连续 {config.plan_segment_retries} 次仍有 error，"
+            "计划未保存：\n" + "\n".join(errors)
+        )
+
+    chapter_errors: list[str] = []
+    only_chapters: set[str] | None = None
+    chapter_config = chapter_engine_config or ChapterEngineConfig()
+    for chapter_attempt in range(1, config.plan_chapter_lint_retries + 1):
+        try:
+            await generate_chapter_specs(
+                plan,
+                workspace,
+                adapter,
+                chapter_config,
+                on_chapter=lambda goal_id, chapter_id: _emit(
+                    store,
+                    _progress_event(
+                        research_id, f"章 {goal_id}/{chapter_id} 落盘"
+                    ),
+                ),
+                only_chapters=only_chapters,
+                lint_errors=chapter_errors,
+            )
+            chapter_errors = lint(
+                plan, max_chapters_per_goal=max_chapters,
+            )["errors"]
+        except PlanSegmentError as exc:
+            raise PlanGenerationError(str(exc)) from exc
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            chapter_errors = _structure_errors(exc)
+        if not chapter_errors:
+            store.save_plan_snapshot(
+                research_id, snapshot=plan.to_dict(), expected_rev=0
+            )
+            await _emit(
+                store,
+                _progress_event(
+                    research_id,
+                    f"计划通过 lint 并保存：{len(plan.goals)} 个 goal",
+                ),
+            )
+            return plan
+        if chapter_attempt < config.plan_chapter_lint_retries:
+            await _emit(
+                store,
+                _retry_event(research_id, chapter_attempt + 1, chapter_errors),
+            )
+            only_chapters = _affected_chapter_refs(chapter_errors) or {
+                f"{goal.goal_id}/ch-{index}"
+                for goal in plan.goals
+                for index, _ in enumerate(goal.agents, start=1)
+            }
+
     raise PlanGenerationError(
-        f"计划生成连续 {config.plan_segment_retries} 次仍有 error，计划未保存：\n"
-        + "\n".join(errors)
+        "reason=chapter_lint_not_converged\n"
+        f"章级 lint 未收敛：连续 {config.plan_chapter_lint_retries} 次仍有 error，"
+        "计划未保存。最后一轮错误原文：\n" + "\n".join(chapter_errors),
+        reason="chapter_lint_not_converged",
     )
 
 

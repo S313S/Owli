@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import inspect
 import json
-import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
 from app.adapters import validation
 from app.adapters.contracts import EngineTask
-from app.adapters.ratelimit import classify_transport_error
+from app.orchestrator.chapter_failure import (
+    chapter_failure_reason as section_failure_reason,
+)
 from app.orchestrator.scheduler import TaskRunResult
 
 
@@ -62,6 +63,54 @@ def _ledger_inputs(rows: list[dict[str, Any]], goal_id: str) -> dict[str, list[d
                 "reason": row["reason"],
             })
     return {"done": done, "missing": missing}
+
+
+def _artifact_key(raw_path: Any, research_root: Path) -> str | None:
+    path_text = str(raw_path or "").strip()
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = research_root / path
+    return str(path.resolve(strict=False))
+
+
+def _merge_declared_done_inputs(
+    inputs: dict[str, list[dict[str, Any]]],
+    rows: list[dict[str, Any]],
+    declared_inputs: Any,
+    *,
+    research_root: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    """只把章级声明且账本已 done 的路径并入节输入。"""
+
+    done_rows_by_path = {}
+    for row in rows:
+        if row["status"] != "done":
+            continue
+        key = _artifact_key(row.get("actual_output_path"), research_root)
+        if key is not None:
+            done_rows_by_path.setdefault(key, row)
+    seen = {
+        key
+        for item in inputs["done"]
+        if (key := _artifact_key(item.get("path"), research_root)) is not None
+    }
+    for item in declared_inputs if isinstance(declared_inputs, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        key = _artifact_key(item.get("path"), research_root)
+        row = done_rows_by_path.get(key)
+        if row is None or key in seen:
+            continue
+        inputs["done"].append({
+            "goal_id": row["goal_id"],
+            "chapter_id": row["chapter_id"],
+            "path": row["actual_output_path"],
+            "actual_count": row["actual_count"],
+        })
+        seen.add(key)
+    return inputs
 
 
 def _ctx(task: EngineTask, runs_root: Path, store: Any) -> validation.Ctx:
@@ -121,52 +170,6 @@ def _invalid_conclusion_source(result: Any) -> str:
         if "owli-result" in text:
             return f"{conclusion_error}\n原 owli-result 块：\n{text}"
     return conclusion_error
-
-
-def section_failure_reason(
-    result: Any, output_path: Path | None = None,
-) -> str:
-    """把适配器失败归一为章账本闭集，不用统一的重试耗尽掩盖死因。"""
-
-    conclusion = getattr(result, "conclusion", None)
-    declared = str(getattr(conclusion, "reason", "") or "").casefold()
-    denials = [
-        *list(getattr(result, "permission_denials", None) or []),
-        *list(getattr(conclusion, "capability_denials", None) or []),
-    ]
-    if declared == "tool_unavailable" or denials:
-        return "tool_unavailable"
-    if declared in {"empty_result", "quota_exhausted", "retry_exhausted"}:
-        return declared
-    errors = " ".join(filter(None, (
-        str(getattr(result, "engine_error", "") or ""),
-        str(getattr(result, "conclusion_error", "") or ""),
-    )))
-    if re.search(r"quota|rate.?limit|429|额度|限流", errors, re.IGNORECASE):
-        return "quota_exhausted"
-    if errors and classify_transport_error(errors):
-        return "retry_exhausted"
-    if output_path is not None:
-        try:
-            if (
-                not output_path.is_file()
-                or not output_path.read_text(encoding="utf-8").strip()
-            ):
-                return "empty_result"
-        except (OSError, UnicodeError):
-            return "empty_result"
-    conclusion_error = str(getattr(result, "conclusion_error", "") or "")
-    report = getattr(result, "validation", None)
-    if (
-        conclusion is None
-        and conclusion_error
-        and getattr(report, "verdict", None) is validation.Verdict.PASS
-    ):
-        return "conclusion_invalid"
-    output_path = str(getattr(conclusion, "output_path", "") or "").strip()
-    if conclusion is None or not output_path:
-        return "empty_result"
-    return "retry_exhausted"
 
 
 def _assemble(
@@ -256,6 +259,17 @@ async def run_sectioned_task(
             continue
         current_rows = store.list_chapters(plan.research_id)
         inputs = _ledger_inputs(current_rows, section["goal_id"])
+        chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+        opening = chapter.get("opening", {})
+        declared_inputs = (
+            opening.get("inputs", []) if isinstance(opening, Mapping) else []
+        )
+        inputs = _merge_declared_done_inputs(
+            inputs,
+            current_rows,
+            declared_inputs,
+            research_root=runs_root / plan.research_id,
+        )
         section_path = section_root / section["filename"]
         body = (
             f"{base_task.body}\n\n"
@@ -266,7 +280,18 @@ async def run_sectioned_task(
             "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
             f"{section_path}\n"
             f"节目标={json.dumps(section, ensure_ascii=False)}\n"
-            "节输入只含该 goal 下 done 章 output.path 与 missing 章 reason：\n"
+            "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
+            "章级 opening.inputs 声明且账本 status=done 的上游产物；"
+            "每条都带 goal_id/chapter_id/path/actual_count。\n"
+            "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
+            "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
+            "产物 path 只用于定位，不是 permalink；角标 permalink 必须逐字取自 done 产物内容。"
+            "结构化派生产物若同时给出实体条目及该实体的 permalink 来源，"
+            "可逐字复用该 permalink 支撑同一实体条目中的判断；不得跨实体挪用。"
+            "实体对应可由显式字段，或 permalink 中无歧义的品牌或模型标识确认；"
+            "不得只按 sources 数组顺序猜测实体对应。"
+            "若内容没有可支撑判断的 permalink，原位标注缺失；"
+            "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
             f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
         )
         section_task = replace(

@@ -8,7 +8,7 @@ import json
 import os
 import re
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -56,7 +56,7 @@ _STREAM_LINE_LIMIT = 16 * 1024 * 1024
 _NON_FATAL_WARNING_MARKERS = (
     "analytics", "telemetry", "opentelemetry", "analytics-events",
     "featured plugin ids cache", "featured plugin cache",
-    "failed to load recommended plugins",
+    "failed to load recommended plugins", "remote plugin catalog",
 )
 _RECOVERABLE_TRANSPORT_MARKERS = (
     "tls handshake eof",
@@ -307,24 +307,59 @@ def _infrastructure_error(events: list[NormalizedEvent]) -> str | None:
         if not event.is_error and not isinstance(event.raw, str):
             continue
         text = event.text.lower()
-        recovered = any(
-            later.item_kind is ItemKind.DONE
-            and (event.thread_id is None or later.thread_id == event.thread_id)
-            for later in events[index + 1:]
-        )
+        later_events = events[index + 1:]
+        recovered = _has_later_done(event, later_events)
         if recovered and any(
             marker in text for marker in _RECOVERABLE_TRANSPORT_MARKERS
         ):
             continue
-        if (
-            not event.is_error
-            and re.search(r"\bwarn(?:ing)?\b", text)
-            and any(marker in text for marker in _NON_FATAL_WARNING_MARKERS)
-        ):
+        if _is_non_fatal_warning(event, later_events):
             continue
         if any(marker in text for marker in _INFRASTRUCTURE_MARKERS):
             return event.text
     return None
+
+
+def _has_later_done(
+    event: NormalizedEvent,
+    later_events: list[NormalizedEvent],
+) -> bool:
+    return any(
+        later.item_kind is ItemKind.DONE
+        and (event.thread_id is None or later.thread_id == event.thread_id)
+        for later in later_events
+    )
+
+
+def _is_unlinked_item_error(event: NormalizedEvent) -> bool:
+    """识别载荷自身无 thread/turn 关联的 item.completed/error。"""
+
+    raw = event.raw
+    if not isinstance(raw, Mapping) or raw.get("type") != "item.completed":
+        return False
+    item = raw.get("item")
+    return (
+        isinstance(item, Mapping)
+        and item.get("type") == "error"
+        and not raw.get("thread_id")
+        and not raw.get("turn_id")
+    )
+
+
+def _is_non_fatal_warning(
+    event: NormalizedEvent,
+    later_events: list[NormalizedEvent],
+) -> bool:
+    """沿用非致命告警机制，并支持结构化启动告警的完成态取证。"""
+
+    if _is_unlinked_item_error(event) and _has_later_done(event, later_events):
+        return True
+    text = event.text.lower()
+    return (
+        not event.is_error
+        and re.search(r"\bwarn(?:ing)?\b", text) is not None
+        and any(marker in text for marker in _NON_FATAL_WARNING_MARKERS)
+    )
 
 
 def _process_group_exists(process_group_id: int) -> bool:
@@ -476,6 +511,35 @@ class CodexAdapter:
         thread_id: str | None = None
         turn_id: str | None = None
         turn_number = 0
+        startup_phase = True
+        pending_startup_errors: list[NormalizedEvent] = []
+
+        async def publish(event: NormalizedEvent, *, log_error: bool = True) -> None:
+            events.append(event)
+            if log_error:
+                append_engine_error(event, log_root=self._log_root)
+            if on_event is not None:
+                callback_result = on_event(event)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+
+        async def flush_pending(*, recovered_by: NormalizedEvent | None) -> None:
+            nonlocal pending_startup_errors
+            later = [recovered_by] if recovered_by is not None else []
+            for pending in pending_startup_errors:
+                if _is_non_fatal_warning(pending, later):
+                    await publish(
+                        replace(
+                            pending,
+                            item_kind=ItemKind.THINKING,
+                            is_error=False,
+                        ),
+                        log_error=False,
+                    )
+                else:
+                    await publish(pending)
+            pending_startup_errors = []
+
         while True:
             line = await stream.readline()
             if not line:
@@ -508,16 +572,29 @@ class CodexAdapter:
                     callback_result = on_event(event)
                     if inspect.isawaitable(callback_result):
                         await callback_result
-            for event in normalize_codex_event(
+            normalized_events = normalize_codex_event(
                 raw, thread_id=thread_id, turn_id=turn_id
+            )
+            for event in normalized_events:
+                if (
+                    startup_phase
+                    and not routing_events
+                    and _is_unlinked_item_error(event)
+                ):
+                    pending_startup_errors.append(event)
+                    continue
+                if event.item_kind is ItemKind.DONE:
+                    await flush_pending(recovered_by=event)
+                await publish(event, log_error=not routing_events)
+            if (
+                isinstance(raw, Mapping)
+                and str(raw.get("type", "")).startswith("item.")
+                and not any(
+                    _is_unlinked_item_error(event) for event in normalized_events
+                )
             ):
-                events.append(event)
-                if not routing_events:
-                    append_engine_error(event, log_root=self._log_root)
-                if on_event is not None:
-                    callback_result = on_event(event)
-                    if inspect.isawaitable(callback_result):
-                        await callback_result
+                startup_phase = False
+        await flush_pending(recovered_by=None)
 
     async def _consume_and_wait(
         self,

@@ -18,7 +18,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.adapters.selfcheck import SchemaCheckError, initialize_and_check, probe_engines
+from app.adapters.selfcheck import (
+    RuntimeConfigCheckError,
+    SchemaCheckError,
+    initialize_and_check,
+    probe_engines,
+    validate_runtime_config,
+)
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.runtime import RuntimeCoordinator
@@ -127,6 +133,7 @@ def create_app(
         )
 
     store.on_plan_event = publish_plan_event
+    product_scale_config = scale_config or load_research_scale_config()
     runtime = RuntimeCoordinator(
         store=store,
         event_buffer=events,
@@ -136,16 +143,19 @@ def create_app(
         runs_root=runs_root or ROOT / "runs",
         auto_confirm=auto_confirm,
         routing_utc_clock=routing_utc_clock,
-        scale_config=scale_config or load_research_scale_config(),
+        scale_config=product_scale_config,
     )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         try:
             events.bind_to_running_loop()
+            application.state.runtime_config_check = validate_runtime_config(
+                product_scale_config
+            )
             application.state.schema_check = initialize_and_check(database, schema)
             application.state.engine_checks = (engine_probe or probe_engines)()
-        except SchemaCheckError as error:
+        except (RuntimeConfigCheckError, SchemaCheckError) as error:
             print(str(error), file=sys.stderr)
             raise
         yield

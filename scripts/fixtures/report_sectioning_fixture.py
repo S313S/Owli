@@ -53,13 +53,8 @@ r["output"] = {"format": "markdown", "path": "goals/goal-3/report.md", "validato
 r["chapter"] = chap("ch-1", "report", r["output"]["path"], ["豆包语音输入法"], [c["output"]["path"]])
 plan = Plan.from_dict(src)
 
-# 坑：app/adapters/claude.py 的 capability 路径判定用的是 app/adapters/validation.py
-# 里写死的模块级 RUNS_ROOT = <repo>/runs，不认 RuntimeCoordinator 注入的 runs_root。
-# 产物根必须落在仓库 runs/ 下，否则每个工具调用都被判「路径不在 capability 路径范围」。
-import shutil
-from app.adapters import validation as _artifact_validation
-runs = _artifact_validation.RUNS_ROOT; rr = runs / RID
-shutil.rmtree(rr, ignore_errors=True)
+# E3 回归：报告产物根刻意注入调用方 /tmp 输出目录，不依赖仓内默认 runs/。
+runs = ROOT / "runs"; rr = runs / RID
 def w(p, obj):
     p = rr / p; p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8"); return str(p)
@@ -108,6 +103,11 @@ async def on_event(e):
     if k is not None and str(k) != "thinking": print(f"{time.time()-t0:6.1f}s [{k}] {t}", flush=True)
 res = asyncio.run(coord._run_task(plan, plan.goals[2].agents[0], SimpleNamespace(goal_id="goal-3", attempt=1, engine="claude", failure_feedback=None, on_event=on_event)))
 print("\n=== 结果", res, f"总耗时 {time.time()-t0:.0f}s")
-for row in store.list_chapters(RID): print(dict(row))
+rows = store.list_chapters(RID)
+for row in rows: print(dict(row))
 print("\n=== 节文件"); [print(p, p.stat().st_size) for p in sorted((rr/"goals/goal-3/report").glob("*.md"))]
 print("\n=== 报告正文\n", (rr/"goals/goal-3/report.md").read_text(encoding="utf-8"))
+done_sections = [row for row in rows if "/" in row["chapter_id"] and row["status"] == "done"]
+print(f"\n=== E3 断言：/tmp 注入根下 done 节数={len(done_sections)}")
+if not done_sections:
+    raise SystemExit("E3 未过：Claude 节没有任何 done")

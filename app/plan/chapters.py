@@ -158,10 +158,19 @@ def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
 
 def _prompt(
     agent: Agent,
-    upstream_info: list[Mapping[str, Any]],
+    upstream_info: Mapping[str, Any],
     errors: list[str] | None = None,
 ) -> str:
-    history = json.dumps(upstream_info, ensure_ascii=False, separators=(",", ":"))
+    history = json.dumps(
+        upstream_info.get("dependency_artifacts", []),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    collection_inventory = json.dumps(
+        upstream_info.get("collection_chapters", []),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     declared_inputs = [
         str(item.get("artifact")) for item in agent.inputs if item.get("artifact")
     ]
@@ -182,11 +191,13 @@ def _prompt(
         f"系统声明 task={json.dumps(agent.task, ensure_ascii=False)}；"
         f"系统声明 inputs={json.dumps(declared_inputs, ensure_ascii=False)}；"
         f"系统声明 output.path={json.dumps(agent.output['path'], ensure_ascii=False)}。"
-        "对比或交叉验证章的 inputs 必须覆盖此前全部 collection 章 output.path。"
+        "comparison / cross_validation 章的 opening.inputs 必须逐条使用全卷采集章"
+        "清单里的 output.path 原文，不得自造路径。"
         "closing.notes 必须是 JSON object，不得写字符串；竞品章 notes 必须使用 "
         "positioning/pricing/feature_differences/social_proof/strengths_weaknesses "
         f"五个字段。collection 章 closing.entities 必须恰好一个元素{entity_rule}"
         f"系统从计划树派生的上游信息（不是实际 closing）={history}"
+        f"全卷采集章清单={collection_inventory}。"
         f"{retry}"
     )
 
@@ -204,7 +215,7 @@ def _render_chapter(chapter: Mapping[str, Any], agent: Agent) -> str:
 
 
 def _chapter_input_hash(
-    agent: Agent, prior_closings: list[dict[str, Any]],
+    agent: Agent, prior_closings: Mapping[str, Any],
 ) -> str:
     data = agent.to_dict()
     data.pop("chapter", None)
@@ -217,7 +228,29 @@ def _chapter_input_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _derived_input_paths(goal_agents: list[Agent], agent: Agent) -> list[str]:
+def _collection_inventory(plan: Plan) -> list[dict[str, Any]]:
+    """从计划树一次性派生全卷采集章清单，不读取章 closing。"""
+
+    return [
+        {
+            "goal_id": goal.goal_id,
+            "agent_id": agent.agent_id,
+            "output": {"path": str(agent.output.get("path", ""))},
+            "entity": agent.entity,
+        }
+        for goal in plan.goals
+        for agent in goal.agents
+        if agent.capability.get("profile") == "web-collector"
+        and str(agent.output.get("path", "")).strip()
+    ]
+
+
+def _derived_input_paths(
+    goal_agents: list[Agent],
+    agent: Agent,
+    chapter_type: str,
+    collection_inventory: list[Mapping[str, Any]],
+) -> list[str]:
     outputs = {
         item.agent_id: str(item.output.get("path", ""))
         for item in goal_agents
@@ -232,12 +265,20 @@ def _derived_input_paths(goal_agents: list[Agent], agent: Agent) -> list[str]:
         artifact = str(item.get("artifact", "")).strip()
         if artifact:
             paths.append(artifact)
+    if chapter_type in {"comparison", "cross_validation"}:
+        paths.extend(
+            str(item.get("output", {}).get("path", "")).strip()
+            for item in collection_inventory
+            if isinstance(item.get("output"), Mapping)
+        )
     return list(dict.fromkeys(paths))
 
 
 def _derived_upstream_info(
-    goal_agents: list[Agent], agent: Agent,
-) -> list[dict[str, Any]]:
+    goal_agents: list[Agent],
+    agent: Agent,
+    collection_inventory: list[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
     """从依赖与声明输入派生 spec 所需上游摘要，不读取已生成 closing。"""
 
     by_id = {item.agent_id: item for item in goal_agents}
@@ -272,12 +313,23 @@ def _derived_upstream_info(
                 "expected_count": None,
                 "notes": {"derived_from": "plan"},
             }
-    return list(records.values())
+    return {
+        "dependency_artifacts": list(records.values()),
+        "collection_chapters": [dict(item) for item in collection_inventory],
+    }
 
 
 def _merge_inputs(model_inputs: list[dict[str, str]], derived: list[str]) -> list[dict[str, str]]:
     paths = [*derived, *(str(item.get("path", "")) for item in model_inputs)]
     return [{"path": path} for path in dict.fromkeys(item for item in paths if item)]
+
+
+def _model_inputs_for_merge(value: Mapping[str, Any]) -> list[dict[str, str]]:
+    """全卷型章只认系统派生路径，丢弃模型猜测的额外路径。"""
+
+    if value.get("chapter_type") in {"comparison", "cross_validation"}:
+        return []
+    return list(value["opening"]["inputs"])
 
 
 async def _generate_selected_chapter_specs(
@@ -287,12 +339,19 @@ async def _generate_selected_chapter_specs(
     engine_config: ChapterEngineConfig,
     *,
     on_chapter: Any = None,
-    prior_closings: list[dict[str, Any]] | None = None,
+    prior_closings: Mapping[str, Any] | None = None,
+    collection_inventory: list[Mapping[str, Any]] | None = None,
     only_agent_ids: set[str] | None = None,
+    force_regenerate: bool = False,
+    lint_errors: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """生成指定 agent 的章，调用方可对同 goal 全量并发。"""
 
-    history = list(prior_closings or [])
+    inventory = list(collection_inventory or [])
+    history = dict(prior_closings or {
+        "dependency_artifacts": [],
+        "collection_chapters": inventory,
+    })
     generated_closings: list[dict[str, Any]] = []
     research_root = Path(workspace.root).parent
     for goal in plan.goals:
@@ -304,7 +363,8 @@ async def _generate_selected_chapter_specs(
             hash_path = research_root / f"goals/{goal.goal_id}/.{segment_name}.sha256"
             input_hash = _chapter_input_hash(agent, history)
             if (
-                workspace.formal_path(segment_name).is_file()
+                not force_regenerate
+                and workspace.formal_path(segment_name).is_file()
                 and chapter_path.is_file()
                 and hash_path.is_file()
                 and hash_path.read_text(encoding="utf-8").strip() == input_hash
@@ -314,8 +374,13 @@ async def _generate_selected_chapter_specs(
                 )
                 value = validate_chapter_value(raw_value, agent)
                 value["opening"]["inputs"] = _merge_inputs(
-                    value["opening"]["inputs"],
-                    _derived_input_paths(goal.agents, agent),
+                    _model_inputs_for_merge(value),
+                    _derived_input_paths(
+                        goal.agents,
+                        agent,
+                        value["chapter_type"],
+                        inventory,
+                    ),
                 )
                 chapter = {
                     "chapter_id": f"ch-{index}",
@@ -341,7 +406,7 @@ async def _generate_selected_chapter_specs(
                         await callback_result
                 continue
             workspace.reset_attempts(segment_name)
-            semantic_errors: list[str] = []
+            semantic_errors = list(lint_errors or [])
             value = None
             for _ in range(workspace.config.plan_segment_retries):
                 raw = await workspace.generate(
@@ -361,8 +426,13 @@ async def _generate_selected_chapter_specs(
                     + "；".join(semantic_errors)
                 )
             value["opening"]["inputs"] = _merge_inputs(
-                value["opening"]["inputs"],
-                _derived_input_paths(goal.agents, agent),
+                _model_inputs_for_merge(value),
+                _derived_input_paths(
+                    goal.agents,
+                    agent,
+                    value["chapter_type"],
+                    inventory,
+                ),
             )
             chapter = {
                 "chapter_id": f"ch-{index}",
@@ -404,11 +474,19 @@ async def generate_chapter_specs(
     engine_config: ChapterEngineConfig,
     *,
     on_chapter: Any = None,
+    only_chapters: set[str] | None = None,
+    lint_errors: list[str] | None = None,
 ) -> None:
     """同 goal 全部章并发生成；spec 不依赖执行期 expected_count 链。"""
 
+    collection_inventory = _collection_inventory(plan)
     for goal in plan.goals:
-        indexed = list(enumerate(goal.agents, start=1))
+        indexed = [
+            (index, agent)
+            for index, agent in enumerate(goal.agents, start=1)
+            if only_chapters is None
+            or f"{goal.goal_id}/ch-{index}" in only_chapters
+        ]
         await asyncio.gather(*(
             _generate_selected_chapter_specs(
                 plan,
@@ -416,8 +494,13 @@ async def generate_chapter_specs(
                 adapter,
                 engine_config,
                 on_chapter=on_chapter,
-                prior_closings=_derived_upstream_info(goal.agents, agent),
+                prior_closings=_derived_upstream_info(
+                    goal.agents, agent, collection_inventory,
+                ),
+                collection_inventory=collection_inventory,
                 only_agent_ids={agent.agent_id},
+                force_regenerate=only_chapters is not None,
+                lint_errors=lint_errors,
             )
             for _, agent in indexed
         ))

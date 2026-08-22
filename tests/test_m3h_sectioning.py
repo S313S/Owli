@@ -202,6 +202,136 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     assert empty_row["reason"] == "empty_result"
 
 
+def _run_章级声明输入_case(tmp_path, *, upstream_status, include_upstream_section):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
+    from app.orchestrator.sectioning import run_sectioned_task
+
+    store = _store(tmp_path)
+    runs_root = tmp_path / "runs"
+    upstream_path = runs_root / "r-ledger" / "goals/goal-2/matrix.json"
+    upstream_path.parent.mkdir(parents=True, exist_ok=True)
+    upstream_path.write_text('{"matrix": {}}', encoding="utf-8")
+    store.ensure_chapters(
+        "r-ledger",
+        [{"goal_id": "goal-2", "chapter_id": "ch-1"}],
+        updated_at="2026-08-22T00:00:00Z",
+    )
+    store.start_chapter(
+        "r-ledger", "goal-2", "ch-1",
+        engine="claude", updated_at="2026-08-22T00:00:01Z",
+    )
+    store.finish_chapter(
+        "r-ledger", "goal-2", "ch-1",
+        status=upstream_status,
+        reason=None if upstream_status == "done" else "tool_unavailable",
+        actual_output_path=str(upstream_path),
+        actual_count=3 if upstream_status == "done" else 0,
+        updated_at="2026-08-22T00:00:02Z",
+    )
+    goals = []
+    if include_upstream_section:
+        goals.append(SimpleNamespace(goal_id="goal-2", title="六维矩阵"))
+    goals.append(SimpleNamespace(goal_id="goal-3", title="竞品分析报告"))
+    plan = SimpleNamespace(
+        research_id="r-ledger",
+        title="报告",
+        goals=goals,
+    )
+    agent = SimpleNamespace(chapter={
+        "chapter_id": "ch-report",
+        "opening": {"inputs": [{"path": "goals/goal-2/matrix.json"}]},
+    })
+    context = SimpleNamespace(goal_id="goal-3", engine="claude")
+    task = EngineTask(
+        body="写报告",
+        output_path=runs_root / "r-ledger/goals/goal-3/report.md",
+        output_format="markdown",
+        research_id="r-ledger",
+        goal_id="goal-3",
+        agent_id="report-writing",
+        agent_kind="report",
+        validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-3/**",)),
+        ),
+    )
+    bodies = {}
+
+    class Adapter:
+        async def run(self, section_task, ctx, on_event=None):
+            del on_event
+            bodies[section_task.output_path.name] = section_task.body
+            section_task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            section_task.output_path.write_text(
+                "## 结论\n\n完成。\n\n## 信息源\n\n- 来源。\n",
+                encoding="utf-8",
+            )
+            return EngineRunResult(
+                conclusion=OwliResult(
+                    "done", str(section_task.output_path), "完成", [], [], [], None,
+                ),
+                conclusion_error=None,
+                validation=validation.validate(ctx, section_task.validators),
+                events=[],
+                permission_denials=[],
+            )
+
+    result = asyncio.run(run_sectioned_task(
+        plan=plan,
+        agent=agent,
+        context=context,
+        base_task=task,
+        adapter=Adapter(),
+        store=store,
+        runs_root=runs_root,
+        now_iso=lambda: "2026-08-22T00:00:03Z",
+        on_event=lambda event: asyncio.sleep(0),
+    ))
+    return result, bodies, upstream_path
+
+
+def _节输入_from_body(body):
+    return json.loads(body[body.rfind("\n{") + 1:])
+
+
+def test_章级声明且账本done的上游路径注入节输入并按路径去重(tmp_path):
+    result, bodies, upstream_path = _run_章级声明输入_case(
+        tmp_path, upstream_status="done", include_upstream_section=True,
+    )
+
+    expected = [{
+        "goal_id": "goal-2",
+        "chapter_id": "ch-1",
+        "path": str(upstream_path),
+        "actual_count": 3,
+    }]
+    assert result.succeeded is True
+    assert _节输入_from_body(bodies["sec-1.md"])["done"] == expected
+    assert _节输入_from_body(bodies["sec-2.md"])["done"] == expected
+    assert "章级 opening.inputs 声明且账本 status=done 的上游产物" in bodies["sec-2.md"]
+    assert "产物 path 只用于定位，不是 permalink" in bodies["sec-2.md"]
+    assert "不得把本地路径改写成 file:// 角标" in bodies["sec-2.md"]
+    assert "结构化派生产物若同时给出实体条目及该实体的 permalink 来源" in bodies["sec-2.md"]
+    assert "permalink 中无歧义的品牌或模型标识" in bodies["sec-2.md"]
+    assert "不得只按 sources 数组顺序猜测实体对应" in bodies["sec-2.md"]
+    assert "节输入只含该 goal 下 done 章" not in bodies["sec-2.md"]
+
+
+def test_章级声明但账本不是done的上游路径不进节输入(tmp_path):
+    result, bodies, upstream_path = _run_章级声明输入_case(
+        tmp_path, upstream_status="missing", include_upstream_section=False,
+    )
+
+    inputs = _节输入_from_body(bodies["sec-1.md"])
+    assert result.succeeded is True
+    assert inputs == {"done": [], "missing": []}
+    assert str(upstream_path) not in bodies["sec-1.md"]
+    assert "只允许读取下方 done 列出的产物" in bodies["sec-1.md"]
+
+
 def test_节失败原因按真实_cause_映射():
     from app.orchestrator.sectioning import section_failure_reason
 
@@ -222,7 +352,7 @@ def test_节失败原因按真实_cause_映射():
         conclusion_error=None,
         conclusion=None,
         permission_denials=[],
-    )) == "retry_exhausted"
+    )) == "timeout"
 
 
 def test_失败节非空正文改名保全并把路径写入错误字段(tmp_path):

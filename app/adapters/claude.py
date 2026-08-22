@@ -108,7 +108,7 @@ def _schema_for_claude_cli(schema: Mapping[str, Any]) -> dict[str, Any]:
 
 def _goal_root(task: TaskSpec) -> Path:
     return (
-        artifact_validation.RUNS_ROOT
+        artifact_validation.runs_root_of(task)
         / task.research_id
         / "goals"
         / task.goal_id
@@ -133,7 +133,7 @@ def _resolve_tool_path(raw_path: str) -> Path:
 def _capability_path(task: TaskSpec, raw_path: str) -> str | None:
     actual = _resolve_tool_path(raw_path)
     research_root = (
-        artifact_validation.RUNS_ROOT / task.research_id
+        artifact_validation.runs_root_of(task) / task.research_id
     ).resolve(strict=False)
     try:
         return actual.relative_to(research_root).as_posix()

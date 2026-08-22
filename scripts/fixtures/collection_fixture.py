@@ -40,7 +40,10 @@ COMPETITORS = ["讯飞输入法", "搜狗输入法", "百度输入法"]
 SOURCES = [("web_search", "网页搜索数据抓取"), ("x", "X 数据抓取")]
 HN_SOURCE = [("hacker_news", "HN 数据抓取")]
 TERMINAL = {"done", "missing", "deferred"}
-REASONS = {"empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted"}
+REASONS = {
+    "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
+    "timeout",
+}
 SCALE = "fast"
 
 
@@ -139,7 +142,9 @@ def _goal(number: int, competitor: str, scale_profile: Any,
 
 def build_plan(case: str) -> Plan:
     profile = load_research_scale_config().profile(SCALE)
-    if case in {"inject-429", "inject-429-twice", "inject-engine-error"}:
+    if case in {
+        "inject-429", "inject-429-twice", "inject-engine-error", "inject-timeout",
+    }:
         goals = [_goal(1, COMPETITORS[0], profile, SOURCES[:1])]
     elif case == "empty-hn":
         # 真实零命中：英文社区源对中文输入法题目全空（m3-h §七 C9 同款），
@@ -214,6 +219,7 @@ class Recorder:
         inject_rate_limit: int,
         *,
         inject_engine_error: bool = False,
+        inject_timeout: bool = False,
     ) -> None:
         """在 adapter.run 边界注入确定性失败；注入分支不启动真实引擎。"""
 
@@ -223,21 +229,30 @@ class Recorder:
         async def run(task: Any, ctx: Any, on_event: Any = None) -> Any:
             key = f"{task.goal_id}/{task.agent_id}"
             begin = self.elapsed()
-            if inject_engine_error:
+            if inject_engine_error or inject_timeout:
+                engine_error = (
+                    "夹具注入 engine_error：确定性启动失败"
+                    if inject_engine_error
+                    else "夹具注入 engine_error：引擎调用超时"
+                )
                 result = SimpleNamespace(
                     conclusion=None,
                     conclusion_error="夹具注入：结构化结论未生成",
                     validation=SimpleNamespace(verdict=None, results=()),
                     events=[],
                     permission_denials=[],
-                    engine_error="夹具注入 engine_error：确定性启动失败",
+                    engine_error=engine_error,
                     succeeded=False,
                 )
                 self._record(
                     key,
                     begin,
                     engine=task.user_override,
-                    note="注入 engine_error（未起引擎）",
+                    note=(
+                        "注入 engine_error（未起引擎）"
+                        if inject_engine_error
+                        else "注入 timeout（未起引擎）"
+                    ),
                     result=result,
                 )
                 return result
@@ -342,7 +357,8 @@ async def run_case(root: Path, case: str, budget_seconds: float) -> dict[str, An
     coordinator._adapters[RID] = adapter
     recorder.wrap(adapter, inject_rate_limit={
         "inject-429": 1, "inject-429-twice": 2,
-    }.get(case, 0), inject_engine_error=case == "inject-engine-error")
+    }.get(case, 0), inject_engine_error=case == "inject-engine-error",
+        inject_timeout=case == "inject-timeout")
 
     timed_out = False
     try:
@@ -374,6 +390,10 @@ async def run_case(root: Path, case: str, budget_seconds: float) -> dict[str, An
         "attempts": recorder.attempts,
         "chapter_updates": [
             event["data"] for event in published if event.get("type") == "chapter_update"
+        ],
+        "normalized_events": [
+            event["data"] for event in published
+            if event.get("type") == "normalized_event"
         ],
         "runs_root": str(runs_root),
     }
@@ -472,6 +492,24 @@ def assess_main(outcome: dict[str, Any]) -> list[dict[str, Any]]:
         and set(outcome["goal_statuses"].values()) == {"done"},
         f"scheduler={outcome['scheduler_status']}；goals={outcome['goal_statuses']}",
     ))
+    error_events = [
+        event for event in outcome.get("normalized_events", [])
+        if event.get("is_error") is True
+    ]
+    real_causes = [
+        attempt for attempt in outcome["attempts"]
+        if attempt.get("succeeded") is False
+    ]
+    shortened_errors = [
+        event for event in error_events
+        if "Skill descriptions were shortened" in str(event.get("text", ""))
+    ]
+    checks.append(_check(
+        "E4 非致命 Codex 启动告警不以错误事件进入 SSE",
+        len(error_events) == len(real_causes) and not shortened_errors,
+        f"is_error=True 事件={len(error_events)}；真实死因={len(real_causes)}；"
+        f"shortened 假错误={len(shortened_errors)}",
+    ))
     return checks
 
 
@@ -533,6 +571,17 @@ def assess_engine_error(outcome: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def assess_timeout(outcome: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = assess_engine_error(outcome)
+    row = outcome["ledger"][0] if outcome["ledger"] else {}
+    checks[0] = _check(
+        "E1 注入超时原文进入账本且 reason=timeout",
+        "超时" in str(row.get("engine_error")) and row.get("reason") == "timeout",
+        f"reason={row.get('reason')!r}；engine_error={row.get('engine_error')!r}",
+    )
+    return checks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Owli 采集模块夹具")
     parser.add_argument("outdir")
@@ -543,6 +592,7 @@ def main() -> int:
             "inject-429",
             "inject-429-twice",
             "inject-engine-error",
+            "inject-timeout",
             "empty-hn",
         ])
     parser.add_argument("--budget-seconds", type=float, default=900.0)
@@ -565,6 +615,7 @@ def main() -> int:
         "inject-429": assess_inject,
         "inject-429-twice": assess_inject,
         "inject-engine-error": assess_engine_error,
+        "inject-timeout": assess_timeout,
         "empty-hn": assess_empty,
     }[args.case](outcome)
     outcome["checks"] = checks

@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
+from inspect import signature
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, Callable
 
-from app.adapters.codex import CodexAuthMode, build_codex_env
+from app.adapters.codex import CodexAdapter, CodexAuthMode, build_codex_env
+from app.config import ResearchScaleConfig
 
 from app.store.schema import (
     initialize_database_if_empty,
@@ -20,6 +22,39 @@ from app.store.schema import (
 
 class SchemaCheckError(RuntimeError):
     """SQLite 实际结构与权威 schema 不一致。"""
+
+
+class RuntimeConfigCheckError(RuntimeError):
+    """部署级运行配置违反跨模块安全约束。"""
+
+
+def validate_runtime_config(
+    scale_config: ResearchScaleConfig,
+    *,
+    codex_timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """拒绝章墙钟不大于 Codex 单次任务超时的配置。"""
+
+    timeout = codex_timeout_seconds
+    if timeout is None:
+        timeout = float(
+            signature(CodexAdapter).parameters["timeout_seconds"].default
+        )
+    for scale in ("standard", "fast"):
+        wall_clock = scale_config.profile(scale).chapter_wall_clock_seconds
+        if wall_clock is not None and wall_clock <= timeout:
+            raise RuntimeConfigCheckError(
+                f"{scale} 档 chapter_wall_clock_seconds={wall_clock} 必须严格大于 "
+                f"Codex 引擎超时 {timeout:g} 秒"
+            )
+    return {
+        "ok": True,
+        "codex_timeout_seconds": timeout,
+        "chapter_wall_clock_seconds": {
+            scale: scale_config.profile(scale).chapter_wall_clock_seconds
+            for scale in ("standard", "fast")
+        },
+    }
 
 
 def _engine_result(
