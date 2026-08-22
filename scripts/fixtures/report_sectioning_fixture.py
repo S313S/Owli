@@ -53,7 +53,13 @@ r["output"] = {"format": "markdown", "path": "goals/goal-3/report.md", "validato
 r["chapter"] = chap("ch-1", "report", r["output"]["path"], ["豆包语音输入法"], [c["output"]["path"]])
 plan = Plan.from_dict(src)
 
-runs = ROOT / "runs"; rr = runs / RID
+# 坑：app/adapters/claude.py 的 capability 路径判定用的是 app/adapters/validation.py
+# 里写死的模块级 RUNS_ROOT = <repo>/runs，不认 RuntimeCoordinator 注入的 runs_root。
+# 产物根必须落在仓库 runs/ 下，否则每个工具调用都被判「路径不在 capability 路径范围」。
+import shutil
+from app.adapters import validation as _artifact_validation
+runs = _artifact_validation.RUNS_ROOT; rr = runs / RID
+shutil.rmtree(rr, ignore_errors=True)
 def w(p, obj):
     p = rr / p; p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8"); return str(p)
@@ -84,6 +90,11 @@ coord._adapters[RID] = coord.adapter_factory()
 _ad = coord._adapters[RID]; _orig = _ad.run
 async def _run(task, ctx, on_event=None):
     r = await _orig(task, ctx, on_event=on_event)
+    # 取证：节化在判失败时会用占位覆盖已写好的节文件，先留一份原样快照
+    if task.output_path.is_file():
+        snap = task.output_path.with_suffix(".raw.md")
+        snap.write_text(task.output_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f">>> 快照 {snap.name} {snap.stat().st_size}B", flush=True)
     print(f"\n>>> 节 {task.output_path.name} engine_error={getattr(r,'engine_error',None)!r} conclusion_error={getattr(r,'conclusion_error',None)!r} "
           f"verdict={getattr(getattr(r,'validation',None),'verdict',None)} failures={[ (f.name,f.message) for f in getattr(getattr(r,'validation',None),'failures',[])]} denials={getattr(r,'permission_denials',None)} "
           f"conclusion={getattr(r,'conclusion',None)!r}"[:900], flush=True)

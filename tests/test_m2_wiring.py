@@ -32,6 +32,8 @@ def _skeleton() -> dict[str, Any]:
     return {
         "market_profile": "global_product",
         "market_profile_justification": "产品面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "研究主体为飞书。",
         "goals": [
             {
                 "title": "采集竞品证据",
@@ -44,7 +46,7 @@ def _skeleton() -> dict[str, Any]:
                     "description": "带永久链接的证据数组。",
                 },
                 "acceptance": ["文件存在且至少包含 1 条 permalink 记录"],
-                "agents": [{"name": "HN 数据抓取", "task": "采集 Hacker News 证据",
+                "agents": [{"name": "HN 数据抓取·飞书", "task": "采集 Hacker News 证据",
                             "output": {"shape": "array"}}],
             },
             {
@@ -102,6 +104,10 @@ class RecordingEngine:
                     "market_profile_justification": self.skeleton[
                         "market_profile_justification"
                     ],
+                    "subjects": self.skeleton["subjects"],
+                    "subjects_justification": self.skeleton[
+                        "subjects_justification"
+                    ],
                     "goals": [
                         {
                             "title": goal["title"],
@@ -140,7 +146,8 @@ class RecordingEngine:
                         "acceptance": ["产物按声明路径落盘"],
                     },
                     "closing": {
-                        "output": {"path": output_path}, "entities": ["飞书"],
+                        "output": {"path": output_path},
+                        "entities": ["飞书"] if chapter_type == "collection" else [],
                         "expected_count": 1, "notes": {},
                     },
                 }
@@ -517,7 +524,14 @@ async def test_批准后改_goal_删除已完成产物并双写_feedback_json(tm
 
 
 @async_test
-async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实标注(tmp_path: Path):
+async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实标注(
+    tmp_path: Path, monkeypatch
+):
+    from app.orchestrator import scheduler as scheduler_module
+
+    monkeypatch.setitem(
+        scheduler_module.CHAPTER_RETRY_INTERVAL_SECONDS, "standard", 0.0
+    )
     skeleton = _skeleton()
     skeleton["goals"].append({
         "title": "独立输出失败说明",
@@ -556,7 +570,7 @@ async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实�
         "goal-3": "done",
         "goal-4": "done",
     }
-    assert len([task for task in engine.tasks if task.agent_kind == "data_collection"]) == 20
+    assert len([task for task in engine.tasks if task.agent_kind == "data_collection"]) == 3
     assert any(task.agent_kind == "reliability_audit" for task in engine.tasks)
     assert any(task.agent_id.startswith("report-writing-2-sec-") for task in engine.tasks)
     assert "retry_exhausted" in text

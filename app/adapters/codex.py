@@ -150,7 +150,7 @@ def _writable_directories(task: TaskSpec, roots: tuple[str, ...]) -> list[Path]:
 
     directories: list[Path] = []
     research_root = (
-        artifact_validation.RUNS_ROOT / task.research_id
+        artifact_validation.runs_root_of(task) / task.research_id
     ).resolve(strict=False)
     goal_root = (research_root / "goals" / task.goal_id).resolve(strict=False)
     replacements = {
@@ -183,7 +183,7 @@ def _require_capability_output(task: TaskSpec, translated: CodexArgs) -> None:
     """防止 -C 自带的可写权限绕过 capability 路径谓词。"""
 
     research_root = (
-        artifact_validation.RUNS_ROOT / task.research_id
+        artifact_validation.runs_root_of(task) / task.research_id
     ).resolve(strict=False)
     output_path = _resolve_output_path(task.output_path)
     try:
@@ -265,7 +265,7 @@ def _task_contract_failure(
     actual_path = _resolve_output_path(task.output_path)
     ctx_path = _resolve_output_path(ctx.output_path)
     expected_root = (
-        artifact_validation.RUNS_ROOT
+        artifact_validation.runs_root_of(task)
         / task.research_id
         / "goals"
         / task.goal_id
@@ -287,7 +287,10 @@ def _task_contract_failure(
             differences.append("产物路径不能等于 goal 根目录")
     if not differences:
         return None
-    message = "CodexTask 与校验上下文不一致，已在启动前拒绝"
+    message = (
+        "CodexTask 与校验上下文不一致，已在启动前拒绝；差异："
+        + "；".join(differences[:3])
+    )
     return artifact_validation.Result(
         artifact_validation.Verdict.FAIL,
         "codex_task_contract",

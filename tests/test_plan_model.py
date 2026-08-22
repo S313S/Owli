@@ -12,7 +12,8 @@ def test_三层字段名与字段表逐字一致() -> None:
 
     assert [field.name for field in fields(Plan)] == [
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "market_profile", "market_profile_justification", "scale", "status",
+        "market_profile", "market_profile_justification", "subjects",
+        "subjects_justification", "scale", "status",
         "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     ]
@@ -22,7 +23,7 @@ def test_三层字段名与字段表逐字一致() -> None:
         "agents", "status",
     ]
     assert [field.name for field in fields(Agent)] == [
-        "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
+        "agent_id", "display_name", "entity", "task", "depends_on", "inputs", "engine",
         "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     ]

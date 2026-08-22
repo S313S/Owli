@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 20 条阻断校验和 7 类质量提示。"""
+"""计划树保存与批准前的 26 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -583,36 +583,51 @@ def _rule_20(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _is_collection_agent(agent: Mapping[str, Any]) -> bool:
+    """只读结构化 kind/profile 判断采集职能。"""
+
+    return (
+        agent.get("agent_kind") == "data_collection"
+        or agent.get("capability", {}).get("profile") == "web-collector"
+    )
+
+
 def _collection_reuse_violations(
     goals: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
-    """只按结构化采集能力与产物路径识别跨 goal 同源重采。"""
+    """只按结构化采集能力、实体与产物路径识别同源同实体重采。"""
 
-    first_by_source: dict[str, dict[str, str]] = {}
+    first_by_key: dict[tuple[str, str], dict[str, str]] = {}
     violations: list[dict[str, str]] = []
     for goal in goals:
         goal_id = str(goal.get("goal_id", ""))
         for agent in goal.get("agents", []):
+            if not _is_collection_agent(agent):
+                continue
             sources = agent.get("capability", {}).get("sources", [])
+            entity = str(agent.get("entity") or "").strip()
             output_path = str(agent.get("output", {}).get("path", "")).strip()
-            if not isinstance(sources, list) or not output_path:
+            if not isinstance(sources, list) or not entity or not output_path:
                 continue
             current = {
                 "goal_id": goal_id,
                 "agent_id": str(agent.get("agent_id", "")),
                 "agent_kind": "data_collection",
+                "entity": entity,
                 "output_path": output_path,
             }
             for source in sources:
                 source_id = str(source).strip()
                 if not source_id:
                     continue
-                first = first_by_source.get(source_id)
+                key = (source_id, entity)
+                first = first_by_key.get(key)
                 if first is None:
-                    first_by_source[source_id] = current
-                elif first["goal_id"] != goal_id:
+                    first_by_key[key] = current
+                else:
                     violations.append({
                         "source_id": source_id,
+                        "entity": entity,
                         "first_goal_id": first["goal_id"],
                         "first_agent_id": first["agent_id"],
                         "first_output_path": first["output_path"],
@@ -641,8 +656,8 @@ def _rule_21(goals: list[dict[str, Any]]) -> list[str]:
     for item in _collection_reuse_violations(goals):
         messages.append(
             f"[规则21] {item['goal_id']}/{item['agent_id']} "
-            f"(agent_kind={item['agent_kind']}) 跨 goal 重复完整采集 "
-            f"source_id={item['source_id']}；首次采集="
+            f"(agent_kind={item['agent_kind']}) 重复完整采集 "
+            f"source_id={item['source_id']}、entity={item['entity']}；首次采集="
             f"{item['first_goal_id']}/{item['first_agent_id']}，"
             f"output.path={item['first_output_path']}；本次 output.path="
             f"{item['output_path']}。请删除重复采集 agent，改为 inputs 引用上游产物 "
@@ -735,7 +750,11 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for goal, agent in _agents(goals):
         chapter = agent.get("chapter")
-        if not isinstance(chapter, dict) or chapter.get("chapter_type") != "collection":
+        chapter_is_collection = (
+            isinstance(chapter, dict)
+            and chapter.get("chapter_type") == "collection"
+        )
+        if not _is_collection_agent(agent) and not chapter_is_collection:
             continue
         for source in agent.get("capability", {}).get("sources", []):
             source_id = str(source)
@@ -745,6 +764,92 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
                     f"采集章 source_id={source_id} 不适用于题目市场属性 "
                     f"{profile}；可用源={','.join(sorted(applicable))}"
                 )
+    return messages
+
+
+def _rule_25(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
+    """骨架研究实体必须被至少一个采集 agent 的结构化 entity 覆盖。"""
+
+    subjects = {
+        str(item).strip()
+        for item in raw.get("subjects", [])
+        if isinstance(item, str) and item.strip()
+    }
+    if not subjects:
+        return []
+    collected = {
+        str(agent.get("entity")).strip()
+        for _, agent in _agents(goals)
+        if _is_collection_agent(agent)
+        and isinstance(agent.get("entity"), str)
+        and str(agent.get("entity")).strip()
+    }
+    anchor = str(goals[-1].get("goal_id", "goal-1")) if goals else "goal-1"
+    return [
+        f"[规则25] {anchor}/subjects 缺少实体采集 agent：{entity}；"
+        "请在本 goal 补充该实体的采集 agent，或在其他 goal 分摊该实体"
+        for entity in sorted(subjects - collected)
+    ]
+
+
+def _rule_26(goals: list[dict[str, Any]]) -> list[str]:
+    """非采集章只可声明其 inputs 结构化可达的采集实体。"""
+
+    chapters_by_output: dict[str, dict[str, Any]] = {}
+    records: list[dict[str, Any]] = []
+    for goal, agent in _agents(goals):
+        chapter = agent.get("chapter")
+        if not isinstance(chapter, dict):
+            continue
+        closing = chapter.get("closing", {})
+        opening = chapter.get("opening", {})
+        output = closing.get("output", {}) if isinstance(closing, dict) else {}
+        path = str(output.get("path", "")).strip() if isinstance(output, dict) else ""
+        record = {
+            "goal_id": str(goal.get("goal_id", "")),
+            "agent_id": str(agent.get("agent_id", "")),
+            "chapter_id": str(chapter.get("chapter_id", "")),
+            "chapter_type": str(chapter.get("chapter_type", "")),
+            "entities": {
+                str(item).strip()
+                for item in closing.get("entities", [])
+                if isinstance(item, str) and item.strip()
+            } if isinstance(closing, dict) else set(),
+            "inputs": [
+                str(item.get("path", "")).strip()
+                for item in opening.get("inputs", [])
+                if isinstance(item, dict) and str(item.get("path", "")).strip()
+            ] if isinstance(opening, dict) else [],
+        }
+        records.append(record)
+        if path:
+            chapters_by_output[path] = record
+
+    messages: list[str] = []
+    for record in records:
+        if record["chapter_type"] == "collection":
+            continue
+        reachable_entities: set[str] = set()
+        pending = list(record["inputs"])
+        visited: set[str] = set()
+        while pending:
+            path = pending.pop()
+            if path in visited:
+                continue
+            visited.add(path)
+            upstream = chapters_by_output.get(path)
+            if upstream is None:
+                continue
+            if upstream["chapter_type"] == "collection":
+                reachable_entities.update(upstream["entities"])
+            else:
+                pending.extend(upstream["inputs"])
+        for entity in sorted(record["entities"] - reachable_entities):
+            messages.append(
+                f"[规则26] {record['goal_id']}/{record['chapter_id']} "
+                f"({record['agent_id']}) closing.entities 超出 inputs 可达采集实体："
+                f"{entity}。请为该实体补采集章，或从本章 entities 中删除"
+            )
     return messages
 
 
@@ -799,13 +904,21 @@ def _warnings(goals: list[dict[str, Any]]) -> list[str]:
             messages.append(
                 f"[警告4] {agent.get('agent_id')}.prompt.body 缺可复现参数：{missing}"
             )
-    platforms: dict[str, list[str]] = {}
+    platforms: dict[tuple[str, str], list[str]] = {}
     for _, agent in _agents(goals):
+        entity = str(agent.get("entity") or "").strip()
+        if not entity:
+            continue
         for source in agent.get("capability", {}).get("sources", []):
-            platforms.setdefault(str(source), []).append(str(agent.get("agent_id")))
-    for source, agent_ids in platforms.items():
+            platforms.setdefault(
+                (str(source), entity), []
+            ).append(str(agent.get("agent_id")))
+    for (source, entity), agent_ids in platforms.items():
         if len(agent_ids) > 1:
-            messages.append(f"[警告5] 平台 {source} 被多个 agent 重复采集：{agent_ids}")
+            messages.append(
+                f"[警告5] 平台 {source} 的实体 {entity} 被多个 agent 重复采集："
+                f"{agent_ids}"
+            )
     for goal in goals:
         count = len(goal.get("agents", []))
         if count > 5:
@@ -855,4 +968,6 @@ def lint(
     errors.extend(_rule_22(goals))
     errors.extend(_rule_23(raw, goals))
     errors.extend(_rule_24(goals, max_chapters_per_goal))
+    errors.extend(_rule_25(raw, goals))
+    errors.extend(_rule_26(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

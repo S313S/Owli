@@ -14,6 +14,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNS_ROOT = PROJECT_ROOT / "runs"
 
 
+def runs_root_of(obj: Any) -> Path:
+    """统一读取调用方注入的 runs_root；旧任务形态保持默认根。"""
+
+    return Path(getattr(obj, "runs_root", None) or RUNS_ROOT)
+
+
 class Verdict(StrEnum):
     PASS = "pass"
     FAIL = "fail"

@@ -8,7 +8,10 @@ import inspect
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+from jsonschema import SchemaError, ValidationError as JsonSchemaValidationError
+from jsonschema import validate as validate_json_schema
 
 from app.adapters.capability import (
     CapabilityValidationError,
@@ -40,12 +43,16 @@ _RESULT_BLOCK = re.compile(
 _STATUSES = {"done", "partial", "blocked"}
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMMON_PROMPT_PATH = PROJECT_ROOT / "app" / "prompts" / "common" / "v1.md"
+OWLI_RESULT_SCHEMA_PATH = (
+    PROJECT_ROOT / "app" / "prompts" / "common" / "owli-result.schema.json"
+)
 CLAUDE_TOOL_UNIVERSE = frozenset(
     {
         "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep",
         "Bash", "WebFetch", "WebSearch", "Task", "TodoWrite", "Skill",
     }
 )
+CLAUDE_PROTOCOL_TOOLS = frozenset({"StructuredOutput"})
 
 
 class OwliResultError(ValueError):
@@ -83,6 +90,20 @@ def _load_sdk():
 def compose_prompt(body: str) -> str:
     prefix = COMMON_PROMPT_PATH.read_text(encoding="utf-8").rstrip("\n")
     return f"{prefix}\n{body}"
+
+
+def _owli_result_schema() -> dict[str, Any]:
+    return json.loads(OWLI_RESULT_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+def _schema_for_claude_cli(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """复制 schema 并剥离 Claude CLI 不接受的顶层元数据。"""
+
+    unsupported_meta_keys = {"$schema", "$id", "$defs"}
+    return {
+        key: value for key, value in schema.items()
+        if key not in unsupported_meta_keys
+    }
 
 
 def _goal_root(task: TaskSpec) -> Path:
@@ -144,6 +165,8 @@ def make_permission_callback(task: TaskSpec, denials: list[str], *, sdk=None):
 
     async def can_use_tool(tool_name: str, input_data: dict[str, Any], context: Any):
         del context
+        if tool_name in CLAUDE_PROTOCOL_TOOLS:
+            return sdk.PermissionResultAllow()
         if tool_name not in allowed_tools:
             denials.append(tool_name)
             return sdk.PermissionResultDeny(message=f"工具不在 capability 白名单：{tool_name}")
@@ -231,6 +254,10 @@ def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
         "hooks": {
             "PreToolUse": [make_pre_tool_hook(permission_callback, sdk=sdk)],
         },
+        "output_format": {
+            "type": "json_schema",
+            "schema": _schema_for_claude_cli(_owli_result_schema()),
+        },
     }
     if translated is not None and translated.registered_sources:
         values["mcp_servers"] = {
@@ -271,6 +298,119 @@ def _assistant_text(message: Any, sdk: Any) -> list[str]:
         if isinstance(result, str) and result.strip():
             texts.append(result)
     return texts
+
+
+def _planning_json_payload(text: str) -> str:
+    """只按 JSON 结构剥离围栏或前后说明，不读取业务措辞。"""
+
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        stripped = stripped[first_newline + 1:] if first_newline >= 0 else ""
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[:-3]
+        stripped = stripped.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        start, end = stripped.find("{"), stripped.rfind("}")
+        if 0 <= start < end:
+            stripped = stripped[start:end + 1]
+    return stripped
+
+
+def _merge_planning_continuation(prefix: str, suffix: str) -> str:
+    """按字符级最长首尾重叠还原已收文本，供产物判定使用。"""
+
+    if not prefix:
+        return suffix
+    if not suffix:
+        return prefix
+    for size in range(min(len(prefix), len(suffix)), 0, -1):
+        if prefix[-size:] == suffix[:size]:
+            return prefix + suffix[size:]
+    return prefix + suffix
+
+
+def _planning_product(
+    candidates: list[Any], output_schema: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """按候选产物顺序解析 object，并在有 schema 时做协议校验。"""
+
+    errors: list[str] = []
+    for candidate in candidates:
+        try:
+            if isinstance(candidate, Mapping):
+                value = dict(candidate)
+            elif isinstance(candidate, str) and candidate.strip():
+                value = json.loads(_planning_json_payload(candidate))
+            else:
+                raise ValueError("规划段未收到 JSON object 候选")
+            if not isinstance(value, dict):
+                raise ValueError("规划段 JSON 顶层必须是 object")
+            if output_schema is not None:
+                validate_json_schema(instance=value, schema=dict(output_schema))
+            return value, None
+        except (
+            json.JSONDecodeError,
+            ValueError,
+            JsonSchemaValidationError,
+            SchemaError,
+        ) as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+    return None, "；".join(errors) or "规划段产物不可用"
+
+
+def _planning_error_event(request: PlanningSegmentRequest, message: Any) -> NormalizedEvent:
+    return NormalizedEvent(
+        engine="Claude",
+        thread_id=request.research_id,
+        turn_id=request.segment_name,
+        item_kind=ItemKind.ERROR,
+        text=str(message),
+        is_error=True,
+        raw=message,
+        cause="planning_segment",
+    )
+
+
+def _engine_error_from_events(events: list[NormalizedEvent]) -> str | None:
+    """汇总正常收尾消息携带的错误原文，不依赖 SDK 是否抛异常。"""
+
+    samples: list[str] = []
+    for event in events:
+        if not event.is_error:
+            continue
+        raw = event.raw
+
+        def field(name: str, default: Any = None) -> Any:
+            if isinstance(raw, dict):
+                return raw.get(name, default)
+            return getattr(raw, name, default)
+
+        api_error_status = field("api_error_status")
+        subtype = field("subtype")
+        raw_result = field("result")
+        raw_errors = field("errors")
+        if not (
+            raw_result
+            or subtype
+            or api_error_status is not None
+            or raw_errors
+        ):
+            continue
+        sample = json.dumps(
+            {
+                "is_error": bool(field("is_error", event.is_error)),
+                "api_error_status": api_error_status,
+                "subtype": subtype,
+                "result": raw_result or event.text,
+                "errors": raw_errors,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        if sample not in samples:
+            samples.append(sample)
+    return "\n".join(samples) or None
 
 
 def _unavailable_run(
@@ -393,20 +533,54 @@ class ClaudeAdapter:
                                 if inspect.isawaitable(callback_result):
                                     await callback_result
                 if isinstance(message, sdk.ResultMessage):
+                    plain_text = "".join(chunks)
                     structured = getattr(message, "structured_output", None)
                     if structured is not None:
                         text = json.dumps(structured, ensure_ascii=False)
-                        chunks[:] = [text]
                         if on_text is not None and not saw_stream_delta:
                             callback_result = on_text(text)
                             if inspect.isawaitable(callback_result):
                                 await callback_result
                     api_status = getattr(message, "api_error_status", None)
                     is_error = bool(getattr(message, "is_error", False))
+                    if is_error or api_status is not None:
+                        append_engine_error(
+                            _planning_error_event(request, message),
+                            log_root=self._log_root,
+                        )
+                    merged_text = _merge_planning_continuation(
+                        request.continuation, plain_text
+                    )
+                    product, product_error = _planning_product(
+                        [structured, merged_text, plain_text],
+                        request.output_schema,
+                    )
+                    if product is not None:
+                        completed = True
+                        failed = False
+                        cause = None
+                        error_text = None
+                        if structured is not None:
+                            chunks[:] = [json.dumps(product, ensure_ascii=False)]
+                        continue
+
+                    failed = True
+                    message_cause = str(getattr(message, "cause", "") or "").casefold()
+                    subtype = getattr(message, "subtype", None)
+                    stop_reason = getattr(message, "stop_reason", None)
+                    normal_stop_sequence = (
+                        subtype == "success"
+                        and stop_reason == "stop_sequence"
+                        and api_status is None
+                    )
                     if api_status == 429:
                         cause = "rate_limit"
                     elif api_status in {500, 529}:
                         cause = "service"
+                    elif normal_stop_sequence:
+                        cause = "stop_sequence"
+                    elif message_cause:
+                        cause = message_cause
                     elif is_error:
                         message_text = str(message)
                         cause = (
@@ -414,16 +588,14 @@ class ClaudeAdapter:
                             if classify_transport_error(message_text)
                             else "engine_error"
                         )
-                    if is_error or api_status is not None:
-                        error_text = (
-                            f"is_error={is_error}; "
-                            f"api_error_status={api_status}; raw={message}"
-                        )
-                    failed = (
-                        is_error
-                        or api_status is not None
+                    else:
+                        cause = "artifact_invalid"
+                    error_text = (
+                        f"规划段产物不可用：{product_error}; is_error={is_error}; "
+                        f"api_error_status={api_status}; subtype={subtype}; "
+                        f"stop_reason={stop_reason}"
                     )
-                    completed = not failed
+                    completed = False
         except Exception as exc:
             message = str(exc)
             interrupted = classify_transport_error(message)
@@ -441,7 +613,7 @@ class ClaudeAdapter:
                 pass
         return PlanningSegmentResult(
             "".join(chunks),
-            completed and bool(chunks),
+            completed and bool(chunks or request.continuation),
             error=error_text if failed else None,
             cause=cause,
         )
@@ -458,6 +630,7 @@ class ClaudeAdapter:
         denials: list[str] = []
         events: list[NormalizedEvent] = []
         output_text: list[str] = []
+        structured_output: Any = None
         try:
             sdk = self._sdk or _load_sdk()
         except Exception as exc:
@@ -494,6 +667,10 @@ class ClaudeAdapter:
             await client.connect(_prompt_stream(compose_prompt(task.body)))
             async for message in client.receive_response():
                 output_text.extend(_assistant_text(message, sdk))
+                if isinstance(message, sdk.ResultMessage):
+                    candidate = getattr(message, "structured_output", None)
+                    if candidate is not None:
+                        structured_output = candidate
                 routing_events: list[NormalizedEvent] = []
                 route(
                     message,
@@ -560,7 +737,11 @@ class ClaudeAdapter:
         conclusion_error = None
         path_failure = None
         try:
-            conclusion = parse_owli_result("\n".join(output_text))
+            conclusion = (
+                _parse_owli_result_value(structured_output)
+                if structured_output is not None
+                else parse_owli_result("\n".join(output_text))
+            )
             actual = _resolve_tool_path(conclusion.output_path)
             expected = _resolve_tool_path(str(task.output_path))
             if actual != expected:
@@ -598,6 +779,7 @@ class ClaudeAdapter:
             report,
             events,
             denials,
+            _engine_error_from_events(events),
         )
 
 
@@ -615,6 +797,10 @@ def parse_owli_result(text: str) -> OwliResult:
         value = json.loads(matches[-1])
     except json.JSONDecodeError as exc:
         raise OwliResultError(f"owli-result JSON 无法解析：{exc}") from exc
+    return _parse_owli_result_value(value)
+
+
+def _parse_owli_result_value(value: Any) -> OwliResult:
     if not isinstance(value, dict):
         raise OwliResultError("owli-result 顶层必须是对象")
     required = {

@@ -70,6 +70,7 @@ def _thaw(value: Any) -> Any:
 class Agent:
     agent_id: str
     display_name: str
+    entity: str | None
     task: str
     depends_on: list[str]
     inputs: list[dict[str, Any]]
@@ -84,7 +85,7 @@ class Agent:
     status: str
 
     _FIELDS: ClassVar[set[str]] = {
-        "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
+        "agent_id", "display_name", "entity", "task", "depends_on", "inputs", "engine",
         "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     }
@@ -92,6 +93,10 @@ class Agent:
     def __post_init__(self) -> None:
         if not _AGENT_ID_PATTERN.fullmatch(self.agent_id):
             raise ValueError(f"agent_id 必须是 kebab-case：{self.agent_id}")
+        if self.entity is not None and (
+            not isinstance(self.entity, str) or not self.entity.strip()
+        ):
+            raise ValueError(f"agent {self.agent_id}.entity 必须是非空字符串或 null")
         for field_name, value in self.origin.items():
             if field_name == "_node":
                 if value not in {"generated", "user"}:
@@ -105,6 +110,7 @@ class Agent:
     def from_dict(cls, data: Mapping[str, Any]) -> "Agent":
         _strict_fields(data, cls._FIELDS, "agent")
         values = dict(data)
+        values.setdefault("entity", None)
         values.setdefault("inputs", [])
         values.setdefault("model", None)
         values.setdefault("chapter", None)
@@ -115,7 +121,7 @@ class Agent:
         return {name: _copy(getattr(self, name)) for name in self._FIELDS_ORDER}
 
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
-        "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
+        "agent_id", "display_name", "entity", "task", "depends_on", "inputs", "engine",
         "model", "capability", "prompt", "output", "chapter", "extra_quota_credits",
         "origin", "status",
     )
@@ -175,6 +181,8 @@ class Plan:
     use_case: str
     market_profile: str
     market_profile_justification: str
+    subjects: list[str]
+    subjects_justification: str
     scale: str
     status: str
     approved_at: str | None
@@ -189,7 +197,8 @@ class Plan:
 
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
         "research_id", "plan_rev", "title", "research_question", "use_case",
-        "market_profile", "market_profile_justification", "scale", "status",
+        "market_profile", "market_profile_justification", "subjects",
+        "subjects_justification", "scale", "status",
         "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     )
@@ -197,6 +206,17 @@ class Plan:
     def __post_init__(self) -> None:
         if self.plan_rev < 1:
             raise ValueError("plan_rev 必须从 1 开始")
+        seen_agent_ids: set[str] = set()
+        duplicate_agent_ids: set[str] = set()
+        for goal in self.goals:
+            for agent in goal.agents:
+                if agent.agent_id in seen_agent_ids:
+                    duplicate_agent_ids.add(agent.agent_id)
+                seen_agent_ids.add(agent.agent_id)
+        if duplicate_agent_ids:
+            raise ValueError(
+                f"agent_id 跨 goal 重复：{sorted(duplicate_agent_ids)}"
+            )
         if self.scale not in {"fast", "standard"}:
             raise ValueError(f"scale 只能取 fast 或 standard：{self.scale!r}")
         if self.market_profile not in {"cn_product", "global_product"}:
@@ -206,6 +226,14 @@ class Plan:
             )
         if not self.market_profile_justification.strip():
             raise ValueError("market_profile_justification 不能为空")
+        if not isinstance(self.subjects, list) or not all(
+            isinstance(item, str) and item.strip() for item in self.subjects
+        ):
+            raise ValueError("subjects 必须是非空字符串数组或兼容旧计划的空数组")
+        if len(set(self.subjects)) != len(self.subjects):
+            raise ValueError("subjects 不得含重复实体")
+        if self.subjects and not self.subjects_justification.strip():
+            raise ValueError("subjects_justification 不能为空")
         if not (
             self.baseline_source in {"generated", "expert_panel"}
             or re.fullmatch(r"reused:r-[A-Za-z0-9-]+", self.baseline_source)
@@ -229,6 +257,8 @@ class Plan:
         values.setdefault("expert_panel", None)
         values.setdefault("baseline", None)
         values.setdefault("scale", "standard")
+        values.setdefault("subjects", [])
+        values.setdefault("subjects_justification", "历史计划未记录研究实体。")
         values.setdefault("market_profile", "global_product")
         values.setdefault(
             "market_profile_justification", "历史计划未记录市场属性，按全球产品兼容。"

@@ -151,7 +151,7 @@ class PlanSegmentWorkspace:
                 "transport" if result.transport_interrupted else cause
             )
             does_not_consume_budget = effective_cause in {
-                "rate_limit", "transport", "service",
+                "rate_limit", "transport", "service", "stop_sequence",
             }
             if does_not_consume_budget:
                 transport_failures += 1

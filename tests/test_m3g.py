@@ -19,6 +19,7 @@ from tests.test_plan_generate import (
 
 def _collector(agent_id: str, goal_id: str, source_id: str) -> dict:
     agent = make_agent(agent_id, goal_id)
+    agent["entity"] = "飞书"
     agent["capability"].update({
         "profile": "web-collector",
         "tools": [f"source.{source_id}", "fs.write", "db.write"],
@@ -104,7 +105,8 @@ def test_goal段提示词注入上游源与产物路径且明确_inputs_复用()
     assert "source_id=hacker_news" in prompt
     assert "goals/goal-1/data-collection.json" in prompt
     assert "通过 inputs 消费" in prompt
-    assert "禁止重采同源" in prompt
+    assert "相同 source_id 与 entity 的组合禁止重复采集" in prompt
+    assert "同源不同实体允许跨 goal 采集" in prompt
 
 
 def test_中文市场选源覆盖表进入规划提示且_lint_拦_HN_PH() -> None:
@@ -186,7 +188,7 @@ def test_规则21重试只回灌后出现的违规_goal段(tmp_path) -> None:
     invalid = _valid_skeleton()
     invalid["goals"][2] = _goal(
         3,
-        [_agent("HN 数据抓取", "重复采集 Hacker News")],
+        [_agent("HN 数据抓取·飞书", "重复采集 Hacker News")],
     )
     corrected = deepcopy(invalid)
     corrected["goals"][2] = _goal(
@@ -219,15 +221,17 @@ def test_fast_骨架_goal与单_goal采集源上限均为配置硬约束() -> No
         {"title": str(index), "objective": "产出", "depends_on": []}
         for index in range(4)
     ], "market_profile": "global_product",
-        "market_profile_justification": "面向全球市场。"}
+        "market_profile_justification": "面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "研究主体为飞书。"}
     with pytest.raises(ValueError, match="goal 数必须在 3–3"):
         _skeleton_scaffolds(four_goals, scale="fast", scale_config=config)
 
     plan = _valid_skeleton()
     plan["goals"][0]["agents"] = [
-        _agent("HN 数据抓取", "采集 HN"),
-        _agent("网页搜索数据抓取", "采集网页"),
-        _agent("Product Hunt 数据抓取", "采集 Product Hunt"),
+        _agent("HN 数据抓取·飞书", "采集 HN"),
+        _agent("网页搜索数据抓取·飞书", "采集网页"),
+        _agent("Product Hunt 数据抓取·飞书", "采集 Product Hunt"),
     ]
     with pytest.raises(ValueError, match="采集源最多 2 个"):
         _build_plan(

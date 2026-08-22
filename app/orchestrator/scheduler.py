@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -22,6 +23,19 @@ from app.plan.model import Agent, Goal, Plan
 
 
 R8_CONFIRM_SECONDS = 15 * 60
+repeat_cause_limit = 3
+CHAPTER_RETRY_INTERVAL_SECONDS = {"fast": 5.0, "standard": 15.0}
+_MISSING_REASONS = frozenset({
+    "empty_result",
+    "tool_unavailable",
+    "quota_exhausted",
+    "retry_exhausted",
+    "conclusion_invalid",
+})
+_ISO_TIMESTAMP_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})"
+)
+_LONG_TOKEN_PATTERN = re.compile(r"(?<![0-9A-Za-z])(?:0x)?[0-9A-Fa-f]{8,}(?![0-9A-Za-z])")
 
 
 @dataclass(frozen=True)
@@ -36,6 +50,8 @@ class TaskRunResult:
     reason: str | None = None
     actual_output_path: str | None = None
     actual_count: int | None = None
+    engine_error: str | None = None
+    conclusion_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +130,29 @@ def _failure_feedback(result: Any) -> str | None:
     return "\n".join(parts) or None
 
 
+def _truncate_error(value: str | None, limit: int = 2000) -> str | None:
+    """错误原文按 Unicode 字符安全截断，避免超长载荷进入章账本。"""
+
+    if value is None:
+        return None
+    return str(value)[:limit]
+
+
+def _normalize_failure_text(value: str | None) -> str:
+    text = str(value or "")[:200]
+    text = _ISO_TIMESTAMP_PATTERN.sub("<timestamp>", text)
+    return _LONG_TOKEN_PATTERN.sub("<id>", text)
+
+
+def _failure_signature(result: TaskRunResult) -> tuple[str, str, str, str]:
+    return (
+        str(result.chapter_status or ""),
+        str(result.reason or ""),
+        _normalize_failure_text(result.conclusion_error),
+        _normalize_failure_text(result.engine_error),
+    )
+
+
 class Scheduler:
     """按 goal/agent 两级 DAG 推进，并执行重试、限流和发卡策略。"""
 
@@ -156,6 +195,9 @@ class Scheduler:
         self._card_sequence = 0
         self._agent_feedback: dict[str, str | None] = {}
         self._supplemented: set[str] = set()
+        self._last_attempt_started_at: dict[tuple[str, str], datetime] = {}
+        self._last_failure_signature: dict[tuple[str, str], tuple[str, str, str, str]] = {}
+        self._repeat_cause_counts: dict[tuple[str, str], int] = {}
         if self._chapter_ledger is not None:
             self._chapter_ledger.ensure_chapters(
                 plan.research_id,
@@ -192,6 +234,8 @@ class Scheduler:
         reason: str | None,
         output_path: str | None,
         actual_count: int | None,
+        engine_error: str | None,
+        conclusion_error: str | None,
     ) -> None:
         if self._chapter_ledger is None:
             return
@@ -203,6 +247,8 @@ class Scheduler:
             reason=reason,
             actual_output_path=output_path,
             actual_count=actual_count,
+            engine_error=_truncate_error(engine_error),
+            conclusion_error=_truncate_error(conclusion_error),
             updated_at=self._clock().isoformat(),
         )
 
@@ -217,6 +263,17 @@ class Scheduler:
         await self._emit({"type": "chapter_update", "data": row})
 
     def _validate_graphs(self) -> None:
+        seen_agent_ids: set[str] = set()
+        duplicate_agent_ids: set[str] = set()
+        for goal in self.plan.goals:
+            for agent in goal.agents:
+                if agent.agent_id in seen_agent_ids:
+                    duplicate_agent_ids.add(agent.agent_id)
+                seen_agent_ids.add(agent.agent_id)
+        if duplicate_agent_ids:
+            raise ValueError(
+                f"agent_id 跨 goal 重复：{sorted(duplicate_agent_ids)}"
+            )
         goal_graph = {
             goal.goal_id: list(goal.depends_on) for goal in self.plan.goals
         }
@@ -226,6 +283,27 @@ class Scheduler:
                 agent.agent_id: list(agent.depends_on) for agent in goal.agents
             }
             _assert_acyclic(agent_graph, f"{goal.goal_id} agent")
+
+    async def _wait_for_chapter_retry(self, goal: Goal, agent: Agent) -> None:
+        if self._chapter_ledger is None:
+            return
+        key = (goal.goal_id, self._chapter_id(agent))
+        started_at = self._last_attempt_started_at.get(key)
+        if started_at is None:
+            return
+        interval = CHAPTER_RETRY_INTERVAL_SECONDS[self.plan.scale]
+        elapsed = (self._clock() - started_at).total_seconds()
+        remaining = interval - elapsed
+        if remaining <= 0:
+            return
+        ready = asyncio.get_running_loop().create_future()
+
+        def release() -> None:
+            if not ready.done():
+                ready.set_result(None)
+
+        self._timer(remaining, release)
+        await ready
 
     def update_plan(self, plan: Plan) -> None:
         """在干预点替换后续计划；保留已运行节点的运行时状态。"""
@@ -498,6 +576,8 @@ class Scheduler:
             reason=_field(result, "reason"),
             actual_output_path=_field(result, "actual_output_path"),
             actual_count=_field(result, "actual_count"),
+            engine_error=_field(result, "engine_error"),
+            conclusion_error=_field(result, "conclusion_error"),
         )
 
     async def _execute_agent(self, goal: Goal, agent: Agent) -> None:
@@ -516,14 +596,24 @@ class Scheduler:
             if self._paused:
                 await self._set_agent_status(agent.agent_id, "retrying")
                 return
+            if attempt > 1:
+                await self._wait_for_chapter_retry(goal, agent)
+                if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
+                    return
+                if self._paused:
+                    await self._set_agent_status(agent.agent_id, "retrying")
+                    return
             self._attempts[agent.agent_id] = attempt
             if self._chapter_ledger is not None:
+                attempt_started_at = self._clock()
+                chapter_key = (goal.goal_id, self._chapter_id(agent))
+                self._last_attempt_started_at[chapter_key] = attempt_started_at
                 started = self._chapter_ledger.start_chapter(
                     self.plan.research_id,
                     goal.goal_id,
                     self._chapter_id(agent),
                     engine=agent.engine,
-                    updated_at=self._clock().isoformat(),
+                    updated_at=attempt_started_at.isoformat(),
                 )
                 if not started:
                     return
@@ -544,7 +634,11 @@ class Scheduler:
             except asyncio.CancelledError:
                 return
             except Exception as exc:
-                result = TaskRunResult(False, agent.engine)
+                result = TaskRunResult(
+                    False,
+                    agent.engine,
+                    engine_error=f"{type(exc).__name__}: {exc}",
+                )
                 await self._emit({
                     "type": "agent_error",
                     "data": {
@@ -557,6 +651,37 @@ class Scheduler:
                 await self._consume_signal(decision)
             if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
                 return
+            if self._chapter_ledger is not None and not result.succeeded:
+                chapter_key = (goal.goal_id, self._chapter_id(agent))
+                signature = _failure_signature(result)
+                if self._last_failure_signature.get(chapter_key) == signature:
+                    repeat_count = self._repeat_cause_counts.get(chapter_key, 1) + 1
+                else:
+                    repeat_count = 1
+                self._last_failure_signature[chapter_key] = signature
+                self._repeat_cause_counts[chapter_key] = repeat_count
+                if (
+                    repeat_count >= repeat_cause_limit
+                    and result.chapter_status not in {"missing", "deferred"}
+                ):
+                    reason = (
+                        result.reason
+                        if result.reason in _MISSING_REASONS
+                        else "retry_exhausted"
+                    )
+                    self._finish_ledger(
+                        goal,
+                        agent,
+                        status="missing",
+                        reason=reason,
+                        output_path=result.actual_output_path,
+                        actual_count=result.actual_count,
+                        engine_error=result.engine_error,
+                        conclusion_error=result.conclusion_error,
+                    )
+                    await self._emit_chapter_update(goal, agent)
+                    await self._set_agent_status(agent.agent_id, "missing")
+                    return
             if (
                 self._chapter_ledger is not None
                 and deadline_seconds is not None
@@ -576,6 +701,8 @@ class Scheduler:
                     reason="retry_exhausted",
                     output_path=result.actual_output_path,
                     actual_count=result.actual_count,
+                    engine_error=result.engine_error,
+                    conclusion_error=result.conclusion_error,
                 )
                 await self._emit_chapter_update(goal, agent)
                 await self._set_agent_status(agent.agent_id, status)
@@ -588,6 +715,8 @@ class Scheduler:
                     reason=None,
                     output_path=result.actual_output_path or str(agent.output["path"]),
                     actual_count=result.actual_count,
+                    engine_error=result.engine_error,
+                    conclusion_error=result.conclusion_error,
                 )
                 await self._emit_chapter_update(goal, agent)
                 await self._set_agent_status(agent.agent_id, "done")
@@ -605,6 +734,8 @@ class Scheduler:
                     reason=result.reason,
                     output_path=result.actual_output_path,
                     actual_count=result.actual_count,
+                    engine_error=result.engine_error,
+                    conclusion_error=result.conclusion_error,
                 )
                 await self._emit_chapter_update(goal, agent)
                 await self._set_agent_status(agent.agent_id, status)
@@ -622,6 +753,8 @@ class Scheduler:
                     reason="retry_exhausted",
                     output_path=result.actual_output_path,
                     actual_count=result.actual_count,
+                    engine_error=result.engine_error,
+                    conclusion_error=result.conclusion_error,
                 )
                 await self._emit_chapter_update(goal, agent)
                 await self._set_agent_status(agent.agent_id, "missing")

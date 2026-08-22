@@ -431,6 +431,23 @@ def test_owli_result_解析最后一个结论块并校验字段(validation_env):
         parse_owli_result(invalid)
 
 
+def test_conclusion_invalid只属于系统账本原因而非agent自报原因():
+    from app.adapters.claude import OwliResultError, parse_owli_result
+
+    schema = json.loads(
+        (ROOT / "app/prompts/common/owli-result.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "conclusion_invalid" not in schema["properties"]["reason"]["enum"]
+
+    agent_result = """```json owli-result
+{"status":"partial","output_path":"runs/r/goals/goal-1/a.md","summary":"结论块异常","assumptions":[],"unmet":["结论块不合法"],"capability_denials":[],"reason":"conclusion_invalid"}
+```"""
+    with pytest.raises(OwliResultError, match="reason 不在缺失原因闭集"):
+        parse_owli_result(agent_result)
+
+
 def test_claude_选项强制隔离设置并用_disallowed_tools_收敛白名单(validation_env):
     from app.adapters.claude import ClaudeTask, build_claude_options
 
@@ -509,6 +526,41 @@ def test_can_use_tool_拒绝越界写入并指出路径(validation_env):
     assert str(output_path.parents[3] / "outside.txt") in denied.message
     assert denials == [str(output_path.parents[3] / "outside.txt")]
     assert isinstance(allowed, Allow)
+
+
+def test_claude_结构化输出协议工具不占用业务capability(validation_env):
+    import asyncio
+    from app.adapters.claude import ClaudeTask, make_permission_callback
+
+    class Allow:
+        pass
+
+    class Deny:
+        def __init__(self, *, message):
+            self.message = message
+
+    class FakeSdk:
+        PermissionResultAllow = Allow
+        PermissionResultDeny = Deny
+
+    _, output_path = validation_env
+    task = ClaudeTask(
+        body="执行任务",
+        output_path=output_path,
+        output_format="json",
+        research_id="research-1",
+        goal_id="goal-1",
+        agent_id="agent-1",
+        validators=["file_exists"],
+        tools=frozenset({"Write"}),
+    )
+    denials = []
+    callback = make_permission_callback(task, denials, sdk=FakeSdk)
+
+    decision = asyncio.run(callback("StructuredOutput", {"answer": "完成"}, None))
+
+    assert isinstance(decision, Allow)
+    assert denials == []
 
 
 def test_PreToolUse_即使工具已预批准也强制复核写入路径(validation_env):

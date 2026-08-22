@@ -121,6 +121,15 @@ def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
             "collection 章 closing.entities 必须恰含一个实体，"
             "以落实竞品 × 信息源的单章颗粒度"
         )
+    if (
+        chapter_type == "collection"
+        and agent.entity is not None
+        and entities != [agent.entity]
+    ):
+        raise ValueError(
+            "collection 章 closing.entities 必须逐字等于 agent.entity："
+            f"{agent.entity}"
+        )
     expected_count = closing.get("expected_count")
     if expected_count is not None and (
         not isinstance(expected_count, int)
@@ -149,14 +158,14 @@ def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
 
 def _prompt(
     agent: Agent,
-    prior_closings: list[Mapping[str, Any]],
+    upstream_info: list[Mapping[str, Any]],
     errors: list[str] | None = None,
 ) -> str:
-    history = json.dumps(prior_closings, ensure_ascii=False, separators=(",", ":"))
+    history = json.dumps(upstream_info, ensure_ascii=False, separators=(",", ":"))
     declared_inputs = [
         str(item.get("artifact")) for item in agent.inputs if item.get("artifact")
     ]
-    entity = agent.display_name.partition("·")[2].strip()
+    entity = agent.entity or ""
     retry = (
         "上一轮章节结构错误（逐条修正）：" + "；".join(errors or [])
         if errors else ""
@@ -177,7 +186,7 @@ def _prompt(
         "closing.notes 必须是 JSON object，不得写字符串；竞品章 notes 必须使用 "
         "positioning/pricing/feature_differences/social_proof/strengths_weaknesses "
         f"五个字段。collection 章 closing.entities 必须恰好一个元素{entity_rule}"
-        f"此前各章仅提供以下结构化结尾，不包含其全文：{history}"
+        f"系统从计划树派生的上游信息（不是实际 closing）={history}"
         f"{retry}"
     )
 
@@ -226,6 +235,46 @@ def _derived_input_paths(goal_agents: list[Agent], agent: Agent) -> list[str]:
     return list(dict.fromkeys(paths))
 
 
+def _derived_upstream_info(
+    goal_agents: list[Agent], agent: Agent,
+) -> list[dict[str, Any]]:
+    """从依赖与声明输入派生 spec 所需上游摘要，不读取已生成 closing。"""
+
+    by_id = {item.agent_id: item for item in goal_agents}
+    records: dict[str, dict[str, Any]] = {}
+    pending = list(agent.depends_on)
+    visited: set[str] = set()
+    while pending:
+        dependency = str(pending.pop())
+        if dependency in visited:
+            continue
+        visited.add(dependency)
+        upstream = by_id.get(dependency)
+        if upstream is None:
+            continue
+        path = str(upstream.output.get("path", "")).strip()
+        if path:
+            records[path] = {
+                "agent_id": upstream.agent_id,
+                "output": {"path": path},
+                "entities": [upstream.entity] if upstream.entity else [],
+                "expected_count": None,
+                "notes": {"derived_from": "plan"},
+            }
+        pending.extend(upstream.depends_on)
+    for item in agent.inputs:
+        path = str(item.get("artifact", "")).strip()
+        if path and path not in records:
+            records[path] = {
+                "from_goal": str(item.get("from_goal", "")),
+                "output": {"path": path},
+                "entities": [],
+                "expected_count": None,
+                "notes": {"derived_from": "plan"},
+            }
+    return list(records.values())
+
+
 def _merge_inputs(model_inputs: list[dict[str, str]], derived: list[str]) -> list[dict[str, str]]:
     paths = [*derived, *(str(item.get("path", "")) for item in model_inputs)]
     return [{"path": path} for path in dict.fromkeys(item for item in paths if item)]
@@ -241,7 +290,7 @@ async def _generate_selected_chapter_specs(
     prior_closings: list[dict[str, Any]] | None = None,
     only_agent_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """生成指定 agent 的章，供依赖波次并发调度。"""
+    """生成指定 agent 的章，调用方可对同 goal 全量并发。"""
 
     history = list(prior_closings or [])
     generated_closings: list[dict[str, Any]] = []
@@ -356,41 +405,22 @@ async def generate_chapter_specs(
     *,
     on_chapter: Any = None,
 ) -> None:
-    """按依赖波次生成章；同 goal 内无依赖章并发。"""
+    """同 goal 全部章并发生成；spec 不依赖执行期 expected_count 链。"""
 
-    prior_closings: list[dict[str, Any]] = []
     for goal in plan.goals:
         indexed = list(enumerate(goal.agents, start=1))
-        local_ids = {agent.agent_id for _, agent in indexed}
-        completed: set[str] = set()
-        remaining = list(indexed)
-        while remaining:
-            ready = [
-                (index, agent) for index, agent in remaining
-                if {item for item in agent.depends_on if item in local_ids} <= completed
-            ]
-            if not ready:
-                raise ValueError(f"{goal.goal_id} 章依赖无法拓扑排序")
-            history = list(prior_closings)
-            results = await asyncio.gather(*(
-                _generate_selected_chapter_specs(
-                    plan,
-                    workspace,
-                    adapter,
-                    engine_config,
-                    on_chapter=on_chapter,
-                    prior_closings=history,
-                    only_agent_ids={agent.agent_id},
-                )
-                for _, agent in ready
-            ))
-            for closings in results:
-                prior_closings.extend(closings)
-            completed.update(agent.agent_id for _, agent in ready)
-            ready_ids = {agent.agent_id for _, agent in ready}
-            remaining = [
-                item for item in remaining if item[1].agent_id not in ready_ids
-            ]
+        await asyncio.gather(*(
+            _generate_selected_chapter_specs(
+                plan,
+                workspace,
+                adapter,
+                engine_config,
+                on_chapter=on_chapter,
+                prior_closings=_derived_upstream_info(goal.agents, agent),
+                only_agent_ids={agent.agent_id},
+            )
+            for _, agent in indexed
+        ))
 
 
 __all__ = [

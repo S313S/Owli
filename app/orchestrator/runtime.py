@@ -147,6 +147,20 @@ class RuntimeCoordinator:
         self._auto_tasks.add(task)
         task.add_done_callback(self._auto_tasks.discard)
 
+    async def _drain_auto_tasks(
+        self,
+        *,
+        max_rounds: int = 20,
+        timeout_seconds: float = 10.0,
+    ) -> None:
+        """有限排干自动操作；每轮完成后重新扫描可能新增的后继任务。"""
+
+        for _ in range(max_rounds):
+            pending = [task for task in self._auto_tasks if not task.done()]
+            if not pending:
+                return
+            await asyncio.wait(pending, timeout=timeout_seconds)
+
     def initial_state(self, research_id: str, query: str) -> dict[str, Any]:
         return {
             "research_id": research_id,
@@ -426,6 +440,7 @@ class RuntimeCoordinator:
             model=agent.model,
             user_override=context.engine,
             source_item_limit=source_item_limit,
+            runs_root=self.runs_root,
         )
 
     def _plain(self, value: Any) -> Any:
@@ -497,6 +512,8 @@ class RuntimeCoordinator:
             )
 
         result = await adapter.run(task, self._ctx(task), on_event=on_event)
+        engine_error = getattr(result, "engine_error", None)
+        conclusion_error = getattr(result, "conclusion_error", None)
         if (
             kind == "reliability_audit"
             and not bool(getattr(result, "succeeded", False))
@@ -514,6 +531,8 @@ class RuntimeCoordinator:
                         "authority_kind / interest_relation 越出 source-reliability "
                         "§1.1/§1.5 闭集；必须逐条改为闭集字面值"
                     ),
+                    engine_error=engine_error,
+                    conclusion_error=conclusion_error,
                 )
             if closed_set_failed and context.attempt >= 3:
                 try:
@@ -560,11 +579,13 @@ class RuntimeCoordinator:
                 False, engine=context.engine, chapter_status="deferred",
                 reason="quota_exhausted", actual_output_path=actual_path,
                 actual_count=actual_count,
+                engine_error=engine_error, conclusion_error=conclusion_error,
             )
         if reason in {"empty_result", "tool_unavailable"}:
             return TaskRunResult(
                 False, engine=context.engine, chapter_status="missing", reason=reason,
                 actual_output_path=actual_path, actual_count=actual_count,
+                engine_error=engine_error, conclusion_error=conclusion_error,
             )
         if bool(getattr(result, "succeeded", False)):
             if (
@@ -576,6 +597,7 @@ class RuntimeCoordinator:
             return TaskRunResult(
                 True, engine=context.engine, actual_output_path=actual_path,
                 actual_count=actual_count,
+                engine_error=engine_error, conclusion_error=conclusion_error,
             )
         return result
 
@@ -732,6 +754,7 @@ class RuntimeCoordinator:
         )
         self._schedulers[plan.research_id] = scheduler
         await scheduler.start()
+        await self._drain_auto_tasks()
         await self._finalize_if_terminal(plan.research_id)
 
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
@@ -788,6 +811,7 @@ class RuntimeCoordinator:
         if scheduler is None:
             raise RuntimeError("Scheduler 尚未启动")
         await scheduler.resume()
+        await self._drain_auto_tasks()
         await self._finalize_if_terminal(research_id)
 
     async def stop(self, research_id: str) -> None:

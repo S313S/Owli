@@ -506,6 +506,224 @@ def test_claude_adapter_feeds_native_messages_into_rate_route(tmp_path, monkeypa
     assert route_events[2].no_fallback_left is True
 
 
+def test_claude_执行章优先使用SDK结构化结论(tmp_path, monkeypatch):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    class ResultMessage:
+        is_error = False
+        api_error_status = None
+        subtype = "success"
+        session_id = "s-structured"
+        uuid = "result-structured"
+        result = "这段文本没有 owli-result 围栏"
+
+        def __init__(self, structured_output):
+            self.structured_output = structured_output
+
+    class Options:
+        values = None
+
+        def __init__(self, **values):
+            Options.values = values
+
+    class Client:
+        message = None
+
+        def __init__(self, options):
+            self.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self):
+            yield self.message
+
+        async def disconnect(self):
+            pass
+
+    class Sdk:
+        ClaudeAgentOptions = Options
+        ClaudeSDKClient = Client
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    Sdk.ResultMessage = ResultMessage
+
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-1" / "goals" / "goal-1" / "result.md"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("真实产物", encoding="utf-8")
+    Client.message = ResultMessage({
+        "status": "done",
+        "output_path": str(output_path),
+        "summary": "结构化完成",
+        "assumptions": [],
+        "unmet": [],
+        "capability_denials": [],
+        "reason": None,
+    })
+    task = EngineTask(
+        body="写报告",
+        output_path=output_path,
+        output_format="markdown",
+        research_id="r-1",
+        goal_id="goal-1",
+        agent_id="agent-1",
+        agent_kind="report",
+        validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+
+    result = asyncio.run(ClaudeAdapter(sdk=Sdk).run(
+        task, _ctx(validation, output_path),
+    ))
+
+    with open("app/prompts/common/owli-result.schema.json", encoding="utf-8") as stream:
+        expected_schema = json.load(stream)
+    assert expected_schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    cli_schema = {
+        key: value for key, value in expected_schema.items()
+        if key not in {"$schema", "$id", "$defs"}
+    }
+    assert Options.values["output_format"] == {
+        "type": "json_schema", "schema": cli_schema,
+    }
+    assert Options.values["output_format"]["schema"]["properties"]["summary"]["maxLength"] == 200
+    assert Options.values["output_format"]["schema"]["properties"]["reason"]["type"] == [
+        "string", "null",
+    ]
+    assert result.conclusion is not None
+    assert result.conclusion.summary == "结构化完成"
+    assert result.succeeded is True
+
+
+def test_claude_CLI_schema只剥离顶层不兼容元数据():
+    from app.adapters.claude import _schema_for_claude_cli
+
+    source = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "urn:owli:test",
+        "$defs": {"summary": {"type": "string"}},
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "maxLength": 200},
+            "reason": {"type": ["string", "null"]},
+        },
+    }
+
+    cleaned = _schema_for_claude_cli(source)
+
+    assert cleaned == {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "maxLength": 200},
+            "reason": {"type": ["string", "null"]},
+        },
+    }
+    assert "$schema" in source
+    assert source["properties"]["summary"]["maxLength"] == 200
+
+
+def test_claude_执行章把正常收尾消息里的错误原文汇入engine_error(tmp_path, monkeypatch):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+    from app.orchestrator.sectioning import section_failure_reason
+
+    class ResultMessage:
+        is_error = True
+        api_error_status = None
+        subtype = "success"
+        session_id = "s-error"
+        uuid = "result-error"
+        result = "API Error: The socket connection was closed unexpectedly"
+        structured_output = None
+        errors = []
+
+    class Options:
+        def __init__(self, **values):
+            self.values = values
+
+    class Client:
+        def __init__(self, options):
+            self.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self):
+            yield ResultMessage()
+
+        async def disconnect(self):
+            pass
+
+    class Sdk:
+        ClaudeAgentOptions = Options
+        ClaudeSDKClient = Client
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    Sdk.ResultMessage = ResultMessage
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-1" / "goals" / "goal-1" / "result.md"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("中断前正文", encoding="utf-8")
+    task = EngineTask(
+        body="写报告",
+        output_path=output_path,
+        output_format="markdown",
+        research_id="r-1",
+        goal_id="goal-1",
+        agent_id="agent-1",
+        agent_kind="report",
+        validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+
+    result = asyncio.run(ClaudeAdapter(sdk=Sdk).run(
+        task, _ctx(validation, output_path),
+    ))
+
+    assert "socket connection was closed unexpectedly" in result.engine_error
+    assert '"subtype": "success"' in result.engine_error
+    assert '"api_error_status": null' in result.engine_error
+    assert section_failure_reason(result, output_path) == "retry_exhausted"
+
+
 def test_codex_adapter_feeds_jsonl_into_rate_route(tmp_path, monkeypatch):
     from app.adapters import validation
     from app.adapters.capability import Capability, FileSystemScope

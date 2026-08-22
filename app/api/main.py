@@ -599,8 +599,15 @@ def create_app(
         if hit is not None:
             return hit
         await runtime.resume(research_id)
-        response = await change_state(research_id, "running", "运行中")
-        response["data"]["actions"] = runtime.running_actions(research_id)
+        scheduler = runtime.scheduler_for(research_id)
+        if scheduler is not None and scheduler.status == "completed":
+            state = researches.get(research_id)
+            if state is None:
+                raise HTTPException(status_code=404, detail="调研任务不存在")
+            response = envelope(state)
+        else:
+            response = await change_state(research_id, "running", "运行中")
+            response["data"]["actions"] = runtime.running_actions(research_id)
         await publish_state_update(research_id, response["data"])
         return remember(scope, x_request_id, response)
 

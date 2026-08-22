@@ -7,6 +7,7 @@ def make_agent(agent_id: str, goal_id: str) -> dict:
     return {
         "agent_id": agent_id,
         "display_name": f"执行单元 {agent_id}",
+        "entity": None,
         "task": "按固定查询式处理近 30 天资料并输出可复核结果。",
         "depends_on": [],
         "inputs": [],
@@ -42,7 +43,7 @@ def make_agent(agent_id: str, goal_id: str) -> dict:
             },
             "closing": {
                 "output": {"path": f"goals/{goal_id}/{agent_id}.md"},
-                "entities": ["飞书"],
+                "entities": [],
                 "expected_count": 1,
                 "notes": {},
             },
@@ -91,6 +92,8 @@ def make_plan_dict() -> dict:
         "use_case": "product_competitor",
         "market_profile": "global_product",
         "market_profile_justification": "产品面向全球市场。",
+        "subjects": [],
+        "subjects_justification": "历史测试计划未声明研究实体。",
         "scale": "standard",
         "status": "awaiting_review",
         "approved_at": None,

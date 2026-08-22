@@ -32,12 +32,14 @@ def _multi_source_skeleton() -> dict:
     return {
         "market_profile": "global_product",
         "market_profile_justification": "产品面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "研究主体为飞书。",
         "goals": [
             _goal(1, [
-                {"name": "HN 数据抓取", "task": "采集 Hacker News 讨论"},
-                {"name": "网页搜索数据抓取", "task": "采集官方与评测原文"},
-                {"name": "Product Hunt 数据抓取", "task": "采集发布与评论"},
-                {"name": "X 数据抓取", "task": "采集近期用户反馈"},
+                {"name": "HN 数据抓取·飞书", "task": "采集 Hacker News 讨论"},
+                {"name": "网页搜索数据抓取·飞书", "task": "采集官方与评测原文"},
+                {"name": "Product Hunt 数据抓取·飞书", "task": "采集发布与评论"},
+                {"name": "X 数据抓取·飞书", "task": "采集近期用户反馈"},
             ]),
             _goal(2, [{"name": "可靠度审计", "task": "完成闭集判定与五维评分"}]),
             _goal(
@@ -81,6 +83,10 @@ class PlanEngine:
                 "market_profile": self.skeleton["market_profile"],
                 "market_profile_justification": self.skeleton[
                     "market_profile_justification"
+                ],
+                "subjects": self.skeleton["subjects"],
+                "subjects_justification": self.skeleton[
+                    "subjects_justification"
                 ],
                 "goals": [
                     {

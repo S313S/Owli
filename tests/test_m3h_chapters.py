@@ -29,7 +29,7 @@ def _chapter_value(agent, *, chapter_type, inputs, entities):
     }
 
 
-def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落盘(tmp_path):
+def test_同_goal线性链仍并发生成_提示词只带派生上游信息(tmp_path):
     from app.config import ChapterEngineConfig, ResilienceConfig
     from app.plan.chapters import generate_chapter_specs
     from app.plan.model import Plan
@@ -53,14 +53,21 @@ def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落
     source["goals"][0]["agents"].append(second)
     plan = Plan.from_dict(source)
     calls = []
+    active = 0
+    max_active = 0
 
     class Adapter:
         async def run_planning_segment(self, request, on_text=None):
+            nonlocal active, max_active
             from app.adapters.contracts import PlanningSegmentResult
 
             calls.append((request.segment_name, request.prompt, request.output_schema))
-            agent = plan.goals[0].agents[len(calls) - 1]
-            if len(calls) == 1:
+            index = int(request.segment_name.rsplit("-", 1)[1]) - 1
+            agent = plan.goals[0].agents[index]
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            if index == 0:
                 value = _chapter_value(
                     agent, chapter_type="collection", inputs=[], entities=["豆包"],
                 )
@@ -73,6 +80,7 @@ def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落
                 )
             text = json.dumps(value, ensure_ascii=False)
             await on_text(text)
+            active -= 1
             return PlanningSegmentResult(text, True)
 
     workspace = PlanSegmentWorkspace(
@@ -84,8 +92,11 @@ def test_章节逐次短调用_下一章只带前序结构化结尾_并逐章落
     ))
 
     assert [name for name, _, _ in calls] == ["goal-1-ch-1", "goal-1-ch-2"]
+    assert max_active == 2
     assert "产品定位" not in calls[0][1]
-    assert "产品定位" in calls[1][1]
+    assert "产品定位" not in calls[1][1]
+    assert "系统从计划树派生的上游信息" in calls[1][1]
+    assert plan.goals[0].agents[0].output["path"] in calls[1][1]
     assert "正文" not in calls[1][1]
     assert all(call[2]["required"] == ["chapter_type", "opening", "closing"]
                for call in calls)
@@ -370,7 +381,7 @@ def test_章节重试预算按轮独立_跨轮重生成不累加(tmp_path):
     assert calls == ["goal-1-ch-1"] * 3
 
 
-def test_上游结构化结尾变化会使依赖章缓存失效(tmp_path):
+def test_上游实际closing变化不影响基于派生输入的章节缓存(tmp_path):
     from app.config import ChapterEngineConfig, ResilienceConfig
     from app.plan.chapters import generate_chapter_specs
     from app.plan.model import Plan
@@ -420,7 +431,7 @@ def test_上游结构化结尾变化会使依赖章缓存失效(tmp_path):
         plan, workspace, Adapter(), ChapterEngineConfig(),
     ))
 
-    assert calls == ["goal-1-ch-1", "goal-1-ch-2", "goal-1-ch-2"]
+    assert calls == ["goal-1-ch-1", "goal-1-ch-2"]
 
 
 def test_有shell能力的章引擎强制codex_章级默认不覆盖规则7(tmp_path):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -129,6 +129,13 @@ def test_配额章_deferred_后仅补采一轮_仍不成则_missing(tmp_path: Pa
     source["goals"] = source["goals"][:1]
     plan = Plan.from_dict(source)
     calls = []
+    current = [datetime(2026, 8, 22, tzinfo=timezone.utc)]
+
+    def timer(delay, callback):
+        if delay <= 15:
+            current[0] += timedelta(seconds=delay)
+            callback()
+        return object()
 
     async def run_task(agent, context):
         calls.append(context.attempt)
@@ -139,8 +146,7 @@ def test_配额章_deferred_后仅补采一轮_仍不成则_missing(tmp_path: Pa
 
     scheduler = Scheduler(
         plan, run_task, lambda event: None,
-        lambda: datetime(2026, 8, 22, tzinfo=timezone.utc),
-        lambda delay, callback: None, chapter_ledger=store,
+        lambda: current[0], timer, chapter_ledger=store,
     )
     asyncio.run(scheduler.start())
     row = store.list_chapters("r-ledger")[0]

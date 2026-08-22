@@ -42,12 +42,23 @@ def _valid_skeleton() -> dict:
     return {
         "market_profile": "global_product",
         "market_profile_justification": "产品面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "研究主体为飞书。",
         "goals": [
-            _goal(1, [_agent("HN 数据抓取", "通过 API 抓取 Hacker News 证据")]),
+            _goal(1, [_agent("HN 数据抓取·飞书", "通过 API 抓取 Hacker News 证据")]),
             _goal(2, [_agent("可靠度审计", "审核证据可靠度并做交叉验证")]),
             _goal(3, [_agent("报告撰写", "撰写带角标的 Markdown 报告")]),
         ]
     }
+
+
+def _add_coverage_collector(skeleton: dict) -> None:
+    """为只测非采集职能的整计划用例保留 subjects 的结构化采集覆盖。"""
+
+    skeleton["goals"][1]["agents"].insert(
+        0,
+        _agent("HN 数据抓取·飞书", "采集研究主体证据"),
+    )
 
 
 class FakeStore:
@@ -98,6 +109,8 @@ class FakeEngine:
                 "market_profile_justification": self._current[
                     "market_profile_justification"
                 ],
+                "subjects": self._current["subjects"],
+                "subjects_justification": self._current["subjects_justification"],
                 "goals": [
                     {
                         "title": goal["title"],
@@ -156,7 +169,7 @@ class FakeEngine:
                 },
                 "closing": {
                     "output": {"path": output_path},
-                    "entities": ["飞书"],
+                    "entities": ["飞书"] if chapter_type == "collection" else [],
                     "expected_count": 1,
                     "notes": {},
                 },
@@ -285,6 +298,7 @@ def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_p
     agent = _agent(name, task)
     agent["output"]["shape"] = skeleton["goals"][0]["deliverable"]["shape"]
     skeleton["goals"][0]["agents"] = [agent]
+    _add_coverage_collector(skeleton)
 
     plan, _, _ = _generate(tmp_path, [skeleton])
     generated = plan.goals[0].agents[0]
@@ -298,6 +312,7 @@ def test_角色只按封闭名称分类_任务中的_API_不得误派报告_agen
     skeleton["goals"][0]["agents"] = [
         _agent("报告撰写", "撰写 API 竞品报告", output={"shape": "array"})
     ]
+    _add_coverage_collector(skeleton)
 
     plan, _, _ = _generate(tmp_path, [skeleton])
 
@@ -345,7 +360,7 @@ def test_每个落盘_agent_都具有当前_goal_写权限(tmp_path) -> None:
 def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) -> None:
     skeleton = _valid_skeleton()
     skeleton["goals"][0]["agents"] = [
-        _agent("X 数据抓取", "通过 recent search 采集 X 证据")
+        _agent("X 数据抓取·飞书", "通过 recent search 采集 X 证据")
     ]
 
     plan, _, _ = _generate(tmp_path, [skeleton])
@@ -361,6 +376,7 @@ def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> No
     skeleton["goals"][0]["agents"] = [
         _agent("报告撰写", "输出 JSON 摘要", output={"shape": "array"})
     ]
+    _add_coverage_collector(skeleton)
 
     plan, _, _ = _generate(tmp_path, [skeleton])
 

@@ -76,6 +76,7 @@ _EVIDENCE_FIELDS = _EVIDENCE_REQUIRED | set(_EVIDENCE_DEFAULTS)
 _CHAPTER_TERMINAL = {"done", "missing", "deferred"}
 _CHAPTER_REASONS = {
     "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
+    "conclusion_invalid",
 }
 
 

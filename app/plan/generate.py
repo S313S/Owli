@@ -123,6 +123,12 @@ def _role_name(name: str) -> str:
     return name.partition("·")[0].strip()
 
 
+def _entity_name(name: str) -> str:
+    """只按约定分隔符提取 `角色·实体` 的实体部分。"""
+
+    return name.partition("·")[2].strip()
+
+
 def _classify(name: str, task: str) -> tuple[str, str]:
     del task
     normalized = _normalize_name(_role_name(name))
@@ -163,10 +169,13 @@ def _skeleton_prompt(
     return (
         f"目标：为《{query}》生成 3–{profile.max_goals} 个 goal 的短骨架。\n"
         "方法要点：按证据链自然断点拆分；goal 之间只用 depends_on 表达有向无环依赖，"
-        "禁止按搜索/阅读/总结工种拆 goal；同一 source_id 的完整采集链全计划只安排"
-        "一次，需要复用的下游 goal 必须通过 depends_on 连到唯一采集链。\n"
+        "禁止按搜索/阅读/总结工种拆 goal；同一 source_id 与 entity 的完整采集组合"
+        "全计划只安排一次，同源不同实体允许分摊到多个 goal；需要复用的下游 goal "
+        "必须通过 depends_on 连到已有采集链。\n"
         "产物结构：只输出 JSON object，顶层只含 market_profile、"
-        "market_profile_justification、goals。market_profile 只能取 "
+        "market_profile_justification、subjects、subjects_justification、goals。"
+        "subjects 必须是被研究实体的非空去重字符串数组，并包含主体自身；"
+        "subjects_justification 用一句可复核理由说明纳入边界；market_profile 只能取 "
         "cn_product/global_product，justification 用一句可复核理由；"
         "每个 goal 只能含 title、"
         "objective、depends_on。depends_on 只能引用在它之前的 goal-<n>。\n"
@@ -183,6 +192,7 @@ def _goal_prompt(
     errors: list[str],
     *,
     upstream_collections: list[Mapping[str, str]] | None = None,
+    subjects: list[str] | None = None,
     market_profile: str = "global_product",
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
@@ -213,13 +223,14 @@ def _goal_prompt(
     )
     inventory_locations = "；".join(
         f"{item.get('goal_id')}/{item.get('agent_id')} "
-        f"source_id={item.get('source_id')} output.path={item.get('output_path')}"
+        f"source_id={item.get('source_id')} entity={item.get('entity')} "
+        f"output.path={item.get('output_path')}"
         for item in upstream_collections or []
     ) or "无"
     reuse_rule = (
         f"上游 goal 已采集源及产物路径={inventory}；定位={inventory_locations}；"
-        "清单内 source_id 禁止重采同源，"
-        "下游必须通过 inputs 消费对应 output_path。"
+        "清单内相同 source_id 与 entity 的组合禁止重复采集，"
+        "同源不同实体允许跨 goal 采集；重复组合必须通过 inputs 消费对应 output.path。"
     )
     if scale == "fast":
         source_limits = "、".join(
@@ -228,6 +239,9 @@ def _goal_prompt(
         )
         scale_rule = (
             f"快速档每个 goal 采集源最多 {profile.max_sources_per_goal} 个；"
+            f"本 goal 章数上限为 {profile.max_chapters_per_goal}；"
+            "超预算时只允许以下两条出路：同一实体的多源合并为一章，或把实体分摊到多个 goal"
+            "（跨 goal 采同一源的不同实体是允许的）；"
             f"每源采集条数参数：{source_limits}；"
         )
         hn_rule = (
@@ -245,10 +259,11 @@ def _goal_prompt(
         f"{json.dumps(dict(scaffold), ensure_ascii=False)}。\n"
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
         f"注册表选择：{sources}；源 × 市场属性覆盖表={coverage}；"
+        f"全计划研究实体闭集={json.dumps(list(subjects or scaffold.get('subjects', [])), ensure_ascii=False)}；"
         f"采集章只能选择 applicable_sources 中的 source_id；{reuse_rule}{scale_rule}"
         "采集 agent 的 name 必须唯一确定 capability.sources "
-        "与 source.* 工具；采集、交叉验证、竞品核对这类重型 goal 必须把 agents 拆到"
-        "一项只负责一个竞品与一个信息源；name 用“注册表原名·竞品名”的结构化格式，"
+        "与 source.* 工具；在章数预算内，优先一实体一源；name 用“注册表原名·竞品名”"
+        "的结构化格式，"
         "同一采集角色可为不同竞品重复出现；"
         "非采集 agent 的 name 只能逐字取职能闭集："
         f"{'、'.join(_ROLE_MAP)}，不得自造名称。\n"
@@ -275,6 +290,7 @@ def _skeleton_scaffolds(
     if not isinstance(value, Mapping) or not isinstance(value.get("goals"), list):
         raise ValueError("骨架顶层必须是含 goals 数组的 object")
     _skeleton_market_profile(value)
+    subjects, subjects_justification = _skeleton_subjects(value)
     goals = value["goals"]
     profile = _scale_profile(scale, scale_config)
     if not 3 <= len(goals) <= profile.max_goals:
@@ -303,6 +319,8 @@ def _skeleton_scaffolds(
             "title": title,
             "objective": objective,
             "depends_on": list(depends_on),
+            "subjects": list(subjects),
+            "subjects_justification": subjects_justification,
         })
     return result
 
@@ -317,6 +335,21 @@ def _skeleton_market_profile(value: Mapping[str, Any]) -> tuple[str, str]:
     if not justification:
         raise ValueError("骨架 market_profile_justification 不能为空")
     return profile, justification
+
+
+def _skeleton_subjects(value: Mapping[str, Any]) -> tuple[list[str], str]:
+    subjects = value.get("subjects")
+    justification = str(value.get("subjects_justification", "")).strip()
+    if not isinstance(subjects, list) or not subjects or not all(
+        isinstance(item, str) and item.strip() for item in subjects
+    ):
+        raise ValueError("骨架 subjects 必须是包含主体自身的非空字符串数组")
+    normalized = [str(item).strip() for item in subjects]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("骨架 subjects 不得含重复实体")
+    if not justification:
+        raise ValueError("骨架 subjects_justification 不能为空")
+    return normalized, justification
 
 
 def _capability(
@@ -531,7 +564,7 @@ def _deliverable(raw: Any, goal_id: str) -> dict[str, str]:
 
 def _origin() -> dict[str, str]:
     fields = (
-        "_node", "display_name", "task", "depends_on", "inputs", "engine",
+        "_node", "display_name", "entity", "task", "depends_on", "inputs", "engine",
         "model", "capability", "prompt.body", "output", "chapter",
         "extra_quota_credits",
     )
@@ -548,6 +581,8 @@ def _build_plan(
     scale_config: ResearchScaleConfig | None = None,
     market_profile: str = "global_product",
     market_profile_justification: str = "兼容旧调用的全球产品默认。",
+    subjects: list[str] | None = None,
+    subjects_justification: str = "兼容旧调用，未声明研究实体。",
 ) -> Plan:
     if not isinstance(skeleton, Mapping) or not isinstance(skeleton.get("goals"), list):
         raise ValueError("规划产物顶层必须是含 goals 数组的 object")
@@ -707,6 +742,8 @@ def _build_plan(
         "use_case": use_case,
         "market_profile": market_profile,
         "market_profile_justification": market_profile_justification,
+        "subjects": list(subjects or []),
+        "subjects_justification": subjects_justification,
         "scale": scale,
         "status": "awaiting_review",
         "approved_at": None,
@@ -760,6 +797,7 @@ def _build_agent(
     normalized_name = _normalize_name(_role_name(name))
     source_spec = _source_specs().get(normalized_name)
     source_id = source_spec.source_id if source_spec is not None else "hacker_news"
+    entity = (_entity_name(name) or None) if agent_kind == "data_collection" else None
     counters[agent_kind] += 1
     suffix = "" if counters[agent_kind] == 1 else f"-{counters[agent_kind]}"
     agent_id = f"{agent_kind.replace('_', '-')}{suffix}"
@@ -783,6 +821,7 @@ def _build_agent(
     return {
         "agent_id": agent_id,
         "display_name": name,
+        "entity": entity,
         "task": task[:200],
         "depends_on": [] if previous_agent_id is None else [previous_agent_id],
         "inputs": inputs,
@@ -863,6 +902,7 @@ def _upstream_collection_inventory(
                 "goal_id": goal_id,
                 "agent_id": agent_id,
                 "source_id": source_spec.source_id,
+                "entity": _entity_name(name),
                 "output_path": str(output["path"]),
             })
     return inventory
@@ -943,6 +983,8 @@ async def generate_plan(
     scaffolds: list[dict[str, Any]] | None = None
     market_profile = ""
     market_profile_justification = ""
+    subjects: list[str] = []
+    subjects_justification = ""
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
@@ -971,6 +1013,7 @@ async def generate_plan(
             market_profile, market_profile_justification = (
                 _skeleton_market_profile(skeleton)
             )
+            subjects, subjects_justification = _skeleton_subjects(skeleton)
             await _emit(
                 store,
                 _progress_event(
@@ -1009,6 +1052,7 @@ async def generate_plan(
                     expansions, index
                 ),
                 market_profile=market_profile,
+                subjects=subjects,
                 scale=scale,
                 scale_config=product_scale_config,
             ),
@@ -1072,6 +1116,8 @@ async def generate_plan(
                 scale_config=product_scale_config,
                 market_profile=market_profile,
                 market_profile_justification=market_profile_justification,
+                subjects=subjects,
+                subjects_justification=subjects_justification,
             )
             max_chapters = product_scale_config.profile(
                 scale

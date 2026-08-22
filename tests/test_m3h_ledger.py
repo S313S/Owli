@@ -102,12 +102,13 @@ def test_v3章节账本迁移后增加错误原文字段(tmp_path):
         columns = {
             row[1] for row in connection.execute("PRAGMA table_xinfo(chapter_progress)")
         }
-    assert version == 4
+    assert version == 5
     assert {"engine_error", "conclusion_error"} <= columns
 
 
 @pytest.mark.parametrize("reason", [
     "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
+    "conclusion_invalid",
 ])
 def test_missing_reason_闭集(reason, tmp_path):
     store = _store(tmp_path)
@@ -119,6 +120,53 @@ def test_missing_reason_闭集(reason, tmp_path):
         updated_at="2026-08-22T00:01:00Z",
     )
     assert store.list_chapters("r-ledger")[0]["reason"] == reason
+
+
+def test_v4章节账本迁移后接受结论无效原因(tmp_path):
+    from app.store.dao import Store
+    from app.store.schema import initialize_database_if_empty
+
+    database = tmp_path / "owli-v4.db"
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+        CREATE TABLE reports (id TEXT PRIMARY KEY) STRICT;
+        CREATE TABLE chapter_progress (
+          research_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL,
+          chapter_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','running','done','missing','deferred')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          engine TEXT,
+          reason TEXT CHECK (reason IN (
+            'empty_result','tool_unavailable','quota_exhausted','retry_exhausted'
+          ) OR reason IS NULL),
+          engine_error TEXT,
+          conclusion_error TEXT,
+          actual_output_path TEXT,
+          actual_count INTEGER,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (research_id, goal_id, chapter_id)
+        ) STRICT;
+        PRAGMA user_version = 4;
+        """)
+
+    initialize_database_if_empty(database, SCHEMA)
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        connection.execute("INSERT INTO reports (id) VALUES ('r-ledger')")
+    store = Store(database)
+    store.ensure_chapters(
+        "r-ledger", [{"goal_id": "goal-1", "chapter_id": "ch-1"}],
+        updated_at="2026-08-22T00:00:00Z",
+    )
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-1",
+        status="missing", reason="conclusion_invalid",
+        actual_output_path=None, actual_count=0,
+        updated_at="2026-08-22T00:01:00Z",
+    )
+    assert store.list_chapters("r-ledger")[0]["reason"] == "conclusion_invalid"
 
 
 def test_账本只返回_pending_deferred_供重跑(tmp_path):
@@ -218,6 +266,7 @@ def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_p
     store = _store(tmp_path)
     source = make_plan_dict()
     source["research_id"] = "r-ledger"
+    source["scale"] = "fast"
     source["baseline"] = None
     source["goals"] = source["goals"][:1]
     source["goals"][0]["retry_policy"].update(

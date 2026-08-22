@@ -16,6 +16,8 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
     skeleton = {
         "market_profile": "global_product",
         "market_profile_justification": "产品面向全球市场。",
+        "subjects": ["飞书"],
+        "subjects_justification": "研究主体为飞书。",
         "goals": [
             {"title": "采集", "objective": "形成证据数组。", "depends_on": []},
             {"title": "审计", "objective": "形成可靠度评级。", "depends_on": ["goal-1"]},
@@ -26,7 +28,7 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
         "goal-1": {
             "deliverable": {"format": "json", "shape": "array", "path": "evidence.json", "description": "证据数组"},
             "acceptance": ["文件存在且至少包含 1 条 permalink 记录"],
-            "agents": [{"name": "HN 数据抓取", "task": "采集竞品证据", "output": {"shape": "array"}}],
+            "agents": [{"name": "HN 数据抓取·飞书", "task": "采集竞品证据", "output": {"shape": "array"}}],
         },
         "goal-2": {
             "deliverable": {"format": "json", "shape": "array", "path": "audit.json", "description": "评级数组"},
@@ -50,7 +52,7 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
                 output_tail = request.prompt.partition("系统声明 output.path=")[2]
                 output_path = json.JSONDecoder().raw_decode(output_tail)[0]
                 type_by_name = {
-                    "HN 数据抓取": "collection",
+                    "HN 数据抓取·飞书": "collection",
                     "可靠度审计": "audit",
                     "报告撰写": "report",
                 }

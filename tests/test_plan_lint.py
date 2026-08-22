@@ -88,6 +88,7 @@ def test_六类_warning_均覆盖() -> None:
     agent["prompt"]["body"] = "整理资料并输出。"
     agent["output"]["validators"] = ["section_exists:结论"]
     agent["capability"]["sources"] = ["hacker_news"]
+    agent["entity"] = "飞书"
     agent["capability"]["tools"] = ["source.hacker_news", "fs.read"]
     goal["agents"].extend(
         make_agent(f"agent-extra-{number}", "goal-1") for number in range(1, 6)
@@ -95,6 +96,7 @@ def test_六类_warning_均覆盖() -> None:
     for duplicate in goal["agents"][1:3]:
         duplicate["capability"]["sources"] = ["hacker_news"]
         duplicate["capability"]["tools"] = ["source.hacker_news", "fs.read"]
+        duplicate["entity"] = "飞书"
 
     warnings = lint(plan)["warnings"]
     assert len(warnings) >= 6

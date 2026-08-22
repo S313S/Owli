@@ -86,6 +86,43 @@ def _placeholder(section: dict[str, Any], reason: str) -> str:
     )
 
 
+def _preserve_rejected_artifact(section_path: Path) -> Path | None:
+    """非空失败产物改名留存；空文件与缺失文件不制造 rejected 副本。"""
+
+    try:
+        if not section_path.is_file():
+            return None
+        if not section_path.read_text(encoding="utf-8").strip():
+            return None
+    except (OSError, UnicodeError):
+        return None
+    rejected_path = section_path.with_name(
+        f"{section_path.stem}.rejected{section_path.suffix}"
+    )
+    section_path.replace(rejected_path)
+    return rejected_path
+
+
+def _conclusion_error_with_rejected_path(
+    conclusion_error: str | None, rejected_path: Path | None,
+) -> str | None:
+    if rejected_path is None:
+        return conclusion_error
+    path_note = f"rejected_path={rejected_path}"
+    return f"{conclusion_error}\n{path_note}" if conclusion_error else path_note
+
+
+def _invalid_conclusion_source(result: Any) -> str:
+    """优先回喂模型刚生成的原始结论块，使定向重试保留全部字段。"""
+
+    conclusion_error = str(getattr(result, "conclusion_error", "") or "")
+    for event in reversed(list(getattr(result, "events", None) or [])):
+        text = str(getattr(event, "text", "") or "")
+        if "owli-result" in text:
+            return f"{conclusion_error}\n原 owli-result 块：\n{text}"
+    return conclusion_error
+
+
 def section_failure_reason(
     result: Any, output_path: Path | None = None,
 ) -> str:
@@ -118,6 +155,14 @@ def section_failure_reason(
                 return "empty_result"
         except (OSError, UnicodeError):
             return "empty_result"
+    conclusion_error = str(getattr(result, "conclusion_error", "") or "")
+    report = getattr(result, "validation", None)
+    if (
+        conclusion is None
+        and conclusion_error
+        and getattr(report, "verdict", None) is validation.Verdict.PASS
+    ):
+        return "conclusion_invalid"
     output_path = str(getattr(conclusion, "output_path", "") or "").strip()
     if conclusion is None or not output_path:
         return "empty_result"
@@ -145,20 +190,10 @@ def _assemble(
             )
             reason = str(row["reason"] if row else "empty_result")
             section_texts.append(_placeholder(section, reason).strip())
-    has_conclusion_section = any(
-        re.search(r"(?m)^#{1,6}\s+结论\s*$", text) for text in section_texts
-    )
     blocks = [f"# {plan.title}", ""]
-    if not has_conclusion_section:
-        blocks.extend(["# 结论", ""])
-    has_source_section = False
     for text in section_texts:
-        if re.search(r"(?m)^#{1,6}\s+.*信息源", text):
-            has_source_section = True
         blocks.append(text)
         blocks.append("")
-    if not has_source_section:
-        blocks.extend(["# 信息源", "", "- 无可用信息源。", ""])
     blocks.append("## 缺失清单")
     missing = [
         row for row in rows
@@ -225,6 +260,9 @@ async def run_sectioned_task(
         body = (
             f"{base_task.body}\n\n"
             "本次只写一个报告节；禁止生成整份报告。\n"
+            "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
+            "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
+            "本节的结论/信息源只覆盖本节范围，不总结或引用其他报告节。\n"
             "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
             f"{section_path}\n"
             f"节目标={json.dumps(section, ensure_ascii=False)}\n"
@@ -252,6 +290,31 @@ async def run_sectioned_task(
             )
         except (OSError, UnicodeError):
             artifact_empty = True
+        conclusion_invalid = (
+            not artifact_empty
+            and getattr(result, "conclusion", None) is None
+            and bool(getattr(result, "conclusion_error", None))
+            and getattr(result, "engine_error", None) is None
+            and getattr(getattr(result, "validation", None), "verdict", None)
+            is validation.Verdict.PASS
+        )
+        if conclusion_invalid:
+            original_conclusion = _invalid_conclusion_source(result)
+            retry_task = replace(
+                section_task,
+                body=(
+                    f"结论块字段不合法：{original_conclusion}，"
+                    "请只重发 owli-result 块，不要重写产物"
+                ),
+                agent_id=f"{section_task.agent_id}-conclusion-retry",
+            )
+            result = adapter.run(
+                retry_task,
+                _ctx(retry_task, runs_root, store),
+                on_event=on_event,
+            )
+            if inspect.isawaitable(result):
+                result = await result
         succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
         if succeeded:
             store.finish_chapter(
@@ -268,6 +331,10 @@ async def run_sectioned_task(
             reason = section_failure_reason(result, section_path)
             engine_error = getattr(result, "engine_error", None)
             conclusion_error = getattr(result, "conclusion_error", None)
+            rejected_path = _preserve_rejected_artifact(section_path)
+            conclusion_error = _conclusion_error_with_rejected_path(
+                conclusion_error, rejected_path,
+            )
             section_path.write_text(_placeholder(section, reason), encoding="utf-8")
             store.finish_chapter(
                 plan.research_id,
@@ -295,6 +362,14 @@ async def run_sectioned_task(
             if inspect.isawaitable(event_result):
                 await event_result
     rows = store.list_chapters(plan.research_id)
+    section_ids = {section["section_id"] for section in sections}
+    done_count = sum(
+        1
+        for row in rows
+        if row["goal_id"] == context.goal_id
+        and row["chapter_id"] in section_ids
+        and row["status"] == "done"
+    )
     _assemble(
         plan=plan,
         agent=agent,
@@ -303,6 +378,28 @@ async def run_sectioned_task(
         sections=sections,
         rows=rows,
     )
+    if done_count == 0:
+        section_reasons = {
+            str(row["reason"])
+            for row in rows
+            if row["goal_id"] == context.goal_id
+            and row["chapter_id"] in section_ids
+            and row["reason"]
+        }
+        reason = (
+            next(iter(section_reasons))
+            if len(section_reasons) == 1
+            else "retry_exhausted"
+        )
+        return TaskRunResult(
+            False,
+            engine=context.engine,
+            failure_feedback="所有报告节均未完成；占位报告已落盘",
+            chapter_status="missing",
+            reason=reason,
+            actual_output_path=str(base_task.output_path),
+            actual_count=0,
+        )
     final_validation = validation.validate(
         _ctx(base_task, runs_root, store), base_task.validators,
     )
@@ -337,13 +434,13 @@ async def run_sectioned_task(
             engine=context.engine,
             failure_feedback=json.dumps(failures, ensure_ascii=False),
             actual_output_path=str(base_task.output_path),
-            actual_count=len(sections),
+            actual_count=done_count,
         )
     return TaskRunResult(
         True,
         engine=context.engine,
         actual_output_path=str(base_task.output_path),
-        actual_count=len(sections),
+        actual_count=done_count,
     )
 
 
