@@ -185,6 +185,7 @@ class Scheduler:
         self._paused = False
         self._started = False
         self._tasks: dict[asyncio.Task[Any], tuple[str, str]] = {}
+        self._drive_tasks: set[asyncio.Task[Any]] = set()
         self._state_lock = asyncio.Lock()
         self._goal_started_at: dict[str, datetime] = {}
         self._agent_started_at: dict[str, datetime] = {}
@@ -249,6 +250,20 @@ class Scheduler:
             conclusion_error=_truncate_error(conclusion_error),
             updated_at=self._clock().isoformat(),
         )
+
+    def _reset_ledger(self, goal: Goal, agent: Agent) -> bool:
+        """把被打断的在跑章复位成 pending；没有账本或本来就不是 running 时返回 False。"""
+        if self._chapter_ledger is None:
+            return False
+        reset = getattr(self._chapter_ledger, "reset_running_chapter", None)
+        if reset is None:
+            return False
+        return bool(reset(
+            self.plan.research_id,
+            goal.goal_id,
+            self._chapter_id(agent),
+            updated_at=self._clock().isoformat(),
+        ))
 
     async def _emit_chapter_update(self, goal: Goal, agent: Agent) -> None:
         if self._chapter_ledger is None:
@@ -393,13 +408,40 @@ class Scheduler:
         self.status = "paused"
         await self._emit({"type": "scheduler_update", "data": {"status": "paused"}})
 
-    async def resume(self) -> None:
-        if self.status == "stopped":
-            return
+    async def resume(self, *, wait: bool = True) -> None:
+        """恢复执行；`stopped` 也能恢复（停下的章已复位，按未完成部分继续跑）。
+
+        wait=False 时只翻状态并把驱动循环放到后台任务里，调用方立刻拿到真实状态，
+        不必阻塞到整轮跑完（HTTP `/resume` 走这条）。驱动循环仍是同一个 `_drive`。
+        """
         self._paused = False
-        self.status = "running"
-        await self._emit({"type": "scheduler_update", "data": {"status": "running"}})
-        await self._drive()
+        self._started = True
+        if self.status != "completed":
+            self.status = "running"
+        await self._emit(
+            {"type": "scheduler_update", "data": {"status": self.status}}
+        )
+        task = self._spawn_drive()
+        if wait:
+            await task
+
+    def _spawn_drive(self) -> asyncio.Task[Any]:
+        task = asyncio.create_task(self._drive())
+        self._drive_tasks.add(task)
+        task.add_done_callback(self._drive_tasks.discard)
+        return task
+
+    @property
+    def drive_pending(self) -> bool:
+        return any(not task.done() for task in self._drive_tasks)
+
+    async def wait_idle(self) -> None:
+        """等后台驱动循环全部落定，供上层做终态收尾。"""
+        while True:
+            pending = [task for task in self._drive_tasks if not task.done()]
+            if not pending:
+                return
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def stop(self) -> None:
         if self.status == "stopped":
@@ -578,6 +620,31 @@ class Scheduler:
             conclusion_error=_field(result, "conclusion_error"),
         )
 
+    async def _abort_agent_on_stop(
+        self, goal: Goal, agent: Agent, result: TaskRunResult | None
+    ) -> None:
+        """/stop 打断在跑章：已拿到成功结果就落终态，否则复位账本并重新排队。
+
+        两条路都不留 running 幽灵；复位成 pending 后 `resume` 由 `_drive` 正常派活。
+        """
+        if result is not None and result.succeeded:
+            self._finish_ledger(
+                goal,
+                agent,
+                status="done",
+                reason=None,
+                output_path=result.actual_output_path or str(agent.output["path"]),
+                actual_count=result.actual_count,
+                engine_error=result.engine_error,
+                conclusion_error=result.conclusion_error,
+            )
+            await self._emit_chapter_update(goal, agent)
+            await self._set_agent_status(agent.agent_id, "done")
+            return
+        self._reset_ledger(goal, agent)
+        await self._emit_chapter_update(goal, agent)
+        await self._set_agent_status(agent.agent_id, "queued")
+
     async def _execute_agent(self, goal: Goal, agent: Agent) -> None:
         policy = goal.retry_policy
         per_round = int(policy["max_attempts_per_round"])
@@ -588,7 +655,10 @@ class Scheduler:
             deadline_seconds = int(deadline_seconds)
         self._agent_started_at.setdefault(agent.agent_id, self._clock())
         while self._attempts.get(agent.agent_id, 0) < total:
-            if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
+            if self.status == "stopped":
+                await self._abort_agent_on_stop(goal, agent, None)
+                return
+            if self.goal_statuses[goal.goal_id] != "running":
                 return
             attempt = self._attempts.get(agent.agent_id, 0) + 1
             if self._paused:
@@ -596,7 +666,10 @@ class Scheduler:
                 return
             if attempt > 1:
                 await self._wait_for_chapter_retry(goal, agent)
-                if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
+                if self.status == "stopped":
+                    await self._abort_agent_on_stop(goal, agent, None)
+                    return
+                if self.goal_statuses[goal.goal_id] != "running":
                     return
                 if self._paused:
                     await self._set_agent_status(agent.agent_id, "retrying")
@@ -647,7 +720,10 @@ class Scheduler:
                 })
             for decision in result.route_decisions:
                 await self._consume_signal(decision)
-            if self.status == "stopped" or self.goal_statuses[goal.goal_id] != "running":
+            if self.status == "stopped":
+                await self._abort_agent_on_stop(goal, agent, result)
+                return
+            if self.goal_statuses[goal.goal_id] != "running":
                 return
             if self._chapter_ledger is not None and not result.succeeded:
                 chapter_key = (goal.goal_id, self._chapter_id(agent))

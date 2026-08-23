@@ -490,6 +490,34 @@ class Store:
         if cursor.rowcount != 1:
             raise KeyError(f"章节账本不存在：{research_id}/{goal_id}/{chapter_id}")
 
+    def reset_running_chapter(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_id: str,
+        *,
+        updated_at: str,
+    ) -> bool:
+        """在跑章被 /stop 打断时把 running 复位成 pending，供恢复后重跑。
+
+        与 ensure_chapters(reset_running=True) 的恢复初始化同口径，只是收敛到单章：
+        章没跑完就没有终态，账本不能留 running 幽灵。attempts 累计值保留不动。
+        """
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE chapter_progress
+                SET status = 'pending', reason = NULL,
+                    engine_error = NULL, conclusion_error = NULL,
+                    updated_at = ?
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                  AND status = 'running'
+                """,
+                (updated_at, research_id, goal_id, chapter_id),
+            )
+        return cursor.rowcount == 1
+
     def reset_done_chapters(
         self,
         research_id: str,
