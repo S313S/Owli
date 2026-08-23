@@ -16,6 +16,9 @@ case 一览（对当前代码各自必红；括号里是「防修过头」的绿
   section-transport-jitter  缺陷 E：节级传输断连一次即 missing/retry_exhausted（attempts=1，没重试），
                         章级重试又跳过 missing 节（guard：真耗尽仍 missing；conclusion_invalid
                         不被重试；真 429 仍 quota_exhausted）
+  section-wall-clock    D-008：章墙钟对 claude 不生效、节级重试无时间预算、json 章组装 dict 撞 array
+                        验证器、denial 掩盖断连（guard：D-007 九条、codex 超时语义、慢 429 仍 quota_exhausted）
+                        ①④ 走 VirtualClock（虚拟钟，秒级跑完 600 s 墙钟）；②③ 真实时间但 ≤20 s
 
 所有章产物都由假适配器构造；结论落 <输出目录>/summary.json（每条断言 name/expected/actual/passed）。
 退出码只给调度脚本用（全过 0，否则 1），判定以 summary.json 为准。
@@ -27,11 +30,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import heapq
+import inspect
 import json
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -42,6 +47,7 @@ from app.adapters import validation
 from app.adapters.contracts import EngineRunResult, OwliResult
 from app.orchestrator.chapter_failure import chapter_failure_reason
 from app.orchestrator.runtime import RuntimeCoordinator
+from app.orchestrator.sectioning import _ctx as sectioning_ctx
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan
 from app.plan.store import save_plan
 from app.store.dao import Store
@@ -748,21 +754,34 @@ def _row_digest(row: dict[str, Any] | None) -> dict[str, Any]:
 
 async def _run_jitter(root: Path, rid: str, budget: float, *, per_round: int = JITTER_PER_ROUND,
                       max_rounds: int = 1, report_validators: list[str] | None = None,
-                      sec2: Any) -> dict[str, Any]:
-    """起一次不真跑引擎的整研究；sec2(task, ctx, chapter_attempt) 决定 sec-2 每次派活的结果。"""
+                      sec2: Any, clock: Any = None,
+                      deadline_seconds: int | None = None) -> dict[str, Any]:
+    """起一次不真跑引擎的整研究；sec2(task, ctx, chapter_attempt) 决定 sec-2 每次派活的结果。
+
+    clock（D-008 新增，可选）：VirtualClock 实例，替换 coordinator.now / coordinator.timer，
+    让墙钟与退避都走虚拟时间；deadline_seconds 写进 goal-2 的 retry_policy.chapter_deadline_seconds
+    （产品侧由 generate.py 从 profile 注入，手工计划这里直接写）。两者都缺省时行为与 D-007 完全一致。
+    """
     store = make_store(root, rid)
     plan = plan_section_jitter(rid, per_round=per_round, max_rounds=max_rounds,
                                report_validators=report_validators
                                or ["file_exists", "sections_exist:结论,信息源"])
+    if deadline_seconds is not None:
+        plan.goals[1].retry_policy["chapter_deadline_seconds"] = int(deadline_seconds)
     adapter = FakeAdapter()
     published: list[dict[str, Any]] = []
     coordinator = make_coordinator(store, root, rid, plan, adapter, published)
+    if clock is not None:
+        coordinator.now = clock.now      # 仅夹具实例：Scheduler 的 clock/timer 在 start_research 时取自这两个属性
+        coordinator.timer = clock.timer
     chapter_attempt = {"current": 0}
+    chapter_starts: list[str] = []
     original_run_task = coordinator._run_task
 
     async def tracking_run_task(plan_: Plan, agent: Any, context: Any) -> Any:
         if agent.agent_id == SECTION_AGENT:
             chapter_attempt["current"] = int(getattr(context, "attempt", 0) or 0)
+            chapter_starts.append(coordinator.now().isoformat())
         return await original_run_task(plan_, agent, context)
 
     coordinator._run_task = tracking_run_task  # 仅夹具实例，不改产品代码
@@ -786,6 +805,8 @@ async def _run_jitter(root: Path, rid: str, budget: float, *, per_round: int = J
         "chapter": rows.get("ch-1"), "sec1": rows.get("ch-1/sec-1"), "sec2": rows.get("ch-1/sec-2"),
         "sec2_calls": sec2_calls, "adapter_calls": adapter.calls,
         "section_errors": [e["data"] for e in published if e.get("type") == "section_error"],
+        "chapter_starts": chapter_starts,
+        "assembly_errors": [e["data"] for e in published if e.get("type") == "section_assembly_error"],
     }
 
 
@@ -916,6 +937,459 @@ async def case_section_transport_jitter(root: Path, checks: Checks, budget: floa
 
 
 # --------------------------------------------------------------------------
+# case section-wall-clock（D-008，缺陷 E 第 2 次修复）
+# --------------------------------------------------------------------------
+
+#: 虚拟钟里「引擎超时余量」取 codex 适配器的默认 timeout_seconds（期望 b 要求 claude 同档）
+def _engine_timeout_default() -> float:
+    from inspect import signature
+    from app.adapters.codex import CodexAdapter
+    return float(signature(CodexAdapter).parameters["timeout_seconds"].default)
+
+
+def _fast_wall_clock() -> int:
+    from app.config import load_research_scale_config
+    return int(load_research_scale_config().profile("fast").chapter_wall_clock_seconds)
+
+
+SECTION_RETRY_CAP = 3           # 期望 c：节级重试次数上限独立常量（≤3）
+REAL_DEADLINE_SECONDS = 5       # 子例 ② 真实时间：夹具缩到 5 s（通过 retry_policy 覆盖，不改产品默认）
+REAL_CANCEL_GRACE_SECONDS = 10  # 调度器主动取消的宽限（期望 a：超时由调度器取消）
+REAL_RUN_BUDGET_SECONDS = 20
+CLAUDE_RUN_FIXTURE_TIMEOUT = 10.0  # 子例 ②b：夹具给 claude 适配器单次 run 的上限（需 timeout_seconds 可配）
+DENIAL_TEXT = "Glob 未提供可校验的写入路径"
+
+
+class VirtualClock:
+    """虚拟钟：谁等待谁拨钟。
+
+    - now()：当前虚拟时刻（替换 coordinator.now，Scheduler/账本 updated_at 都走它）。
+    - timer(delay, cb)：delay ≤ JUMP_SECONDS（章级/节级退避这类短等待）立即把钟拨过去并在下个
+      loop tick 触发；更长的（goal_deadline 12h、R8 15min、将来的章墙钟取消器）进堆，只在
+      advance() 越过到期点时触发。这样 fast 档 5 s 退避不占真实时间，而 600 s 墙钟不会被提前触发。
+    - advance(s)：伪 adapter 用它模拟「跑了 s 秒」。
+    """
+
+    JUMP_SECONDS = 60.0
+
+    def __init__(self) -> None:
+        self._now = datetime.now(timezone.utc)
+        self._heap: list[tuple[datetime, int, Any]] = []
+        self._seq = 0
+        self.fired: list[float] = []
+
+    def now(self) -> datetime:
+        return self._now
+
+    def _fire(self, callback: Any) -> None:
+        result = callback()
+        if inspect.isawaitable(result):
+            asyncio.ensure_future(result)
+
+    def timer(self, delay_seconds: float, callback: Any) -> Any:
+        delay = max(0.0, float(delay_seconds))
+        if delay <= self.JUMP_SECONDS:
+            self._now += timedelta(seconds=delay)
+            asyncio.get_running_loop().call_soon(self._fire, callback)
+            return None
+        self._seq += 1
+        heapq.heappush(self._heap, (self._now + timedelta(seconds=delay), self._seq, callback))
+        return None
+
+    async def advance(self, seconds: float) -> None:
+        target = self._now + timedelta(seconds=seconds)
+        while self._heap and self._heap[0][0] <= target:
+            due, _, callback = heapq.heappop(self._heap)
+            self._now = due
+            self.fired.append(seconds)
+            self._fire(callback)
+            await asyncio.sleep(0)
+        self._now = target
+        await asyncio.sleep(0)
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _sec2_slow_disconnect(clock: VirtualClock, hold_seconds: float, *, final_error: dict[str, Any]) -> Any:
+    """子例 ① / 429 guard：每次派活先「跑」hold_seconds（虚拟钟），再返回 final_error。"""
+
+    async def behavior(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+        del serial, chapter_attempt
+        await clock.advance(hold_seconds)
+        return _transport_failure(task, ctx, final_error)
+
+    return behavior
+
+
+def _sec2_never_returns(record: dict[str, Any]) -> Any:
+    """子例 ②：永不返回；被取消时记下真实时刻（期望 a：超时由调度器主动取消）。"""
+
+    async def behavior(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+        del task, ctx, serial, chapter_attempt
+        record.setdefault("started_at", time.monotonic())
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            record["cancelled_after"] = round(time.monotonic() - record["started_at"], 2)
+            raise
+        raise AssertionError("unreachable")
+
+    return behavior
+
+
+def _transport_failure_with_denial(task: Any, ctx: Any) -> EngineRunResult:
+    """子例 ④：同一尝试里 socket 断连 + 一条 permission denial（6b sec-2 第 8 次的真实形态）。"""
+    del task, ctx
+    return EngineRunResult(
+        conclusion=None, conclusion_error=None,
+        validation=validation.ValidationReport(validation.Verdict.PASS, []), events=[],
+        permission_denials=[DENIAL_TEXT],
+        engine_error=json.dumps(TRANSPORT_ENGINE_ERROR, ensure_ascii=False),
+    )
+
+
+async def _sec2_disconnect_denial_then_ok(task: Any, ctx: Any, serial: int,
+                                          chapter_attempt: int) -> EngineRunResult:
+    del chapter_attempt
+    if serial == 1:
+        return _transport_failure(task, ctx, TRANSPORT_ENGINE_ERROR)
+    if serial == 2:
+        return _transport_failure_with_denial(task, ctx)
+    _write_section_2(task)
+    return _done(task, ctx)
+
+
+def _chapter_elapsed_seconds(run: dict[str, Any]) -> float | None:
+    """章从第一次派活（虚拟钟）到账本终态 updated_at（虚拟钟）的总时长。"""
+    started = _parse_iso((run.get("chapter_starts") or [None])[0])
+    finished = _parse_iso((run.get("chapter") or {}).get("updated_at"))
+    if started is None or finished is None:
+        return None
+    return round((finished - started).total_seconds(), 1)
+
+
+XVAL_AGENT = "cross-validation"
+XVAL_PATH = "goals/goal-3/cross-validation.json"
+XVAL_VALIDATORS = ["file_exists", "no_item_missing_rating"]
+
+
+def _rated_item(section_index: int) -> dict[str, Any]:
+    """满足 no_item_missing_rating 的一条评分记录（五维 0–2 整数 + rating_notes + rated_by）。"""
+    return {
+        "competitor": "讯飞输入法", "section": f"sec-{section_index}",
+        "permalink": "https://example.com/iflytek-dialect",
+        "score_authority": 2, "score_freshness": 1, "score_crossref": 1,
+        "score_completeness": 2, "score_independence": 1,
+        "rating_notes": "官方实测页，二手转述一处", "rated_by": "seam-fixture",
+    }
+
+
+def plan_cross_validation_json(rid: str, *, max_rounds: int) -> Plan:
+    """三 goal：goal-1/goal-2 采集 done；goal-3 = cross_validation 章、output.format=json、shape=array、
+    validators 含 no_item_missing_rating（与 6b goal-2/ch-3、goal-3/ch-3 的声明同构）。"""
+    g1 = _goal("goal-1", "竞品基准信息采集", [collection_agent("goal-1", 1)], [])
+    g2 = _goal("goal-2", "竞品口碑采集", [collection_agent("goal-2", 2)], [])
+    g3 = _goal("goal-3", "来源可靠度交叉验证", [_agent(
+        "goal-3", XVAL_AGENT, display="交叉验证（claude，json 节化）",
+        kind_profile="readonly-analyst", engine="claude", fmt="json", path=XVAL_PATH,
+        validators=XVAL_VALIDATORS, cid="ch-3", ctype="cross_validation",
+        inputs=("goals/goal-1/data-collection.json", "goals/goal-2/data-collection-2.json"))],
+        ["goal-1", "goal-2"])
+    g3["retry_policy"] = {**DEFAULT_RETRY_POLICY, "max_attempts_per_round": 1,
+                          "max_rounds": max_rounds}
+    return build_plan(rid, [g1, g2, g3])
+
+
+async def _run_cross_validation_json(root: Path, rid: str, budget: float) -> dict[str, Any]:
+    """三节各注入一份合法 done 产物（评分条目数组），让 _assemble 跑真实组装。"""
+    store = make_store(root, rid)
+    plan = plan_cross_validation_json(rid, max_rounds=2)
+    adapter = FakeAdapter()
+    published: list[dict[str, Any]] = []
+    coordinator = make_coordinator(store, root, rid, plan, adapter, published)
+    section_calls: list[str] = []
+
+    def section_behavior(index: int) -> Any:
+        async def behavior(task: Any, ctx: Any) -> EngineRunResult:
+            section_calls.append(task.agent_id)
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            task.output_path.write_text(json.dumps([_rated_item(index)], ensure_ascii=False, indent=2),
+                                        encoding="utf-8")
+            return _done(task, ctx)
+        return behavior
+
+    for index in (1, 2, 3):
+        adapter.behaviors[f"{XVAL_AGENT}-sec-{index}"] = section_behavior(index)
+    timed_out = await run_to_terminal(coordinator, plan, budget)
+    scheduler = coordinator.scheduler_for(rid)
+    rows = {r["chapter_id"]: dict(r) for r in store.list_chapters(rid) if r["goal_id"] == "goal-3"}
+    parent = root / "runs" / rid / XVAL_PATH
+    parent_task = SimpleNamespace(output_path=parent, output_format="json", research_id=rid,
+                                  goal_id="goal-3", agent_id=XVAL_AGENT, validators=XVAL_VALIDATORS)
+    final_report = validation.validate(sectioning_ctx(parent_task, root / "runs", store), XVAL_VALIDATORS)
+    return {
+        "final_validation": {"verdict": final_report.verdict.name,
+                             "failures": [f"{i.name}: {i.message}" for i in final_report.failures]},
+        "research_id": rid, "timed_out": timed_out,
+        "scheduler": None if scheduler is None else scheduler.status,
+        "chapter": rows.get("ch-3"), "sections": {k: _row_digest(v) for k, v in rows.items() if "/sec-" in k},
+        "section_calls": section_calls,
+        "assembly_errors": [e["data"] for e in published if e.get("type") == "section_assembly_error"],
+        "parent_path": str(parent), "parent_exists": parent.is_file(),
+        "parent_top_type": _json_top_type(parent),
+    }
+
+
+def _json_top_type(path: Path) -> str | None:
+    try:
+        return type(json.loads(path.read_text(encoding="utf-8"))).__name__
+    except (OSError, ValueError):
+        return None
+
+
+def _hanging_claude_sdk() -> Any:
+    """永不出消息的假 Claude SDK：connect 正常、receive_response 永远挂起（对齐本机代理掐长连接后 CLI 内部 api_retry 的表现）。"""
+
+    class Client:
+        def __init__(self, options: Any) -> None:
+            self.options = options
+
+        async def connect(self, prompt: Any) -> None:
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self) -> Any:
+            await asyncio.Event().wait()
+            yield None  # pragma: no cover - 永不到达
+
+        async def disconnect(self) -> None:
+            pass
+
+        async def interrupt(self) -> None:
+            pass
+
+    class Options:
+        def __init__(self, **values: Any) -> None:
+            self.values = values
+
+    class Sdk:
+        ClaudeSDKClient = Client
+        ClaudeAgentOptions = Options
+        ResultMessage = type("ResultMessage", (), {})
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        ToolUseBlock = type("ToolUseBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type("Deny", (), {"__init__": lambda self, **values: None})
+        HookMatcher = type("HookMatcher", (), {"__init__": lambda self, matcher=None, hooks=None: None})
+
+    return Sdk
+
+
+async def _run_hanging_claude(root: Path) -> dict[str, Any]:
+    """子例 ②b：真实 ClaudeAdapter + 假 SDK，看单次 run 是否在引擎超时内自己返回 timeout。"""
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    output_path = root / "runs" / "r-seam-wall-claude" / "goals" / "goal-1" / "hang.md"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    task = EngineTask(
+        body="接缝夹具：永不返回的 Claude 任务", output_path=output_path, output_format="markdown",
+        research_id="r-seam-wall-claude", goal_id="goal-1", agent_id="hang", agent_kind="report",
+        validators=["file_exists"],
+        capability=Capability(tools=("fs.write",), fs=FileSystemScope(write=("goals/goal-1/**",))),
+    )
+    ctx = sectioning_ctx(task, root / "runs", None)
+    kwargs: dict[str, Any] = {"sdk": _hanging_claude_sdk(), "log_root": root / "claude-logs"}
+    configured = True
+    try:
+        adapter = ClaudeAdapter(timeout_seconds=CLAUDE_RUN_FIXTURE_TIMEOUT / 2, **kwargs)
+    except TypeError as exc:
+        configured = False
+        adapter = ClaudeAdapter(**kwargs)
+        construct_error = f"{type(exc).__name__}: {exc}"
+    else:
+        construct_error = None
+    started = time.monotonic()
+    try:
+        result = await asyncio.wait_for(adapter.run(task, ctx), timeout=CLAUDE_RUN_FIXTURE_TIMEOUT)
+    except asyncio.TimeoutError:
+        result = None
+    elapsed = round(time.monotonic() - started, 2)
+    reason = None if result is None else chapter_failure_reason(result, output_path)
+    return {"timeout_configurable": configured, "construct_error": construct_error,
+            "returned": result is not None, "elapsed": elapsed, "reason": reason,
+            "engine_error": None if result is None else getattr(result, "engine_error", None)}
+
+
+async def case_section_wall_clock(root: Path, checks: Checks, budget: float) -> dict[str, Any]:
+    wall = _fast_wall_clock()
+    engine_timeout = _engine_timeout_default()
+    t0 = time.monotonic()
+    timings: dict[str, float] = {}
+
+    def stamp(label: str) -> None:
+        timings[label] = round(time.monotonic() - t0 - sum(timings.values()), 2)
+    # 子例 ①（虚拟钟）：每次派活「跑」墙钟/2 后断连，节级预算 10（产品默认）
+    clock1 = VirtualClock()
+    one = await _run_jitter(
+        root, "r-seam-wall-1", budget, per_round=DEFAULT_RETRY_POLICY["max_attempts_per_round"],
+        max_rounds=DEFAULT_RETRY_POLICY["max_rounds"], clock=clock1, deadline_seconds=wall,
+        sec2=_sec2_slow_disconnect(clock1, wall / 2, final_error=TRANSPORT_ENGINE_ERROR))
+    chapter1, sec2a = one["chapter"] or {}, one["sec2"] or {}
+    elapsed1 = _chapter_elapsed_seconds(one)
+    checks.add("guard: 子例 ① 研究到终态、sec-1 done、虚拟钟确实推进（不是真睡）", guard=True,
+               expected={"scheduler": "completed", "sec1": "done", "elapsed>0": True},
+               actual={"scheduler": one["scheduler"], "sec1": _row_digest(one["sec1"]),
+                       "elapsed_virtual": elapsed1, "timed_out": one["timed_out"]},
+               passed=(one["scheduler"] == "completed" and (one["sec1"] or {}).get("status") == "done"
+                       and not one["timed_out"] and (elapsed1 or 0) > 0))
+    checks.add(f"W1 章任一尝试总时长 ≤ 墙钟 {wall}s + 引擎超时余量 {engine_timeout:g}s（期望 a/c）",
+               expected={"elapsed<=": wall + engine_timeout},
+               actual={"elapsed_virtual": elapsed1, "chapter": _row_digest(chapter1),
+                       "sec2_calls": len(one["sec2_calls"])},
+               passed=elapsed1 is not None and elapsed1 <= wall + engine_timeout)
+    checks.add(f"W2 节级重试次数上限独立常量 ≤{SECTION_RETRY_CAP}，不沿用 max_attempts_per_round=10（期望 c）",
+               expected={"sec2.attempts<=": SECTION_RETRY_CAP, "sec2_calls<=": SECTION_RETRY_CAP},
+               actual={"sec2": _row_digest(sec2a), "sec2_calls": len(one["sec2_calls"])},
+               passed=((sec2a.get("attempts") or 99) <= SECTION_RETRY_CAP
+                       and len(one["sec2_calls"]) <= SECTION_RETRY_CAP))
+    # 当前代码：sec-1 done 时父章照样 done（墙钟检查只看 result.succeeded），sec-2 落 retry_exhausted；
+    # 修复后无论章被取消（章 reason=timeout）还是节在预算内停派（节 reason=timeout），都不得再是 retry_exhausted。
+    checks.add("W3 墙钟超时的终态 reason=timeout（章被取消 → 章 reason；或节在预算内停派 → 节 reason），不是 retry_exhausted（期望 a/c）",
+               expected={"chapter.reason": "timeout", "or": {"chapter.status": "done", "sec2.reason": "timeout"}},
+               actual={"chapter": _row_digest(chapter1), "sec2": _row_digest(sec2a)},
+               passed=(chapter1.get("reason") == "timeout"
+                       or (chapter1.get("status") == "done" and sec2a.get("reason") == "timeout")))
+
+    stamp("①虚拟钟")
+    # 子例 ②（真实时间）：伪 adapter 永不返回；墙钟缩到 5 s（retry_policy 覆盖），看调度器是否主动取消
+    record: dict[str, Any] = {}
+    two = await _run_jitter(root, "r-seam-wall-2", REAL_RUN_BUDGET_SECONDS, per_round=1, max_rounds=1,
+                            deadline_seconds=REAL_DEADLINE_SECONDS, sec2=_sec2_never_returns(record))
+    chapter2 = two["chapter"] or {}
+    cancel_limit = REAL_DEADLINE_SECONDS + REAL_CANCEL_GRACE_SECONDS
+    checks.add(f"W4 永不返回的 run 在墙钟 {REAL_DEADLINE_SECONDS}s + 宽限 {REAL_CANCEL_GRACE_SECONDS}s 内被调度器取消、研究自行到终态（期望 a）",
+               expected={"cancelled_after<=": cancel_limit, "scheduler": "completed", "timed_out": False},
+               actual={"cancelled_after": record.get("cancelled_after"), "scheduler": two["scheduler"],
+                       "timed_out(夹具兜底 stop)": two["timed_out"]},
+               passed=((record.get("cancelled_after") or 1e9) <= cancel_limit
+                       and two["scheduler"] == "completed" and not two["timed_out"]))
+    checks.add("W5 被墙钟取消的章 reason=timeout（期望 a）",
+               expected={"chapter.reason": "timeout"}, actual=_row_digest(chapter2),
+               passed=chapter2.get("reason") == "timeout")
+
+    stamp("②真实时间")
+    # 子例 ②b（真实时间）：真实 ClaudeAdapter + 永不出消息的假 SDK —— run() 自己要有引擎超时
+    hang = await _run_hanging_claude(root)
+    checks.add(f"W6 claude 适配器单次 run 有可配引擎超时且在 {CLAUDE_RUN_FIXTURE_TIMEOUT:g}s 内自行返回（期望 b）",
+               expected={"timeout_configurable": True, "returned": True},
+               actual=hang, passed=hang["timeout_configurable"] and hang["returned"])
+    checks.add("W7 claude 超时归 timeout（期望 b）", expected={"reason": "timeout"},
+               actual={"reason": hang["reason"], "engine_error": hang["engine_error"]},
+               passed=hang["reason"] == "timeout")
+    from inspect import signature
+    from app.adapters.selfcheck import validate_runtime_config
+    checks.add("W8 selfcheck 对 claude 同样校验墙钟 > 引擎超时（期望 b：validate_runtime_config 接受 claude 超时参数）",
+               expected="参数表含 claude_timeout_seconds",
+               actual=sorted(signature(validate_runtime_config).parameters),
+               passed="claude_timeout_seconds" in signature(validate_runtime_config).parameters)
+
+    stamp("②b-claude假SDK")
+    # 子例 ③（真实时间）：cross_validation json 节化章，三节合法 done → 真实 _assemble
+    three = await _run_cross_validation_json(root, "r-seam-wall-3", budget)
+    chapter3 = three["chapter"] or {}
+    checks.add("guard: 子例 ③ 三节都被派活并写下合法评分数组、研究到终态", guard=True,
+               expected={"section_calls>=": 3, "scheduler": "completed", "parent_exists": True},
+               actual={"section_calls": three["section_calls"], "scheduler": three["scheduler"],
+                       "parent_exists": three["parent_exists"], "timed_out": three["timed_out"]},
+               passed=(len(three["section_calls"]) >= 3 and three["scheduler"] == "completed"
+                       and three["parent_exists"] and not three["timed_out"]))
+    checks.add("W9 shape=array 的 json 节化章组装产物通过自己声明的 validators（no_item_missing_rating）（期望 d）",
+               expected={"final_validation": "PASS", "parent_top_type": "list", "assembly_errors": 0},
+               actual={"final_validation": three["final_validation"],
+                       "parent_top_type": three["parent_top_type"],
+                       "assembly_errors": three["assembly_errors"]},
+               passed=(three["final_validation"]["verdict"] == "PASS"
+                       and three["parent_top_type"] == "list" and not three["assembly_errors"]))
+    checks.add("W10 三节 done 的章一轮即 done，不复位节、不进第二轮（期望 d）",
+               expected={"chapter.status": "done", "chapter.reason": None, "chapter.attempts": 1},
+               actual={"chapter": _row_digest(chapter3), "sections": three["sections"]},
+               passed=(chapter3.get("status") == "done" and chapter3.get("reason") is None
+                       and chapter3.get("attempts") == 1))
+
+    stamp("③真实时间")
+    # 子例 ④（虚拟钟）：第 2 次断连同时带一条 permission denial，第 3 次成功
+    clock4 = VirtualClock()
+    four = await _run_jitter(root, "r-seam-wall-4", budget, per_round=3, clock=clock4,
+                             deadline_seconds=wall, sec2=_sec2_disconnect_denial_then_ok)
+    sec2d = four["sec2"] or {}
+    checks.add("W11 断连 + denial 同现仍按传输类退避重试：sec-2 第 3 次 done、attempts=3（期望 e）",
+               expected={"status": "done", "attempts": 3, "sec2_calls": 3},
+               actual={**_row_digest(sec2d), "sec2_calls": len(four["sec2_calls"]),
+                       "section_errors": [e.get("reason") for e in four["section_errors"]]},
+               passed=(sec2d.get("status") == "done" and sec2d.get("attempts") == 3
+                       and len(four["sec2_calls"]) == 3))
+    checks.add("W12 section_error 里 socket 断连不被 denial 掩盖成 tool_unavailable（期望 e）",
+               expected="所有 section_error.reason != tool_unavailable",
+               actual={"section_errors": four["section_errors"]},
+               passed=all(e.get("reason") != "tool_unavailable" for e in four["section_errors"]))
+    denial_result = _transport_failure_with_denial(None, None)
+    reason_direct = chapter_failure_reason(denial_result, root / "runs" / "r-seam-wall-4" / "none.md")
+    checks.add("W13 chapter_failure_reason：engine_error=socket 断连 + denials → 传输类，不是 tool_unavailable（期望 e）",
+               expected="∈ {retry_exhausted, timeout}", actual={"reason": reason_direct},
+               passed=reason_direct in {"retry_exhausted", "timeout"})
+
+    stamp("④虚拟钟")
+    # guard：真 429 即使慢（墙钟/2 后才返回）仍 quota_exhausted，不得被改判 timeout
+    clock5 = VirtualClock()
+    five = await _run_jitter(root, "r-seam-wall-5", budget, clock=clock5, deadline_seconds=wall,
+                             sec2=_sec2_slow_disconnect(clock5, wall / 2, final_error=REAL_RATELIMIT_ENGINE_ERROR))
+    sec2e = five["sec2"] or {}
+    checks.add("guard: 慢返回的真 429 仍 quota_exhausted（不归 timeout / retry_exhausted）", guard=True,
+               expected={"status": "missing", "reason": "quota_exhausted"},
+               actual={**_row_digest(sec2e), "scheduler": five["scheduler"]},
+               passed=sec2e.get("status") == "missing" and sec2e.get("reason") == "quota_exhausted")
+    # guard：codex 超时语义不变（默认 300 s；selfcheck 仍拒绝墙钟 ≤ codex 超时；超时文案归 timeout）
+    from app.config import load_research_scale_config
+    from app.adapters.selfcheck import RuntimeConfigCheckError
+    try:
+        validate_runtime_config(load_research_scale_config({"fast": {"chapter_wall_clock_seconds": int(engine_timeout)}}))
+        rejected = False
+    except RuntimeConfigCheckError:
+        rejected = True
+    codex_timeout_reason = chapter_failure_reason(
+        _failed_result(f"Codex 任务超时（{engine_timeout:g} 秒），已终止并要求整任务重跑", None),
+        root / "runs" / "none.md")
+    checks.add("guard: codex 超时语义不变：默认 300 s、selfcheck 拒绝墙钟≤codex 超时、超时文案归 timeout", guard=True,
+               expected={"codex_timeout": 300.0, "selfcheck_rejects": True, "reason": "timeout"},
+               actual={"codex_timeout": engine_timeout, "selfcheck_rejects": rejected,
+                       "reason": codex_timeout_reason},
+               passed=engine_timeout == 300.0 and rejected and codex_timeout_reason == "timeout")
+    # guard：D-007 section-transport-jitter 九条继续绿（子目录里整跑一遍）
+    sub = Checks()
+    print("\n  --- guard：重跑 D-007 section-transport-jitter（九条）---", flush=True)
+    (root / "d007").mkdir(parents=True, exist_ok=True)
+    d007 = await case_section_transport_jitter(root / "d007", sub, budget)
+    checks.add("guard: D-007 section-transport-jitter 九条继续绿", guard=True,
+               expected={"failed": [], "count": 9},
+               actual={"failed": sub.failed_names(), "count": len(sub.items)},
+               passed=not sub.failed_names() and len(sub.items) == 9)
+    stamp("guards")
+    return {"wall_clock_seconds": wall, "engine_timeout_seconds": engine_timeout, "timings": timings,
+            "sub1": one, "sub2": {**two, "cancel_record": record}, "sub2b": hang, "sub3": three,
+            "sub4": four, "guard_429": five, "guard_d007": {"checks": sub.items, "outcome": d007}}
+
+
+# --------------------------------------------------------------------------
 # 入口
 # --------------------------------------------------------------------------
 
@@ -925,6 +1399,7 @@ CASES = {
     "ratelimit-regex": case_ratelimit_regex,
     "stop-resume": case_stop_resume,
     "section-transport-jitter": case_section_transport_jitter,
+    "section-wall-clock": case_section_wall_clock,
 }
 
 
