@@ -544,6 +544,9 @@ class RuntimeCoordinator:
                 now_iso=self.now_iso,
                 on_event=on_event,
                 timer=self.timer,
+                now=self.now,
+                deadline_at=getattr(context, "deadline_at", None),
+                engine_timeout_seconds=getattr(adapter, "timeout_seconds", None),
             )
 
         result = await adapter.run(task, self._ctx(task), on_event=on_event)

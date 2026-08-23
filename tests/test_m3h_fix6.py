@@ -174,9 +174,12 @@ def test_章级下一轮重新派活传输耗尽的节(tmp_path):
     second = _run(tmp_path, per_round=1, sec2_errors=[None], store=store)
 
     # sec-1 已 done 仍跳过；sec-2 被复位重派并写成
+    # 第一轮已按独立常量 SECTION_RETRY_MAX_ATTEMPTS 退避耗尽，第二轮再派一次即 done
+    from app.orchestrator.sectioning import SECTION_RETRY_MAX_ATTEMPTS
+
     assert second.calls == ["sec-2.md"]
     assert second.rows["ch-1/sec-2"]["status"] == "done"
-    assert second.rows["ch-1/sec-2"]["attempts"] == 2
+    assert second.rows["ch-1/sec-2"]["attempts"] == SECTION_RETRY_MAX_ATTEMPTS + 1
     assert "此处缺失" not in section_file.read_text(encoding="utf-8")
     assert second.result.succeeded is True
 

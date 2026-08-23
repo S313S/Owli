@@ -52,14 +52,23 @@ def chapter_failure_reason(
         *list(_field(result, "permission_denials", []) or []),
         *list(_field(conclusion, "capability_denials", []) or []),
     ]
+    engine_error = str(_field(result, "engine_error", "") or "")
+    conclusion_error = str(_field(result, "conclusion_error", "") or "")
+    errors = " ".join(filter(None, (engine_error, conclusion_error)))
     if declared == "tool_unavailable" or denials:
+        # D-008 期望 e：同一尝试里传输断连 / 超时与 denial 同现时，链路信号优先；
+        # 一条 Glob 无 path 的 denial 不该把 socket 断连掩盖成「工具不可用」。
+        if classify_rate_limit(
+            result, engine_error, conclusion_error, text=errors,
+        ) is not RateLimitVerdict.LIMITED:
+            if search_without_negation(_TIMEOUT_WORDING_PATTERN, errors) is not None:
+                return "timeout"
+            if errors and classify_transport_error(errors):
+                return "retry_exhausted"
         return "tool_unavailable"
     if declared in CHAPTER_FAILURE_REASONS:
         return declared
 
-    engine_error = str(_field(result, "engine_error", "") or "")
-    conclusion_error = str(_field(result, "conclusion_error", "") or "")
-    errors = " ".join(filter(None, (engine_error, conclusion_error)))
     # 限流优先读结构化字段（api_error_status / 错误类型 / rate_limit_info）；
     # 只有结构化一个信号都没有时才退到措辞兜底，且兜底不命中「非限流」这类否定句。
     if classify_rate_limit(
