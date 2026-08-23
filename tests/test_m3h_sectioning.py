@@ -21,6 +21,9 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     source["scale"] = "standard"
     source["baseline"] = None
     source["goals"] = source["goals"][:2]
+    # 节级传输重试次数沿用本 goal 的 max_attempts_per_round；这里压到 1，
+    # 让本用例仍旧只看「一次断连即落账 + 进 SSE」的细节（重试次数由 D-007 专用例覆盖）。
+    source["goals"][1]["retry_policy"]["max_attempts_per_round"] = 1
     report_agent = source["goals"][1]["agents"][0]
     report_agent["agent_id"] = "report-writing"
     report_agent["display_name"] = "报告撰写"
@@ -180,7 +183,10 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
         ),
     ))
     assert recovered.succeeded is True
-    assert [item[2] for item in calls] == ["sec-2.md", "sec-1.md"]
+    # D-007：传输耗尽的 sec-2 每一次章级尝试都会被复位重派，不再永久跳过。
+    assert [item[2] for item in calls] == [
+        "sec-2.md", "sec-2.md", "sec-1.md", "sec-2.md",
+    ]
 
     store.reset_done_chapters(
         "r-ledger", "goal-2", ["ch-1/sec-1"],

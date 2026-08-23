@@ -518,6 +518,44 @@ class Store:
             )
         return cursor.rowcount == 1
 
+    def reset_retry_exhausted_chapters(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_ids: Iterable[str],
+        *,
+        updated_at: str,
+    ) -> list[str]:
+        """章级重试前，把传输耗尽（missing/retry_exhausted）的子节复位成 pending 重新派活。
+
+        只放行 `retry_exhausted` 这一个 reason：`quota_exhausted` / `tool_unavailable`
+        等闭集原因是「这一轮问不出来」，重新派活只会白烧额度，仍旧跳过。
+        """
+
+        wanted = [
+            str(chapter_id) for chapter_id in chapter_ids if str(chapter_id).strip()
+        ]
+        if not wanted:
+            return []
+        reset: list[str] = []
+        with self._connect() as connection:
+            for chapter_id in wanted:
+                cursor = connection.execute(
+                    """
+                    UPDATE chapter_progress
+                    SET status = 'pending', reason = NULL,
+                        actual_output_path = NULL, actual_count = NULL,
+                        engine_error = NULL, conclusion_error = NULL,
+                        updated_at = ?
+                    WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                      AND status = 'missing' AND reason = 'retry_exhausted'
+                    """,
+                    (updated_at, research_id, goal_id, chapter_id),
+                )
+                if cursor.rowcount == 1:
+                    reset.append(chapter_id)
+        return reset
+
     def reset_done_chapters(
         self,
         research_id: str,

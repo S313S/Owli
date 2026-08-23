@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from dataclasses import replace
@@ -10,17 +11,70 @@ from typing import Any, Mapping
 
 from app.adapters import validation
 from app.adapters.contracts import EngineTask
+from app.adapters.ratelimit import classify_transport_error
 from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
 )
-from app.orchestrator.scheduler import TaskRunResult
+from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
 
 
 SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
 
+#: 节级传输断连可重试的唯一闭集 reason。其余闭集原因（quota_exhausted /
+#: tool_unavailable / timeout / conclusion_invalid / empty_result）行为不变。
+SECTION_RETRYABLE_REASON = "retry_exhausted"
+
 
 def should_section(kind: str, output_format: str) -> bool:
     return kind in SECTIONED_KINDS and output_format in {"markdown", "json"}
+
+
+def _section_attempt_budget(plan: Any, goal_id: str) -> int:
+    """节级重试次数沿用本 goal 的 `retry_policy.max_attempts_per_round`。"""
+
+    for goal in getattr(plan, "goals", None) or []:
+        if getattr(goal, "goal_id", None) != goal_id:
+            continue
+        policy = getattr(goal, "retry_policy", None)
+        if isinstance(policy, Mapping):
+            try:
+                return max(1, int(policy["max_attempts_per_round"]))
+            except (KeyError, TypeError, ValueError):
+                return 1
+    return 1
+
+
+def _is_transport_failure(result: Any, reason: str) -> bool:
+    """传输断连（socket 断开这类）才退避重试；限流 / 超时 / 结论不合法都不算。
+
+    先看归一后的 reason —— `classify_rate_limit` 与超时兜底都排在传输判定之前，
+    所以 reason 落到 retry_exhausted 时才轮得到传输判定，真 429 不会被误吞。
+    """
+
+    if reason != SECTION_RETRYABLE_REASON:
+        return False
+    engine_error = str(getattr(result, "engine_error", "") or "")
+    conclusion_error = str(getattr(result, "conclusion_error", "") or "")
+    errors = " ".join(filter(None, (engine_error, conclusion_error)))
+    return bool(errors) and classify_transport_error(errors)
+
+
+async def _wait_before_section_retry(timer: Any, delay: float) -> None:
+    """退避沿用章级口径（`CHAPTER_RETRY_INTERVAL_SECONDS[scale]`）。"""
+
+    if delay <= 0:
+        return
+    if timer is None:
+        await asyncio.sleep(delay)
+        return
+    ready = asyncio.get_running_loop().create_future()
+
+    def release() -> None:
+        if not ready.done():
+            ready.set_result(None)
+
+    timer(delay, release)
+    await ready
 
 
 def _chapter_id(agent: Any) -> str:
@@ -258,6 +312,7 @@ async def run_sectioned_task(
     runs_root: Path,
     now_iso: Any,
     on_event: Any,
+    timer: Any = None,
 ) -> TaskRunResult:
     sections = _section_specs(plan, agent)
     store.ensure_chapters(
@@ -276,148 +331,183 @@ async def run_sectioned_task(
     }
     section_root = base_task.output_path.parent / Path(base_task.output_path.stem)
     section_root.mkdir(parents=True, exist_ok=True)
+    # 章级重试（本函数每被调用一次 = 父章一次尝试）先把上一轮传输耗尽的节复位成
+    # pending 重新派活；done 节与其它闭集 reason 的 missing 节仍旧跳过。
+    reset_ids = set(store.reset_retry_exhausted_chapters(
+        plan.research_id,
+        context.goal_id,
+        [section["section_id"] for section in sections],
+        updated_at=now_iso(),
+    ))
+    if reset_ids:
+        for section in sections:
+            if section["section_id"] in reset_ids:
+                # 上一轮写下的占位正文不能留着冒充产物，否则重派后引擎不落盘也会判 done。
+                (section_root / section["filename"]).unlink(missing_ok=True)
+        existing = {
+            row["chapter_id"]: row
+            for row in store.list_chapters(plan.research_id)
+            if row["goal_id"] == context.goal_id
+        }
+    attempt_budget = _section_attempt_budget(plan, context.goal_id)
+    retry_delay = float(
+        CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
+    )
     for section in sections:
         row = existing.get(section["section_id"])
         if row and row["status"] in {"done", "missing"}:
             continue
-        started = store.start_chapter(
-            plan.research_id,
-            context.goal_id,
-            section["section_id"],
-            engine=context.engine,
-            updated_at=now_iso(),
-        )
-        if not started:
-            continue
-        current_rows = store.list_chapters(plan.research_id)
-        inputs = _ledger_inputs(current_rows, section["goal_id"])
-        chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
-        opening = chapter.get("opening", {})
-        declared_inputs = (
-            opening.get("inputs", []) if isinstance(opening, Mapping) else []
-        )
-        inputs = _merge_declared_done_inputs(
-            inputs,
-            current_rows,
-            declared_inputs,
-            research_root=runs_root / plan.research_id,
-        )
-        section_path = section_root / section["filename"]
-        body = (
-            f"{base_task.body}\n\n"
-            "本次只写一个报告节；禁止生成整份报告。\n"
-            "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
-            "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
-            "本节的结论/信息源只覆盖本节范围，不总结或引用其他报告节。\n"
-            "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
-            f"{section_path}\n"
-            f"节目标={json.dumps(section, ensure_ascii=False)}\n"
-            "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
-            "章级 opening.inputs 声明且账本 status=done 的上游产物；"
-            "每条都带 goal_id/chapter_id/path/actual_count。\n"
-            "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
-            "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
-            "产物 path 只用于定位，不是 permalink；角标 permalink 必须逐字取自 done 产物内容。"
-            "结构化派生产物若同时给出实体条目及该实体的 permalink 来源，"
-            "可逐字复用该 permalink 支撑同一实体条目中的判断；不得跨实体挪用。"
-            "实体对应可由显式字段，或 permalink 中无歧义的品牌或模型标识确认；"
-            "不得只按 sources 数组顺序猜测实体对应。"
-            "若内容没有可支撑判断的 permalink，原位标注缺失；"
-            "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
-            f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
-        )
-        section_task = replace(
-            base_task,
-            body=body,
-            output_path=section_path,
-            output_format="markdown",
-            agent_id=f"{base_task.agent_id}-{section['filename'].removesuffix('.md')}",
-            validators=["file_exists"],
-            capability=base_task.capability,
-        )
-        result = adapter.run(
-            section_task, _ctx(section_task, runs_root, store), on_event=on_event,
-        )
-        if inspect.isawaitable(result):
-            result = await result
-        try:
-            artifact_empty = (
-                not section_path.is_file()
-                or not section_path.read_text(encoding="utf-8").strip()
+        section_attempt = 0
+        while True:
+            started = store.start_chapter(
+                plan.research_id,
+                context.goal_id,
+                section["section_id"],
+                engine=context.engine,
+                updated_at=now_iso(),
             )
-        except (OSError, UnicodeError):
-            artifact_empty = True
-        conclusion_invalid = (
-            not artifact_empty
-            and getattr(result, "conclusion", None) is None
-            and bool(getattr(result, "conclusion_error", None))
-            and getattr(result, "engine_error", None) is None
-            and getattr(getattr(result, "validation", None), "verdict", None)
-            is validation.Verdict.PASS
-        )
-        if conclusion_invalid:
-            original_conclusion = _invalid_conclusion_source(result)
-            retry_task = replace(
-                section_task,
-                body=(
-                    f"结论块字段不合法：{original_conclusion}，"
-                    "请只重发 owli-result 块，不要重写产物"
-                ),
-                agent_id=f"{section_task.agent_id}-conclusion-retry",
+            if not started:
+                break
+            section_attempt += 1
+            current_rows = store.list_chapters(plan.research_id)
+            inputs = _ledger_inputs(current_rows, section["goal_id"])
+            chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+            opening = chapter.get("opening", {})
+            declared_inputs = (
+                opening.get("inputs", []) if isinstance(opening, Mapping) else []
+            )
+            inputs = _merge_declared_done_inputs(
+                inputs,
+                current_rows,
+                declared_inputs,
+                research_root=runs_root / plan.research_id,
+            )
+            section_path = section_root / section["filename"]
+            body = (
+                f"{base_task.body}\n\n"
+                "本次只写一个报告节；禁止生成整份报告。\n"
+                "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
+                "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
+                "本节的结论/信息源只覆盖本节范围，不总结或引用其他报告节。\n"
+                "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
+                f"{section_path}\n"
+                f"节目标={json.dumps(section, ensure_ascii=False)}\n"
+                "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
+                "章级 opening.inputs 声明且账本 status=done 的上游产物；"
+                "每条都带 goal_id/chapter_id/path/actual_count。\n"
+                "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
+                "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
+                "产物 path 只用于定位，不是 permalink；角标 permalink 必须逐字取自 done 产物内容。"
+                "结构化派生产物若同时给出实体条目及该实体的 permalink 来源，"
+                "可逐字复用该 permalink 支撑同一实体条目中的判断；不得跨实体挪用。"
+                "实体对应可由显式字段，或 permalink 中无歧义的品牌或模型标识确认；"
+                "不得只按 sources 数组顺序猜测实体对应。"
+                "若内容没有可支撑判断的 permalink，原位标注缺失；"
+                "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
+                f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
+            )
+            section_task = replace(
+                base_task,
+                body=body,
+                output_path=section_path,
+                output_format="markdown",
+                agent_id=f"{base_task.agent_id}-{section['filename'].removesuffix('.md')}",
+                validators=["file_exists"],
+                capability=base_task.capability,
             )
             result = adapter.run(
-                retry_task,
-                _ctx(retry_task, runs_root, store),
-                on_event=on_event,
+                section_task, _ctx(section_task, runs_root, store), on_event=on_event,
             )
             if inspect.isawaitable(result):
                 result = await result
-        succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
-        if succeeded:
-            store.finish_chapter(
-                plan.research_id,
-                context.goal_id,
-                section["section_id"],
-                status="done",
-                reason=None,
-                actual_output_path=str(section_path),
-                actual_count=1,
-                updated_at=now_iso(),
+            try:
+                artifact_empty = (
+                    not section_path.is_file()
+                    or not section_path.read_text(encoding="utf-8").strip()
+                )
+            except (OSError, UnicodeError):
+                artifact_empty = True
+            conclusion_invalid = (
+                not artifact_empty
+                and getattr(result, "conclusion", None) is None
+                and bool(getattr(result, "conclusion_error", None))
+                and getattr(result, "engine_error", None) is None
+                and getattr(getattr(result, "validation", None), "verdict", None)
+                is validation.Verdict.PASS
             )
-        else:
-            reason = section_failure_reason(result, section_path)
-            engine_error = getattr(result, "engine_error", None)
-            conclusion_error = getattr(result, "conclusion_error", None)
-            rejected_path = _preserve_rejected_artifact(section_path)
-            conclusion_error = _conclusion_error_with_rejected_path(
-                conclusion_error, rejected_path,
-            )
-            section_path.write_text(_placeholder(section, reason), encoding="utf-8")
-            store.finish_chapter(
-                plan.research_id,
-                context.goal_id,
-                section["section_id"],
-                status="missing",
-                reason=reason,
-                actual_output_path=str(section_path),
-                actual_count=0,
-                engine_error=engine_error,
-                conclusion_error=conclusion_error,
-                updated_at=now_iso(),
-            )
-            event_result = on_event({
-                "type": "section_error",
-                "data": {
-                    "goal_id": context.goal_id,
-                    "chapter_id": section["section_id"],
-                    "reason": reason,
-                    "engine_error": engine_error,
-                    "conclusion_error": conclusion_error,
-                },
-                "is_error": True,
-            })
-            if inspect.isawaitable(event_result):
-                await event_result
+            if conclusion_invalid:
+                original_conclusion = _invalid_conclusion_source(result)
+                retry_task = replace(
+                    section_task,
+                    body=(
+                        f"结论块字段不合法：{original_conclusion}，"
+                        "请只重发 owli-result 块，不要重写产物"
+                    ),
+                    agent_id=f"{section_task.agent_id}-conclusion-retry",
+                )
+                result = adapter.run(
+                    retry_task,
+                    _ctx(retry_task, runs_root, store),
+                    on_event=on_event,
+                )
+                if inspect.isawaitable(result):
+                    result = await result
+            succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
+            if succeeded:
+                store.finish_chapter(
+                    plan.research_id,
+                    context.goal_id,
+                    section["section_id"],
+                    status="done",
+                    reason=None,
+                    actual_output_path=str(section_path),
+                    actual_count=1,
+                    updated_at=now_iso(),
+                )
+                break
+            else:
+                reason = section_failure_reason(result, section_path)
+                engine_error = getattr(result, "engine_error", None)
+                conclusion_error = getattr(result, "conclusion_error", None)
+                if (
+                    section_attempt < attempt_budget
+                    and _is_transport_failure(result, reason)
+                ):
+                    # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
+                    # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
+                    await _wait_before_section_retry(timer, retry_delay)
+                    continue
+                rejected_path = _preserve_rejected_artifact(section_path)
+                conclusion_error = _conclusion_error_with_rejected_path(
+                    conclusion_error, rejected_path,
+                )
+                section_path.write_text(_placeholder(section, reason), encoding="utf-8")
+                store.finish_chapter(
+                    plan.research_id,
+                    context.goal_id,
+                    section["section_id"],
+                    status="missing",
+                    reason=reason,
+                    actual_output_path=str(section_path),
+                    actual_count=0,
+                    engine_error=engine_error,
+                    conclusion_error=conclusion_error,
+                    updated_at=now_iso(),
+                )
+                event_result = on_event({
+                    "type": "section_error",
+                    "data": {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "reason": reason,
+                        "engine_error": engine_error,
+                        "conclusion_error": conclusion_error,
+                    },
+                    "is_error": True,
+                })
+                if inspect.isawaitable(event_result):
+                    await event_result
+                break
     rows = store.list_chapters(plan.research_id)
     section_ids = {section["section_id"] for section in sections}
     done_count = sum(
@@ -447,13 +537,19 @@ async def run_sectioned_task(
         reason = (
             next(iter(section_reasons))
             if len(section_reasons) == 1
-            else "retry_exhausted"
+            else SECTION_RETRYABLE_REASON
         )
+        # 节全丢时不无条件定终态：如果全是传输耗尽，这一章还值得再来一轮
+        # （下一轮入口会把这些节复位重新派活）。所以不写 chapter_status，
+        # 交回 Scheduler 走正常章级重试；轮次耗尽后它自会落 missing。
+        retryable = bool(section_reasons) and section_reasons <= {
+            SECTION_RETRYABLE_REASON,
+        }
         return TaskRunResult(
             False,
             engine=context.engine,
             failure_feedback="所有报告节均未完成；占位报告已落盘",
-            chapter_status="missing",
+            chapter_status=None if retryable else "missing",
             reason=reason,
             actual_output_path=str(base_task.output_path),
             actual_count=0,

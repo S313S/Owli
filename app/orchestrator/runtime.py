@@ -543,6 +543,7 @@ class RuntimeCoordinator:
                 runs_root=self.runs_root,
                 now_iso=self.now_iso,
                 on_event=on_event,
+                timer=self.timer,
             )
 
         result = await adapter.run(task, self._ctx(task), on_event=on_event)
