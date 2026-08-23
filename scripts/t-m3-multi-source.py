@@ -40,6 +40,15 @@ SOURCE_URLS = {
 }
 
 
+def _goals_root(path: Path) -> Path:
+    """章节化后 output.path 会多出小节层级，按 goals 目录名向上定位更稳。"""
+
+    for parent in path.parents:
+        if parent.name == "goals":
+            return parent
+    raise AssertionError(f"未能在 {path} 的父链中找到 goals 目录")
+
+
 def _source_tool(source_id: str):
     def search(query: str, window: str, *, on_event=None):
         del query, window, on_event
@@ -65,6 +74,10 @@ def _source_tool(source_id: str):
 
 def _skeleton() -> dict[str, Any]:
     return {
+        "market_profile": "global_product",
+        "market_profile_justification": "取样源为 Hacker News、Product Hunt 与网页搜索，按全球产品口径。",
+        "subjects": ["飞书"],
+        "subjects_justification": "三源均围绕主体飞书自身取证。",
         "goals": [
             {
                 "title": "三源采集",
@@ -72,14 +85,18 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": [],
                 "deliverable": {
                     "format": "json",
+                    "shape": "array",
                     "path": "multi-source.json",
                     "description": "三源证据 JSON 数组。",
                 },
                 "acceptance": ["每条记录含 permalink 与 fetched_at 字段"],
                 "agents": [
-                    {"name": "HN 数据抓取", "task": "采集 Hacker News 用户讨论"},
-                    {"name": "网页搜索数据抓取", "task": "采集官方与评测原文"},
-                    {"name": "Product Hunt 数据抓取", "task": "采集 launch 与评论"},
+                    {"name": "HN 数据抓取·飞书", "task": "采集 Hacker News 用户讨论",
+                     "output": {"shape": "array"}},
+                    {"name": "网页搜索数据抓取·飞书", "task": "采集官方与评测原文",
+                     "output": {"shape": "array"}},
+                    {"name": "Product Hunt 数据抓取·飞书", "task": "采集 launch 与评论",
+                     "output": {"shape": "array"}},
                 ],
             },
             {
@@ -88,11 +105,13 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": ["goal-1"],
                 "deliverable": {
                     "format": "json",
+                    "shape": "array",
                     "path": "audit.json",
                     "description": "三源五维评分数组。",
                 },
                 "acceptance": ["每条记录的五维分与 rating_notes 均通过正则校验"],
-                "agents": [{"name": "可靠度审计", "task": "完成闭集判定与五维评分"}],
+                "agents": [{"name": "可靠度审计", "task": "完成闭集判定与五维评分",
+                            "output": {"shape": "array"}}],
             },
             {
                 "title": "报告成稿",
@@ -100,11 +119,13 @@ def _skeleton() -> dict[str, Any]:
                 "depends_on": ["goal-2"],
                 "deliverable": {
                     "format": "markdown",
+                    "shape": "object",
                     "path": "report.md",
                     "description": "带三源角标和五维清单的报告。",
                 },
                 "acceptance": ["报告包含结论与信息源两个章节且角标双向一致"],
-                "agents": [{"name": "报告撰写", "task": "撰写飞书竞品优缺点报告"}],
+                "agents": [{"name": "报告撰写", "task": "撰写飞书竞品优缺点报告",
+                            "output": {"shape": "object"}}],
             },
         ]
     }
@@ -121,10 +142,19 @@ class DemoEngine:
             stem = task.output_path.stem
             skeleton = _skeleton()
             if stem == "skeleton":
-                payload = {"goals": [
+                payload = {
+                    key: skeleton[key]
+                    for key in (
+                        "market_profile",
+                        "market_profile_justification",
+                        "subjects",
+                        "subjects_justification",
+                    )
+                }
+                payload["goals"] = [
                     {key: goal[key] for key in ("title", "objective", "depends_on")}
                     for goal in skeleton["goals"]
-                ]}
+                ]
             elif "-ch-" in stem:
                 goal_number = int(stem.split("-ch-", 1)[0].removeprefix("goal-"))
                 output_path = json.loads(
@@ -189,7 +219,7 @@ class DemoEngine:
             return SimpleNamespace(succeeded=True)
         if task.agent_kind == "reliability_audit":
             assert self.router is not None
-            research_root = task.output_path.parents[2]
+            research_root = _goals_root(task.output_path).parent
             evidence = []
             for path in sorted((research_root / "goals" / "goal-1").glob("*.json")):
                 value = json.loads(path.read_text(encoding="utf-8"))
@@ -206,7 +236,7 @@ class DemoEngine:
             )
             return SimpleNamespace(succeeded=True)
         if task.agent_kind == "report_writing":
-            audit_path = task.output_path.parents[1] / "goal-2" / "audit.json"
+            audit_path = _goals_root(task.output_path) / "goal-2" / "audit.json"
             evidence = json.loads(audit_path.read_text(encoding="utf-8"))
             conclusions = [
                 f"{item['platform']} 提供了一条可追溯的竞品观察 [S{item['citation_no']:02d}]"
