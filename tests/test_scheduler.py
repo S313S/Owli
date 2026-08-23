@@ -113,8 +113,9 @@ async def test_并行两_goal_同时起且汇合等待两者_done():
     )
 
     running = asyncio.create_task(scheduler.start())
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    # 一次派活现在包成独立可取消 task（墙钟 / stop 共用取消路径），多一个 tick 才进 run_task
+    for _ in range(3):
+        await asyncio.sleep(0)
 
     assert set(started) == {"goal-1", "goal-2"}
     assert "goal-3" not in started

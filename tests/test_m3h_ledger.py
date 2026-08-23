@@ -294,7 +294,8 @@ def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_p
     row = store.list_chapters("r-ledger")[0]
     assert calls == [1, 2]
     assert row["status"] == "missing"
-    assert row["reason"] == "retry_exhausted"
+    # D-008 期望 a：墙钟到点的章 reason 恒为 timeout，不再退回 retry_exhausted
+    assert row["reason"] == "timeout"
     assert row["attempts"] == 2
 
 

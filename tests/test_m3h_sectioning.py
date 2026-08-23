@@ -21,8 +21,8 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     source["scale"] = "standard"
     source["baseline"] = None
     source["goals"] = source["goals"][:2]
-    # 节级传输重试次数沿用本 goal 的 max_attempts_per_round；这里压到 1，
-    # 让本用例仍旧只看「一次断连即落账 + 进 SSE」的细节（重试次数由 D-007 专用例覆盖）。
+    # 节级传输重试次数是独立常量 SECTION_RETRY_MAX_ATTEMPTS（D-008 期望 c），
+    # 与 max_attempts_per_round 无关；本用例只看「耗尽后落账 + 进 SSE」的细节。
     source["goals"][1]["retry_policy"]["max_attempts_per_round"] = 1
     report_agent = source["goals"][1]["agents"][0]
     report_agent["agent_id"] = "report-writing"
@@ -120,6 +120,8 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
         routing_utc_clock=lambda: datetime(2026, 8, 22, tzinfo=timezone.utc),
     )
     coordinator._adapters["r-ledger"] = Adapter()
+    # 节级退避沿用章级口径（standard=15 s）；本用例只看次数与落账，用假 timer 立即放行
+    coordinator.timer = lambda delay, callback: callback()
 
     result = asyncio.run(coordinator._run_task(
         plan,
@@ -137,7 +139,9 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     text = output.read_text(encoding="utf-8")
     assert result.succeeded is True
     assert result.actual_count == 1
-    assert [item[2] for item in calls] == ["sec-2.md"]
+    from app.orchestrator.sectioning import SECTION_RETRY_MAX_ATTEMPTS
+
+    assert [item[2] for item in calls] == ["sec-2.md"] * SECTION_RETRY_MAX_ATTEMPTS
     assert "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用）" in calls[0][1]
     assert "本节的结论/信息源只覆盖本节范围" in calls[0][1]
     assert "已有节" in text
@@ -184,9 +188,11 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     ))
     assert recovered.succeeded is True
     # D-007：传输耗尽的 sec-2 每一次章级尝试都会被复位重派，不再永久跳过。
-    assert [item[2] for item in calls] == [
-        "sec-2.md", "sec-2.md", "sec-1.md", "sec-2.md",
-    ]
+    assert [item[2] for item in calls] == (
+        ["sec-2.md"] * SECTION_RETRY_MAX_ATTEMPTS * 2
+        + ["sec-1.md"]
+        + ["sec-2.md"] * SECTION_RETRY_MAX_ATTEMPTS
+    )
 
     store.reset_done_chapters(
         "r-ledger", "goal-2", ["ch-1/sec-1"],

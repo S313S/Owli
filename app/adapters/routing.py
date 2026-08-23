@@ -100,6 +100,17 @@ class RoutedAdapter:
         self._source_adapter = SourceToolAdapter(source_tools)
 
     @property
+    def timeout_seconds(self) -> float | None:
+        """本路由下「一次引擎超时」的口径：取各适配器超时的最大值（与引擎无关）。"""
+
+        values = [
+            float(value)
+            for adapter in self._adapters.values()
+            if (value := getattr(adapter, "timeout_seconds", None)) is not None
+        ]
+        return max(values) if values else None
+
+    @property
     def future_engine(self) -> str | None:
         """限流事件要求后续新任务让路时的适配层覆盖。"""
 

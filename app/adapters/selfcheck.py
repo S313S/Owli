@@ -28,28 +28,41 @@ class RuntimeConfigCheckError(RuntimeError):
     """部署级运行配置违反跨模块安全约束。"""
 
 
+def _adapter_timeout_default(adapter_type: Any) -> float:
+    return float(signature(adapter_type).parameters["timeout_seconds"].default)
+
+
 def validate_runtime_config(
     scale_config: ResearchScaleConfig,
     *,
     codex_timeout_seconds: float | None = None,
+    claude_timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """拒绝章墙钟不大于 Codex 单次任务超时的配置。"""
+    """拒绝章墙钟不大于任一引擎单次任务超时的配置（D-008 期望 b：claude 同样校验）。"""
 
     timeout = codex_timeout_seconds
     if timeout is None:
-        timeout = float(
-            signature(CodexAdapter).parameters["timeout_seconds"].default
-        )
+        timeout = _adapter_timeout_default(CodexAdapter)
+    claude_timeout = claude_timeout_seconds
+    if claude_timeout is None:
+        from app.adapters.claude import ClaudeAdapter
+
+        claude_timeout = _adapter_timeout_default(ClaudeAdapter)
+    engine_timeouts = {"Codex": float(timeout), "Claude": float(claude_timeout)}
     for scale in ("standard", "fast"):
         wall_clock = scale_config.profile(scale).chapter_wall_clock_seconds
-        if wall_clock is not None and wall_clock <= timeout:
-            raise RuntimeConfigCheckError(
-                f"{scale} 档 chapter_wall_clock_seconds={wall_clock} 必须严格大于 "
-                f"Codex 引擎超时 {timeout:g} 秒"
-            )
+        if wall_clock is None:
+            continue
+        for engine, engine_timeout in engine_timeouts.items():
+            if wall_clock <= engine_timeout:
+                raise RuntimeConfigCheckError(
+                    f"{scale} 档 chapter_wall_clock_seconds={wall_clock} 必须严格大于 "
+                    f"{engine} 引擎超时 {engine_timeout:g} 秒"
+                )
     return {
         "ok": True,
         "codex_timeout_seconds": timeout,
+        "claude_timeout_seconds": claude_timeout,
         "chapter_wall_clock_seconds": {
             scale: scale_config.profile(scale).chapter_wall_clock_seconds
             for scale in ("standard", "fast")

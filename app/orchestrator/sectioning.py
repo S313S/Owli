@@ -29,19 +29,41 @@ def should_section(kind: str, output_format: str) -> bool:
     return kind in SECTIONED_KINDS and output_format in {"markdown", "json"}
 
 
-def _section_attempt_budget(plan: Any, goal_id: str) -> int:
-    """节级重试次数沿用本 goal 的 `retry_policy.max_attempts_per_round`。"""
+#: 节级重试次数上限：独立常量，不再沿用 `retry_policy.max_attempts_per_round`
+#: （D-008 期望 c —— 那个值是章级轮内次数，默认 10，节级照抄会把一章拖成黑洞）。
+SECTION_RETRY_MAX_ATTEMPTS = 3
 
-    for goal in getattr(plan, "goals", None) or []:
-        if getattr(goal, "goal_id", None) != goal_id:
-            continue
-        policy = getattr(goal, "retry_policy", None)
-        if isinstance(policy, Mapping):
-            try:
-                return max(1, int(policy["max_attempts_per_round"]))
-            except (KeyError, TypeError, ValueError):
-                return 1
-    return 1
+#: 拿不到适配器超时时的「一次引擎超时」兜底口径，与两个引擎的默认值同档。
+FALLBACK_ENGINE_TIMEOUT_SECONDS = 300.0
+
+
+class SectionAssemblyShapeError(ValueError):
+    """确定性的组装失败：节产物形状与章声明的 shape 对不上。"""
+
+
+def _section_attempt_budget() -> int:
+    return SECTION_RETRY_MAX_ATTEMPTS
+
+
+def _declared_shape(agent: Any) -> str:
+    output = getattr(agent, "output", None)
+    if isinstance(output, Mapping):
+        return str(output.get("shape", "") or "").strip().casefold()
+    return ""
+
+
+def _retry_within_deadline(
+    now: Any, deadline_at: Any, engine_timeout_seconds: float,
+) -> bool:
+    """剩余墙钟不足一次引擎超时就不再派：节级重试总和受章墙钟约束（期望 c）。"""
+
+    if deadline_at is None or now is None:
+        return True
+    try:
+        remaining = (deadline_at - now()).total_seconds()
+    except (AttributeError, TypeError):
+        return True
+    return remaining >= engine_timeout_seconds
 
 
 def _is_transport_failure(result: Any, reason: str) -> bool:
@@ -226,6 +248,29 @@ def _invalid_conclusion_source(result: Any) -> str:
     return conclusion_error
 
 
+def _write_object_document(
+    *,
+    plan: Any,
+    agent: Any,
+    output_path: Path,
+    section_items: list[dict[str, Any]],
+    missing_items: list[dict[str, Any]],
+) -> None:
+    document = {
+        "title": plan.title,
+        "chapter_id": _chapter_id(agent),
+        "sections": [
+            {key: value for key, value in item.items() if key != "done"}
+            for item in section_items
+        ],
+        "缺失清单": missing_items,
+    }
+    output_path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _assemble(
     *,
     plan: Any,
@@ -244,13 +289,13 @@ def _assemble(
     section_items: list[dict[str, Any]] = []
     for section in sections:
         path = section_root / section["filename"]
+        row = next(
+            (item for item in rows if item["chapter_id"] == section["section_id"]),
+            None,
+        )
         if path.is_file():
             text = path.read_text(encoding="utf-8").strip()
         else:
-            chapter_id = section["section_id"]
-            row = next(
-                (item for item in rows if item["chapter_id"] == chapter_id), None,
-            )
             reason = str(row["reason"] if row else "empty_result")
             text = _placeholder(section, reason).strip()
         section_items.append({
@@ -258,6 +303,10 @@ def _assemble(
             "goal_id": section["goal_id"],
             "title": section["title"],
             "markdown": text,
+            # 有产物且账本没判它失败，就按「本节有内容」参与组装。
+            "done": bool(
+                path.is_file() and (row is None or row["status"] == "done")
+            ),
         })
     missing = [
         row for row in rows
@@ -277,16 +326,55 @@ def _assemble(
         for row in missing
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_format == "json":
-        document = {
-            "title": plan.title,
-            "chapter_id": _chapter_id(agent),
-            "sections": section_items,
-            "缺失清单": missing_items,
-        }
+    if output_format == "json" and _declared_shape(agent) == "array":
+        # 章声明 shape=array（其 validators 按顶层数组写）：节产物逐条并成数组，
+        # 缺失清单另置到同目录的 `<stem>.missing.json`，不塞进数组里污染条目（期望 d）。
+        done_items = [item for item in section_items if item["done"]]
+        parsed: list[tuple[dict[str, Any], Any]] = []
+        unparsed: list[str] = []
+        for item in done_items:
+            try:
+                parsed.append((item, json.loads(item["markdown"])))
+            except ValueError:
+                unparsed.append(item["section_id"])
+        if done_items and unparsed and len(unparsed) < len(done_items):
+            # 同一章里既有 JSON 节又有非 JSON 节：确定性的形状冲突，重来一轮也一样。
+            raise SectionAssemblyShapeError(
+                f"节产物形状不一致，无法按 shape=array 组装：{sorted(unparsed)} 不是合法 JSON"
+            )
+        if unparsed:
+            # 整章的节都是叙述体（声明 json 只是产物后缀）：沿用对象文档，不硬拗数组。
+            _write_object_document(
+                plan=plan, agent=agent, output_path=output_path,
+                section_items=section_items, missing_items=missing_items,
+            )
+            return
+        items: list[Any] = []
+        for _item, payload in parsed:
+            if isinstance(payload, list):
+                items.extend(payload)
+            else:
+                items.append(payload)
         output_path.write_text(
-            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(items, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
+        )
+        output_path.with_name(f"{output_path.stem}.missing.json").write_text(
+            json.dumps(
+                {
+                    "chapter_id": _chapter_id(agent),
+                    "缺失清单": missing_items,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        return
+    if output_format == "json":
+        _write_object_document(
+            plan=plan, agent=agent, output_path=output_path,
+            section_items=section_items, missing_items=missing_items,
         )
         return
     blocks = [f"# {plan.title}", ""]
@@ -313,6 +401,9 @@ async def run_sectioned_task(
     now_iso: Any,
     on_event: Any,
     timer: Any = None,
+    now: Any = None,
+    deadline_at: Any = None,
+    engine_timeout_seconds: float | None = None,
 ) -> TaskRunResult:
     sections = _section_specs(plan, agent)
     store.ensure_chapters(
@@ -349,7 +440,14 @@ async def run_sectioned_task(
             for row in store.list_chapters(plan.research_id)
             if row["goal_id"] == context.goal_id
         }
-    attempt_budget = _section_attempt_budget(plan, context.goal_id)
+    attempt_budget = _section_attempt_budget()
+    if deadline_at is None:
+        deadline_at = getattr(context, "deadline_at", None)
+    engine_timeout = float(
+        engine_timeout_seconds
+        if engine_timeout_seconds is not None
+        else FALLBACK_ENGINE_TIMEOUT_SECONDS
+    )
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
@@ -475,8 +573,11 @@ async def run_sectioned_task(
                 ):
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
-                    await _wait_before_section_retry(timer, retry_delay)
-                    continue
+                    if _retry_within_deadline(now, deadline_at, engine_timeout):
+                        await _wait_before_section_retry(timer, retry_delay)
+                        continue
+                    # 剩余墙钟不足一次引擎超时：停派并按 timeout 定终态（期望 c）。
+                    reason = "timeout"
                 rejected_path = _preserve_rejected_artifact(section_path)
                 conclusion_error = _conclusion_error_with_rejected_path(
                     conclusion_error, rejected_path,
@@ -517,15 +618,41 @@ async def run_sectioned_task(
         and row["chapter_id"] in section_ids
         and row["status"] == "done"
     )
-    _assemble(
-        plan=plan,
-        agent=agent,
-        output_path=base_task.output_path,
-        output_format=base_task.output_format,
-        section_root=section_root,
-        sections=sections,
-        rows=rows,
-    )
+    try:
+        _assemble(
+            plan=plan,
+            agent=agent,
+            output_path=base_task.output_path,
+            output_format=base_task.output_format,
+            section_root=section_root,
+            sections=sections,
+            rows=rows,
+        )
+    except SectionAssemblyShapeError as exc:
+        # 形状对不上是确定性失败：换一轮也是同样结果，直接定终态、不进第二轮（期望 d）。
+        event_result = on_event({
+            "type": "section_assembly_error",
+            "data": {
+                "goal_id": context.goal_id,
+                "chapter_id": _chapter_id(agent),
+                "validation_failures": [
+                    {"name": "section_assembly_shape", "message": str(exc),
+                     "offenders": []},
+                ],
+            },
+            "is_error": True,
+        })
+        if inspect.isawaitable(event_result):
+            await event_result
+        return TaskRunResult(
+            False,
+            engine=context.engine,
+            failure_feedback=str(exc),
+            chapter_status="missing",
+            reason="conclusion_invalid",
+            actual_output_path=str(base_task.output_path),
+            actual_count=done_count,
+        )
     if done_count == 0:
         section_reasons = {
             str(row["reason"])
@@ -558,6 +685,9 @@ async def run_sectioned_task(
         _ctx(base_task, runs_root, store), base_task.validators,
     )
     if final_validation.verdict is not validation.Verdict.PASS:
+        # json 章的组装是确定性的：同样的节文件重来一轮还是同样的产物。
+        # 复位已写成的节再来一轮既白烧一轮墙钟，又把三节成果冲掉（D-008 根因 4）。
+        deterministic = base_task.output_format == "json"
         failures = [
             {
                 "name": item.name,
@@ -566,12 +696,13 @@ async def run_sectioned_task(
             }
             for item in final_validation.failures
         ]
-        store.reset_done_chapters(
-            plan.research_id,
-            context.goal_id,
-            [section["section_id"] for section in sections],
-            updated_at=now_iso(),
-        )
+        if not deterministic:
+            store.reset_done_chapters(
+                plan.research_id,
+                context.goal_id,
+                [section["section_id"] for section in sections],
+                updated_at=now_iso(),
+            )
         event_result = on_event({
             "type": "section_assembly_error",
             "data": {
@@ -587,6 +718,8 @@ async def run_sectioned_task(
             False,
             engine=context.engine,
             failure_feedback=json.dumps(failures, ensure_ascii=False),
+            chapter_status="missing" if deterministic else None,
+            reason="conclusion_invalid" if deterministic else None,
             actual_output_path=str(base_task.output_path),
             actual_count=done_count,
         )

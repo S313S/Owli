@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import inspect
@@ -413,6 +414,28 @@ def _engine_error_from_events(events: list[NormalizedEvent]) -> str | None:
     return "\n".join(samples) or None
 
 
+#: claude 单次 run 的默认引擎超时，与 codex 同档（D-008 期望 b）。
+DEFAULT_CLAUDE_TIMEOUT_SECONDS = 300.0
+
+
+def _timeout_run(timeout_seconds: float) -> ClaudeRunResult:
+    """单次 run 越过引擎超时：统一归 timeout（措辞与 codex 同构）。"""
+    message = (
+        f"Claude 任务超时（{timeout_seconds:g} 秒），已终止并要求整任务重跑"
+    )
+    result = artifact_validation.Result(
+        artifact_validation.Verdict.FAIL,
+        "claude_timeout",
+        message,
+        [],
+        {"timeout_seconds": timeout_seconds},
+    )
+    report = artifact_validation.ValidationReport(
+        artifact_validation.Verdict.FAIL, [result]
+    )
+    return ClaudeRunResult(None, message, report, [], [], message)
+
+
 def _unavailable_run(
     error: Exception,
     events: list[NormalizedEvent],
@@ -441,10 +464,14 @@ class ClaudeAdapter:
         sdk=None,
         log_root: Path = DEFAULT_LOG_ROOT,
         on_rate_limited=None,
+        timeout_seconds: float | None = DEFAULT_CLAUDE_TIMEOUT_SECONDS,
     ):
         self._sdk = sdk
         self._log_root = log_root
         self._on_rate_limited = on_rate_limited
+        self.timeout_seconds = (
+            None if timeout_seconds is None else float(timeout_seconds)
+        )
         self._client = None
         self._clients: dict[object, Any] = {}
 
@@ -619,6 +646,30 @@ class ClaudeAdapter:
         )
 
     async def run(
+        self,
+        task: TaskSpec,
+        ctx: artifact_validation.Ctx,
+        on_event=None,
+        source_adapter=None,
+        run_token: object | None = None,
+    ) -> ClaudeRunResult:
+        """单次 run 受引擎超时约束（D-008 期望 b）：越界即取消并归 timeout。"""
+        timeout = self.timeout_seconds
+        inner = self._run_once(
+            task,
+            ctx,
+            on_event=on_event,
+            source_adapter=source_adapter,
+            run_token=run_token,
+        )
+        if timeout is None or timeout <= 0:
+            return await inner
+        try:
+            return await asyncio.wait_for(inner, timeout)
+        except asyncio.TimeoutError:
+            return _timeout_run(timeout)
+
+    async def _run_once(
         self,
         task: TaskSpec,
         ctx: artifact_validation.Ctx,

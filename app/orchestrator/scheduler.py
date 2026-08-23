@@ -61,6 +61,8 @@ class TaskContext:
     engine: str
     on_event: Callable[[Any], Awaitable[None]]
     failure_feedback: str | None = None
+    #: 本章墙钟的绝对到点时刻（None = 不设墙钟）；节级预算按它算剩余时间。
+    deadline_at: datetime | None = None
 
 
 RunTask = Callable[[Agent, TaskContext], Awaitable[TaskRunResult | Any]]
@@ -197,6 +199,11 @@ class Scheduler:
         self._last_attempt_started_at: dict[tuple[str, str], datetime] = {}
         self._last_failure_signature: dict[tuple[str, str], tuple[str, str, str, str]] = {}
         self._repeat_cause_counts: dict[tuple[str, str], int] = {}
+        #: 在跑的 adapter 任务（章 agent_id → task）；墙钟取消与 /stop 共用它。
+        self._running_runs: dict[str, asyncio.Task[Any]] = {}
+        self._cancel_reasons: dict[str, str] = {}
+        self._deadline_expired: set[str] = set()
+        self._deadline_armed: set[str] = set()
         if self._chapter_ledger is not None:
             self._chapter_ledger.ensure_chapters(
                 plan.research_id,
@@ -448,6 +455,9 @@ class Scheduler:
             return
         self.status = "stopped"
         self._paused = True
+        # /stop 与墙钟超时共用一条取消路径：不留在跑的 adapter 任务（D-008）。
+        for agent_id in list(self._running_runs):
+            self._cancel_running_run(agent_id, "stopped")
         await self._emit({"type": "scheduler_update", "data": {"status": "stopped"}})
 
     async def _drive(self) -> None:
@@ -620,6 +630,72 @@ class Scheduler:
             conclusion_error=_field(result, "conclusion_error"),
         )
 
+    async def _invoke_run_task(self, agent: Agent, context: TaskContext) -> Any:
+        """把一次派活包成独立 task，才能被墙钟 / stop 主动取消。"""
+
+        result = self._run_task(agent, context)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    def _cancel_running_run(self, agent_id: str, reason: str) -> None:
+        """取消在跑的 adapter 任务。墙钟超时与 /stop 都只走这一条路径（D-008）。"""
+
+        task = self._running_runs.get(agent_id)
+        if task is None or task.done():
+            return
+        self._cancel_reasons[agent_id] = reason
+        task.cancel()
+
+    def _arm_chapter_deadline(self, agent: Agent, deadline_seconds: float) -> None:
+        """章第一次派活时挂上墙钟定时器：到点主动取消在跑任务，不等它自己返回。"""
+
+        if agent.agent_id in self._deadline_armed:
+            return
+        self._deadline_armed.add(agent.agent_id)
+
+        def expire() -> None:
+            # 一次都还没派活就到点的，只可能是假时钟把定时器提前触发了：
+            # 此时没有可取消的对象，交给事后墙钟分支收口，不凭空判 timeout。
+            if self._attempts.get(agent.agent_id, 0) < 1:
+                return
+            self._deadline_expired.add(agent.agent_id)
+            self._cancel_running_run(agent.agent_id, "timeout")
+
+        self._timer(float(deadline_seconds), expire)
+
+    async def _finish_on_deadline(
+        self,
+        goal: Goal,
+        agent: Agent,
+        result: TaskRunResult | None,
+        *,
+        exhausted: bool = False,
+    ) -> None:
+        """墙钟到点定终态：reason 恒为 timeout（部分节已成功的章同样介入）。
+
+        还有轮次预算时先 deferred 留一次补轮；轮次已用尽就直接 missing，
+        不留一个永远排不上队的 deferred 幽灵。
+        """
+
+        status = (
+            "missing"
+            if exhausted or agent.agent_id in self._supplemented
+            else "deferred"
+        )
+        self._finish_ledger(
+            goal,
+            agent,
+            status=status,
+            reason="timeout",
+            output_path=None if result is None else result.actual_output_path,
+            actual_count=None if result is None else result.actual_count,
+            engine_error=None if result is None else result.engine_error,
+            conclusion_error=None if result is None else result.conclusion_error,
+        )
+        await self._emit_chapter_update(goal, agent)
+        await self._set_agent_status(agent.agent_id, status)
+
     async def _abort_agent_on_stop(
         self, goal: Goal, agent: Agent, result: TaskRunResult | None
     ) -> None:
@@ -654,9 +730,14 @@ class Scheduler:
         if deadline_seconds is not None:
             deadline_seconds = int(deadline_seconds)
         self._agent_started_at.setdefault(agent.agent_id, self._clock())
+        if self._chapter_ledger is not None and deadline_seconds is not None:
+            self._arm_chapter_deadline(agent, deadline_seconds)
         while self._attempts.get(agent.agent_id, 0) < total:
             if self.status == "stopped":
                 await self._abort_agent_on_stop(goal, agent, None)
+                return
+            if agent.agent_id in self._deadline_expired:
+                await self._finish_on_deadline(goal, agent, None)
                 return
             if self.goal_statuses[goal.goal_id] != "running":
                 return
@@ -691,6 +772,12 @@ class Scheduler:
             await self._set_agent_status(
                 agent.agent_id, "running" if attempt == 1 else "retrying"
             )
+            deadline_at = (
+                self._agent_started_at[agent.agent_id]
+                + timedelta(seconds=deadline_seconds)
+                if deadline_seconds is not None
+                else None
+            )
             context = TaskContext(
                 research_id=self.plan.research_id,
                 goal_id=goal.goal_id,
@@ -699,9 +786,36 @@ class Scheduler:
                 engine=agent.engine,
                 on_event=self._consume_signal,
                 failure_feedback=self._agent_feedback.get(agent.agent_id),
+                deadline_at=deadline_at,
             )
+            run_future = asyncio.ensure_future(
+                self._invoke_run_task(agent, context)
+            )
+            self._running_runs[agent.agent_id] = run_future
             try:
-                result = self._normalize_result(await self._run_task(agent, context))
+                await asyncio.wait({run_future})
+            except asyncio.CancelledError:
+                run_future.cancel()
+                return
+            finally:
+                self._running_runs.pop(agent.agent_id, None)
+            if run_future.cancelled():
+                cancel_reason = self._cancel_reasons.pop(agent.agent_id, None)
+                if cancel_reason == "timeout":
+                    await self._finish_on_deadline(
+                        goal, agent, None,
+                        exhausted=self._attempts.get(agent.agent_id, 0) >= total,
+                    )
+                elif cancel_reason == "stopped" or self.status == "stopped":
+                    # /stop 掐掉的这次派活没跑完，不该让 resume 再干等一次章级退避。
+                    self._last_attempt_started_at.pop(
+                        (goal.goal_id, self._chapter_id(agent)), None,
+                    )
+                    await self._abort_agent_on_stop(goal, agent, None)
+                return
+            self._cancel_reasons.pop(agent.agent_id, None)
+            try:
+                result = self._normalize_result(run_future.result())
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -763,25 +877,11 @@ class Scheduler:
                 and not result.succeeded
                 and result.chapter_status not in {"missing", "deferred"}
             ):
-                status = (
-                    "missing" if agent.agent_id in self._supplemented
-                    else "deferred"
+                # 墙钟到点的章一律 timeout：errors 为空时不再退回 retry_exhausted（D-008 根因 1）。
+                await self._finish_on_deadline(
+                    goal, agent, result,
+                    exhausted=self._attempts.get(agent.agent_id, 0) >= total,
                 )
-                self._finish_ledger(
-                    goal,
-                    agent,
-                    status=status,
-                    reason=chapter_failure_reason(
-                        result,
-                        fallback="retry_exhausted",
-                    ),
-                    output_path=result.actual_output_path,
-                    actual_count=result.actual_count,
-                    engine_error=result.engine_error,
-                    conclusion_error=result.conclusion_error,
-                )
-                await self._emit_chapter_update(goal, agent)
-                await self._set_agent_status(agent.agent_id, status)
                 return
             if result.succeeded:
                 self._finish_ledger(
