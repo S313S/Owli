@@ -615,12 +615,10 @@ class RuntimeCoordinator:
                 actual_count=actual_count,
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
-        if reason in {"empty_result", "tool_unavailable"}:
-            return TaskRunResult(
-                False, engine=context.engine, chapter_status="missing", reason=reason,
-                actual_output_path=actual_path, actual_count=actual_count,
-                engine_error=engine_error, conclusion_error=conclusion_error,
-            )
+        # succeeded 必须排在 reason 短路之前：硬约束 4a 的前提是「产物为空」，
+        # 而「产物为空」由 succeeded（validation PASS + min_items + unmet 非空）天然承担。
+        # 反过来先看 reason，会把「产物合法 + partial + unmet 齐全 + 如实写 reason」
+        # 的章误判成 missing，C7 的 _record_unmet() 在这条路径上永不执行。
         if bool(getattr(result, "succeeded", False)):
             if (
                 conclusion is not None
@@ -631,6 +629,12 @@ class RuntimeCoordinator:
             return TaskRunResult(
                 True, engine=context.engine, actual_output_path=actual_path,
                 actual_count=actual_count,
+                engine_error=engine_error, conclusion_error=conclusion_error,
+            )
+        if reason in {"empty_result", "tool_unavailable"}:
+            return TaskRunResult(
+                False, engine=context.engine, chapter_status="missing", reason=reason,
+                actual_output_path=actual_path, actual_count=actual_count,
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
         return result
@@ -865,66 +869,164 @@ class RuntimeCoordinator:
             raise RuntimeError("Scheduler 尚未启动")
         await scheduler.stop()
 
-    def _report_path(self, plan: Plan) -> Path:
-        report_agents = [
+    def _report_agents(self, plan: Plan) -> list[Any]:
+        """全卷的报告章，按计划顺序；**不按 output.format 过滤**。
+
+        以前两层筛选都要求 markdown，报告章声明成 json 时一个都匹配不上，
+        收尾就兜底到一个没有任何 agent 会写的 report.md（缺陷 D 的病根）。
+        """
+        agents = [
             agent
             for goal in plan.goals
             for agent in goal.agents
             if self._agent_kind(agent) in {"report", "report_writing"}
-            and str(agent.output.get("format")) == "markdown"
         ]
-        if not report_agents:
-            report_agents = [
-                agent
-                for goal in plan.goals
-                for agent in goal.agents
-                if str(agent.capability.get("profile")) == "report-writer"
-                and str(agent.output.get("format")) == "markdown"
-            ]
-        if report_agents:
-            return self.runs_root / plan.research_id / str(report_agents[-1].output["path"])
-        return self.runs_root / plan.research_id / "goals" / plan.goals[-1].goal_id / "report.md"
+        if agents:
+            return agents
+        return [
+            agent
+            for goal in plan.goals
+            for agent in goal.agents
+            if str(agent.capability.get("profile")) == "report-writer"
+        ]
+
+    def _report_target(self, plan: Plan) -> tuple[Path, str, bool]:
+        """(报告产物路径, 声明格式, 计划是否声明了报告章)。
+
+        取计划里最后一个报告章的**真实声明产物**（它才是全卷交付物），
+        格式原样保留；计划没有报告章时才落到 goals/<末 goal>/report.md 由收尾自行汇总。
+        """
+        agents = self._report_agents(plan)
+        if agents:
+            agent = agents[-1]
+            fmt = str(agent.output.get("format") or "markdown")
+            return (
+                self.runs_root / plan.research_id / str(agent.output["path"]),
+                fmt,
+                True,
+            )
+        fallback = (
+            self.runs_root / plan.research_id / "goals"
+            / plan.goals[-1].goal_id / "report.md"
+        )
+        return fallback, "markdown", False
+
+    def _report_path(self, plan: Plan) -> Path:
+        return self._report_target(plan)[0]
+
+    def _missing_entries(self, research_id: str) -> list[dict[str, Any]]:
+        """章节缺失 + unmet，逐条带 goal/chapter/reason 与成文文本。"""
+        entries = [
+            {
+                "goal_id": row["goal_id"],
+                "chapter_id": row["chapter_id"],
+                "reason": row["reason"],
+                "text": (
+                    f"此处缺失：{row['goal_id']}/{row['chapter_id']}"
+                    f"；原因：{row['reason']}"
+                ),
+            }
+            for row in self.store.list_chapters(research_id)
+            if row["status"] == "missing"
+        ]
+        for item in self._unmet_items(research_id):
+            for index, unmet_text in enumerate(item["unmet"], start=1):
+                chapter_id = f"{item['chapter_id']}/unmet-{index}"
+                entries.append({
+                    "goal_id": item["goal_id"],
+                    "chapter_id": chapter_id,
+                    "reason": unmet_text,
+                    "text": (
+                        f"此处缺失：{item['goal_id']}/{chapter_id}；原因：{unmet_text}"
+                    ),
+                })
+        return entries
+
+    def _finalization_notes(self, plan: Plan, scheduler: Any) -> dict[str, Any]:
+        return {
+            "决策天平": [
+                {
+                    "q_id": item["q_id"],
+                    "问题": item["question"],
+                    "答案": item["answer"],
+                }
+                for item in plan.decision_balance
+            ],
+            "未完成 goal": [
+                goal_id for goal_id, status in scheduler.goal_statuses.items()
+                if status in {"failed", "skipped"}
+            ],
+            "缺失清单": self._missing_entries(plan.research_id),
+        }
+
+    def _summary_body(self, plan: Plan) -> str:
+        """计划没有报告章时的收尾正文：按账本汇总已完成章，而不是硬写「未生成」。"""
+        done = [
+            row for row in self.store.list_chapters(plan.research_id)
+            if row["status"] == "done"
+        ]
+        if not done:
+            return "# 结论\n\n- 本次运行未生成完整结论。\n\n# 信息源\n\n- 无可用信息源。"
+        lines = ["# 结论", "", "- 本计划未声明报告章，以下按章节账本汇总已完成产物。"]
+        lines.extend(
+            f"- {row['goal_id']}/{row['chapter_id']}：{row['actual_output_path']}"
+            for row in done
+        )
+        lines.extend(["", "# 信息源", ""])
+        lines.extend(
+            f"- {row['goal_id']}/{row['chapter_id']} 产物：{row['actual_output_path']}"
+            for row in done
+        )
+        return "\n".join(lines)
 
     def _append_decision_notes(self, path: Path, plan: Plan, scheduler: Any) -> None:
+        """把决策天平注释与缺失清单写进报告产物；按产物格式落盘，不制造假 json。"""
+        notes = self._finalization_notes(plan, scheduler)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() == ".json":
+            self._write_json_finalization(path, notes)
+            return
         if path.is_file():
             text = path.read_text(encoding="utf-8").rstrip()
             evidence = load_evidence_artifacts(self.runs_root / plan.research_id)
             if evidence:
                 text = enrich_source_section(text, evidence).rstrip()
-        else:
+        elif self._report_target(plan)[2]:
+            # 声明了报告章却没有产物：如实写「未生成」，收尾据此判 failed。
             text = "# 结论\n\n- 本次运行未生成完整结论。\n\n# 信息源\n\n- 无可用信息源。"
-        failed = [
-            goal_id for goal_id, status in scheduler.goal_statuses.items()
-            if status in {"failed", "skipped"}
-        ]
-        references = " ".join(f"[^{item['q_id']}]" for item in plan.decision_balance)
+        else:
+            text = self._summary_body(plan)
+        references = " ".join(f"[^{item['q_id']}]" for item in notes["决策天平"])
         block = ["", "## 决策天平注释", f"- 本报告按已确认的调研口径生成。{references}"]
-        if failed:
-            block.append(f"- 未完成 goal：{', '.join(failed)}。")
-        for item in plan.decision_balance:
-            answer = json.dumps(item["answer"], ensure_ascii=False)
-            block.append(f"[^{item['q_id']}]: 问题：{item['question']}；答案：{answer}")
-        missing = [
-            row for row in self.store.list_chapters(plan.research_id)
-            if row["status"] == "missing"
-        ]
-        unmet = self._unmet_items(plan.research_id)
+        if notes["未完成 goal"]:
+            block.append(f"- 未完成 goal：{', '.join(notes['未完成 goal'])}。")
+        for item in notes["决策天平"]:
+            answer = json.dumps(item["答案"], ensure_ascii=False)
+            block.append(f"[^{item['q_id']}]: 问题：{item['问题']}；答案：{answer}")
         block.extend(["", "## 缺失清单"])
-        if missing or unmet:
-            block.extend(
-                f"- 此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
-                for row in missing
-            )
-            for item in unmet:
-                for index, text_item in enumerate(item["unmet"], start=1):
-                    block.append(
-                        f"- 此处缺失：{item['goal_id']}/{item['chapter_id']}/unmet-{index}"
-                        f"；原因：{text_item}"
-                    )
+        if notes["缺失清单"]:
+            block.extend(f"- {item['text']}" for item in notes["缺失清单"])
         else:
             block.append("- 无。")
-        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{text}\n" + "\n".join(block) + "\n", encoding="utf-8")
+
+    def _write_json_finalization(self, path: Path, notes: dict[str, Any]) -> None:
+        """JSON 报告产物：注释与缺失清单进结构化字段，绝不把 Markdown 拼进 .json。"""
+        if path.is_file():
+            raw = path.read_text(encoding="utf-8")
+            try:
+                parsed: Any = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeError):
+                # 历史遗留的「假 json」（后缀 .json、内容 Markdown）在收尾时修回真 json
+                parsed = {"报告正文": raw}
+            document = parsed if isinstance(parsed, dict) else {"报告正文": parsed}
+        else:
+            document = {"报告正文": "本次运行未生成完整结论。"}
+        document["收尾注释"] = notes
+        path.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     async def _finalize_if_terminal(self, research_id: str) -> None:
         if research_id in self._finalized:
@@ -936,20 +1038,27 @@ class RuntimeCoordinator:
         plan = load_plan(self.store, research_id)
         if plan is None:
             raise RuntimeError("终态计划不存在")
-        report_path = self._report_path(plan)
+        report_path, report_format, report_declared = self._report_target(plan)
+        # 收尾**之前**报告产物是否已存在，是「报告到底生成了没有」的唯一依据；
+        # _append_decision_notes 之后文件必然存在，那时再判就永远判不出来。
+        report_ready = report_path.is_file()
         self._append_decision_notes(report_path, plan, scheduler)
-        report_validators = [
-            "file_exists",
-            "sections_exist:结论,信息源,缺失清单",
-            "citation_marks_resolvable",
-            "no_orphan_citation",
-            "chapter_missing_items_reported",
-        ]
+        if report_format == "markdown":
+            report_validators = [
+                "file_exists",
+                "sections_exist:结论,信息源,缺失清单",
+                "citation_marks_resolvable",
+                "no_orphan_citation",
+                "chapter_missing_items_reported",
+            ]
+        else:
+            # 非 Markdown 报告产物不套 Markdown 章节/角标校验，只验存在与缺失清单齐全。
+            report_validators = ["file_exists", "chapter_missing_items_reported"]
         relative = report_path.relative_to(self.runs_root / research_id)
         goal_id = relative.parts[1] if len(relative.parts) > 1 and relative.parts[0] == "goals" else plan.goals[-1].goal_id
         validation_ctx = validation.Ctx(
             output_path=report_path,
-            output_format="markdown",
+            output_format=report_format,
             research_id=research_id,
             goal_id=goal_id,
             agent_id="report-finalizer",
@@ -976,8 +1085,28 @@ class RuntimeCoordinator:
                 },
             },
         )
-        failed = validation_report.verdict is not validation.Verdict.PASS
-        report_status = "failed" if failed else "completed"
+        validation_failed = validation_report.verdict is not validation.Verdict.PASS
+        # 硬约束 4：报告能生成就 completed，failed 只留给「报告根本没生成」。
+        # 校验没过是报告质量告警（已随 report_validation 事件发出），不是研究失败。
+        report_missing = report_declared and not report_ready
+        report_status = "failed" if report_missing else "completed"
+        unfinished_goals = [
+            goal_id for goal_id, status in scheduler.goal_statuses.items()
+            if status in {"failed", "skipped"}
+        ]
+        if validation_failed and not report_missing:
+            await self.events.publish(
+                research_id,
+                {
+                    "type": "report_warning",
+                    "data": {
+                        "research_id": research_id,
+                        "report_path": str(report_path),
+                        "reason": "report_validation_failed",
+                        "failures": failures,
+                    },
+                },
+            )
         try:
             stored_path = str(report_path.relative_to(Path(__file__).resolve().parents[2]))
         except ValueError:
@@ -986,17 +1115,27 @@ class RuntimeCoordinator:
             research_id,
             status=report_status,
             completed_at=self.now_iso(),
-            summary="计划执行完成，报告已生成",
-            summary_line="部分 goal 失败" if failed else "全部 goal 已完成",
+            summary="计划执行完成，报告已生成" if not report_missing else "报告未生成",
+            summary_line=(
+                "报告未生成" if report_missing
+                else "部分 goal 失败" if unfinished_goals
+                else "全部 goal 已完成"
+            ),
             report_path=stored_path,
         )
         state = self.researches[research_id]
         state["status"] = report_status
-        state["status_label"] = "已完成" if not failed else "执行失败"
+        state["status_label"] = "执行失败" if report_missing else "已完成"
         state["actions"] = []
-        state["progress"]["summary"] = (
-            "报告已生成，包含失败 goal 说明" if failed else "报告已生成并通过计划执行"
-        )
+        if report_missing:
+            summary = "报告未生成，请查看章节账本缺失项"
+        elif validation_failed:
+            summary = "报告已生成，收尾校验有告警"
+        elif unfinished_goals:
+            summary = "报告已生成，包含失败 goal 说明"
+        else:
+            summary = "报告已生成并通过计划执行"
+        state["progress"]["summary"] = summary
         await self.events.publish(
             research_id,
             {

@@ -52,30 +52,140 @@ def test_执行失败回灌原样保留_unmet_与_capability_denials():
     assert '["source.web_search 不可用"]' in feedback
 
 
+def _one_chapter_plan(*, fmt: str, validators: list[str]):
+    """单 goal / 单章的最小计划：章终态直接落章节账本，便于断言成品而不是原料。"""
+    from app.plan.model import Plan
+
+    source = make_plan_dict()
+    source["research_id"] = "r-ledger"
+    source["baseline"] = None
+    source["goals"] = source["goals"][:1]
+    source["goals"][0]["depends_on"] = []
+    agent = source["goals"][0]["agents"][0]
+    agent["agent_id"] = "consistency-check"
+    suffix = "json" if fmt == "json" else "md"
+    path = f"goals/goal-1/consistency-check.{suffix}"
+    agent["output"] = {
+        "format": fmt, "shape": "array" if fmt == "json" else "object",
+        "path": path, "validators": list(validators),
+    }
+    agent["chapter"]["chapter_id"] = "ch-3"
+    agent["chapter"]["closing"]["output"] = {"path": path}
+    source["goals"][0]["deliverable"]["format"] = fmt
+    source["goals"][0]["deliverable"]["path"] = path
+    return Plan.from_dict(source)
+
+
+def _run_one_chapter(tmp_path: Path, plan, behavior):
+    """用真实 Scheduler + RuntimeCoordinator._run_task 跑一章，返回 (账本行, coordinator)。"""
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from app.orchestrator.scheduler import Scheduler
+
+    store = _store(tmp_path)
+
+    async def publish(research_id, payload):
+        return None
+
+    coordinator = RuntimeCoordinator(
+        store=store,
+        event_buffer=SimpleNamespace(publish=publish),
+        researches={},
+        cards={},
+        runs_root=tmp_path / "runs",
+        auto_confirm=True,
+        routing_utc_clock=lambda: datetime(2026, 8, 22, tzinfo=timezone.utc),
+    )
+    coordinator.researches[plan.research_id] = coordinator._state_from_plan(plan)
+    coordinator._adapters[plan.research_id] = SimpleNamespace(run=behavior)
+
+    scheduler = Scheduler(
+        plan,
+        lambda agent, context: coordinator._run_task(plan, agent, context),
+        lambda event: None,
+        lambda: datetime(2026, 8, 22, tzinfo=timezone.utc),
+        lambda delay, callback: None,
+        chapter_ledger=store,
+    )
+    asyncio.run(scheduler.start())
+    row = next(
+        item for item in store.list_chapters(plan.research_id)
+        if item["chapter_id"] == "ch-3"
+    )
+    return row, coordinator
+
+
 def test_partial_合法产物视为章_done_并保留_unmet(tmp_path: Path):
+    """断成品：章终态必须是 done，unmet 必须被 _record_unmet() 落盘。
+
+    只断 EngineRunResult.succeeded 是断原料 —— 6b 整跑里 succeeded 为 True
+    的章仍被 runtime 的 reason 短路判成 missing（缺陷 A）。
+    """
     from app.adapters import validation
     from app.adapters.contracts import EngineRunResult, OwliResult
 
-    output = tmp_path / "runs" / "r" / "goals" / "goal-1" / "audit.md"
-    output.parent.mkdir(parents=True)
-    output.write_text("# 结论\n\n存在上游缺口。\n", encoding="utf-8")
-    report = validation.ValidationReport(
-        validation.Verdict.PASS,
-        [validation.Result(validation.Verdict.PASS, "file_exists", "ok", [])],
+    plan = _one_chapter_plan(fmt="markdown", validators=["file_exists", "sections_exist:结论"])
+
+    async def behavior(task, ctx, on_event=None):
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text(
+            "# 一致性检查\n\n## 结论\n\n- 仅能基于 DC1 单边对齐 [S01]\n",
+            encoding="utf-8",
+        )
+        return EngineRunResult(
+            conclusion=OwliResult(
+                "partial", str(task.output_path), "部分完成", [], ["缺少 HN 样本"], [],
+                "empty_result",
+            ),
+            conclusion_error=None,
+            validation=validation.validate(ctx, list(task.validators)),
+            events=[],
+            permission_denials=[],
+        )
+
+    row, coordinator = _run_one_chapter(tmp_path, plan, behavior)
+
+    assert row["status"] == "done" and row["reason"] is None
+    unmet_file = (
+        tmp_path / "runs" / "r-ledger" / "goals" / "goal-1"
+        / ".owli-unmet-consistency-check.json"
     )
-    result = EngineRunResult(
-        conclusion=OwliResult(
-            "partial", str(output), "部分完成", [], ["缺少 HN 样本"], [],
-            "empty_result",
-        ),
-        conclusion_error=None,
-        validation=report,
-        events=[],
-        permission_denials=[],
+    assert unmet_file.is_file()
+    payload = json.loads(unmet_file.read_text(encoding="utf-8"))
+    assert payload["goal_id"] == "goal-1"
+    assert payload["chapter_id"] == "ch-3"
+    assert payload["unmet"] == ["缺少 HN 样本"]
+    assert payload["reason"] == "empty_result"
+    assert coordinator._unmet_items("r-ledger") == [payload]
+
+
+def test_产物为空数组的_empty_result_仍判_missing_不记_unmet(tmp_path: Path):
+    """硬约束 4a 不被放宽：产物真空时 succeeded 为 False，仍走 reason 短路。"""
+    from app.adapters import validation
+    from app.adapters.contracts import EngineRunResult, OwliResult
+
+    plan = _one_chapter_plan(
+        fmt="json", validators=["file_exists", "json_array_min_items:1"],
     )
 
-    assert result.succeeded is True
-    assert result.conclusion.unmet == ["缺少 HN 样本"]
+    async def behavior(task, ctx, on_event=None):
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text("[]", encoding="utf-8")
+        empty_ctx = validation.Ctx(**{**vars(ctx), "missing_reason": "empty_result"})
+        return EngineRunResult(
+            conclusion=OwliResult(
+                "partial", str(task.output_path), "零命中", [], [], [], "empty_result",
+            ),
+            conclusion_error=None,
+            validation=validation.validate(empty_ctx, list(task.validators)),
+            events=[],
+            permission_denials=[],
+        )
+
+    row, coordinator = _run_one_chapter(tmp_path, plan, behavior)
+
+    assert row["status"] == "missing" and row["reason"] == "empty_result"
+    assert row["actual_count"] == 0
+    assert coordinator._unmet_items("r-ledger") == []
 
 
 @pytest.mark.parametrize("reason", ["empty_result", "tool_unavailable"])
