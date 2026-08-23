@@ -615,14 +615,20 @@ class RuntimeCoordinator:
                 actual_count=actual_count,
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
-        # 章终态判定的先后顺序（D-001 缺陷 A + D-005 回归，两条一起看才完整）：
-        # 1) 闭集 reason + **产物有效条目为 0** → missing/<reason>，不记 unmet、不烧重试。
-        #    硬约束 4a 的前提就是「产物为空」；succeeded 并不能替它把关 ——
-        #    真实引擎里 partial + unmet 非空 + validators 全 PASS（空数组按 missing_reason
-        #    被接收）也会 succeeded=True，空数组照样会被判成 done（D-005）。
-        # 2) 产物非空时才轮到 succeeded：产物合法 + partial + unmet 齐全 + 如实写 reason
-        #    的章判 done 并执行 C7 的 _record_unmet()，不能被 reason 短路成 missing（D-001）。
-        if reason in {"empty_result", "tool_unavailable"} and self._artifact_is_empty(task):
+        # 章终态判定的先后顺序（D-001 缺陷 A + D-005 + D-006，三条一起看才完整）：
+        # 1) reason == tool_unavailable：章声明的源/工具不可达，**产物无论空不空都不构成
+        #    契约履行** —— agent 自行改抓替代源写出的非空数组也一样 —— 一律 missing/
+        #    tool_unavailable，不记 unmet、不烧重试（attempts=1）。替代源条目留在磁盘，
+        #    但不进账本 done（D-006）。
+        # 2) reason == empty_result + 产物有效条目为 0 → missing/empty_result。succeeded
+        #    并不能替它把关：真实引擎里 partial + unmet 非空 + validators 全 PASS（空数组
+        #    按 missing_reason 被接收）也会 succeeded=True（D-005）。
+        # 3) reason == empty_result + 产物非空时才轮到 succeeded：产物合法 + partial +
+        #    unmet 齐全 + 如实写 reason 的章判 done 并执行 C7 的 _record_unmet()，
+        #    不能被 reason 短路成 missing（D-001 缺陷 A 的原始场景）。
+        if reason == "tool_unavailable" or (
+            reason == "empty_result" and self._artifact_is_empty(task)
+        ):
             return TaskRunResult(
                 False, engine=context.engine, chapter_status="missing", reason=reason,
                 actual_output_path=actual_path, actual_count=actual_count,

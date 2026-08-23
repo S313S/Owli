@@ -230,8 +230,8 @@ def test_空数组的_partial_即使_succeeded_也判_missing(tmp_path: Path):
     assert coordinator._unmet_items("r-ledger") == []  # 空产物不记 unmet
 
 
-def test_非空数组的_partial_仍判_done_并记_unmet(tmp_path: Path):
-    """对照组：同构造但产物非空 ⇒ 保持 D-001 的 A 修复语义 done + _record_unmet()。"""
+def test_非空数组的_empty_result_仍判_done_并记_unmet(tmp_path: Path):
+    """对照组：empty_result + 产物非空 ⇒ 保持 D-001 的 A 修复语义 done + _record_unmet()。"""
     plan = _one_chapter_plan(
         fmt="json", validators=["file_exists", "json_array_min_items:1"],
     )
@@ -239,7 +239,7 @@ def test_非空数组的_partial_仍判_done_并记_unmet(tmp_path: Path):
         tmp_path, plan,
         _partial_json_behavior(
             [{"title": "讯飞输入法方言支持", "url": "https://example.com/a"}],
-            "tool_unavailable",
+            "empty_result",
         ),
     )
 
@@ -247,6 +247,28 @@ def test_非空数组的_partial_仍判_done_并记_unmet(tmp_path: Path):
     assert row["actual_count"] == 1
     items = coordinator._unmet_items("r-ledger")
     assert [item["unmet"] for item in items] == [["X 平台样本缺失"]]
+
+
+def test_非空替代源产物的_tool_unavailable_仍判_missing(tmp_path: Path):
+    """D-006：声明的源不可达时，agent 改抓替代源写出的非空数组也不构成契约履行。"""
+    plan = _one_chapter_plan(
+        fmt="json", validators=["file_exists", "json_array_min_items:1"],
+    )
+    row, coordinator = _run_one_chapter(
+        tmp_path, plan,
+        _partial_json_behavior(
+            [
+                {"title": "知乎：豆包语音输入法体验", "url": "https://example.com/z"},
+                {"title": "少数派：语音输入横评", "url": "https://example.com/s"},
+            ],
+            "tool_unavailable",
+        ),
+    )
+
+    assert row["status"] == "missing" and row["reason"] == "tool_unavailable"
+    assert row["actual_count"] == 2  # 替代源条目留在磁盘，但不进账本 done
+    assert row["attempts"] == 1  # 不烧重试
+    assert coordinator._unmet_items("r-ledger") == []  # 不记 unmet
 
 
 @pytest.mark.parametrize("reason", ["empty_result", "tool_unavailable"])
