@@ -615,10 +615,19 @@ class RuntimeCoordinator:
                 actual_count=actual_count,
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
-        # succeeded 必须排在 reason 短路之前：硬约束 4a 的前提是「产物为空」，
-        # 而「产物为空」由 succeeded（validation PASS + min_items + unmet 非空）天然承担。
-        # 反过来先看 reason，会把「产物合法 + partial + unmet 齐全 + 如实写 reason」
-        # 的章误判成 missing，C7 的 _record_unmet() 在这条路径上永不执行。
+        # 章终态判定的先后顺序（D-001 缺陷 A + D-005 回归，两条一起看才完整）：
+        # 1) 闭集 reason + **产物有效条目为 0** → missing/<reason>，不记 unmet、不烧重试。
+        #    硬约束 4a 的前提就是「产物为空」；succeeded 并不能替它把关 ——
+        #    真实引擎里 partial + unmet 非空 + validators 全 PASS（空数组按 missing_reason
+        #    被接收）也会 succeeded=True，空数组照样会被判成 done（D-005）。
+        # 2) 产物非空时才轮到 succeeded：产物合法 + partial + unmet 齐全 + 如实写 reason
+        #    的章判 done 并执行 C7 的 _record_unmet()，不能被 reason 短路成 missing（D-001）。
+        if reason in {"empty_result", "tool_unavailable"} and self._artifact_is_empty(task):
+            return TaskRunResult(
+                False, engine=context.engine, chapter_status="missing", reason=reason,
+                actual_output_path=actual_path, actual_count=actual_count,
+                engine_error=engine_error, conclusion_error=conclusion_error,
+            )
         if bool(getattr(result, "succeeded", False)):
             if (
                 conclusion is not None
@@ -638,6 +647,36 @@ class RuntimeCoordinator:
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
         return result
+
+    def _artifact_is_empty(self, task: Any) -> bool:
+        """产物「有效条目为 0」——按 output 形态判，与 4a 的既有口径同源。
+
+        文件缺失 / 空白正文一律算空（同 chapter_failure 的 empty_result 口径）；
+        json 数组看 len==0，json object 看有没有键；其余格式只要正文非空就不算空。
+        与引擎无关，纯看落盘产物，所以放在 runtime 的章终态判定处。
+        """
+        path = getattr(task, "output_path", None)
+        if path is None:
+            return True
+        try:
+            if not path.is_file():
+                return True
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return True
+        if not text.strip():
+            return True
+        if getattr(task, "output_format", None) != "json":
+            return False
+        try:
+            artifact = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if isinstance(artifact, list):
+            return not artifact
+        if isinstance(artifact, dict):
+            return not artifact
+        return False
 
     def _record_unmet(
         self, research_id: str, goal_id: str, agent: Any, conclusion: Any

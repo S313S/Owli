@@ -188,6 +188,67 @@ def test_产物为空数组的_empty_result_仍判_missing_不记_unmet(tmp_path
     assert coordinator._unmet_items("r-ledger") == []
 
 
+def _partial_json_behavior(items: list[dict[str, object]], reason: str):
+    """partial + unmet 非空 + validators 全 PASS ⇒ succeeded=True（真实引擎的 X 源形态）。"""
+    from app.adapters import validation
+    from app.adapters.contracts import EngineRunResult, OwliResult
+
+    async def behavior(task, ctx, on_event=None):
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text(
+            json.dumps(items, ensure_ascii=False), encoding="utf-8",
+        )
+        run_ctx = validation.Ctx(**{**vars(ctx), "missing_reason": reason})
+        result = EngineRunResult(
+            conclusion=OwliResult(
+                "partial", str(task.output_path), "X 工具不可用", [],
+                ["X 平台样本缺失"], [], reason,
+            ),
+            conclusion_error=None,
+            validation=validation.validate(run_ctx, list(task.validators)),
+            events=[],
+            permission_denials=[],
+        )
+        assert result.succeeded, "用例前提：这一支必须 succeeded=True"
+        return result
+
+    return behavior
+
+
+def test_空数组的_partial_即使_succeeded_也判_missing(tmp_path: Path):
+    """D-005 回归：succeeded=True 不能替 4a 把关，空产物必须落 missing/<reason>。"""
+    plan = _one_chapter_plan(
+        fmt="json", validators=["file_exists", "json_array_min_items:1"],
+    )
+    row, coordinator = _run_one_chapter(
+        tmp_path, plan, _partial_json_behavior([], "tool_unavailable"),
+    )
+
+    assert row["status"] == "missing" and row["reason"] == "tool_unavailable"
+    assert row["actual_count"] == 0
+    assert row["attempts"] == 1  # 不烧重试
+    assert coordinator._unmet_items("r-ledger") == []  # 空产物不记 unmet
+
+
+def test_非空数组的_partial_仍判_done_并记_unmet(tmp_path: Path):
+    """对照组：同构造但产物非空 ⇒ 保持 D-001 的 A 修复语义 done + _record_unmet()。"""
+    plan = _one_chapter_plan(
+        fmt="json", validators=["file_exists", "json_array_min_items:1"],
+    )
+    row, coordinator = _run_one_chapter(
+        tmp_path, plan,
+        _partial_json_behavior(
+            [{"title": "讯飞输入法方言支持", "url": "https://example.com/a"}],
+            "tool_unavailable",
+        ),
+    )
+
+    assert row["status"] == "done" and row["reason"] is None
+    assert row["actual_count"] == 1
+    items = coordinator._unmet_items("r-ledger")
+    assert [item["unmet"] for item in items] == [["X 平台样本缺失"]]
+
+
 @pytest.mark.parametrize("reason", ["empty_result", "tool_unavailable"])
 def test_空结果与工具不可用立即_missing_且不烧重试(tmp_path: Path, reason: str):
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
