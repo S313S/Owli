@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -296,3 +296,96 @@ def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_p
     assert row["status"] == "missing"
     assert row["reason"] == "retry_exhausted"
     assert row["attempts"] == 2
+
+
+def test_D003缺陷B_在跑章复位只动running且保留attempts(tmp_path):
+    """/stop 打断的章必须从 running 复位成 pending，终态章不受影响。"""
+    store = _store(tmp_path)
+    store.ensure_chapters(
+        "r-ledger",
+        [{"goal_id": "goal-1", "chapter_id": "ch-1"},
+         {"goal_id": "goal-1", "chapter_id": "ch-2"}],
+        updated_at="2026-08-22T00:00:00Z",
+    )
+    store.start_chapter("r-ledger", "goal-1", "ch-1", engine="codex",
+                        updated_at="2026-08-22T00:01:00Z")
+    store.start_chapter("r-ledger", "goal-1", "ch-2", engine="codex",
+                        updated_at="2026-08-22T00:01:00Z")
+    store.finish_chapter("r-ledger", "goal-1", "ch-2", status="done", reason=None,
+                         actual_output_path="goals/goal-1/ch-2.json", actual_count=1,
+                         updated_at="2026-08-22T00:02:00Z")
+
+    assert store.reset_running_chapter(
+        "r-ledger", "goal-1", "ch-1", updated_at="2026-08-22T00:03:00Z") is True
+    # 终态章不是 running，复位是空操作
+    assert store.reset_running_chapter(
+        "r-ledger", "goal-1", "ch-2", updated_at="2026-08-22T00:03:00Z") is False
+
+    rows = {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+    assert rows["ch-1"]["status"] == "pending"
+    assert rows["ch-1"]["attempts"] == 1
+    assert rows["ch-1"]["reason"] is None
+    assert rows["ch-2"]["status"] == "done"
+    # 复位后可以重新派活
+    assert store.start_chapter("r-ledger", "goal-1", "ch-1", engine="codex",
+                               updated_at="2026-08-22T00:04:00Z") is True
+    assert store.list_chapters("r-ledger")[0]["attempts"] == 2
+
+
+def test_D003缺陷B_stop打断未成功的章后resume重跑到done(tmp_path):
+    """/stop 时在跑且没跑成的章复位成 pending，agent 回到 queued，resume 后真续跑。"""
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+
+    store = _store(tmp_path)
+    source = make_plan_dict()
+    source["research_id"] = "r-ledger"
+    source["goals"] = source["goals"][:1]
+    source["baseline"] = None
+    source["goals"][0]["agents"][0]["chapter"]["chapter_id"] = "ch-1"
+    plan = Plan.from_dict(source)
+    agent_id = plan.goals[0].agents[0].agent_id
+    attempts: list[int] = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    # 时钟必须前进，否则第二次尝试会卡在章级重试间隔上（假 timer 不会回调）
+    current = [datetime(2026, 8, 22, tzinfo=timezone.utc)]
+
+    async def run_task(agent, context):
+        attempts.append(context.attempt)
+        current[0] = current[0] + timedelta(minutes=1)
+        if len(attempts) == 1:
+            started.set()
+            await release.wait()
+            return TaskRunResult(False, context.engine, engine_error="被 stop 打断")
+        return TaskRunResult(
+            True, context.engine, actual_output_path=str(agent.output["path"]),
+            actual_count=1,
+        )
+
+    async def scenario():
+        scheduler = Scheduler(
+            plan, run_task, lambda event: None,
+            lambda: current[0],
+            lambda delay, callback: None,
+            chapter_ledger=store,
+        )
+        driving = asyncio.create_task(scheduler.start())
+        await started.wait()
+        await scheduler.stop()
+        release.set()
+        await driving
+        assert scheduler.status == "stopped"
+        assert scheduler.agent_statuses[agent_id] == "queued"
+        assert store.list_chapters("r-ledger")[0]["status"] == "pending"
+
+        await scheduler.resume()
+        return scheduler
+
+    scheduler = asyncio.run(scenario())
+    assert attempts == [1, 2]
+    row = store.list_chapters("r-ledger")[0]
+    assert row["status"] == "done"
+    assert row["attempts"] == 2
+    assert scheduler.agent_statuses[agent_id] == "done"

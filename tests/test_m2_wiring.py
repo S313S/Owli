@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -603,6 +604,52 @@ async def test_stop_接_scheduler_终止且在跑结果不再启动后续(tmp_pa
     assert [task.agent_kind for task in engine.tasks] == [
         "planning", "planning", "planning", "planning", "planning", "planning", "planning", "data_collection"
     ]
+
+
+@async_test
+async def test_stop后resume真续跑_状态取自调度器且不阻塞(tmp_path: Path):
+    """D-003 缺陷 B：/stop 之后 /resume 曾是 no-op，API 却无条件回报 running。"""
+    engine = RecordingEngine()
+    engine.block_kind = "data_collection"
+    async with api_client(tmp_path, auto_confirm=True, engine=engine) as (application, client, _):
+        created = await client.post(
+            "/api/researches",
+            json={"query": "飞书竞品优缺点"},
+            headers={"X-Request-ID": "create-stop-resume"},
+        )
+        research_id = created.json()["data"]["research_id"]
+        await engine.started.wait()
+        stopped = await client.post(
+            f"/api/researches/{research_id}/stop",
+            headers={"X-Request-ID": "stop-before-resume"},
+        )
+        assert stopped.status_code == 200, stopped.text
+        assert [action["id"] for action in stopped.json()["data"]["actions"]] == ["resume"]
+        engine.release.set()
+        for _ in range(20):
+            await asyncio.sleep(0)
+        scheduler = application.state.runtime.scheduler_for(research_id)
+        assert scheduler.status == "stopped"
+        # 停下时在跑的章不得留 running 幽灵
+        store = application.state.store
+        assert all(
+            row["status"] != "running" for row in store.list_chapters(research_id)
+        ), store.list_chapters(research_id)
+
+        started_at = time.monotonic()
+        resumed = await client.post(
+            f"/api/researches/{research_id}/resume",
+            headers={"X-Request-ID": "resume-after-stop"},
+        )
+        elapsed = time.monotonic() - started_at
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["data"]["status"] == scheduler.status == "running"
+        assert elapsed < 5.0, f"/resume 阻塞了 {elapsed:.1f}s"
+        completed = await wait_for_status(client, research_id, "completed")
+
+    assert completed["progress"]["done"] == 3
+    assert scheduler.status == "completed"
+    assert {row["status"] for row in store.list_chapters(research_id)} == {"done"}
 
 
 @async_test

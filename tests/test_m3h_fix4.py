@@ -309,7 +309,7 @@ def test_D4_start_research返回前排干自动放行任务(monkeypatch, tmp_pat
     assert finalized and set(finalized) == {"completed"}
 
 
-def test_D4_resume返回前同样排干自动任务(tmp_path: Path):
+def test_D4_resume不阻塞但后台收尾前仍排干自动任务(tmp_path: Path):
     from app.orchestrator.runtime import RuntimeCoordinator
 
     class Events:
@@ -327,12 +327,19 @@ def test_D4_resume返回前同样排干自动任务(tmp_path: Path):
     completed: list[str] = []
 
     class Scheduler:
-        async def resume(self):
+        drive_pending = False
+
+        async def resume(self, *, wait: bool = True):
+            assert wait is False, "HTTP /resume 必须走不阻塞分支"
+
             async def finish():
                 await asyncio.sleep(0)
                 completed.append("auto")
 
             coordinator._track_auto_task(asyncio.create_task(finish()))
+
+        async def wait_idle(self):
+            return None
 
     coordinator._schedulers["r-ledger"] = Scheduler()
     finalized: list[str] = []
@@ -341,7 +348,13 @@ def test_D4_resume返回前同样排干自动任务(tmp_path: Path):
         finalized.append(research_id)
 
     coordinator._finalize_if_terminal = finalize  # type: ignore[method-assign]
-    asyncio.run(coordinator.resume("r-ledger"))
+
+    async def scenario() -> None:
+        await coordinator.resume("r-ledger")
+        assert finalized == [], "resume 不得阻塞到收尾完成"
+        await asyncio.gather(*list(coordinator._drive_watchers))
+
+    asyncio.run(scenario())
 
     assert completed == ["auto"]
     assert finalized == ["r-ledger"]

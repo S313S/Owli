@@ -336,9 +336,10 @@ def create_app(
 
     @application.get("/api/researches/{research_id}")
     async def get_research(research_id: str) -> dict:
-        state = researches.get(research_id)
-        if state is None:
+        if research_id not in researches:
             raise HTTPException(status_code=404, detail="调研任务不存在")
+        # 状态以调度器为准：收尾之前也不得回报与调度器相反的状态
+        state = runtime.sync_state_with_scheduler(research_id)
         return {"ok": True, "data": state, "error": None}
 
     @application.get("/api/researches/{research_id}/chapters")
@@ -608,16 +609,11 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        if research_id not in researches:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+        # resume 只翻状态并把驱动放后台，不阻塞到整轮跑完；回报的状态取自调度器本身
         await runtime.resume(research_id)
-        scheduler = runtime.scheduler_for(research_id)
-        if scheduler is not None and scheduler.status == "completed":
-            state = researches.get(research_id)
-            if state is None:
-                raise HTTPException(status_code=404, detail="调研任务不存在")
-            response = envelope(state)
-        else:
-            response = await change_state(research_id, "running", "运行中")
-            response["data"]["actions"] = runtime.running_actions(research_id)
+        response = envelope(runtime.sync_state_with_scheduler(research_id))
         await publish_state_update(research_id, response["data"])
         return remember(scope, x_request_id, response)
 
@@ -632,7 +628,11 @@ def create_app(
             return hit
         await runtime.stop(research_id)
         response = await change_state(research_id, "stopped", "已终止")
-        response["data"]["actions"] = []
+        # 终止后仍留一个恢复出口：停下的章已复位，/resume 会按未完成部分继续
+        response["data"]["actions"] = [
+            {"id": "resume", "label": "继续", "method": "POST",
+             "href": f"/api/researches/{research_id}/resume"},
+        ]
         await publish_state_update(research_id, response["data"])
         return remember(scope, x_request_id, response)
 

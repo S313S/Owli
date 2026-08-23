@@ -35,6 +35,17 @@ from app.reliability.audit import degrade_after_closed_set_retry
 
 AdapterFactory = Callable[[], Any]
 
+#: 调度器状态 → 工作板状态文案。API 只做映射，不自己猜研究处于什么状态。
+SCHEDULER_STATUS_LABELS = {
+    "ready": "等待开始",
+    "running": "运行中",
+    "paused": "已暂停",
+    "stopped": "已终止",
+    "completed": "已完成",
+}
+#: 收尾已经落定的状态，不再被调度器状态覆盖。
+REPORT_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+
 
 class RuntimeCoordinator:
     """每个 FastAPI 进程唯一的运行期协调器。"""
@@ -73,6 +84,7 @@ class RuntimeCoordinator:
         self._schedulers: dict[str, Any] = {}
         self._finalized: set[str] = set()
         self._auto_tasks: set[asyncio.Task[Any]] = set()
+        self._drive_watchers: set[asyncio.Task[Any]] = set()
         setattr(self.store, "runs_root", self.runs_root)
 
     def now(self) -> datetime:
@@ -189,6 +201,28 @@ class RuntimeCoordinator:
                 "href": f"/api/researches/{research_id}/stop",
             },
         ]
+
+    def sync_state_with_scheduler(self, research_id: str) -> dict[str, Any] | None:
+        """把工作板状态对齐到调度器的真实状态；API 回报只读这里，不自己猜。
+
+        已收尾（completed / failed）的研究以收尾结论为准；规划期没有调度器时原样返回。
+        """
+        state = self.researches.get(research_id)
+        if state is None:
+            return None
+        scheduler = self.scheduler_for(research_id)
+        if scheduler is None or state.get("status") in REPORT_TERMINAL_STATUSES:
+            return state
+        status = str(getattr(scheduler, "status", "") or "")
+        if status in {"", "ready"}:
+            return state
+        state["status"] = status
+        state["status_label"] = SCHEDULER_STATUS_LABELS.get(status, status)
+        if status == "running":
+            state["actions"] = self.running_actions(research_id)
+        elif status == "completed":
+            state["actions"] = []
+        return state
 
     def _state_from_plan(self, plan: Plan) -> dict[str, Any]:
         return {
@@ -697,11 +731,9 @@ class RuntimeCoordinator:
             state["progress"].update(done=data["done"], total=data["total"])
         elif kind == "scheduler_update":
             state["status"] = data["status"]
-            state["status_label"] = {
-                "paused": "已暂停",
-                "running": "运行中",
-                "stopped": "已终止",
-            }.get(data["status"], data["status"])
+            state["status_label"] = SCHEDULER_STATUS_LABELS.get(
+                data["status"], data["status"]
+            )
         elif kind == "card_update":
             card = self._external_card(data["card"])
             self.cards[card.card_id] = card
@@ -810,8 +842,21 @@ class RuntimeCoordinator:
         scheduler = self.scheduler_for(research_id)
         if scheduler is None:
             raise RuntimeError("Scheduler 尚未启动")
-        await scheduler.resume()
-        await self._drain_auto_tasks()
+        await scheduler.resume(wait=False)
+        task = asyncio.create_task(
+            self._finalize_after_drive(research_id, scheduler),
+            name=f"owli:resume-finalize:{research_id}",
+        )
+        self._drive_watchers.add(task)
+        task.add_done_callback(self._drive_watchers.discard)
+
+    async def _finalize_after_drive(self, research_id: str, scheduler: Any) -> None:
+        """后台驱动跑完（含自动干预派生的续跑）后收尾，`/resume` 不必阻塞到整轮结束。"""
+        for _ in range(20):
+            await scheduler.wait_idle()
+            await self._drain_auto_tasks()
+            if not scheduler.drive_pending:
+                break
         await self._finalize_if_terminal(research_id)
 
     async def stop(self, research_id: str) -> None:
