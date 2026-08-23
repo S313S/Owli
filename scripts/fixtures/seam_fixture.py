@@ -13,6 +13,9 @@ case 一览（对当前代码各自必红；括号里是「防修过头」的绿
                         （guard：api_error_status=429 仍归 quota_exhausted；超时仍归 timeout）
   stop-resume           缺陷 B：走 API，/stop 之后 /resume 是 no-op 但回报 running，研究永不到终态
                         （guard：/resume 必须在 N 秒内返回，不阻塞到整轮结束）
+  section-transport-jitter  缺陷 E：节级传输断连一次即 missing/retry_exhausted（attempts=1，没重试），
+                        章级重试又跳过 missing 节（guard：真耗尽仍 missing；conclusion_invalid
+                        不被重试；真 429 仍 quota_exhausted）
 
 所有章产物都由假适配器构造；结论落 <输出目录>/summary.json（每条断言 name/expected/actual/passed）。
 退出码只给调度脚本用（全过 0，否则 1），判定以 summary.json 为准。
@@ -682,6 +685,237 @@ async def case_stop_resume(root: Path, checks: Checks, budget: float) -> dict[st
 
 
 # --------------------------------------------------------------------------
+# case section-transport-jitter（缺陷 E，D-007）
+# --------------------------------------------------------------------------
+
+# 6b 整跑账本 engine_error 逐字（runs/6b-final/ledger-final.txt，7 处 retry_exhausted 全同此文案）
+TRANSPORT_ENGINE_ERROR = {
+    "is_error": True,
+    "api_error_status": None,
+    "subtype": "error_during_execution",
+    "result": "API Error: The socket connection was closed unexpectedly",
+    "errors": ["API Error: The socket connection was closed unexpectedly"],
+}
+SECTION_AGENT = "report-writing"
+SECTION_2 = f"{SECTION_AGENT}-sec-2"
+SECTION_2_CONCLUSION_RETRY = f"{SECTION_2}-conclusion-retry"
+SECTION_2_HEADING = "竞品对比"
+JITTER_PER_ROUND = 3
+
+
+def _transport_failure(task: Any, ctx: Any, engine_error: dict[str, Any]) -> EngineRunResult:
+    """传输断连：无产物、无结论、engine_error=结构化 JSON 整段落账本（对齐 claude 适配器）。"""
+    del task, ctx
+    return EngineRunResult(
+        conclusion=None, conclusion_error=None,
+        validation=validation.ValidationReport(validation.Verdict.PASS, []), events=[],
+        permission_denials=[], engine_error=json.dumps(engine_error, ensure_ascii=False),
+    )
+
+
+def _write_section_2(task: Any) -> None:
+    task.output_path.parent.mkdir(parents=True, exist_ok=True)
+    task.output_path.write_text(
+        f"## {SECTION_2_HEADING}\n\n- 讯飞 23 种方言 vs 豆包 8 种 [S01]\n\n"
+        "## 结论\n\n- 讯飞输入法方言覆盖领先豆包 [S01]\n\n"
+        "## 信息源\n\n- [S01] [讯飞方言实测](https://example.com/iflytek-dialect)\n",
+        encoding="utf-8")
+
+
+def plan_section_jitter(rid: str, *, per_round: int, max_rounds: int,
+                        report_validators: list[str]) -> Plan:
+    """两 goal：goal-1 采集 done；goal-2 节化报告章（sec-1←goal-1，sec-2←goal-2）。"""
+    g1 = _goal("goal-1", "竞品基准信息采集", [collection_agent("goal-1", 1)], [])
+    g2 = _goal("goal-2", "竞品分析报告", [_agent(
+        "goal-2", SECTION_AGENT, display="报告章（report-writer，节化）",
+        kind_profile="report-writer", engine="claude", fmt="markdown",
+        path="goals/goal-2/report.md", validators=report_validators,
+        cid="ch-1", ctype="report", inputs=("goals/goal-1/data-collection.json",))], ["goal-1"])
+    g2["retry_policy"] = {**DEFAULT_RETRY_POLICY, "max_attempts_per_round": per_round,
+                          "max_rounds": max_rounds}
+    return build_plan(rid, [g1, g2])
+
+
+def _section_rows(store: Store, rid: str) -> dict[str, dict[str, Any]]:
+    return {r["chapter_id"]: dict(r) for r in store.list_chapters(rid) if r["goal_id"] == "goal-2"}
+
+
+def _row_digest(row: dict[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {"status": None}
+    return {k: row.get(k) for k in ("status", "reason", "attempts", "engine")}
+
+
+async def _run_jitter(root: Path, rid: str, budget: float, *, per_round: int = JITTER_PER_ROUND,
+                      max_rounds: int = 1, report_validators: list[str] | None = None,
+                      sec2: Any) -> dict[str, Any]:
+    """起一次不真跑引擎的整研究；sec2(task, ctx, chapter_attempt) 决定 sec-2 每次派活的结果。"""
+    store = make_store(root, rid)
+    plan = plan_section_jitter(rid, per_round=per_round, max_rounds=max_rounds,
+                               report_validators=report_validators
+                               or ["file_exists", "sections_exist:结论,信息源"])
+    adapter = FakeAdapter()
+    published: list[dict[str, Any]] = []
+    coordinator = make_coordinator(store, root, rid, plan, adapter, published)
+    chapter_attempt = {"current": 0}
+    original_run_task = coordinator._run_task
+
+    async def tracking_run_task(plan_: Plan, agent: Any, context: Any) -> Any:
+        if agent.agent_id == SECTION_AGENT:
+            chapter_attempt["current"] = int(getattr(context, "attempt", 0) or 0)
+        return await original_run_task(plan_, agent, context)
+
+    coordinator._run_task = tracking_run_task  # 仅夹具实例，不改产品代码
+    sec2_calls: list[dict[str, Any]] = []
+
+    async def sec2_behavior(task: Any, ctx: Any) -> EngineRunResult:
+        serial = len(sec2_calls) + 1
+        sec2_calls.append({"serial": serial, "agent_id": task.agent_id,
+                           "chapter_attempt": chapter_attempt["current"], "at": _now()})
+        return await sec2(task, ctx, serial, chapter_attempt["current"])
+
+    adapter.behaviors[SECTION_2] = sec2_behavior
+    adapter.behaviors[SECTION_2_CONCLUSION_RETRY] = sec2_behavior
+    timed_out = await run_to_terminal(coordinator, plan, budget)
+    scheduler = coordinator.scheduler_for(rid)
+    rows = _section_rows(store, rid)
+    return {
+        "research_id": rid, "timed_out": timed_out,
+        "scheduler": None if scheduler is None else scheduler.status,
+        "goals": {} if scheduler is None else dict(scheduler.goal_statuses),
+        "chapter": rows.get("ch-1"), "sec1": rows.get("ch-1/sec-1"), "sec2": rows.get("ch-1/sec-2"),
+        "sec2_calls": sec2_calls, "adapter_calls": adapter.calls,
+        "section_errors": [e["data"] for e in published if e.get("type") == "section_error"],
+    }
+
+
+async def _sec2_fail_then_ok(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+    del chapter_attempt
+    if serial == 1:
+        return _transport_failure(task, ctx, TRANSPORT_ENGINE_ERROR)
+    _write_section_2(task)
+    return _done(task, ctx)
+
+
+async def _sec2_always_fail(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+    del serial, chapter_attempt
+    return _transport_failure(task, ctx, TRANSPORT_ENGINE_ERROR)
+
+
+async def _sec2_fail_in_round_1(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+    """章级第 1 次尝试内无论节级重试几次都断连；第 2 次（第二轮）派活即成功。"""
+    del serial
+    if chapter_attempt <= 1:
+        return _transport_failure(task, ctx, TRANSPORT_ENGINE_ERROR)
+    _write_section_2(task)
+    return _done(task, ctx)
+
+
+async def _sec2_conclusion_invalid(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+    """产物已写好但 owli-result 不合法：非传输类失败，只走既有「重发结论块」一次，不得退避重试。"""
+    del serial, chapter_attempt
+    _write_section_2(task)
+    return EngineRunResult(
+        conclusion=None, conclusion_error=NON_RATELIMIT_CONCLUSION_ERROR,
+        validation=_pass_report(task, ctx), events=[], permission_denials=[],
+    )
+
+
+async def _sec2_real_429(task: Any, ctx: Any, serial: int, chapter_attempt: int) -> EngineRunResult:
+    del serial, chapter_attempt
+    return _transport_failure(task, ctx, REAL_RATELIMIT_ENGINE_ERROR)
+
+
+async def case_section_transport_jitter(root: Path, checks: Checks, budget: float) -> dict[str, Any]:
+    # 子例 1（defect）：第 1 次断连、第 2 次成功 → 节 done、attempts=2、引擎不变
+    one = await _run_jitter(root, "r-seam-jitter-1", budget, sec2=_sec2_fail_then_ok)
+    sec2 = one["sec2"] or {}
+    checks.add("guard: 子例 1 研究到终态且 sec-1 done（断连只影响 sec-2）", guard=True,
+               expected={"scheduler": "completed", "sec1": "done"},
+               actual={"scheduler": one["scheduler"], "goals": one["goals"],
+                       "sec1": _row_digest(one["sec1"]), "timed_out": one["timed_out"]},
+               passed=(one["scheduler"] == "completed" and (one["sec1"] or {}).get("status") == "done"
+                       and not one["timed_out"]))
+    checks.add("E1 一次传输断连后节级重试一次即 done（attempts=2，engine 不变）",
+               expected={"status": "done", "reason": None, "attempts": 2, "engine": "claude"},
+               actual={**_row_digest(sec2), "sec2_calls": len(one["sec2_calls"]),
+                       "engine_error": sec2.get("engine_error")},
+               passed=(sec2.get("status") == "done" and sec2.get("reason") is None
+                       and sec2.get("attempts") == 2 and sec2.get("engine") == "claude"
+                       and len(one["sec2_calls"]) == 2))
+    checks.add("guard: 断连注入确实命中 classify_transport_error（不是被归成 timeout/quota）", guard=True,
+               expected="首个 section_error.reason ∈ {retry_exhausted}（或修复后无 section_error）",
+               actual={"section_errors": [e.get("reason") for e in one["section_errors"]]},
+               passed=all(e.get("reason") == "retry_exhausted" for e in one["section_errors"]))
+
+    # 子例 2：连续 N=max_attempts_per_round 次断连 → 真耗尽才 missing/retry_exhausted
+    n = JITTER_PER_ROUND
+    two = await _run_jitter(root, "r-seam-jitter-2", budget, per_round=n, sec2=_sec2_always_fail)
+    sec2b = two["sec2"] or {}
+    checks.add(f"guard: 连续断连 → 节 missing/retry_exhausted、engine 不变、attempts≤N={n}、研究仍到终态",
+               guard=True,
+               expected={"status": "missing", "reason": "retry_exhausted", "engine": "claude",
+                         "attempts<=": n, "scheduler": "completed"},
+               actual={**_row_digest(sec2b), "sec2_calls": len(two["sec2_calls"]),
+                       "scheduler": two["scheduler"], "timed_out": two["timed_out"]},
+               passed=(sec2b.get("status") == "missing" and sec2b.get("reason") == "retry_exhausted"
+                       and sec2b.get("engine") == "claude" and (sec2b.get("attempts") or 0) <= n
+                       and len(two["sec2_calls"]) <= n and two["scheduler"] == "completed"
+                       and not two["timed_out"]))
+    checks.add(f"E2 retry_exhausted 必须真耗尽：attempts == N={n} 且 sec-2 被派活 N 次",
+               expected={"attempts": n, "sec2_calls": n},
+               actual={"attempts": sec2b.get("attempts"), "sec2_calls": len(two["sec2_calls"])},
+               passed=(sec2b.get("attempts") == n and len(two["sec2_calls"]) == n))
+
+    # 子例 3（defect）：章级第二轮重试要重新派活 missing/retry_exhausted 的节
+    # 父章 validators 要求 sec-2 成功内容里的标题，于是第一轮拼装校验失败 → 触发章级重试
+    three = await _run_jitter(
+        root, "r-seam-jitter-3", budget, per_round=1, max_rounds=2,
+        report_validators=["file_exists", f"sections_exist:结论,信息源,{SECTION_2_HEADING}"],
+        sec2=_sec2_fail_in_round_1)
+    sec2c = three["sec2"] or {}
+    chapter = three["chapter"] or {}
+    round2_calls = [c for c in three["sec2_calls"] if c["chapter_attempt"] >= 2]
+    checks.add("guard: 子例 3 章级确实进入第二轮（父章 attempts>=2）且研究到终态", guard=True,
+               expected={"chapter.attempts>=": 2, "scheduler": "completed"},
+               actual={"chapter": _row_digest(chapter), "scheduler": three["scheduler"],
+                       "timed_out": three["timed_out"]},
+               passed=((chapter.get("attempts") or 0) >= 2 and three["scheduler"] == "completed"
+                       and not three["timed_out"]))
+    checks.add("E3 章级第二轮重新派活 missing/retry_exhausted 的 sec-2 并 done（父章 done）",
+               expected={"sec2": "done", "sec2_round2_calls>=": 1, "chapter": "done"},
+               actual={"sec2": _row_digest(sec2c), "chapter": _row_digest(chapter),
+                       "sec2_calls": three["sec2_calls"]},
+               passed=(sec2c.get("status") == "done" and len(round2_calls) >= 1
+                       and chapter.get("status") == "done"))
+
+    # guard：非传输类失败（conclusion_invalid）不被退避重试，行为不变（只走既有结论块重发一次）
+    four = await _run_jitter(root, "r-seam-jitter-4", budget, sec2=_sec2_conclusion_invalid)
+    sec2d = four["sec2"] or {}
+    call_ids = [c["agent_id"] for c in four["sec2_calls"]]
+    checks.add("guard: conclusion_invalid 不走传输重试：attempts=1、只多一次结论块重发、reason=conclusion_invalid",
+               guard=True,
+               expected={"status": "missing", "reason": "conclusion_invalid", "attempts": 1,
+                         "calls": [SECTION_2, SECTION_2_CONCLUSION_RETRY]},
+               actual={**_row_digest(sec2d), "calls": call_ids, "scheduler": four["scheduler"]},
+               passed=(sec2d.get("status") == "missing" and sec2d.get("reason") == "conclusion_invalid"
+                       and sec2d.get("attempts") == 1
+                       and call_ids == [SECTION_2, SECTION_2_CONCLUSION_RETRY]))
+
+    # guard：真 429（api_error_status=429）仍归 quota_exhausted，不得归 retry_exhausted
+    five = await _run_jitter(root, "r-seam-jitter-5", budget, sec2=_sec2_real_429)
+    sec2e = five["sec2"] or {}
+    checks.add("guard: 真限流 429 的节仍 quota_exhausted（不归 retry_exhausted），engine 不变", guard=True,
+               expected={"status": "missing", "reason": "quota_exhausted", "engine": "claude"},
+               actual={**_row_digest(sec2e), "sec2_calls": len(five["sec2_calls"]),
+                       "scheduler": five["scheduler"]},
+               passed=(sec2e.get("status") == "missing" and sec2e.get("reason") == "quota_exhausted"
+                       and sec2e.get("engine") == "claude"))
+    return {"sub1": one, "sub2": two, "sub3": three, "guard_conclusion_invalid": four,
+            "guard_429": five, "transport_engine_error": TRANSPORT_ENGINE_ERROR}
+
+
+# --------------------------------------------------------------------------
 # 入口
 # --------------------------------------------------------------------------
 
@@ -690,6 +924,7 @@ CASES = {
     "partial-done": case_partial_done,
     "ratelimit-regex": case_ratelimit_regex,
     "stop-resume": case_stop_resume,
+    "section-transport-jitter": case_section_transport_jitter,
 }
 
 
