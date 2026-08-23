@@ -350,6 +350,196 @@ def classify_transport_error(text: str) -> bool:
     return bool(_TRANSPORT_JITTER_PATTERN.search(str(text or "")))
 
 
+# --- 限流判定：结构化字段优先，措辞正则只做兜底 -------------------------------
+# 红线（M3-h 硬约束 1）：不得用措辞正则做闭集判定。D-002/缺陷 C 的教训是
+# `限流` 子串命中了「非限流错误」，把 schema 校验失败误判成额度耗尽。
+# 因此分两级：
+#   1) 结构化级：读引擎载荷里的 api_error_status / 错误类型 / rate_limit_info；
+#      拿到状态码就以它为准（429 = 限流，其它状态码 = 明确不是限流）。
+#   2) 措辞级：只有结构化完全取不到信号时才用，且必须排除否定语境。
+
+RATE_LIMIT_HTTP_STATUS = 429
+
+_RATE_LIMIT_STATUS_FIELDS = (
+    "api_error_status", "apiErrorStatus",
+    "status_code", "statusCode",
+    "http_status", "httpStatus",
+)
+_RATE_LIMIT_TYPE_FIELDS = (
+    "error_type", "errorType", "type", "code", "error_code", "errorCode",
+)
+_RATE_LIMIT_TYPE_VALUES = frozenset({
+    "rate_limit_error", "rate_limit_exceeded", "rate_limited",
+    "quota_exceeded", "quota_exhausted", "insufficient_quota",
+    "usage_limit_reached", "too_many_requests",
+})
+
+_QUOTA_WORDING_PATTERN = re.compile(
+    r"quota|rate[\s_-]?limits?|usage[\s_-]?limits?|too many requests"
+    r"|\b429\b|额度|配额|限流",
+    re.IGNORECASE,
+)
+
+# 否定语境：中文只看紧邻的连续汉字（不跨标点），英文只看同一子句内的否定词，
+# 另外看命中片段后面紧跟的「未超 / not exceeded」这类后置否定。
+_CJK_NEGATIONS = ("非", "未", "无", "没", "免", "不")
+_CJK_TAIL_PATTERN = re.compile(r"[一-鿿]{0,4}$")
+_EN_NEGATION_PATTERN = re.compile(
+    r"\b(?:no|not|non|never|without|neither|nor|isn't|aren't|wasn't|weren't"
+    r"|doesn't|don't|didn't|hasn't|haven't|won't|can't|cannot)\b"
+    # 否定词与命中片段之间允许若干冠词/限定词：not a rate limit error
+    r"(?:[\s\-]+(?:a|an|the|any|real|actual|true|hard|engine|api)\b)*[\s\-]*$",
+    re.IGNORECASE,
+)
+_TRAILING_NEGATION_PATTERN = re.compile(
+    r"^[\s\-—:：,，]*(?:未(?:超|达|到|触发|命中|生效)|没(?:有)?(?:超|达|触发)"
+    r"|不(?:会|是|超|存在)"
+    r"|not\s+(?:exceeded|hit|reached|triggered|limited|rejected))",
+    re.IGNORECASE,
+)
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[。！？；;.\n\r]")
+
+
+class RateLimitVerdict(str, Enum):
+    """限流三态：命中 / 明确不是 / 无结构化信号。"""
+
+    LIMITED = "limited"
+    NOT_LIMITED = "not_limited"
+    UNKNOWN = "unknown"
+
+
+def _is_negated(text: str, start: int, end: int) -> bool:
+    """判断命中片段是否落在否定语境里（「非限流」「limit 未超」都算）。"""
+
+    prefix = text[max(0, start - 32):start]
+    boundary = None
+    for match in _CLAUSE_BOUNDARY_PATTERN.finditer(prefix):
+        boundary = match.end()
+    if boundary is not None:
+        prefix = prefix[boundary:]
+    cjk_tail = _CJK_TAIL_PATTERN.search(prefix)
+    if any(negation in (cjk_tail.group() if cjk_tail else "")
+           for negation in _CJK_NEGATIONS):
+        return True
+    if _EN_NEGATION_PATTERN.search(prefix):
+        return True
+    return bool(_TRAILING_NEGATION_PATTERN.match(text[end:end + 24]))
+
+
+def search_without_negation(
+    pattern: re.Pattern[str], text: Any,
+) -> re.Match[str] | None:
+    """措辞兜底专用：返回第一个不处于否定语境的命中，全被否定则返回 None。"""
+
+    probe = str(text or "")
+    for match in pattern.finditer(probe):
+        if not _is_negated(probe, match.start(), match.end()):
+            return match
+    return None
+
+
+def _rate_limit_mapping(value: Any) -> Mapping[str, Any] | None:
+    """把引擎错误载荷（dict / JSON 字符串 / 结果对象）摊成一个 mapping。"""
+
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate.startswith("{"):
+            return None
+        try:
+            parsed = json.loads(candidate)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    if value is None or isinstance(value, (bool, int, float)):
+        return None
+    harvested: dict[str, Any] = {}
+    for name in (
+        *_RATE_LIMIT_STATUS_FIELDS,
+        *_RATE_LIMIT_TYPE_FIELDS,
+        "rate_limit_info", "rateLimitInfo", "engine_error", "conclusion_error",
+    ):
+        got = getattr(value, name, None)
+        if got is not None:
+            harvested[name] = got
+    return harvested or None
+
+
+def _flatten_rate_limit_payloads(value: Any, depth: int = 0) -> list[Mapping[str, Any]]:
+    """递归摊平嵌套载荷（error / errors / 序列化后的子 JSON），深度设上限。"""
+
+    if depth > 3:
+        return []
+    mapping = _rate_limit_mapping(value)
+    if mapping is None:
+        return []
+    found: list[Mapping[str, Any]] = [mapping]
+    for nested in mapping.values():
+        if isinstance(nested, (Mapping, str)):
+            found.extend(_flatten_rate_limit_payloads(nested, depth + 1))
+        elif isinstance(nested, (list, tuple)):
+            for item in nested:
+                found.extend(_flatten_rate_limit_payloads(item, depth + 1))
+    return found
+
+
+def _http_status(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    return int(text) if text.isdigit() else None
+
+
+def structured_rate_limit_verdict(*payloads: Any) -> RateLimitVerdict:
+    """只读结构化字段的限流判定；一个状态信号都取不到才返回 UNKNOWN。"""
+
+    statuses: list[int] = []
+    for payload in payloads:
+        for mapping in _flatten_rate_limit_payloads(payload):
+            info = mapping.get("rate_limit_info", mapping.get("rateLimitInfo"))
+            if (
+                isinstance(info, Mapping)
+                and str(info.get("status", "")).casefold() == "rejected"
+            ):
+                return RateLimitVerdict.LIMITED
+            for name in _RATE_LIMIT_TYPE_FIELDS:
+                value = mapping.get(name)
+                if (
+                    isinstance(value, str)
+                    and value.strip().casefold() in _RATE_LIMIT_TYPE_VALUES
+                ):
+                    return RateLimitVerdict.LIMITED
+            for name in _RATE_LIMIT_STATUS_FIELDS:
+                if name not in mapping:
+                    continue
+                status = _http_status(mapping[name])
+                if status is not None:
+                    statuses.append(status)
+    if RATE_LIMIT_HTTP_STATUS in statuses:
+        return RateLimitVerdict.LIMITED
+    if statuses:
+        # 拿到了明确的非 429 状态码：结构化字段说了不是限流，措辞不得翻案。
+        return RateLimitVerdict.NOT_LIMITED
+    return RateLimitVerdict.UNKNOWN
+
+
+def classify_rate_limit(*payloads: Any, text: Any = None) -> RateLimitVerdict:
+    """限流判定入口：结构化字段优先，措辞正则只在结构化无信号时兜底。"""
+
+    verdict = structured_rate_limit_verdict(*payloads)
+    if verdict is not RateLimitVerdict.UNKNOWN:
+        return verdict
+    probe = text if text is not None else " ".join(
+        payload for payload in payloads if isinstance(payload, str)
+    )
+    if search_without_negation(_QUOTA_WORDING_PATTERN, probe) is not None:
+        return RateLimitVerdict.LIMITED
+    return RateLimitVerdict.UNKNOWN
+
+
 def route(
     msg: Any,
     *,

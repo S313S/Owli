@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.adapters import validation
-from app.adapters.ratelimit import classify_transport_error
+from app.adapters.ratelimit import (
+    RateLimitVerdict,
+    classify_rate_limit,
+    classify_transport_error,
+    search_without_negation,
+)
+
+
+# 措辞正则一律只做兜底，且必须走 search_without_negation 排除否定句（D-002/缺陷 C）。
+_TIMEOUT_WORDING_PATTERN = re.compile(r"timeout|timed? ?out|超时", re.IGNORECASE)
 
 
 CHAPTER_FAILURE_REASONS = frozenset({
@@ -51,9 +60,13 @@ def chapter_failure_reason(
     engine_error = str(_field(result, "engine_error", "") or "")
     conclusion_error = str(_field(result, "conclusion_error", "") or "")
     errors = " ".join(filter(None, (engine_error, conclusion_error)))
-    if re.search(r"quota|rate.?limit|429|额度|限流", errors, re.IGNORECASE):
+    # 限流优先读结构化字段（api_error_status / 错误类型 / rate_limit_info）；
+    # 只有结构化一个信号都没有时才退到措辞兜底，且兜底不命中「非限流」这类否定句。
+    if classify_rate_limit(
+        result, engine_error, conclusion_error, text=errors,
+    ) is RateLimitVerdict.LIMITED:
         return "quota_exhausted"
-    if re.search(r"timeout|timed? ?out|超时", errors, re.IGNORECASE):
+    if search_without_negation(_TIMEOUT_WORDING_PATTERN, errors) is not None:
         return "timeout"
     if errors and classify_transport_error(errors):
         return "retry_exhausted"
