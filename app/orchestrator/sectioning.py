@@ -177,41 +177,73 @@ def _assemble(
     plan: Any,
     agent: Any,
     output_path: Path,
+    output_format: str,
     section_root: Path,
     sections: list[dict[str, Any]],
     rows: list[dict[str, Any]],
 ) -> None:
-    section_texts: list[str] = []
+    """把各节产物拼成父章产物；**按声明的 output.format 落盘**。
+
+    以前无论声明什么格式都写 Markdown，声明 json 的报告章因此得到一份「假 json」
+    （后缀是 .json、内容是 Markdown），下游按 json 解析必然失败。
+    """
+    section_items: list[dict[str, Any]] = []
     for section in sections:
         path = section_root / section["filename"]
         if path.is_file():
-            section_texts.append(path.read_text(encoding="utf-8").strip())
+            text = path.read_text(encoding="utf-8").strip()
         else:
             chapter_id = section["section_id"]
             row = next(
                 (item for item in rows if item["chapter_id"] == chapter_id), None,
             )
             reason = str(row["reason"] if row else "empty_result")
-            section_texts.append(_placeholder(section, reason).strip())
-    blocks = [f"# {plan.title}", ""]
-    for text in section_texts:
-        blocks.append(text)
-        blocks.append("")
-    blocks.append("## 缺失清单")
+            text = _placeholder(section, reason).strip()
+        section_items.append({
+            "section_id": section["section_id"],
+            "goal_id": section["goal_id"],
+            "title": section["title"],
+            "markdown": text,
+        })
     missing = [
         row for row in rows
         if row["status"] == "missing" or (
             row["status"] == "deferred" and "/" in str(row["chapter_id"])
         )
     ]
-    if missing:
-        for row in missing:
-            blocks.append(
-                f"- 此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
-            )
+    missing_items = [
+        {
+            "goal_id": row["goal_id"],
+            "chapter_id": row["chapter_id"],
+            "reason": row["reason"],
+            "text": (
+                f"此处缺失：{row['goal_id']}/{row['chapter_id']}；原因：{row['reason']}"
+            ),
+        }
+        for row in missing
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_format == "json":
+        document = {
+            "title": plan.title,
+            "chapter_id": _chapter_id(agent),
+            "sections": section_items,
+            "缺失清单": missing_items,
+        }
+        output_path.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return
+    blocks = [f"# {plan.title}", ""]
+    for item in section_items:
+        blocks.append(item["markdown"])
+        blocks.append("")
+    blocks.append("## 缺失清单")
+    if missing_items:
+        blocks.extend(f"- {item['text']}" for item in missing_items)
     else:
         blocks.append("- 无。")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(blocks).rstrip() + "\n", encoding="utf-8")
 
 
@@ -399,6 +431,7 @@ async def run_sectioned_task(
         plan=plan,
         agent=agent,
         output_path=base_task.output_path,
+        output_format=base_task.output_format,
         section_root=section_root,
         sections=sections,
         rows=rows,
