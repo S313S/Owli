@@ -17,7 +17,12 @@ from app.adapters.contracts import EngineTask
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.scheduler import Scheduler, TaskRunResult
-from app.orchestrator.sectioning import run_sectioned_task, should_section
+from app.orchestrator.sectioning import (
+    _assemble as assemble_sections,
+    _section_specs as section_specs,
+    run_sectioned_task,
+    should_section,
+)
 from app.plan.cards import (
     Card,
     CardActionType,
@@ -531,6 +536,7 @@ class RuntimeCoordinator:
                 # running 幽灵行（worklog 6b §九小缺陷 3）；父章终态由调度器按
                 # 取消原因落账（timeout → missing/deferred，stop → 复位）。
                 self._reset_running_sections(plan.research_id, context.goal_id)
+                self._salvage_partial_sections(plan, agent, task)
                 raise
 
         result = await adapter.run(task, self._ctx(task), on_event=on_event)
@@ -641,6 +647,48 @@ class RuntimeCoordinator:
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
         return result
+
+    def _salvage_partial_sections(self, plan: Plan, agent: Any, task: Any) -> None:
+        """被取消的节化章只要有 done 节，就把父章产物组装落盘（D-009）。
+
+        产物在不在盘上决定收尾判 completed 还是 failed（硬约束 4）；取消直接
+        丢内容会让报告章中招时整卷归零（r-ca3a3f4eb587 实锤）。尽力而为：
+        组装失败不掩盖取消本身。无终态的节按 missing/timeout 占位——只改传给
+        组装器的行副本、不写账本；reason 必须落闭集，/stop 场景 resume 重派后
+        会重新组装覆盖这份快照。
+        """
+        try:
+            sections = section_specs(plan, agent)
+            section_ids = {item["section_id"] for item in sections}
+            rows = [dict(row) for row in self.store.list_chapters(plan.research_id)]
+            has_done = any(
+                row["goal_id"] == task.goal_id
+                and row["chapter_id"] in section_ids
+                and row["status"] == "done"
+                for row in rows
+            )
+            if not has_done:
+                return
+            for row in rows:
+                if (
+                    row["goal_id"] == task.goal_id
+                    and row["chapter_id"] in section_ids
+                    and row["status"] not in {"done", "missing"}
+                ):
+                    row["status"] = "missing"
+                    row["reason"] = row["reason"] or "timeout"
+            assemble_sections(
+                plan=plan,
+                agent=agent,
+                output_path=task.output_path,
+                output_format=task.output_format,
+                section_root=task.output_path.parent / Path(task.output_path.stem),
+                sections=sections,
+                rows=rows,
+            )
+        except Exception:
+            # 抢救失败只损失部分产物，不改变取消路径的任何既有语义。
+            return
 
     def _reset_running_sections(self, research_id: str, goal_id: str) -> None:
         for row in self.store.list_chapters(research_id):

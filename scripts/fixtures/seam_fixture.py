@@ -1291,6 +1291,16 @@ async def case_section_wall_clock(root: Path, checks: Checks, budget: float) -> 
                actual=ghost_rows,
                passed=(all(d.get("status") != "running" for d in ghost_rows.values())
                        and ghost_rows["sec2"].get("status") == "pending"))
+    # W16（D-009）：取消时已 done 节（sec-1）被抢救组装成父章部分产物落盘
+    partial_path = root / "runs" / "r-seam-wall-2" / "goals" / "goal-2" / "report.md"
+    partial_text = partial_path.read_text(encoding="utf-8") if partial_path.is_file() else ""
+    checks.add("W16 墙钟取消不丢已 done 节：父章部分产物落盘，未完节按 timeout 占位（D-009）",
+               expected={"parent_exists": True, "含缺失占位": "此处缺失：…；原因：timeout"},
+               actual={"parent_exists": partial_path.is_file(),
+                       "有timeout占位": "原因：timeout" in partial_text,
+                       "bytes": len(partial_text)},
+               passed=(partial_path.is_file() and "原因：timeout" in partial_text
+                       and len(partial_text) > 0))
 
     stamp("②真实时间")
     # 子例 ②b（真实时间）：真实 ClaudeAdapter + 永不出消息的假 SDK —— run() 自己要有引擎超时

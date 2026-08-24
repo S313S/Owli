@@ -314,19 +314,16 @@ def test_归并保留占位节与缺失清单并容忍无角标信息源():
     assert document.rstrip().splitlines()[-1] == "- 此处缺失：goal-2/ch-1/sec-2；原因：timeout"
 
 
-# ---------- running 幽灵行（改法 4）----------
+# ---------- running 幽灵行（改法 4）+ 取消抢救（D-009）----------
 
-def test_节化执行中被取消_在跑节复位不留running(tmp_path):
-    from app.orchestrator.runtime import RuntimeCoordinator
+def _sectioned_report_plan(tmp_path):
     from app.plan.model import Plan
-    from datetime import datetime, timezone
 
-    store = _store(tmp_path)
     source = make_plan_dict()
     source["research_id"] = "r-ledger"
     source["scale"] = "standard"
     source["baseline"] = None
-    source["goals"] = source["goals"][:1]
+    # 节按 goal 切：保留工厂默认的 3 个 goal → 报告章有 sec-1/2/3 三节。
     agent = source["goals"][0]["agents"][0]
     agent["agent_id"] = "report-writing"
     agent["display_name"] = "报告撰写"
@@ -347,24 +344,25 @@ def test_节化执行中被取消_在跑节复位不留running(tmp_path):
             "notes": {},
         },
     }
-    plan = Plan.from_dict(source)
-    dispatched = asyncio.Event()
+    return Plan.from_dict(source)
 
-    class HangingAdapter:
-        async def run(self, task, ctx, on_event=None):
-            dispatched.set()
-            await asyncio.Event().wait()
+
+def _cancel_scenario(tmp_path, store, plan, adapter, *, hang_from_call: int):
+    """派活到第 hang_from_call 次时挂起，随后取消；返回取消后的账本行。"""
+    from datetime import datetime, timezone
+
+    from app.orchestrator.runtime import RuntimeCoordinator
 
     coordinator = RuntimeCoordinator(
         store=store,
         event_buffer=SimpleNamespace(publish=_noop_publish),
         researches={},
         cards={},
-        adapter_factory=lambda: HangingAdapter(),
+        adapter_factory=lambda: adapter,
         runs_root=tmp_path / "runs",
         routing_utc_clock=lambda: datetime(2026, 8, 24, tzinfo=timezone.utc),
     )
-    coordinator._adapters["r-ledger"] = HangingAdapter()
+    coordinator._adapters["r-ledger"] = adapter
 
     async def scenario():
         run = asyncio.create_task(coordinator._run_task(
@@ -375,21 +373,77 @@ def test_节化执行中被取消_在跑节复位不留running(tmp_path):
                 failure_feedback=None, on_event=lambda event: asyncio.sleep(0),
             ),
         ))
-        await asyncio.wait_for(dispatched.wait(), timeout=5)
-        rows = {
-            row["chapter_id"]: row["status"]
-            for row in store.list_chapters("r-ledger")
-        }
-        assert rows["ch-1/sec-1"] == "running"
+        await asyncio.wait_for(adapter.hanging.wait(), timeout=5)
         run.cancel()
         with pytest.raises(asyncio.CancelledError):
             await run
 
     asyncio.run(scenario())
-    statuses = [row["status"] for row in store.list_chapters("r-ledger")]
-    assert "running" not in statuses
-    rows = {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+    return {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+
+
+class _HangAfterDoneAdapter:
+    """前 N-1 次派活写出合法 done 节，第 N 次起挂起（模拟墙钟取消场景）。"""
+
+    def __init__(self, hang_from_call: int) -> None:
+        self.calls = 0
+        self.hang_from_call = hang_from_call
+        self.hanging = asyncio.Event()
+
+    async def run(self, task, ctx, on_event=None):
+        from app.adapters import validation
+        from app.adapters.contracts import EngineRunResult, OwliResult
+
+        self.calls += 1
+        if self.calls >= self.hang_from_call:
+            self.hanging.set()
+            await asyncio.Event().wait()
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text(
+            f"## 结论\n\n- 第 {self.calls} 节判断 [S01]\n\n## 信息源\n\n"
+            "- [S01] [来源](https://example.com/a)（fetched_at=t1）\n",
+            encoding="utf-8",
+        )
+        return EngineRunResult(
+            conclusion=OwliResult(
+                "done", str(task.output_path), "完成", [], [], [], None,
+            ),
+            conclusion_error=None,
+            validation=validation.validate(ctx, task.validators),
+            events=[],
+            permission_denials=[],
+        )
+
+
+def test_节化执行中被取消_在跑节复位不留running_零done不落盘(tmp_path):
+    store = _store(tmp_path)
+    plan = _sectioned_report_plan(tmp_path)
+    rows = _cancel_scenario(
+        tmp_path, store, plan, _HangAfterDoneAdapter(hang_from_call=1),
+        hang_from_call=1,
+    )
+    assert all(row["status"] != "running" for row in rows.values())
     assert rows["ch-1/sec-1"]["status"] == "pending"
+    # D-009 期望 b：零 done 节不抢救，收尾仍可如实判「报告未生成」。
+    assert not (tmp_path / "runs" / "r-ledger" / "goals" / "goal-1" / "report.md").is_file()
+
+
+def test_D009_取消时已done节组装成部分产物落盘(tmp_path):
+    store = _store(tmp_path)
+    plan = _sectioned_report_plan(tmp_path)
+    rows = _cancel_scenario(
+        tmp_path, store, plan, _HangAfterDoneAdapter(hang_from_call=2),
+        hang_from_call=2,
+    )
+    assert rows["ch-1/sec-1"]["status"] == "done"
+    assert rows["ch-1/sec-2"]["status"] == "pending"  # 账本只复位，不被抢救改写
+    report = tmp_path / "runs" / "r-ledger" / "goals" / "goal-1" / "report.md"
+    assert report.is_file()
+    text = report.read_text(encoding="utf-8")
+    assert "第 1 节判断" in text                      # done 节内容进卷
+    assert "## 结论" in text and "## 信息源" in text  # 归并结构完整
+    assert "此处缺失：goal-1/ch-1/sec-2；原因：timeout" in text
+    assert "此处缺失：goal-1/ch-1/sec-3；原因：timeout" in text
 
 
 async def _noop_publish(research_id, payload):
