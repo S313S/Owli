@@ -111,3 +111,19 @@ done_sections = [row for row in rows if "/" in row["chapter_id"] and row["status
 print(f"\n=== E3 断言：/tmp 注入根下 done 节数={len(done_sections)}")
 if not done_sections:
     raise SystemExit("E3 未过：Claude 节没有任何 done")
+
+# M4-a 验收（改法 3）：整卷报告仅一个「结论」与一个「信息源」小节；角标零编造。
+import re
+report_text = (rr / "goals/goal-3/report.md").read_text(encoding="utf-8")
+conclusion_count = len(re.findall(r"(?m)^#{1,6}\s*结论\s*$", report_text))
+source_count = len(re.findall(r"(?m)^#{1,6}\s*信息源\s*$", report_text))
+missing_count = len(re.findall(r"(?m)^#{1,6}\s*缺失清单\s*$", report_text))
+allowed_urls = {item["permalink"] for item in items}
+found_urls = set(re.findall(r"https?://[^)\s）>」\"']+", report_text))
+fabricated = sorted(url for url in found_urls if url not in allowed_urls)
+print(f"\n=== M4-a 断言：结论小节={conclusion_count} 信息源小节={source_count} "
+      f"缺失清单小节={missing_count}；URL 共 {len(found_urls)} 个，编造={fabricated}")
+if conclusion_count != 1 or source_count != 1:
+    raise SystemExit("M4-a 未过：整卷报告的「结论/信息源」小节数不为 1（重复结构未归并）")
+if fabricated:
+    raise SystemExit("M4-a 未过：报告出现假数据之外的 URL（角标编造）")

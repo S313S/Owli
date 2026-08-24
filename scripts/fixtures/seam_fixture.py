@@ -1075,38 +1075,30 @@ def _chapter_elapsed_seconds(run: dict[str, Any]) -> float | None:
 
 XVAL_AGENT = "cross-validation"
 XVAL_PATH = "goals/goal-3/cross-validation.json"
-XVAL_VALIDATORS = ["file_exists", "no_item_missing_rating"]
-
-
-def _rated_item(section_index: int) -> dict[str, Any]:
-    """满足 no_item_missing_rating 的一条评分记录（五维 0–2 整数 + rating_notes + rated_by）。"""
-    return {
-        "competitor": "讯飞输入法", "section": f"sec-{section_index}",
-        "permalink": "https://example.com/iflytek-dialect",
-        "score_authority": 2, "score_freshness": 1, "score_crossref": 1,
-        "score_completeness": 2, "score_independence": 1,
-        "rating_notes": "官方实测页，二手转述一处", "rated_by": "seam-fixture",
-    }
+# M4-a：交叉验证章按 §2.3.1 信封形声明（shape=object + sectioned_document_valid），
+# 逐条评级验证器只属于非节化的 reliability_audit 章。
+XVAL_VALIDATORS = ["file_exists", "sectioned_document_valid"]
 
 
 def plan_cross_validation_json(rid: str, *, max_rounds: int) -> Plan:
-    """三 goal：goal-1/goal-2 采集 done；goal-3 = cross_validation 章、output.format=json、shape=array、
-    validators 含 no_item_missing_rating（与 6b goal-2/ch-3、goal-3/ch-3 的声明同构）。"""
+    """三 goal：goal-1/goal-2 采集 done；goal-3 = cross_validation 章、output.format=json、
+    shape=object、validators=sectioned_document_valid（M4-a 后规划期产出的信封形声明）。"""
     g1 = _goal("goal-1", "竞品基准信息采集", [collection_agent("goal-1", 1)], [])
     g2 = _goal("goal-2", "竞品口碑采集", [collection_agent("goal-2", 2)], [])
-    g3 = _goal("goal-3", "来源可靠度交叉验证", [_agent(
+    xval = _agent(
         "goal-3", XVAL_AGENT, display="交叉验证（claude，json 节化）",
         kind_profile="readonly-analyst", engine="claude", fmt="json", path=XVAL_PATH,
         validators=XVAL_VALIDATORS, cid="ch-3", ctype="cross_validation",
-        inputs=("goals/goal-1/data-collection.json", "goals/goal-2/data-collection-2.json"))],
-        ["goal-1", "goal-2"])
+        inputs=("goals/goal-1/data-collection.json", "goals/goal-2/data-collection-2.json"))
+    xval["output"]["shape"] = "object"  # 节化章 shape 恒 object（规则 27）
+    g3 = _goal("goal-3", "来源可靠度交叉验证", [xval], ["goal-1", "goal-2"])
     g3["retry_policy"] = {**DEFAULT_RETRY_POLICY, "max_attempts_per_round": 1,
                           "max_rounds": max_rounds}
     return build_plan(rid, [g1, g2, g3])
 
 
 async def _run_cross_validation_json(root: Path, rid: str, budget: float) -> dict[str, Any]:
-    """三节各注入一份合法 done 产物（评分条目数组），让 _assemble 跑真实组装。"""
+    """三节各注入一份合法 done 散文节，让 _assemble 跑真实的信封组装（M4-a）。"""
     store = make_store(root, rid)
     plan = plan_cross_validation_json(rid, max_rounds=2)
     adapter = FakeAdapter()
@@ -1118,8 +1110,11 @@ async def _run_cross_validation_json(root: Path, rid: str, budget: float) -> dic
         async def behavior(task: Any, ctx: Any) -> EngineRunResult:
             section_calls.append(task.agent_id)
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
-            task.output_path.write_text(json.dumps([_rated_item(index)], ensure_ascii=False, indent=2),
-                                        encoding="utf-8")
+            task.output_path.write_text(
+                f"## 结论\n\n- 判断{index}成立 [S0{index}]\n\n## 信息源\n\n"
+                f"- [S0{index}] [来源{index}](https://example.com/src-{index})"
+                f"（fetched_at=2026-08-20T0{index}:00:00Z）\n",
+                encoding="utf-8")
             return _done(task, ctx)
         return behavior
 
@@ -1286,6 +1281,16 @@ async def case_section_wall_clock(root: Path, checks: Checks, budget: float) -> 
     checks.add("W5 被墙钟取消的章 reason=timeout（期望 a）",
                expected={"chapter.reason": "timeout"}, actual=_row_digest(chapter2),
                passed=chapter2.get("reason") == "timeout")
+    ghost_rows = {
+        "chapter": _row_digest(chapter2),
+        "sec1": _row_digest(two["sec1"]),
+        "sec2": _row_digest(two["sec2"]),
+    }
+    checks.add("W14 幽灵行清零：墙钟取消后账本无 running 行，被打断的节复位 pending（M4-a 改法 4）",
+               expected={"running_rows": 0, "sec2.status": "pending"},
+               actual=ghost_rows,
+               passed=(all(d.get("status") != "running" for d in ghost_rows.values())
+                       and ghost_rows["sec2"].get("status") == "pending"))
 
     stamp("②真实时间")
     # 子例 ②b（真实时间）：真实 ClaudeAdapter + 永不出消息的假 SDK —— run() 自己要有引擎超时
@@ -1313,13 +1318,13 @@ async def case_section_wall_clock(root: Path, checks: Checks, budget: float) -> 
                        "parent_exists": three["parent_exists"], "timed_out": three["timed_out"]},
                passed=(len(three["section_calls"]) >= 3 and three["scheduler"] == "completed"
                        and three["parent_exists"] and not three["timed_out"]))
-    checks.add("W9 shape=array 的 json 节化章组装产物通过自己声明的 validators（no_item_missing_rating）（期望 d）",
-               expected={"final_validation": "PASS", "parent_top_type": "list", "assembly_errors": 0},
+    checks.add("W9 信封形 json 节化章（shape=object）组装产物通过 sectioned_document_valid（M4-a §2.3.1）",
+               expected={"final_validation": "PASS", "parent_top_type": "dict", "assembly_errors": 0},
                actual={"final_validation": three["final_validation"],
                        "parent_top_type": three["parent_top_type"],
                        "assembly_errors": three["assembly_errors"]},
                passed=(three["final_validation"]["verdict"] == "PASS"
-                       and three["parent_top_type"] == "list" and not three["assembly_errors"]))
+                       and three["parent_top_type"] == "dict" and not three["assembly_errors"]))
     checks.add("W10 三节 done 的章一轮即 done，不复位节、不进第二轮（期望 d）",
                expected={"chapter.status": "done", "chapter.reason": None, "chapter.attempts": 1},
                actual={"chapter": _row_digest(chapter3), "sections": three["sections"]},
@@ -1374,6 +1379,22 @@ async def case_section_wall_clock(root: Path, checks: Checks, budget: float) -> 
                actual={"codex_timeout": engine_timeout, "selfcheck_rejects": rejected,
                        "reason": codex_timeout_reason},
                passed=engine_timeout == 300.0 and rejected and codex_timeout_reason == "timeout")
+    # W15（M4-a 改法 1）：规则 27 把数组验证器/非 object shape 挡在节化章外
+    from app.plan.lint import lint as plan_lint
+    bad_plan = plan_cross_validation_json("r-seam-wall-lint", max_rounds=1).to_dict()
+    bad_plan["goals"][2]["agents"][0]["output"]["validators"] = [
+        "file_exists", "no_item_missing_rating",
+    ]
+    bad_errors = [e for e in plan_lint(bad_plan)["errors"] if e.startswith("[规则27]")]
+    good_plan = plan_cross_validation_json("r-seam-wall-lint2", max_rounds=1).to_dict()
+    good_errors = [e for e in plan_lint(good_plan)["errors"] if e.startswith("[规则27]")]
+    checks.add("W15 数组验证器进节化章被 plan_lint 规则 27 拒绝；信封形声明零报错（M4-a §2.3.1）",
+               expected={"bad_rule27_errors": ">=1 且点名 no_item_missing_rating",
+                         "good_rule27_errors": 0},
+               actual={"bad": bad_errors, "good": good_errors},
+               passed=(len(bad_errors) >= 1
+                       and any("no_item_missing_rating" in e for e in bad_errors)
+                       and not good_errors))
     # guard：D-007 section-transport-jitter 九条继续绿（子目录里整跑一遍）
     sub = Checks()
     print("\n  --- guard：重跑 D-007 section-transport-jitter（九条）---", flush=True)
