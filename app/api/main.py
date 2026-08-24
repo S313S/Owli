@@ -179,6 +179,128 @@ def create_app(
             "error": {"code": code, "message": message, "details": details},
         }
 
+    def read_historical_report(
+        research_id: str, report_path: str | None
+    ) -> str | None:
+        """只读历史报告正文；路径必须仍位于该研究的 runs 白名单内。"""
+        if not report_path:
+            return None
+        raw_path = Path(report_path)
+        candidates = [raw_path] if raw_path.is_absolute() else [
+            ROOT / raw_path,
+            runtime.runs_root.parent / raw_path,
+            runtime.runs_root / raw_path,
+            runtime.runs_root / research_id / raw_path,
+        ]
+        allowed_root = (runtime.runs_root / research_id).resolve()
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(allowed_root) or not resolved.is_file():
+                continue
+            try:
+                return resolved.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                return None
+        return None
+
+    def historical_snapshot(research_id: str) -> dict[str, Any] | None:
+        """从 Store 事实重建历史只读 DTO，不创建任何运行态对象。"""
+        report = store.get_report(research_id)
+        if report is None:
+            return None
+        chapters = store.list_chapters(research_id)
+        chapters_by_goal: dict[str, list[dict[str, Any]]] = {}
+        for chapter in chapters:
+            chapters_by_goal.setdefault(str(chapter["goal_id"]), []).append(chapter)
+
+        plan_snapshot = report.get("plan_snapshot")
+        planned_goals = (
+            plan_snapshot.get("goals", []) if isinstance(plan_snapshot, dict) else []
+        )
+        goal_specs: list[tuple[str, str]] = []
+        seen_goal_ids: set[str] = set()
+        for goal in planned_goals:
+            if not isinstance(goal, dict):
+                continue
+            goal_id = str(goal.get("goal_id", "")).strip()
+            if not goal_id or goal_id in seen_goal_ids:
+                continue
+            seen_goal_ids.add(goal_id)
+            goal_specs.append((goal_id, str(goal.get("title") or goal_id)))
+        for goal_id in chapters_by_goal:
+            if goal_id not in seen_goal_ids:
+                goal_specs.append((goal_id, goal_id))
+
+        goals: list[dict[str, Any]] = []
+        for goal_id, title in goal_specs:
+            rows = chapters_by_goal.get(goal_id, [])
+            statuses = {str(row["status"]) for row in rows}
+            if statuses & {"missing", "deferred"}:
+                status = "failed"
+                summary = "章节账本存在缺失项"
+            elif rows and statuses == {"done"}:
+                status = "done"
+                summary = "全部章节已完成"
+            elif "running" in statuses:
+                status = "running"
+                summary = "章节账本记录为运行中"
+            else:
+                status = "queued"
+                summary = "章节账本尚未进入终态"
+            goals.append(
+                {
+                    "id": goal_id,
+                    "title": title,
+                    "status": status,
+                    "summary": summary,
+                    "agents": [],
+                }
+            )
+
+        missing = [
+            {
+                "goal_id": str(row["goal_id"]),
+                "chapter_id": str(row["chapter_id"]),
+                "status": str(row["status"]),
+                "reason": row.get("reason"),
+                "error": row.get("engine_error") or row.get("conclusion_error"),
+            }
+            for row in chapters
+            if row["status"] in {"missing", "deferred"}
+        ]
+        summary = report.get("summary")
+        summary_line = report.get("summary_line") or summary or "历史研究只读快照"
+        status = str(report["status"])
+        status_labels = {
+            "running": "运行中",
+            "completed": "已完成",
+            "failed": "执行失败",
+            "archived": "已归档",
+        }
+        report_path = report.get("report_path")
+        return {
+            "research_id": research_id,
+            "title": report["title"],
+            "status": status,
+            "status_label": status_labels.get(status, status),
+            "snapshot_source": "store",
+            "progress": {
+                "done": sum(goal["status"] in {"done", "failed"} for goal in goals),
+                "total": len(goals),
+                "summary": summary_line,
+            },
+            "report_path": report_path,
+            "report_content": read_historical_report(research_id, report_path),
+            "summary": summary,
+            "summary_line": report.get("summary_line"),
+            "actions": [],
+            "goals": goals,
+            "chapters": chapters,
+            "missing": missing,
+            "cards": [],
+            "events": [],
+        }
+
     def cached(scope: str, request_id: str) -> JSONResponse | None:
         result = request_cache.get((scope, request_id))
         if result is None:
@@ -336,10 +458,13 @@ def create_app(
 
     @application.get("/api/researches/{research_id}")
     async def get_research(research_id: str) -> dict:
-        if research_id not in researches:
+        if research_id in researches:
+            # 状态以调度器为准：收尾之前也不得回报与调度器相反的状态
+            state = runtime.sync_state_with_scheduler(research_id)
+            return {"ok": True, "data": state, "error": None}
+        state = historical_snapshot(research_id)
+        if state is None:
             raise HTTPException(status_code=404, detail="调研任务不存在")
-        # 状态以调度器为准：收尾之前也不得回报与调度器相反的状态
-        state = runtime.sync_state_with_scheduler(research_id)
         return {"ok": True, "data": state, "error": None}
 
     @application.get("/api/researches/{research_id}/chapters")
@@ -834,6 +959,15 @@ def create_app(
         else:
             last_event_id = last_event_id_query
 
+        store_ready = database.is_file()
+        stored_snapshot = (
+            historical_snapshot(research_id)
+            if research_id not in researches and store_ready
+            else None
+        )
+        if research_id not in researches and store_ready and stored_snapshot is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+
         async def stream() -> AsyncIterator[str]:
             connected = {
                 "type": "stream_connected",
@@ -847,6 +981,19 @@ def create_app(
             )
             # 连接确认不进入 research 共享缓冲，也不写 id，避免污染重放游标。
             yield f"event: stream_connected\ndata: {body}\n\n"
+            if stored_snapshot is not None:
+                snapshot_event = {
+                    "type": "research_snapshot",
+                    "research_id": research_id,
+                    "sequence": last_event_id or 0,
+                    "occurred_at": runtime.now_iso(),
+                    "data": stored_snapshot,
+                }
+                snapshot_body = json.dumps(
+                    snapshot_event, ensure_ascii=False, separators=(",", ":")
+                )
+                yield f"event: research_snapshot\ndata: {snapshot_body}\n\n"
+                return
             replay = await events.replay_after(research_id, last_event_id)
             cursor = last_event_id or 0
             for event in replay.events:

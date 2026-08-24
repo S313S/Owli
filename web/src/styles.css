@@ -108,6 +108,19 @@ body { margin: 0; background: #f5f5f5; }
 .editable-field.customized { border-bottom-color: var(--gold); }
 .readonly-field { display: flex; align-items: center; gap: 8px; min-height: 32px; color: rgba(0, 0, 0, .45); }
 .readonly-reason { flex: none; margin: 0; color: rgba(0, 0, 0, .45); }
+.history-readonly-banner { margin-bottom: 12px; }
+.history-heading h3 { margin: 0 !important; font-size: 20px !important; }
+.history-heading .ant-typography { margin-bottom: 8px; }
+.history-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(420px, .8fr); gap: 12px; align-items: start; }
+.history-report { grid-row: span 2; min-width: 0; }
+.history-report-body {
+  min-height: 360px; max-height: calc(100vh - 280px); margin: 0; padding: 20px;
+  overflow: auto; border-radius: 6px; background: #fafafa; color: rgba(0, 0, 0, .88);
+  font: 14px/1.8 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.history-ledger .ant-card-body, .history-missing .ant-card-body { max-height: 40vh; overflow: auto; }
+.history-ledger-row, .history-missing-row { align-items: flex-start !important; }
 @media (max-width: 1320px) {
   .app-header { padding-inline: 16px; gap: 12px; }
   .brand small { display: none; }

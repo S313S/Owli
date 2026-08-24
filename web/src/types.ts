@@ -119,11 +119,41 @@ export type ResearchSnapshot = {
   title: string
   status: string
   status_label: string
+  snapshot_source?: 'store'
   progress: { done: number; total: number; summary: string }
+  report_path?: string | null
+  report_content?: string | null
+  summary?: string | null
+  summary_line?: string | null
   actions: ServerAction[]
   goals: GoalState[]
+  chapters?: ChapterProgress[]
+  missing?: HistoricalMissing[]
   cards: ActionCard[]
   events: NormalizedEvent[]
+}
+
+export type ChapterProgress = {
+  research_id: string
+  goal_id: string
+  chapter_id: string
+  status: string
+  attempts: number
+  engine?: string | null
+  reason?: string | null
+  engine_error?: string | null
+  conclusion_error?: string | null
+  actual_output_path?: string | null
+  actual_count?: number | null
+  updated_at: string
+}
+
+export type HistoricalMissing = {
+  goal_id: string
+  chapter_id: string
+  status: 'missing' | 'deferred'
+  reason?: string | null
+  error?: string | null
 }
 
 export type NormalizedEvent = {

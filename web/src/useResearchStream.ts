@@ -8,7 +8,7 @@ const eventTypes = [
 
 export function useResearchStream(researchId: string) {
   const [snapshot, setSnapshot] = useState<ResearchSnapshot | null>(null)
-  const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting')
+  const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting' | 'historical'>('connecting')
   const [loadError, setLoadError] = useState(false)
 
   const loadSnapshot = useCallback(async () => {
@@ -17,13 +17,12 @@ export function useResearchStream(researchId: string) {
     const result = await response.json() as ApiEnvelope<ResearchSnapshot>
     setSnapshot(result.data)
     setLoadError(false)
+    return result.data
   }, [researchId])
 
   useEffect(() => {
-    void loadSnapshot().catch(() => setLoadError(true))
-    const saved = sessionStorage.getItem(`owli:last:${researchId}`)
-    const suffix = saved ? `?last_event_id=${encodeURIComponent(saved)}` : ''
-    const source = new EventSource(`/api/researches/${encodeURIComponent(researchId)}/events${suffix}`)
+    let disposed = false
+    let source: EventSource | null = null
 
     const receive = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as NormalizedEvent
@@ -34,10 +33,23 @@ export function useResearchStream(researchId: string) {
       }
       setSnapshot((current) => reduceEvent(current, event))
     }
-    eventTypes.forEach((type) => source.addEventListener(type, receive as EventListener))
-    source.onopen = () => setConnection('connected')
-    source.onerror = () => setConnection('reconnecting')
-    return () => source.close()
+    void loadSnapshot().then((loaded) => {
+      if (disposed) return
+      if (loaded.snapshot_source === 'store') {
+        setConnection('historical')
+        return
+      }
+      const saved = sessionStorage.getItem(`owli:last:${researchId}`)
+      const suffix = saved ? `?last_event_id=${encodeURIComponent(saved)}` : ''
+      source = new EventSource(`/api/researches/${encodeURIComponent(researchId)}/events${suffix}`)
+      eventTypes.forEach((type) => source?.addEventListener(type, receive as EventListener))
+      source.onopen = () => setConnection('connected')
+      source.onerror = () => setConnection('reconnecting')
+    }).catch(() => setLoadError(true))
+    return () => {
+      disposed = true
+      source?.close()
+    }
   }, [loadSnapshot, researchId])
 
   return { snapshot, connection, loadError, retry: loadSnapshot }

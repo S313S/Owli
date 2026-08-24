@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Card, Collapse, Empty, Progress, Skeleton, Space,
 import { useEffect } from 'react'
 import ActionButtons from './ActionButtons'
 import ActionCardView from './ActionCardView'
+import HistoricalResearchView from './HistoricalResearchView'
 import { useResearchStream } from './useResearchStream'
 
 const statusColor: Record<string, string> = {
@@ -18,14 +19,20 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
   const pending = snapshot?.cards.filter((card) => card.status === 'pending').length ?? 0
 
   useEffect(() => {
-    document.title = `${pending ? `(${pending}) ` : ''}Owli · 实时工作板`
-  }, [pending])
+    document.title = snapshot?.snapshot_source === 'store'
+      ? 'Owli · 历史只读'
+      : `${pending ? `(${pending}) ` : ''}Owli · 实时工作板`
+  }, [pending, snapshot?.snapshot_source])
 
   if (!snapshot) return <main className="board-page">
     {loadError
       ? <Alert type="error" showIcon message="工作板加载失败：本地快照不可用。确认 Owli 仍在运行后重试。" action={<Button onClick={() => void retry()}>重试</Button>} />
       : <Card><Skeleton active paragraph={{ rows: 8 }} /><Typography.Text type="secondary">正在连接实时工作板…</Typography.Text></Card>}
   </main>
+
+  if (snapshot.snapshot_source === 'store') {
+    return <HistoricalResearchView snapshot={snapshot} />
+  }
 
   const percent = snapshot.progress.total ? Math.round(snapshot.progress.done / snapshot.progress.total * 100) : 0
   const activeGoals = snapshot.goals.filter((goal) => goal.status === 'running').map((goal) => goal.id)

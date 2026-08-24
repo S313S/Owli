@@ -35,6 +35,28 @@ class WebContractTest(unittest.TestCase):
         self.assertIn("deadline", card)
         self.assertIn("超时后", card)
 
+    def test_历史工作板展示报告账本缺失清单且没有操作组件(self) -> None:
+        board = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
+        history_path = WEB / "src" / "HistoricalResearchView.tsx"
+        self.assertTrue(history_path.is_file(), "历史只读视图尚未创建")
+        history = history_path.read_text(encoding="utf-8")
+        stream = (WEB / "src" / "useResearchStream.ts").read_text(encoding="utf-8")
+
+        self.assertIn("snapshot.snapshot_source === 'store'", board)
+        self.assertIn("<HistoricalResearchView", board)
+        for heading in ("历史只读", "报告产物", "章账本", "缺失清单"):
+            self.assertIn(heading, history)
+        for forbidden in ("ActionButtons", "ActionCardView", "<Button", "actions.map"):
+            self.assertNotIn(forbidden, history)
+        self.assertIn("loaded.snapshot_source === 'store'", stream)
+
+    def test_历史报告_JSON_信封优先展示正文而不是原始载荷(self) -> None:
+        history = (WEB / "src" / "HistoricalResearchView.tsx").read_text(encoding="utf-8")
+        self.assertIn("function readableReport", history)
+        self.assertIn("JSON.parse", history)
+        self.assertIn("parsed.sections", history)
+        self.assertIn("parsed['报告正文']", history)
+
     def test_卡片统一走_respond_并携带客户端请求ID(self) -> None:
         source = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
         self.assertIn("/api/cards/", source)
