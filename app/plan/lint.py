@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 26 条阻断校验和 7 类质量提示。"""
+"""计划树保存与批准前的 27 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections import Counter, deque
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
 
-from app.plan.model import Plan
+from app.plan.model import Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of
 
 
 _KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -44,6 +44,7 @@ _VALIDATORS: dict[str, tuple[int, int | None, bool]] = {
     "db_row_exists": (1, 1, False),
     "db_field_non_empty": (1, 1, False),
     "claims_backfilled": (1, None, False),
+    "sectioned_document_valid": (0, 0, False),
     "no_item_missing_rating": (0, 0, False),
     "rating_notes_matches_regex": (0, 0, False),
     "rating_notes_scores_match_columns": (0, 0, False),
@@ -873,6 +874,50 @@ def _rule_24(
     return messages
 
 
+
+# format=json 且顶层必须为数组的验证器（validator-registry §2.2/§2.7）；
+# 与节化文档信封（§2.2b）互斥，出现在节化章即拒绝保存。
+_ARRAY_VALIDATORS = frozenset({
+    "json_array_min_items", "json_array_between", "each_item_has",
+    "field_domain_whitelist", "no_item_missing_rating",
+    "rating_notes_matches_regex", "rating_notes_scores_match_columns",
+})
+
+
+def _rule_27(goals: list[dict[str, Any]]) -> list[str]:
+    """节化章（agents-spec §2.3.1）：shape 恒 object，禁止数组类验证器。"""
+    messages: list[str] = []
+    for goal, agent in _agents(goals):
+        kind = agent_kind_of(
+            str(agent.get("agent_id", "")),
+            agent.get("capability", {}).get("profile"),
+        )
+        output = agent.get("output", {})
+        if (
+            kind not in SECTIONED_CHAPTER_KINDS
+            or output.get("format") not in {"markdown", "json"}
+        ):
+            continue
+        location = f"{goal.get('goal_id')}/{agent.get('agent_id')}"
+        if output.get("shape") != "object":
+            messages.append(
+                f"[规则27] {location} 是节化章，output.shape 必须为 object"
+                f"（信封形，agents-spec §2.3.1），实际 {output.get('shape')!r}"
+            )
+        hits = sorted({
+            str(item).partition(":")[0]
+            for item in output.get("validators", [])
+            if str(item).partition(":")[0] in _ARRAY_VALIDATORS
+        })
+        if hits:
+            messages.append(
+                f"[规则27] {location} 是节化章，validators 不得含数组类验证器："
+                f"{'、'.join(hits)}；节化 json 产物按信封形使用 "
+                "sectioned_document_valid（agents-spec §2.3.1）"
+            )
+    return messages
+
+
 def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     messages: list[str] = []
     for _, agent in _agents(goals):
@@ -974,4 +1019,5 @@ def lint(
     errors.extend(_rule_24(goals, max_chapters_per_goal))
     errors.extend(_rule_25(raw, goals))
     errors.extend(_rule_26(goals))
+    errors.extend(_rule_27(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

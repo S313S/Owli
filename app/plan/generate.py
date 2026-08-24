@@ -22,7 +22,7 @@ from app.config import (
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import duplicate_collection_goal_ids, lint
-from app.plan.model import DEFAULT_RETRY_POLICY, Plan
+from app.plan.model import DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
 from app.sources.registry import planning_catalog
@@ -296,7 +296,8 @@ def _goal_prompt(
         "deliverable 含 format/path/description/shape，path 只写文件名，shape "
         "只能取 object/array；acceptance 是逐条可判定字符串数组；"
         "agents 每项只含 name、task、output，output 只含 shape 且只能取 "
-        "object/array，不得输出 id、engine、"
+        "object/array；交叉验证 / 报告撰写 / 摘要这类节化汇总章的 shape 及其"
+        "所属 deliverable.shape 一律取 object（节化文档信封形）；不得输出 id、engine、"
         "capability、prompt、状态、重试或时间字段。\n"
         "边界与降级：JSON 字符串值内部不得出现未转义的英文双引号，引用名称一律"
         "用中文引号「」；采集 JSON 顶层必须为数组且每条含 permalink、fetched_at；"
@@ -441,7 +442,15 @@ def _output(
                 "each_item_has:permalink,fetched_at",
             ],
         }
-    elif agent_kind in {"audit", "reliability_audit", "cross_validation"}:
+    elif agent_kind == "cross_validation":
+        # 节化章走 §2.3.1 信封形：验证器查信封结构；逐条评级类数组验证器
+        # 只属于非节化的 reliability_audit 章。shape 保留模型声明，非 object
+        # 由规则 27 拒绝（与规则 17 同一「生成保真、lint 把关」口径）。
+        result = {
+            "format": "json", "shape": shape, "path": f"{base}.json",
+            "validators": ["file_exists", "sectioned_document_valid"],
+        }
+    elif agent_kind in {"audit", "reliability_audit"}:
         result = {
             "format": "json", "shape": shape, "path": f"{base}.json",
             "validators": [
@@ -472,9 +481,13 @@ def _output(
         }
     if target is not None:
         if target["format"] != result["format"]:
-            result["validators"] = ["file_exists"]
-            if target["format"] == "excel":
-                result["validators"].append("openpyxl_reload_ok")
+            if agent_kind in SECTIONED_CHAPTER_KINDS and target["format"] == "json":
+                # 节化章的 json 交付物是 §2.3.1 信封，不再塌成裸 file_exists。
+                result["validators"] = ["file_exists", "sectioned_document_valid"]
+            else:
+                result["validators"] = ["file_exists"]
+                if target["format"] == "excel":
+                    result["validators"].append("openpyxl_reload_ok")
         result.update(format=target["format"], path=target["path"])
     return result
 
@@ -527,7 +540,15 @@ def _agent_prompt(
             "points>50、hitsPerPage=1000。"
         )
         evidence_rule = "事实须反向引用上游 permalink 与 fetched_at。"
-        if "no_item_missing_rating" in output["validators"]:
+        if "sectioned_document_valid" in output["validators"]:
+            evidence_rule += (
+                "本章走节化执行：你每次只写一个节的 Markdown 正文，最终产物由系统"
+                "确定性组装成节化文档信封（顶层 JSON object，固定含 title、chapter_id、"
+                "sections 数组与缺失清单，sections 每项含 section_id/goal_id/title/"
+                "markdown）。不要自行输出顶层 JSON 数组，也不要逐条评级——"
+                "五维评级校验属于可靠度审计章，不适用本文件。"
+            )
+        elif "no_item_missing_rating" in output["validators"]:
             evidence_rule += (
                 "本文件顶层必须是 JSON 数组；每个元素为一条评级条目，必须逐条带齐 "
                 "score_authority、score_freshness、score_crossref、score_completeness、"

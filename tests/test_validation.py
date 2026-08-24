@@ -404,11 +404,13 @@ def test_store_提供封闭的校验读取接口(tmp_path):
         store.read_validation_path("evidence; DROP TABLE reports", "research-1")
 
 
-def test_注册表是含别名的_28_个封闭名字(validation_env):
+def test_注册表是含别名的_29_个封闭名字(validation_env):
+    """28 + sectioned_document_valid（M4-a，validator-registry §2.2b）。"""
     validation, _ = validation_env
-    assert len(validation.REGISTRY) == 28
+    assert len(validation.REGISTRY) == 29
     assert "section_exists" in validation.REGISTRY
     assert "xlsx_sheets_exact" in validation.REGISTRY
+    assert "sectioned_document_valid" in validation.REGISTRY
 
 
 def test_owli_result_解析最后一个结论块并校验字段(validation_env):

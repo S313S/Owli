@@ -225,11 +225,13 @@ def _fix5_retry_case(tmp_path: Path, *, always_bad: bool):
     )
 
     valid = _valid_skeleton()
+    # 节化章 shape 恒 object（agents-spec §2.3.1，规则 27）。
+    valid["goals"][1]["deliverable"]["shape"] = "object"
     valid["goals"][1]["agents"] = [
         _agent(
             "交叉验证",
             "交叉验证全卷采集证据",
-            output={"shape": "array"},
+            output={"shape": "object"},
         )
     ]
     invalid_first = deepcopy(valid)

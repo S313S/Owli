@@ -296,6 +296,9 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
 def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_path) -> None:
     skeleton = _valid_skeleton()
     agent = _agent(name, task)
+    if name in {"交叉验证", "报告撰写", "摘要"}:
+        # 节化汇总章 shape 恒 object（agents-spec §2.3.1，规则 27）。
+        skeleton["goals"][0]["deliverable"]["shape"] = "object"
     agent["output"]["shape"] = skeleton["goals"][0]["deliverable"]["shape"]
     skeleton["goals"][0]["agents"] = [agent]
     _add_coverage_collector(skeleton)
@@ -309,8 +312,9 @@ def test_路由表逐项与四预设档映射(name, task, engine, profile, tmp_p
 
 def test_角色只按封闭名称分类_任务中的_API_不得误派报告_agent(tmp_path) -> None:
     skeleton = _valid_skeleton()
+    skeleton["goals"][0]["deliverable"]["shape"] = "object"
     skeleton["goals"][0]["agents"] = [
-        _agent("报告撰写", "撰写 API 竞品报告", output={"shape": "array"})
+        _agent("报告撰写", "撰写 API 竞品报告", output={"shape": "object"})
     ]
     _add_coverage_collector(skeleton)
 
@@ -372,9 +376,11 @@ def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) 
 
 
 def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> None:
+    """报告章 json 交付物按 §2.3.1 信封校验，不再塌成裸 file_exists（M4-a 改法 1）。"""
     skeleton = _valid_skeleton()
+    skeleton["goals"][0]["deliverable"]["shape"] = "object"
     skeleton["goals"][0]["agents"] = [
-        _agent("报告撰写", "输出 JSON 摘要", output={"shape": "array"})
+        _agent("报告撰写", "输出 JSON 摘要", output={"shape": "object"})
     ]
     _add_coverage_collector(skeleton)
 
@@ -382,7 +388,7 @@ def test_deliverable_格式改变时不沿用不兼容_validator(tmp_path) -> No
 
     output = plan.goals[0].agents[-1].output
     assert output["format"] == "json"
-    assert output["validators"] == ["file_exists"]
+    assert output["validators"] == ["file_exists", "sectioned_document_valid"]
 
 
 def test_lint_error_原文回灌并在第三次通过(tmp_path) -> None:

@@ -114,6 +114,114 @@ def enrich_source_section(
     return "\n".join(lines) + suffix
 
 
+_MARK = re.compile(r"\[S\d{2}\]")
+_LINK_URL = re.compile(r"\((https?://[^)\s]+)\)")
+
+
+def _subtree_spans(lines: Sequence[str]) -> list[tuple[int, int, str]]:
+    """(起始行, 结束行, 标题)；子树含标题行，延伸到下一个同级或更高级标题。"""
+    headings = [
+        (index, len(matched.group(1)), matched.group(2).strip())
+        for index, line in enumerate(lines)
+        if (matched := _HEADING.match(line))
+    ]
+    spans: list[tuple[int, int, str]] = []
+    for position, (start, level, title) in enumerate(headings):
+        end = len(lines)
+        for next_start, next_level, _ in headings[position + 1:]:
+            if next_level <= level:
+                end = next_start
+                break
+        spans.append((start, end, title))
+    return spans
+
+
+def _split_section_structures(text: str) -> tuple[str, str, list[str]]:
+    """摘出一节里的「结论 / 信息源 / 缺失清单」子树。
+
+    返回 (剩余正文, 结论正文, 信息源条目行)。节内缺失清单只摘不留 ——
+    拼装器按账本另写权威的一份，节内那份与之重复（worklog report-module §10.4）。
+    """
+    lines = text.splitlines()
+    removed: set[int] = set()
+    conclusion_parts: list[str] = []
+    source_lines: list[str] = []
+    for start, end, title in _subtree_spans(lines):
+        if start in removed:
+            continue
+        if title == "结论":
+            conclusion_parts.append("\n".join(lines[start + 1:end]).strip())
+        elif "信息源" in title:
+            source_lines.extend(
+                line for line in lines[start + 1:end] if line.strip()
+            )
+        elif "缺失清单" in title:
+            pass
+        else:
+            continue
+        removed.update(range(start, end))
+    remainder = "\n".join(
+        line for index, line in enumerate(lines) if index not in removed
+    ).strip()
+    return remainder, "\n\n".join(part for part in conclusion_parts if part), source_lines
+
+
+def merge_sectioned_markdown(
+    title: str, section_texts: Sequence[str], missing_lines: Sequence[str]
+) -> str:
+    """把各节 Markdown 归并成单结论、单信息源的整卷报告。
+
+    节按 goal 切且每节都带自己的「结论/信息源」，直接拼接会得到三份并列的
+    小报告（worklog report-module §10.4）。这里做确定性归并：各节的结论合入
+    章末唯一的「结论」，信息源按 permalink 去重合入唯一的「信息源」并全卷
+    统一重排 [SNN] 角标（各节独立编号会互相撞号）。
+    """
+    inventory: dict[str, tuple[str, str]] = {}  # 去重键 → (新角标, 条目行)
+    plain_source_lines: list[str] = []  # 无角标条目按原文去重保留，不参与重排
+    merged_sections: list[str] = []
+    merged_conclusions: list[str] = []
+    for index, text in enumerate(section_texts):
+        remainder, conclusion, source_lines = _split_section_structures(text)
+        mapping: dict[str, str] = {}
+        for line in source_lines:
+            mark_match = _MARK.search(line)
+            if mark_match is None:
+                if line not in plain_source_lines:
+                    plain_source_lines.append(line)
+                continue
+            old_mark = mark_match.group(0)
+            url_match = _LINK_URL.search(line)
+            key = url_match.group(1) if url_match else f"sec-{index}:{old_mark}"
+            if key not in inventory:
+                new_mark = f"[S{len(inventory) + 1:02d}]"
+                inventory[key] = (new_mark, line.replace(old_mark, new_mark, 1))
+            mapping[old_mark] = inventory[key][0]
+
+        def renumber(value: str) -> str:
+            return _MARK.sub(lambda m: mapping.get(m.group(0), m.group(0)), value)
+
+        if remainder:
+            merged_sections.append(renumber(remainder))
+        if conclusion:
+            merged_conclusions.append(renumber(conclusion))
+    blocks = [f"# {title}", ""]
+    for part in merged_sections:
+        blocks.extend([part, ""])
+    if merged_conclusions:
+        blocks.extend(["## 结论", "", *merged_conclusions, ""])
+    if inventory or plain_source_lines:
+        blocks.extend(["## 信息源", ""])
+        blocks.extend(line for _, line in inventory.values())
+        blocks.extend(plain_source_lines)
+        blocks.append("")
+    blocks.append("## 缺失清单")
+    if missing_lines:
+        blocks.extend(f"- {line}" for line in missing_lines)
+    else:
+        blocks.append("- 无。")
+    return "\n".join(blocks).rstrip() + "\n"
+
+
 def _report_ready(item: Mapping[str, Any]) -> dict[str, Any] | None:
     if not item.get("permalink") or not item.get("fetched_at"):
         return None

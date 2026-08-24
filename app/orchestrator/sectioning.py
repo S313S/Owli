@@ -16,6 +16,7 @@ from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
+from app.report.markdown import merge_sectioned_markdown
 
 
 SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
@@ -377,16 +378,16 @@ def _assemble(
             section_items=section_items, missing_items=missing_items,
         )
         return
-    blocks = [f"# {plan.title}", ""]
-    for item in section_items:
-        blocks.append(item["markdown"])
-        blocks.append("")
-    blocks.append("## 缺失清单")
-    if missing_items:
-        blocks.extend(f"- {item['text']}" for item in missing_items)
-    else:
-        blocks.append("- 无。")
-    output_path.write_text("\n".join(blocks).rstrip() + "\n", encoding="utf-8")
+    # Markdown 整卷报告做确定性归并：单结论、单信息源、全卷统一角标
+    #（M4-a 改法 3，worklog report-module §10.4）。
+    output_path.write_text(
+        merge_sectioned_markdown(
+            plan.title,
+            [item["markdown"] for item in section_items],
+            [item["text"] for item in missing_items],
+        ),
+        encoding="utf-8",
+    )
 
 
 async def run_sectioned_task(

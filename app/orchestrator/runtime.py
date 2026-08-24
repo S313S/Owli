@@ -27,7 +27,7 @@ from app.plan.cards import (
 )
 from app.plan.generate import generate_plan
 from app.plan.editing import apply_edit, approve
-from app.plan.model import Plan
+from app.plan.model import Plan, agent_kind_of
 from app.plan.store import load_plan
 from app.report.markdown import enrich_source_section, load_evidence_artifacts
 from app.reliability.audit import degrade_after_closed_set_retry
@@ -345,30 +345,7 @@ class RuntimeCoordinator:
         return plan
 
     def _agent_kind(self, agent: Any) -> str:
-        prefixes = {
-            "goal-planning": "goal_planning",
-            "plan-arbitration": "plan_arbitration",
-            "reliability-audit": "reliability_audit",
-            "cross-validation": "cross_validation",
-            "consistency-check": "consistency_check",
-            "report-writing": "report_writing",
-            "summary": "summary",
-            "tagging": "tagging",
-            "data-collection": "data_collection",
-            "browser-automation": "browser_automation",
-            "code-execution": "code_execution",
-            "excel-generation": "excel_generation",
-            "data-cleaning": "data_cleaning",
-        }
-        for prefix, kind in prefixes.items():
-            if agent.agent_id == prefix or agent.agent_id.startswith(f"{prefix}-"):
-                return kind
-        return {
-            "web-collector": "data_collection",
-            "report-writer": "report_writing",
-            "sandboxed-runner": "code_execution",
-            "readonly-analyst": "audit",
-        }.get(str(agent.capability.get("profile")), "audit")
+        return agent_kind_of(agent.agent_id, agent.capability.get("profile"))
 
     def _decision_context(self, plan: Plan) -> str:
         lines = ["决策天平答案（报告必须用对应 q-<n> Markdown 注释角标引用）："]
@@ -533,21 +510,28 @@ class RuntimeCoordinator:
             await context.on_event(event)
 
         if should_section(kind, task.output_format):
-            return await run_sectioned_task(
-                plan=plan,
-                agent=agent,
-                context=context,
-                base_task=task,
-                adapter=adapter,
-                store=self.store,
-                runs_root=self.runs_root,
-                now_iso=self.now_iso,
-                on_event=on_event,
-                timer=self.timer,
-                now=self.now,
-                deadline_at=getattr(context, "deadline_at", None),
-                engine_timeout_seconds=getattr(adapter, "timeout_seconds", None),
-            )
+            try:
+                return await run_sectioned_task(
+                    plan=plan,
+                    agent=agent,
+                    context=context,
+                    base_task=task,
+                    adapter=adapter,
+                    store=self.store,
+                    runs_root=self.runs_root,
+                    now_iso=self.now_iso,
+                    on_event=on_event,
+                    timer=self.timer,
+                    now=self.now,
+                    deadline_at=getattr(context, "deadline_at", None),
+                    engine_timeout_seconds=getattr(adapter, "timeout_seconds", None),
+                )
+            except asyncio.CancelledError:
+                # 墙钟取消 / stop 打断落在节执行中：在跑节复位成 pending，不留
+                # running 幽灵行（worklog 6b §九小缺陷 3）；父章终态由调度器按
+                # 取消原因落账（timeout → missing/deferred，stop → 复位）。
+                self._reset_running_sections(plan.research_id, context.goal_id)
+                raise
 
         result = await adapter.run(task, self._ctx(task), on_event=on_event)
         engine_error = getattr(result, "engine_error", None)
@@ -658,11 +642,25 @@ class RuntimeCoordinator:
             )
         return result
 
+    def _reset_running_sections(self, research_id: str, goal_id: str) -> None:
+        for row in self.store.list_chapters(research_id):
+            if (
+                row["goal_id"] == goal_id
+                and "/" in str(row["chapter_id"])
+                and row["status"] == "running"
+            ):
+                self.store.reset_running_chapter(
+                    research_id, goal_id, row["chapter_id"],
+                    updated_at=self.now_iso(),
+                )
+
     def _artifact_is_empty(self, task: Any) -> bool:
         """产物「有效条目为 0」——按 output 形态判，与 4a 的既有口径同源。
 
         文件缺失 / 空白正文一律算空（同 chapter_failure 的 empty_result 口径）；
-        json 数组看 len==0，json object 看有没有键；其余格式只要正文非空就不算空。
+        json 数组看 len==0，json object 看有没有键，且节化文档信封（§2.3.1）的
+        必备键 `sections` 为空即空（裁决点 6：字段都在但零收获不算完成）；
+        其余格式只要正文非空就不算空。
         与引擎无关，纯看落盘产物，所以放在 runtime 的章终态判定处。
         """
         path = getattr(task, "output_path", None)
@@ -685,7 +683,9 @@ class RuntimeCoordinator:
         if isinstance(artifact, list):
             return not artifact
         if isinstance(artifact, dict):
-            return not artifact
+            if not artifact:
+                return True
+            return "sections" in artifact and not artifact["sections"]
         return False
 
     def _record_unmet(

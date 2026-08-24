@@ -22,6 +22,43 @@ DEFAULT_RETRY_POLICY = {
 }
 OPTIONAL_RETRY_POLICY_FIELDS = frozenset({"chapter_deadline_seconds"})
 
+# agent_id 前缀 → 职能；运行期与 plan_lint 共用（原 runtime._agent_kind 内联表）。
+AGENT_KIND_PREFIXES = {
+    "goal-planning": "goal_planning",
+    "plan-arbitration": "plan_arbitration",
+    "reliability-audit": "reliability_audit",
+    "cross-validation": "cross_validation",
+    "consistency-check": "consistency_check",
+    "report-writing": "report_writing",
+    "summary": "summary",
+    "tagging": "tagging",
+    "data-collection": "data_collection",
+    "browser-automation": "browser_automation",
+    "code-execution": "code_execution",
+    "excel-generation": "excel_generation",
+    "data-cleaning": "data_cleaning",
+}
+_PROFILE_FALLBACK_KINDS = {
+    "web-collector": "data_collection",
+    "report-writer": "report_writing",
+    "sandboxed-runner": "code_execution",
+    "readonly-analyst": "audit",
+}
+
+# 节化职能闭集（agents-spec §2.3.1）。与 orchestrator.sectioning.SECTIONED_KINDS
+# 必须同口径——运行期那份零改动，由 tests/test_m4a_report_contract.py 锁一致。
+SECTIONED_CHAPTER_KINDS = frozenset(
+    {"cross_validation", "summary", "report", "report_writing"}
+)
+
+
+def agent_kind_of(agent_id: str, profile: Any = None) -> str:
+    """按 agent_id 前缀归职能；前缀不命中时退回 capability.profile。"""
+    for prefix, kind in AGENT_KIND_PREFIXES.items():
+        if agent_id == prefix or agent_id.startswith(f"{prefix}-"):
+            return kind
+    return _PROFILE_FALLBACK_KINDS.get(str(profile or ""), "audit")
+
 
 def _strict_fields(data: Mapping[str, Any], allowed: set[str], location: str) -> None:
     unknown = set(data) - allowed

@@ -349,6 +349,73 @@ def each_item_has(ctx: Ctx, arguments: list[str]) -> Result:
     return _result(Verdict.PASS, name, f"全部 {len(items)} 个元素字段齐全且非空")
 
 
+@validator("sectioned_document_valid")
+def sectioned_document_valid(ctx: Ctx, arguments: list[str]) -> Result:
+    """节化文档信封校验（validator-registry §2.2b，agents-spec §2.3.1 方案 B）。"""
+
+    name = "sectioned_document_valid"
+    if arguments:
+        return _result(Verdict.UNAVAILABLE, name, f"{name} 不接受参数")
+    try:
+        document = ctx.read_json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError) as exc:
+        return _result(
+            Verdict.FAIL, name, f"产物不是合法 JSON：{type(exc).__name__}: {exc}"
+        )
+    except OSError as exc:
+        return _result(
+            Verdict.UNAVAILABLE, name, f"无法读取 JSON 产物：{type(exc).__name__}: {exc}"
+        )
+    if not isinstance(document, dict):
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"顶层必须是节化文档信封 object，实际是 {type(document).__name__}",
+        )
+    # 闭集来源：orchestrator.chapter_failure（模块级互相引用成环，只能函数内导入）。
+    from app.orchestrator.chapter_failure import CHAPTER_FAILURE_REASONS
+
+    offenders: list[str] = []
+    for key in ("title", "chapter_id"):
+        value = document.get(key)
+        if not isinstance(value, str) or not value.strip():
+            offenders.append(f"{key}：缺失或为空")
+    sections = document.get("sections")
+    if not isinstance(sections, list):
+        offenders.append("sections：缺失或不是数组")
+    elif not sections:
+        offenders.append("sections：为空")
+    else:
+        for index, item in enumerate(sections):
+            if not isinstance(item, dict):
+                offenders.append(f"sections[{index}]：不是 object")
+                continue
+            for key in ("section_id", "goal_id", "title", "markdown"):
+                value = item.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    offenders.append(f"sections[{index}].{key}：缺失或为空")
+    missing_list = document.get("缺失清单")
+    if not isinstance(missing_list, list):
+        offenders.append("缺失清单：缺失或不是数组")
+    else:
+        for index, item in enumerate(missing_list):
+            reason = item.get("reason") if isinstance(item, dict) else None
+            if reason not in CHAPTER_FAILURE_REASONS:
+                offenders.append(f"缺失清单[{index}].reason：越出闭集（{reason!r}）")
+    if offenders:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"节化文档信封不合格，共 {len(offenders)} 处",
+            offenders,
+        )
+    return _result(
+        Verdict.PASS,
+        name,
+        f"节化文档信封合格：{len(sections)} 节、缺失清单 {len(missing_list)} 条",
+    )
+
+
 _HEADING = re.compile(r"(?m)^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 
 
@@ -859,4 +926,4 @@ for _name in _UNIMPLEMENTED:
     validator(_name)(_unimplemented(_name))
 
 
-assert len(REGISTRY) == 28, f"校验器注册表应为 28 项，实际 {len(REGISTRY)} 项"
+assert len(REGISTRY) == 29, f"校验器注册表应为 29 项，实际 {len(REGISTRY)} 项"
