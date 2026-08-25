@@ -25,6 +25,7 @@ from app.adapters.selfcheck import (
     probe_engines,
     validate_runtime_config,
 )
+from app.adapters.recall import PrimaryEngineRecallJudge
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.runtime import RuntimeCoordinator
@@ -41,6 +42,7 @@ from app.plan.editing import (
 from app.plan.model import Plan
 from app.plan.store import PlanRevisionConflict, load_plan, save_plan
 from app.store.dao import Store
+from app.store.recall import RecallRepository, RecallResult, RecallService
 
 
 def _utc_now() -> datetime:
@@ -88,6 +90,7 @@ def create_app(
     enable_test_routes: bool | None = None,
     routing_utc_clock: Callable[[], datetime] = _utc_now,
     scale_config: ResearchScaleConfig | None = None,
+    recall_service: RecallService | None = None,
 ) -> FastAPI:
     database = Path(database_path)
     schema = Path(schema_path)
@@ -105,6 +108,20 @@ def create_app(
     cards: dict[str, Card] = {}
     request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
+
+    async def default_recall_judge(query: str, candidates: Any) -> Any:
+        if adapter_factory is None:
+            from app.adapters.routing import RoutedAdapter
+
+            adapter = RoutedAdapter(utc_clock=routing_utc_clock)
+        else:
+            adapter = adapter_factory()
+        return await PrimaryEngineRecallJudge(adapter)(query, candidates)
+
+    product_recall_service = recall_service or RecallService(
+        RecallRepository(database),
+        judge=default_recall_judge,
+    )
 
     async def publish_plan_event(event: Any) -> None:
         """把规划期事件（分段落盘/重试）投进 SSE，规划过程对外可见。
@@ -174,6 +191,7 @@ def create_app(
     application.state.cards = cards
     application.state.request_cache = request_cache
     application.state.runtime = runtime
+    application.state.recall_service = product_recall_service
 
     def envelope(data: Any = None) -> dict[str, Any]:
         return {"ok": True, "data": data, "error": None}
@@ -184,6 +202,26 @@ def create_app(
             "data": None,
             "error": {"code": code, "message": message, "details": details},
         }
+
+    def similar_payload(result: RecallResult) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": item.candidate.report_id,
+                "title": item.candidate.title,
+                "completed_at": item.candidate.completed_at,
+                "similarity_reason": item.reason,
+                "same_item": item.same_item,
+                "confidence": item.confidence,
+                "reusable_elements": list(item.reusable_elements),
+                "tags": list(item.candidate.tags),
+                "sources": list(item.candidate.sources),
+                "match_label": item.match_label,
+                "query_mode": result.query_mode,
+                "bm25_score": item.candidate.bm25_score,
+                "keyword_score": item.candidate.keyword_score,
+            }
+            for item in result.matches
+        ]
 
     def read_historical_report(
         research_id: str, report_path: str | None
@@ -435,6 +473,7 @@ def create_app(
         query = request.query.strip()
         if not query:
             raise HTTPException(status_code=422, detail="需求文本不能为空")
+        recall_result = await product_recall_service.recall(query)
         research_id = f"r-{uuid.uuid4().hex[:12]}"
         researches[research_id] = runtime.initial_state(research_id, query)
         created_at = runtime.now_iso()
@@ -459,7 +498,10 @@ def create_app(
         )
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
-        response = envelope({"research_id": research_id, "similar": []})
+        response = envelope({
+            "research_id": research_id,
+            "similar": similar_payload(recall_result),
+        })
         request_cache[(scope, x_request_id)] = (200, copy.deepcopy(response))
         return response
 
