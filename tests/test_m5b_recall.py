@@ -111,6 +111,95 @@ def test_like转义百分号与下划线不会意外全表命中(tmp_path: Path)
     assert RecallRepository(database).search("%_", top_n=3).candidates == ()
 
 
+def test_fts零真实命中时跳过主引擎判重(tmp_path: Path) -> None:
+    from app.store.recall import RecallRepository, RecallService
+
+    database = _database(tmp_path)
+    _report(database, "r-tea", "茶叶品牌小红书声量分析")
+    judge_calls = []
+
+    async def judge(query, candidates):
+        judge_calls.append((query, candidates))
+        return ()
+
+    result = asyncio.run(
+        RecallService(RecallRepository(database), judge=judge).recall(
+            "OpenAI 与 Claude Code 开发工具对比"
+        )
+    )
+
+    assert result.query_mode == "fts5_bm25"
+    assert len(result.candidates) == 1
+    assert all(item.bm25_score is None for item in result.candidates)
+    assert judge_calls == []
+    assert result.matches == ()
+    assert result.degraded is False
+    assert result.degrade_reason is None
+
+
+def test_fts有真实bm25命中时仍调用主引擎判重(tmp_path: Path) -> None:
+    from app.store.recall import DuplicateDecision, RecallRepository, RecallService
+
+    database = _database(tmp_path)
+    _report(database, "r-openai", "OpenAI vs Claude Code")
+    judge_calls = []
+
+    async def judge(query, candidates):
+        judge_calls.append((query, candidates))
+        return (
+            DuplicateDecision(
+                report_id=candidates[0].report_id,
+                same_item=True,
+                confidence="高",
+                reason="开发工具与对比目标一致。",
+                reusable_elements=("报告骨架",),
+            ),
+        )
+
+    result = asyncio.run(
+        RecallService(RecallRepository(database), judge=judge).recall(
+            "OpenAI 与 Claude Code 开发工具对比"
+        )
+    )
+
+    assert result.query_mode == "fts5_bm25"
+    assert any(item.bm25_score is not None for item in result.candidates)
+    assert len(judge_calls) == 1
+    assert len(result.matches) == 1
+    assert result.degraded is False
+
+
+def test_like真实命中时仍调用主引擎判重(tmp_path: Path) -> None:
+    from app.store.recall import DuplicateDecision, RecallRepository, RecallService
+
+    database = _database(tmp_path)
+    _report(database, "r-feishu", "飞书协同办公产品竞品分析")
+    judge_calls = []
+
+    async def judge(query, candidates):
+        judge_calls.append((query, candidates))
+        return (
+            DuplicateDecision(
+                report_id=candidates[0].report_id,
+                same_item=True,
+                confidence="高",
+                reason="飞书研究对象一致。",
+                reusable_elements=("报告骨架",),
+            ),
+        )
+
+    result = asyncio.run(
+        RecallService(RecallRepository(database), judge=judge).recall("飞书")
+    )
+
+    assert result.query_mode == "like"
+    assert result.candidates[0].bm25_score is None
+    assert result.candidates[0].keyword_score > 0
+    assert len(judge_calls) == 1
+    assert len(result.matches) == 1
+    assert result.degraded is False
+
+
 def test_主引擎判重保留正反结论与理由(tmp_path: Path) -> None:
     from app.store.recall import DuplicateDecision, RecallRepository, RecallService
 

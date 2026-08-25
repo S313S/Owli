@@ -293,6 +293,19 @@ class RecallService:
         coarse = self._repository.search(query, top_n=self._judge_limit)
         if not coarse.candidates:
             return RecallResult(coarse.query_mode, (), (), False, None)
+        if (
+            coarse.query_mode == "fts5_bm25"
+            and not any(
+                item.bm25_score is not None for item in coarse.candidates
+            )
+        ):
+            return RecallResult(
+                coarse.query_mode,
+                coarse.candidates,
+                (),
+                False,
+                None,
+            )
         try:
             if self._judge is None:
                 raise RuntimeError("主引擎判重器未配置")
