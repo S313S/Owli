@@ -42,7 +42,7 @@ def test_v1数据库通过既有版本机制迁移且不改_evidence_冻结列(t
         actual_evidence_columns = {
             row[1] for row in connection.execute("PRAGMA table_xinfo(evidence)")
         }
-    assert version == 7
+    assert version == 8
     assert {"source_usage", "source_usage_billed_resource"} <= tables
     assert actual_evidence_columns == evidence_columns
 

@@ -53,6 +53,14 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
         <Progress percent={percent} showInfo={false} />
         <Typography.Text type="secondary">{snapshot.progress.summary}</Typography.Text>
       </div>
+      <Typography.Text type="secondary">
+        LLM 实测用量：调用 {snapshot.usage.calls} 次 · 输入 {snapshot.usage.input_tokens.toLocaleString()} ·
+        缓存命中 {snapshot.usage.cached_input_tokens.toLocaleString()} ·
+        缓存写入 {(snapshot.usage.cache_creation_input_tokens + snapshot.usage.cache_write_input_tokens).toLocaleString()} ·
+        输出 {snapshot.usage.output_tokens.toLocaleString()}
+        {snapshot.usage.reasoning_output_tokens ? `（推理 ${snapshot.usage.reasoning_output_tokens.toLocaleString()}）` : ''} ·
+        已知成本 ${snapshot.usage.cost_usd.toFixed(6)}（{snapshot.usage.costed_calls}/{snapshot.usage.calls} 次有成本）
+      </Typography.Text>
       <div className="goal-pips">
         {snapshot.goals.map((goal, index) => <Tag key={goal.id} color={statusColor[goal.status]}>{index + 1} {goal.title}</Tag>)}
       </div>

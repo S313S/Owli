@@ -52,6 +52,13 @@ export default function HistoricalResearchView({ snapshot }: { snapshot: Researc
       <Typography.Text type="secondary">
         账本终态 {snapshot.progress.done} / {snapshot.progress.total} 个 goal
       </Typography.Text>
+      <br />
+      <Typography.Text type="secondary">
+        LLM 实测用量：调用 {snapshot.usage.calls} 次 · 输入 {snapshot.usage.input_tokens.toLocaleString()} ·
+        缓存命中 {snapshot.usage.cached_input_tokens.toLocaleString()} ·
+        输出 {snapshot.usage.output_tokens.toLocaleString()} ·
+        已知成本 ${snapshot.usage.cost_usd.toFixed(6)}（{snapshot.usage.costed_calls}/{snapshot.usage.calls} 次有成本）
+      </Typography.Text>
     </Card>
 
     <section className="history-grid">

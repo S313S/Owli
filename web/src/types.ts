@@ -114,6 +114,18 @@ export type ResearchPlan = {
   updated_at: string
 }
 
+export type LlmUsage = {
+  input_tokens: number
+  cached_input_tokens: number
+  cache_creation_input_tokens: number
+  cache_write_input_tokens: number
+  output_tokens: number
+  reasoning_output_tokens: number
+  cost_usd: number
+  calls: number
+  costed_calls: number
+}
+
 export type ResearchSnapshot = {
   research_id: string
   title: string
@@ -121,6 +133,7 @@ export type ResearchSnapshot = {
   status_label: string
   snapshot_source?: 'store'
   progress: { done: number; total: number; summary: string }
+  usage: LlmUsage
   report_path?: string | null
   report_content?: string | null
   summary?: string | null
@@ -145,6 +158,7 @@ export type ChapterProgress = {
   conclusion_error?: string | null
   actual_output_path?: string | null
   actual_count?: number | null
+  extra?: { usage?: LlmUsage }
   updated_at: string
 }
 

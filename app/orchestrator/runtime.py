@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from enum import Enum
@@ -39,6 +40,7 @@ from app.reliability.audit import degrade_after_closed_set_retry
 
 
 AdapterFactory = Callable[[], Any]
+logger = logging.getLogger(__name__)
 
 #: 调度器状态 → 工作板状态文案。API 只做映射，不自己猜研究处于什么状态。
 SCHEDULER_STATUS_LABELS = {
@@ -50,6 +52,17 @@ SCHEDULER_STATUS_LABELS = {
 }
 #: 收尾已经落定的状态，不再被调度器状态覆盖。
 REPORT_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+EMPTY_LLM_USAGE = {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "cost_usd": 0.0,
+    "calls": 0,
+    "costed_calls": 0,
+}
 
 
 class RuntimeCoordinator:
@@ -97,6 +110,10 @@ class RuntimeCoordinator:
 
     def now_iso(self) -> str:
         return self.now().isoformat()
+
+    def _research_usage(self, research_id: str) -> dict[str, int | float]:
+        aggregate = getattr(self.store, "aggregate_research_usage", None)
+        return dict(EMPTY_LLM_USAGE) if aggregate is None else aggregate(research_id)
 
     def scheduler_for(self, research_id: str) -> Any | None:
         return self._schedulers.get(research_id)
@@ -185,6 +202,7 @@ class RuntimeCoordinator:
             "status": "planning",
             "status_label": "正在生成计划",
             "progress": {"done": 0, "total": 0, "summary": "正在生成调研计划"},
+            "usage": self._research_usage(research_id),
             "actions": [],
             "goals": [],
             "cards": [],
@@ -233,6 +251,7 @@ class RuntimeCoordinator:
             return None
         scheduler = self.scheduler_for(research_id)
         if scheduler is None or state.get("status") in REPORT_TERMINAL_STATUSES:
+            state["usage"] = self._research_usage(research_id)
             return state
         status = str(getattr(scheduler, "status", "") or "")
         if status in {"", "ready"}:
@@ -243,6 +262,7 @@ class RuntimeCoordinator:
             state["actions"] = self.running_actions(research_id)
         elif status == "completed":
             state["actions"] = []
+        state["usage"] = self._research_usage(research_id)
         return state
 
     def _state_from_plan(self, plan: Plan) -> dict[str, Any]:
@@ -256,6 +276,7 @@ class RuntimeCoordinator:
                 "total": len(plan.goals),
                 "summary": "计划已生成，等待回答追问并批准",
             },
+            "usage": self._research_usage(plan.research_id),
             "actions": [],
             "goals": [
                 {
@@ -493,6 +514,8 @@ class RuntimeCoordinator:
         task = self._task(plan, agent, context)
         adapter = self._adapters[plan.research_id]
         observed_causes: set[str] = set()
+        chapter = agent.chapter if isinstance(agent.chapter, dict) else {}
+        chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
 
         async def on_event(event: Any) -> None:
             if isinstance(event, dict):
@@ -501,6 +524,27 @@ class RuntimeCoordinator:
             else:
                 cause = getattr(event, "cause", None)
                 raw = getattr(event, "raw", None)
+            usage = None if isinstance(event, dict) else getattr(event, "usage", None)
+            research_usage = None
+            if isinstance(usage, dict):
+                try:
+                    self.store.record_chapter_usage(
+                        plan.research_id,
+                        context.goal_id,
+                        chapter_id,
+                        usage,
+                    )
+                    research_usage = self._research_usage(plan.research_id)
+                    state = self.researches.get(plan.research_id)
+                    if state is not None:
+                        state["usage"] = research_usage
+                except Exception:
+                    logger.exception(
+                        "LLM usage 计量失败，不改变章节调度结果：%s/%s/%s",
+                        plan.research_id,
+                        context.goal_id,
+                        chapter_id,
+                    )
             if cause is not None:
                 observed_causes.add(str(getattr(cause, "value", cause)))
             if isinstance(raw, dict) and raw.get("http_status", raw.get("status_code")) == 429:
@@ -525,6 +569,8 @@ class RuntimeCoordinator:
                         "item_kind": self._plain(getattr(event, "item_kind", None)),
                         "text": str(getattr(event, "text", "")),
                         "is_error": bool(getattr(event, "is_error", False)),
+                        "usage": self._plain(usage),
+                        "research_usage": self._plain(research_usage),
                     },
                 },
             )

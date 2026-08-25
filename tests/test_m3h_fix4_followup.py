@@ -172,7 +172,7 @@ def test_E1_v5账本迁移到v6后接受_timeout(tmp_path: Path) -> None:
 
     with sqlite3.connect(database) as connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 7
+    assert version == 8
     assert store.list_chapters("r-ledger")[0]["reason"] == "timeout"
 
 

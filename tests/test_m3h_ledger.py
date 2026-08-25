@@ -49,6 +49,7 @@ def test_章节账本表与固定接口记录实际结尾(tmp_path):
         "status": "done", "attempts": 1, "engine": "codex", "reason": None,
         "engine_error": None, "conclusion_error": None,
         "actual_output_path": "goals/goal-1/data.json", "actual_count": 3,
+        "extra": {},
         "updated_at": "2026-08-22T00:02:00Z",
     }
     assert store.start_chapter(
@@ -102,7 +103,7 @@ def test_v3章节账本迁移后增加错误原文字段(tmp_path):
         columns = {
             row[1] for row in connection.execute("PRAGMA table_xinfo(chapter_progress)")
         }
-    assert version == 7
+    assert version == 8
     assert {"engine_error", "conclusion_error"} <= columns
 
 
@@ -153,7 +154,7 @@ def test_v4章节账本迁移后接受结论无效原因(tmp_path):
 
     initialize_database_if_empty(database, SCHEMA)
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
         connection.execute("INSERT INTO reports (id) VALUES ('r-ledger')")
     store = Store(database)
     store.ensure_chapters(

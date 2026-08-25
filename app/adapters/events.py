@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
@@ -35,6 +36,60 @@ class NormalizedEvent:
     allow_current_task_to_finish: bool = False
     outcome: str | None = None
     cause: str | None = None
+    usage: dict[str, int | float | None] | None = None
+
+
+def _token_count(value: Any) -> int:
+    """只接收引擎实测的非负整数；缺失或异常字段按 0 归一。"""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
+
+
+def _cost_usd(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    cost = float(value)
+    return cost if cost >= 0 and math.isfinite(cost) else None
+
+
+def _claude_usage(message: Any) -> dict[str, int | float | None] | None:
+    usage = getattr(message, "usage", None)
+    if not isinstance(usage, Mapping):
+        return None
+    return {
+        "input_tokens": _token_count(usage.get("input_tokens")),
+        "cached_input_tokens": _token_count(usage.get("cache_read_input_tokens")),
+        "cache_creation_input_tokens": _token_count(
+            usage.get("cache_creation_input_tokens")
+        ),
+        "cache_write_input_tokens": 0,
+        "output_tokens": _token_count(usage.get("output_tokens")),
+        "reasoning_output_tokens": 0,
+        "cost_usd": _cost_usd(getattr(message, "total_cost_usd", None)),
+    }
+
+
+def _codex_usage(raw: Mapping[str, Any]) -> dict[str, int | float | None] | None:
+    usage = raw.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    return {
+        "input_tokens": _token_count(usage.get("input_tokens")),
+        "cached_input_tokens": _token_count(usage.get("cached_input_tokens")),
+        "cache_creation_input_tokens": _token_count(
+            usage.get("cache_creation_input_tokens")
+        ),
+        "cache_write_input_tokens": _token_count(
+            usage.get("cache_write_input_tokens")
+        ),
+        "output_tokens": _token_count(usage.get("output_tokens")),
+        "reasoning_output_tokens": _token_count(
+            usage.get("reasoning_output_tokens")
+        ),
+        "cost_usd": _cost_usd(usage.get("cost_usd")),
+    }
 
 
 def _message_ids(
@@ -67,6 +122,7 @@ def _event(
     is_error: bool = False,
     outcome: str | None = None,
     cause: str | None = None,
+    usage: dict[str, int | float | None] | None = None,
 ) -> NormalizedEvent:
     return NormalizedEvent(
         engine="Claude",
@@ -78,6 +134,7 @@ def _event(
         raw=message,
         outcome=outcome,
         cause=cause,
+        usage=usage,
     )
 
 
@@ -182,6 +239,7 @@ def normalize_claude_event(
             item_kind=ItemKind.ERROR if is_error else ItemKind.DONE,
             text=getattr(message, "result", "") or "",
             is_error=is_error,
+            usage=_claude_usage(message),
         )]
     if isinstance(message, sdk.SystemMessage):
         subtype = str(getattr(message, "subtype", ""))
@@ -255,5 +313,12 @@ def normalize_codex_event(
         kind, is_error = ItemKind.THINKING, False
         text = f"[{native_kind}] {text}"
     return [NormalizedEvent(
-        "Codex", current_thread, current_turn, kind, text, is_error, raw
+        "Codex",
+        current_thread,
+        current_turn,
+        kind,
+        text,
+        is_error,
+        raw,
+        usage=_codex_usage(raw) if event_type == "turn.completed" else None,
     )]

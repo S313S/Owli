@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import copy
+import json
+import math
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -78,6 +79,14 @@ _CHAPTER_REASONS = {
     "empty_result", "tool_unavailable", "quota_exhausted", "retry_exhausted",
     "conclusion_invalid", "timeout",
 }
+_USAGE_TOKEN_FIELDS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_creation_input_tokens",
+    "cache_write_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+)
 
 
 class PlanSnapshotConflict(RuntimeError):
@@ -681,20 +690,115 @@ class Store:
                 rows,
             )
 
+    def record_chapter_usage(
+        self,
+        research_id: str,
+        goal_id: str,
+        chapter_id: str,
+        usage: Mapping[str, Any],
+    ) -> None:
+        """把一次引擎终态实测量原子累加进当前章的受控 extra。"""
+
+        normalized: dict[str, int | float | None] = {}
+        for key in _USAGE_TOKEN_FIELDS:
+            value = usage.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"usage.{key} 必须是非负整数")
+            normalized[key] = value
+        raw_cost = usage.get("cost_usd")
+        if raw_cost is None:
+            normalized["cost_usd"] = None
+        elif (
+            isinstance(raw_cost, bool)
+            or not isinstance(raw_cost, (int, float))
+            or raw_cost < 0
+            or not math.isfinite(float(raw_cost))
+        ):
+            raise ValueError("usage.cost_usd 必须是非负有限数或 null")
+        else:
+            normalized["cost_usd"] = float(raw_cost)
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT extra FROM chapter_progress
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                """,
+                (research_id, goal_id, chapter_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"章节账本不存在：{research_id}/{goal_id}/{chapter_id}")
+            extra = json.loads(row["extra"])
+            if not isinstance(extra, dict):
+                raise TypeError("chapter_progress.extra 必须是 object")
+            previous = extra.get("usage")
+            previous = previous if isinstance(previous, dict) else {}
+            accumulated: dict[str, int | float | None] = {
+                key: int(previous.get(key, 0)) + int(normalized[key] or 0)
+                for key in _USAGE_TOKEN_FIELDS
+            }
+            previous_cost = previous.get("cost_usd")
+            known_cost = (
+                float(previous_cost)
+                if isinstance(previous_cost, (int, float))
+                else 0.0
+            )
+            new_cost = normalized["cost_usd"]
+            accumulated["cost_usd"] = (
+                known_cost + float(new_cost)
+                if new_cost is not None or previous_cost is not None
+                else None
+            )
+            accumulated["calls"] = int(previous.get("calls", 0)) + 1
+            accumulated["costed_calls"] = int(previous.get("costed_calls", 0)) + int(
+                new_cost is not None
+            )
+            extra["usage"] = accumulated
+            connection.execute(
+                """
+                UPDATE chapter_progress SET extra = ?
+                WHERE research_id = ? AND goal_id = ? AND chapter_id = ?
+                """,
+                (_extra_text(extra), research_id, goal_id, chapter_id),
+            )
+
+    def aggregate_research_usage(self, research_id: str) -> dict[str, int | float]:
+        """逐字段汇总章账本；已知成本与计价覆盖调用数分开返回。"""
+
+        result: dict[str, int | float] = {
+            **{key: 0 for key in _USAGE_TOKEN_FIELDS},
+            "cost_usd": 0.0,
+            "calls": 0,
+            "costed_calls": 0,
+        }
+        for row in self.list_chapters(research_id):
+            usage = row["extra"].get("usage")
+            if not isinstance(usage, dict):
+                continue
+            for key in (*_USAGE_TOKEN_FIELDS, "calls", "costed_calls"):
+                result[key] += int(usage.get(key, 0) or 0)
+            result["cost_usd"] += float(usage.get("cost_usd") or 0.0)
+        return result
+
     def list_chapters(self, research_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT research_id, goal_id, chapter_id, status, attempts,
                        engine, reason, engine_error, conclusion_error,
-                       actual_output_path, actual_count, updated_at
+                       actual_output_path, actual_count, extra, updated_at
                 FROM chapter_progress
                 WHERE research_id = ?
                 ORDER BY goal_id, chapter_id
                 """,
                 (research_id,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["extra"] = json.loads(item["extra"])
+            result.append(item)
+        return result
 
     def runnable_chapter_keys(self, research_id: str) -> set[tuple[str, str]]:
         return {

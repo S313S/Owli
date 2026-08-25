@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ApiEnvelope, NormalizedEvent, ResearchSnapshot } from './types'
+import type { ApiEnvelope, LlmUsage, NormalizedEvent, ResearchSnapshot } from './types'
+
+const EMPTY_LLM_USAGE: LlmUsage = {
+  input_tokens: 0,
+  cached_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+  cache_write_input_tokens: 0,
+  output_tokens: 0,
+  reasoning_output_tokens: 0,
+  cost_usd: 0,
+  calls: 0,
+  costed_calls: 0,
+}
 
 const eventTypes = [
   'stream_connected', 'research_snapshot', 'research_update', 'progress',
   'agent_update', 'card_update', 'artifact', 'error', 'replay_truncated',
+  'normalized_event',
 ]
 
 export function useResearchStream(researchId: string) {
@@ -57,7 +70,12 @@ export function useResearchStream(researchId: string) {
 
 function reduceEvent(current: ResearchSnapshot | null, event: NormalizedEvent): ResearchSnapshot | null {
   const data = event.data ?? {}
-  if (event.type === 'research_snapshot') return data as unknown as ResearchSnapshot
+  if (event.type === 'research_snapshot') {
+    return {
+      ...data,
+      usage: data.usage ?? current?.usage ?? EMPTY_LLM_USAGE,
+    } as unknown as ResearchSnapshot
+  }
   if (!current) return current
   const eventLine = { ...event }
   if (event.type === 'research_update') {
@@ -65,6 +83,9 @@ function reduceEvent(current: ResearchSnapshot | null, event: NormalizedEvent): 
   }
   if (event.type === 'progress') {
     return { ...current, progress: { ...current.progress, ...data }, events: [eventLine, ...current.events].slice(0, 200) } as ResearchSnapshot
+  }
+  if (event.type === 'normalized_event' && data.research_usage) {
+    return { ...current, usage: data.research_usage, events: [eventLine, ...current.events].slice(0, 200) } as ResearchSnapshot
   }
   if (event.type === 'card_update' && data.card) {
     const card = data.card as ResearchSnapshot['cards'][number]

@@ -295,6 +295,7 @@ def create_app(
                 "total": len(goals),
                 "summary": summary_line,
             },
+            "usage": store.aggregate_research_usage(research_id),
             "report_path": report_path,
             "report_content": read_historical_report(research_id, report_path),
             "summary": summary,

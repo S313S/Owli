@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-_LATEST_SCHEMA_VERSION = 7
+_LATEST_SCHEMA_VERSION = 8
 
 
 def initialize_database_if_empty(
@@ -49,6 +49,8 @@ def _apply_migrations(
         }
         if version == 4 and {"engine_error", "conclusion_error"} <= chapter_columns:
             connection.execute("PRAGMA user_version = 4")
+        elif version == 8 and "extra" in chapter_columns:
+            connection.execute("PRAGMA user_version = 8")
         else:
             connection.executescript(matches[0].read_text(encoding="utf-8"))
         migrated_version = connection.execute("PRAGMA user_version").fetchone()[0]
