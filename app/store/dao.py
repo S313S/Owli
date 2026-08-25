@@ -88,6 +88,7 @@ _USAGE_TOKEN_FIELDS = (
     "output_tokens",
     "reasoning_output_tokens",
 )
+_GENERIC_REPORT_TAGS = {"调研", "报告"}
 
 
 class PlanSnapshotConflict(RuntimeError):
@@ -141,6 +142,29 @@ def _value_type(value: Any) -> str:
 
 def _string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _normalize_report_tags(tags: Iterable[str], *, source: str) -> list[str]:
+    if source not in {"agent", "user"}:
+        raise ValueError("report_tags.source 只能是 agent 或 user")
+    if isinstance(tags, (str, bytes)):
+        raise TypeError("报告标签必须是字符串序列")
+    normalized: set[str] = set()
+    for tag in tags:
+        if not isinstance(tag, str):
+            raise TypeError("报告标签必须全部是字符串")
+        value = tag.strip()
+        if not value:
+            raise ValueError("报告标签不得为空")
+        normalized.add(value)
+    ordered = sorted(normalized)
+    if source == "agent":
+        if not 3 <= len(ordered) <= 8:
+            raise ValueError("agent 报告标签必须为 3–8 个")
+        generic = sorted(_GENERIC_REPORT_TAGS.intersection(ordered))
+        if generic:
+            raise ValueError(f"agent 报告标签不得使用泛化词：{generic}")
+    return ordered
 
 
 def _validate_evidence_extra(extra: dict[str, Any]) -> None:
@@ -1067,10 +1091,16 @@ class Store:
         summary: str | None = None,
         summary_line: str | None = None,
         report_path: str | None = None,
+        agent_tags: Iterable[str] | None = None,
     ) -> None:
         """用具名字段完成或终止报告，禁止调用方拼接 SQL。"""
         if status not in {"completed", "failed"}:
             raise ValueError("finish_report.status 只能是 completed 或 failed")
+        normalized_tags = (
+            None
+            if agent_tags is None
+            else _normalize_report_tags(agent_tags, source="agent")
+        )
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -1091,6 +1121,107 @@ class Store:
             )
             if cursor.rowcount != 1:
                 raise KeyError(f"报告不存在：{report_id}")
+            if status == "completed":
+                if normalized_tags is not None:
+                    self._replace_report_tags(
+                        connection,
+                        report_id,
+                        normalized_tags,
+                        source="agent",
+                        created_at=completed_at,
+                    )
+                self._sync_recall_fts(connection, report_id)
+
+    def replace_report_tags(
+        self,
+        report_id: str,
+        tags: Iterable[str],
+        *,
+        source: str,
+        created_at: str,
+    ) -> None:
+        """替换报告标签现值，并在同一事务同步 completed 报告召回文档。"""
+
+        normalized_tags = _normalize_report_tags(tags, source=source)
+        if not str(created_at).strip():
+            raise ValueError("report_tags.created_at 不得为空")
+        with self._connect() as connection:
+            self._replace_report_tags(
+                connection,
+                report_id,
+                normalized_tags,
+                source=source,
+                created_at=created_at,
+            )
+            self._sync_recall_fts(connection, report_id)
+
+    def backfill_recall_index(self) -> int:
+        """按 completed 报告全量重建召回索引；可安全重复执行。"""
+
+        with self._connect() as connection:
+            connection.execute("DELETE FROM recall_fts")
+            report_ids = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM reports WHERE status = 'completed' ORDER BY id"
+                ).fetchall()
+            ]
+            for report_id in report_ids:
+                self._sync_recall_fts(connection, report_id)
+        return len(report_ids)
+
+    def _replace_report_tags(
+        self,
+        connection: sqlite3.Connection,
+        report_id: str,
+        tags: Iterable[str],
+        *,
+        source: str,
+        created_at: str,
+    ) -> None:
+        exists = connection.execute(
+            "SELECT 1 FROM reports WHERE id = ?", (report_id,)
+        ).fetchone()
+        if exists is None:
+            raise KeyError(f"报告不存在：{report_id}")
+        connection.execute(
+            "DELETE FROM report_tags WHERE report_id = ?", (report_id,)
+        )
+        connection.executemany(
+            "INSERT INTO report_tags(report_id, tag, source, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (report_id, tag, source, created_at)
+                for tag in tags
+            ],
+        )
+
+    def _sync_recall_fts(
+        self, connection: sqlite3.Connection, report_id: str
+    ) -> None:
+        report = connection.execute(
+            "SELECT title, summary_line, status FROM reports WHERE id = ?",
+            (report_id,),
+        ).fetchone()
+        if report is None:
+            raise KeyError(f"报告不存在：{report_id}")
+        connection.execute(
+            "DELETE FROM recall_fts WHERE report_id = ?", (report_id,)
+        )
+        if report["status"] != "completed":
+            return
+        tags = " ".join(
+            row["tag"]
+            for row in connection.execute(
+                "SELECT tag FROM report_tags WHERE report_id = ? ORDER BY tag",
+                (report_id,),
+            ).fetchall()
+        )
+        connection.execute(
+            "INSERT INTO recall_fts(report_id, title, tags, summary_line) "
+            "VALUES (?, ?, ?, ?)",
+            (report_id, report["title"], tags, report["summary_line"]),
+        )
 
     def read_validation_path(self, path: str, report_id: str) -> Any:
         """按封闭路径读取校验数据；调用方不能传 SQL 或表名片段。"""

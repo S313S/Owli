@@ -1152,6 +1152,40 @@ class RuntimeCoordinator:
     def _report_path(self, plan: Plan) -> Path:
         return self._report_target(plan)[0]
 
+    def _completed_agent_tags(self, plan: Plan) -> list[str] | None:
+        """只读取账本已完成的 tagging 章产物，不在运行期生成标签。"""
+
+        completed = {
+            (row["goal_id"], row["chapter_id"])
+            for row in self.store.list_chapters(plan.research_id)
+            if row["status"] == "done"
+        }
+        latest: list[str] | None = None
+        for goal in plan.goals:
+            for agent in goal.agents:
+                if self._agent_kind(agent) != "tagging":
+                    continue
+                chapter = agent.chapter if isinstance(agent.chapter, dict) else {}
+                chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
+                if (goal.goal_id, chapter_id) not in completed:
+                    continue
+                path = self.runs_root / plan.research_id / str(agent.output["path"])
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"已完成 tagging 章产物不可读取：{goal.goal_id}/{chapter_id}"
+                    ) from exc
+                if not isinstance(value, list) or not all(
+                    isinstance(item, str) for item in value
+                ):
+                    raise ValueError(
+                        f"已完成 tagging 章产物必须是字符串数组："
+                        f"{goal.goal_id}/{chapter_id}"
+                    )
+                latest = list(value)
+        return latest
+
     def _missing_entries(self, research_id: str) -> list[dict[str, Any]]:
         """章节缺失 + unmet，逐条带 goal/chapter/reason 与成文文本。"""
         entries = [
@@ -1386,6 +1420,7 @@ class RuntimeCoordinator:
                 else "全部 goal 已完成"
             ),
             report_path=stored_path,
+            agent_tags=self._completed_agent_tags(plan),
         )
         state = self.researches[research_id]
         state["status"] = report_status

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sqlite3
 import sys
 import tempfile
 from collections import Counter
@@ -148,6 +149,20 @@ def _skeleton() -> dict[str, Any]:
                 "agents": [{"name": "报告撰写", "task": "撰写飞书竞品优缺点报告",
                             "output": {"shape": "object"}}],
             },
+            {
+                "title": "报告标签",
+                "objective": "为已生成报告产出受控标签。",
+                "depends_on": ["goal-3"],
+                "deliverable": {
+                    "format": "json",
+                    "shape": "array",
+                    "path": "tags.json",
+                    "description": "3–8 个报告标签。",
+                },
+                "acceptance": ["报告标签为 3–8 个非空字符串"],
+                "agents": [{"name": "标签", "task": "生成受控报告标签",
+                            "output": {"shape": "array"}}],
+            },
         ]
     }
 
@@ -182,7 +197,9 @@ class DemoEngine:
                     task.body.split("系统声明 output.path=", 1)[1].split("。", 1)[0]
                 )
                 payload = {
-                    "chapter_type": {1: "collection", 2: "audit", 3: "report"}[goal_number],
+                    "chapter_type": {
+                        1: "collection", 2: "audit", 3: "report", 4: "tagging"
+                    }[goal_number],
                     "opening": {
                         "inputs": [], "task": "执行本章", "acceptance": ["产物通过校验"],
                     },
@@ -267,6 +284,15 @@ class DemoEngine:
                 render_report(conclusions, evidence), encoding="utf-8"
             )
             return SimpleNamespace(succeeded=True)
+        if task.agent_kind == "tagging":
+            task.output_path.write_text(
+                json.dumps(
+                    ["协作软件", "效率工具", "飞书", "自动化优先"],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(succeeded=True)
         raise AssertionError(f"未覆盖的 agent_kind：{task.agent_kind}")
 
 
@@ -301,7 +327,12 @@ async def main() -> int:
             runs_root=root / "runs",
             auto_confirm=True,
         )
+        before_recall_count = -1
         async with application.router.lifespan_context(application):
+            with sqlite3.connect(root / "owli.db") as connection:
+                before_recall_count = connection.execute(
+                    "SELECT count(*) FROM recall_fts"
+                ).fetchone()[0]
             transport = httpx.ASGITransport(app=application)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 created = await client.post(
@@ -329,6 +360,18 @@ async def main() -> int:
         )
         stored_counts = Counter(row["platform"] for row in stored_rows)
         marks = sorted(set(re.findall(r"\[S\d{2}\]", text)))
+        with sqlite3.connect(root / "owli.db") as connection:
+            tag_rows = connection.execute(
+                "SELECT tag, source FROM report_tags "
+                "WHERE report_id = ? ORDER BY tag",
+                (research_id,),
+            ).fetchall()
+            recall_rows = connection.execute(
+                "SELECT report_id, title, tags, summary_line FROM recall_fts "
+                "WHERE report_id = ?",
+                (research_id,),
+            ).fetchall()
+        expected_tags = " ".join(row[0] for row in tag_rows)
         passed = (
             state["status"] == "completed"
             and all(counts[source_id] >= 1 for source_id in SOURCE_ORDER)
@@ -336,6 +379,16 @@ async def main() -> int:
             and [row["citation_no"] for row in stored_rows] == [1, 2, 3]
             and marks == ["[S01]", "[S02]", "[S03]"]
             and all("rating_notes=" in line for line in text.splitlines() if line.startswith("- [S"))
+            and before_recall_count == 0
+            and len(recall_rows) == 1
+            and tag_rows
+            and all(source == "agent" for _, source in tag_rows)
+            and recall_rows[0] == (
+                research_id,
+                report["title"],
+                expected_tags,
+                report["summary_line"],
+            )
         )
         print(
             "M3 三源无人值守："
@@ -347,6 +400,12 @@ async def main() -> int:
             + "，".join(f"{item}={stored_counts[item]}" for item in SOURCE_ORDER)
         )
         print("信息源清单角标：" + " ".join(marks))
+        print(
+            f"recall_fts 行数：改前={before_recall_count}，"
+            f"改后={len(recall_rows)}"
+        )
+        print("report_tags：" + json.dumps(tag_rows, ensure_ascii=False))
+        print("recall_fts 文档：" + json.dumps(recall_rows, ensure_ascii=False))
         return 0 if passed else 1
 
 
