@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 6;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 7;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -38,6 +38,19 @@ CREATE TABLE reports (
 
 CREATE INDEX idx_reports_status  ON reports(status);
 CREATE INDEX idx_reports_created ON reports(created_at);
+
+-- research 事件日志：SSE 序号与断点补发的持久事实源
+CREATE TABLE events (
+  research_id TEXT NOT NULL,
+  sequence    INTEGER NOT NULL CHECK (sequence > 0),
+  type        TEXT NOT NULL,
+  payload     TEXT NOT NULL CHECK (json_valid(payload)),
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (research_id, sequence)
+) STRICT;
+
+CREATE INDEX idx_events_research_created
+ON events(research_id, created_at, sequence);
 
 -- ═══════════════════════════════════════════
 -- 证据表：报告引用的每一条原始信息源记录
@@ -231,4 +244,4 @@ CREATE VIRTUAL TABLE recall_fts USING fts5(
   tokenize = 'trigram'
 );
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

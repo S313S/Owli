@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -87,6 +88,72 @@ class EventBufferTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             replay.events[0].payload["data"]["goals"][0]["status"], "queued"
         )
+
+    async def test_事件以数据库为事实源且跨缓冲器实例续号(self) -> None:
+        from app.api.events import ResearchEventBuffer
+        from app.store.dao import Store
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "owli.db"
+            with sqlite3.connect(database) as connection:
+                connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            store = Store(database)
+            store.create_report(
+                id="r-restart",
+                title="跨重启事件",
+                research_question="事件序号能否连续？",
+                created_at=self.clock().isoformat(),
+            )
+            before_restart = ResearchEventBuffer(store=store, clock=self.clock)
+            first = await before_restart.publish(
+                "r-restart", {"type": "progress", "data": {"number": 1}}
+            )
+            second = await before_restart.publish(
+                "r-restart", {"type": "progress", "data": {"number": 2}}
+            )
+
+            after_restart = ResearchEventBuffer(store=Store(database), clock=self.clock)
+            replay = await after_restart.replay_after("r-restart", first.sequence)
+            third = await after_restart.publish(
+                "r-restart", {"type": "progress", "data": {"number": 3}}
+            )
+
+        self.assertEqual([event.sequence for event in replay.events], [2])
+        self.assertEqual(second.sequence, 2)
+        self.assertEqual(third.sequence, 3)
+
+    async def test_持久窗口截断按库中最小可回放序号判断(self) -> None:
+        from app.api.events import ResearchEventBuffer
+        from app.store.dao import Store
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Path(temp_dir) / "owli.db"
+            with sqlite3.connect(database) as connection:
+                connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            store = Store(database)
+            store.create_report(
+                id="r-truncated",
+                title="持久窗口",
+                research_question="截断判据是否跨重启？",
+                created_at=self.clock().isoformat(),
+            )
+            buffer = ResearchEventBuffer(
+                store=store, max_events=2, max_age_seconds=3600, clock=self.clock
+            )
+            for number in range(1, 4):
+                await buffer.publish(
+                    "r-truncated", {"type": "progress", "data": {"number": number}}
+                )
+
+            restarted = ResearchEventBuffer(
+                store=Store(database), max_events=2, max_age_seconds=3600,
+                clock=self.clock,
+            )
+            replay = await restarted.replay_after("r-truncated", 0)
+
+        self.assertTrue(replay.truncated)
+        self.assertEqual([event.sequence for event in replay.events], [4])
+        self.assertEqual(replay.events[0].payload["type"], "replay_truncated")
 
 
 class ApiShapeTest(unittest.TestCase):

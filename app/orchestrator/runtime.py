@@ -207,6 +207,22 @@ class RuntimeCoordinator:
             },
         ]
 
+    def resume_actions(self, research_id: str) -> list[dict[str, str]]:
+        return [
+            {
+                "id": "resume",
+                "label": "继续",
+                "method": "POST",
+                "href": f"/api/researches/{research_id}/resume",
+            },
+            {
+                "id": "stop",
+                "label": "停止",
+                "method": "POST",
+                "href": f"/api/researches/{research_id}/stop",
+            },
+        ]
+
     def sync_state_with_scheduler(self, research_id: str) -> dict[str, Any] | None:
         """把工作板状态对齐到调度器的真实状态；API 回报只读这里，不自己猜。
 
@@ -866,6 +882,18 @@ class RuntimeCoordinator:
                 self._track_auto_task(task)
         await self.events.publish(research_id, payload)
 
+    def _build_scheduler(self, plan: Plan) -> Scheduler:
+        scheduler: Scheduler
+        scheduler = Scheduler(
+            plan,
+            lambda agent, context: self._run_task(scheduler.plan, agent, context),
+            lambda event: self._emit_scheduler_event(plan.research_id, event),
+            self.now,
+            self.timer,
+            chapter_ledger=self.store,
+        )
+        return scheduler
+
     async def start_research(self, plan: Plan) -> None:
         state = self.researches[plan.research_id]
         state["status"] = "running"
@@ -876,19 +904,58 @@ class RuntimeCoordinator:
             plan.research_id,
             {"type": "research_update", "data": state},
         )
-        scheduler: Scheduler
-        scheduler = Scheduler(
-            plan,
-            lambda agent, context: self._run_task(scheduler.plan, agent, context),
-            lambda event: self._emit_scheduler_event(plan.research_id, event),
-            self.now,
-            self.timer,
-            chapter_ledger=self.store,
-        )
+        scheduler = self._build_scheduler(plan)
         self._schedulers[plan.research_id] = scheduler
         await scheduler.start()
         await self._drain_auto_tasks()
         await self._finalize_if_terminal(plan.research_id)
+
+    async def rehydrate_running_researches(self) -> list[str]:
+        """从报告与章账本重建可 resume 的运行态；启动时绝不驱动 Scheduler。"""
+
+        restored: list[str] = []
+        for report in self.store.list_running_reports():
+            plan_snapshot = report.get("plan_snapshot")
+            if not isinstance(plan_snapshot, dict):
+                continue
+            plan = Plan.from_dict(plan_snapshot)
+            chapters = [
+                {
+                    "goal_id": goal.goal_id,
+                    "chapter_id": Scheduler._chapter_id(agent),
+                }
+                for goal in plan.goals
+                for agent in goal.agents
+            ]
+            self.store.ensure_chapters(
+                plan.research_id,
+                chapters,
+                updated_at=self.now_iso(),
+                reset_running=True,
+            )
+            state = self._state_from_plan(plan)
+            self.researches[plan.research_id] = state
+            self._adapters[plan.research_id] = self.adapter_factory()
+            scheduler = self._build_scheduler(plan)
+            self._schedulers[plan.research_id] = scheduler
+            for goal_state in state["goals"]:
+                for agent_state in goal_state["agents"]:
+                    agent_state["status"] = scheduler.agent_statuses[agent_state["id"]]
+            state["progress"] = {
+                "done": sum(
+                    bool(goal.agents) and all(
+                        scheduler.agent_statuses[agent.agent_id] in {"done", "missing"}
+                        for agent in goal.agents
+                    )
+                    for goal in plan.goals
+                ),
+                "total": len(plan.goals),
+                "summary": "已从章节账本恢复，等待用户继续",
+            }
+            await scheduler.pause()
+            state["actions"] = self.resume_actions(plan.research_id)
+            restored.append(plan.research_id)
+        return restored
 
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]

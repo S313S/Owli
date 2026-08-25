@@ -97,12 +97,14 @@ def create_app(
         if enable_test_routes is None
         else enable_test_routes
     )
-    events = event_buffer or ResearchEventBuffer(max_events=2000, max_age_seconds=3600)
+    store = Store(database)
+    events = event_buffer or ResearchEventBuffer(
+        max_events=2000, max_age_seconds=3600
+    )
     researches: dict[str, dict[str, Any]] = {}
     cards: dict[str, Card] = {}
     request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
-    store = Store(database)
 
     async def publish_plan_event(event: Any) -> None:
         """把规划期事件（分段落盘/重试）投进 SSE，规划过程对外可见。
@@ -154,7 +156,11 @@ def create_app(
                 product_scale_config
             )
             application.state.schema_check = initialize_and_check(database, schema)
+            events.bind_store(store)
             application.state.engine_checks = (engine_probe or probe_engines)()
+            application.state.rehydrated_researches = (
+                await runtime.rehydrate_running_researches()
+            )
         except (RuntimeConfigCheckError, SchemaCheckError) as error:
             print(str(error), file=sys.stderr)
             raise

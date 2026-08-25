@@ -251,6 +251,100 @@ class Store:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def append_event(
+        self,
+        research_id: str,
+        *,
+        event_type: str,
+        payload: Mapping[str, Any],
+        created_at: str,
+    ) -> dict[str, Any]:
+        """原子分配 research 内序号并写事件；序号不依赖进程内状态。"""
+
+        normalized_research_id = str(research_id).strip()
+        normalized_type = str(event_type).strip()
+        if not normalized_research_id:
+            raise ValueError("事件 research_id 不得为空")
+        if not normalized_type:
+            raise ValueError("事件 type 不得为空")
+        frozen_payload = copy.deepcopy(dict(payload))
+        payload_json = json.dumps(
+            frozen_payload, ensure_ascii=False, separators=(",", ":")
+        )
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            sequence = int(connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE research_id = ?",
+                (normalized_research_id,),
+            ).fetchone()[0])
+            connection.execute(
+                """
+                INSERT INTO events(research_id, sequence, type, payload, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    normalized_research_id,
+                    sequence,
+                    normalized_type,
+                    payload_json,
+                    str(created_at),
+                ),
+            )
+        return {
+            "research_id": normalized_research_id,
+            "sequence": sequence,
+            "type": normalized_type,
+            "payload": frozen_payload,
+            "created_at": str(created_at),
+        }
+
+    def list_events_window(
+        self,
+        research_id: str,
+        *,
+        created_since: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """读取时间与条数窗口的交集；倒序限量后恢复为 sequence 升序。"""
+
+        if limit <= 0:
+            raise ValueError("事件窗口 limit 必须大于 0")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT research_id, sequence, type, payload, created_at
+                FROM events
+                WHERE research_id = ? AND created_at >= ?
+                ORDER BY sequence DESC
+                LIMIT ?
+                """,
+                (research_id, created_since, limit),
+            ).fetchall()
+        result = []
+        for row in reversed(rows):
+            item = dict(row)
+            item["payload"] = json.loads(item["payload"])
+            result.append(item)
+        return result
+
+    def list_running_reports(self) -> list[dict[str, Any]]:
+        """返回需要在进程启动时恢复运行态的报告。"""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM reports WHERE status = 'running' ORDER BY created_at, id"
+            ).fetchall()
+        reports = []
+        for row in rows:
+            report = dict(row)
+            for field in (
+                "plan_snapshot", "decision_balance", "engines_used", "attachments", "extra"
+            ):
+                if report[field] is not None:
+                    report[field] = json.loads(report[field])
+            reports.append(report)
+        return reports
+
     def create_report(
         self,
         *,

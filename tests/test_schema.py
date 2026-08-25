@@ -9,7 +9,7 @@ SCHEMA_PATH = ROOT / "app" / "store" / "schema.sql"
 
 
 class SchemaSqlTest(unittest.TestCase):
-    def test_schema_建立五张业务表_两张运行态表和召回虚拟表(self) -> None:
+    def test_schema_建立五张业务表_三张运行态表和召回虚拟表(self) -> None:
         self.assertTrue(SCHEMA_PATH.is_file(), "app/store/schema.sql 尚未创建")
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -34,11 +34,43 @@ class SchemaSqlTest(unittest.TestCase):
             {
                 "reports", "evidence", "feedback", "report_tags", "ext_key_registry",
                 "source_usage", "source_usage_billed_resource",
-                "chapter_progress",
+                "chapter_progress", "events",
             },
         )
         self.assertIn("recall_fts", tables)
         self.assertEqual(journal_mode, "wal")
+
+    def test_v6数据库迁移到_v7_且保留既有报告(self) -> None:
+        from app.store.schema import initialize_database_if_empty
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database_path = Path(temp_dir) / "owli-v6.db"
+            with sqlite3.connect(database_path) as connection:
+                connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+                connection.execute("DROP TABLE IF EXISTS events")
+                connection.execute("PRAGMA user_version = 6")
+                connection.execute(
+                    "INSERT INTO reports(id,title,research_question,created_at) "
+                    "VALUES ('r-existing','既有报告','不得丢失','2026-08-25T00:00:00Z')"
+                )
+
+            initialize_database_if_empty(database_path, SCHEMA_PATH)
+
+            with sqlite3.connect(database_path) as connection:
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                report = connection.execute(
+                    "SELECT title FROM reports WHERE id='r-existing'"
+                ).fetchone()
+                event_columns = {
+                    row[1] for row in connection.execute("PRAGMA table_xinfo(events)")
+                }
+
+        self.assertEqual(version, 7)
+        self.assertEqual(report, ("既有报告",))
+        self.assertEqual(
+            event_columns,
+            {"research_id", "sequence", "type", "payload", "created_at"},
+        )
 
 
 if __name__ == "__main__":
