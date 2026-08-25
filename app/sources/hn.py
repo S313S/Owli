@@ -26,6 +26,8 @@ _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 _MIN_INTERVAL_SECONDS = 0.25
 _MAX_ATTEMPTS = 3
 _REQUEST_TIMEOUT_SECONDS = 15
+_CONTENT_EXCERPT_CHARACTER_LIMIT = 1200
+_TRUNCATION_MARKER = "…[已截断]"
 _throttle_lock = threading.Lock()
 _last_request_at = 0.0
 
@@ -135,13 +137,21 @@ def _to_evidence(hit: Any, query: str, fetched_at: str) -> Evidence:
     if not isinstance(hit, dict) or not hit.get("objectID"):
         raise RuntimeError("HN Algolia 命中项缺少 objectID")
     item_id = str(hit["objectID"])
+    excerpt = html.unescape(hit.get("story_text") or "")
+    if len(excerpt) > _CONTENT_EXCERPT_CHARACTER_LIMIT:
+        excerpt = (
+            excerpt[
+                : _CONTENT_EXCERPT_CHARACTER_LIMIT - len(_TRUNCATION_MARKER)
+            ]
+            + _TRUNCATION_MARKER
+        )
     return {
         "platform": "hacker_news",
         "source_type": "post",
         "platform_item_id": item_id,
         "permalink": f"https://news.ycombinator.com/item?id={item_id}",
         "title": hit.get("title"),
-        "content_excerpt": html.unescape(hit.get("story_text") or "") or None,
+        "content_excerpt": excerpt or None,
         "author_name": hit.get("author"),
         "source_keyword": query,
         "fetch_method": "official_api",

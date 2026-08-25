@@ -13,7 +13,9 @@ _DEFAULTS = {
     "OWLI_PLAN_TRANSPORT_RETRIES": 3,
     "OWLI_BACKOFF_INITIAL_SECONDS": 60,
     "OWLI_BACKOFF_MAX_SECONDS": 900,
+    "OWLI_SOURCE_PAYLOAD_BYTE_LIMIT": 262_144,
 }
+_MIN_SOURCE_PAYLOAD_BYTE_LIMIT = 1024
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,13 @@ class ResearchScaleConfig:
         if scale not in {"fast", "standard"}:
             raise ValueError(f"scale 只能取 fast 或 standard，实际为 {scale!r}")
         return getattr(self, scale)
+
+
+@dataclass(frozen=True)
+class SourceResponseConfig:
+    """信息源工具回灌给 LLM 的响应护栏。"""
+
+    payload_byte_limit: int
 
 
 _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -198,11 +207,30 @@ def load_resilience_config(
     return config
 
 
+def load_source_response_config(
+    environ: Mapping[str, str] | None = None,
+) -> SourceResponseConfig:
+    """读取 source.* 回灌 payload 的 UTF-8 字节上限。"""
+
+    values = os.environ if environ is None else environ
+    payload_byte_limit = _positive_int(
+        values, "OWLI_SOURCE_PAYLOAD_BYTE_LIMIT"
+    )
+    if payload_byte_limit < _MIN_SOURCE_PAYLOAD_BYTE_LIMIT:
+        raise ValueError(
+            "OWLI_SOURCE_PAYLOAD_BYTE_LIMIT 不得小于 "
+            f"{_MIN_SOURCE_PAYLOAD_BYTE_LIMIT}"
+        )
+    return SourceResponseConfig(payload_byte_limit=payload_byte_limit)
+
+
 __all__ = [
     "ChapterEngineConfig",
     "ResearchScaleConfig",
     "ResearchScaleProfile",
     "ResilienceConfig",
+    "SourceResponseConfig",
     "load_research_scale_config",
     "load_resilience_config",
+    "load_source_response_config",
 ]

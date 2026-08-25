@@ -95,3 +95,23 @@ def test_调研规模配置可由产品配置覆盖() -> None:
     assert config.fast.max_sources_per_goal == 1
     assert config.fast.source_item_limits["hacker_news"] == 42
     assert config.fast.source_item_limits["web_search"] == 5
+
+
+def test_采集响应字节上限有部署默认值且可覆盖() -> None:
+    from app.config import load_source_response_config
+
+    default = load_source_response_config({})
+    overridden = load_source_response_config({
+        "OWLI_SOURCE_PAYLOAD_BYTE_LIMIT": "4096",
+    })
+
+    assert default.payload_byte_limit == 262_144
+    assert overridden.payload_byte_limit == 4096
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "1023"])
+def test_采集响应字节上限拒绝不可用配置(value: str) -> None:
+    from app.config import load_source_response_config
+
+    with pytest.raises(ValueError, match="OWLI_SOURCE_PAYLOAD_BYTE_LIMIT"):
+        load_source_response_config({"OWLI_SOURCE_PAYLOAD_BYTE_LIMIT": value})

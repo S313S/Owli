@@ -82,6 +82,23 @@ class HackerNewsSourceTest(unittest.TestCase):
         with patch.object(hn, "_fetch_json", create=True, return_value={"hits": []}):
             self.assertEqual(hn.search("Feishu", "90d"), [])
 
+    def test_story_text_超长时按字符上限截断并保留可见标记(self) -> None:
+        from app.sources import hn
+
+        payload = {
+            "hits": [{
+                "objectID": "oversized",
+                "story_text": "长" * 2000,
+            }]
+        }
+        with patch.object(hn, "_fetch_json", create=True, return_value=payload):
+            evidence = hn.search("Feishu", "90d")[0]
+
+        excerpt = evidence["content_excerpt"]
+        self.assertIsNotNone(excerpt)
+        self.assertEqual(len(excerpt), 1200)
+        self.assertTrue(excerpt.endswith("…[已截断]"))
+
     def test_search_拒绝非法时间窗且不发请求(self) -> None:
         from app.sources import hn
 

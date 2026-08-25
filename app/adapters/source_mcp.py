@@ -20,7 +20,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 MCP_SERVER_NAME = "owli_sources"
 SOURCE_MCP_PATH = Path(__file__).resolve()
-_X_RUNTIME_ENV_NAMES = (
+_SOURCE_RUNTIME_ENV_NAMES = (
+    "OWLI_SOURCE_PAYLOAD_BYTE_LIMIT",
     "OWLI_X_API_BASE_URL",
     "OWLI_X_BEARER_TOKEN_ENV",
     "OWLI_X_WEEKLY_BUDGET_USD",
@@ -60,18 +61,31 @@ def source_event_path(task: Any) -> Path:
     )
 
 
+def _payload_archive_path(event_path: Path | None) -> Path | None:
+    if event_path is None:
+        return None
+    return Path(f"{event_path}.payload.json")
+
+
 def prepare_source_events(task: Any) -> None:
     """单任务启动前清理旧事件，避免重试轮重放。"""
 
     if tuple(getattr(getattr(task, "capability", None), "sources", ())):
-        source_event_path(task).unlink(missing_ok=True)
+        event_path = source_event_path(task)
+        event_path.unlink(missing_ok=True)
+        archive_path = _payload_archive_path(event_path)
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
 
 
 async def replay_source_events(task: Any, on_event: Any = None) -> None:
     """MCP 子进程事件在引擎返回前重放到 Owli 事件管道。"""
 
     path = source_event_path(task)
+    archive_path = _payload_archive_path(path)
     if not path.is_file():
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
         return
     try:
         try:
@@ -89,6 +103,8 @@ async def replay_source_events(task: Any, on_event: Any = None) -> None:
                     await result
     finally:
         path.unlink(missing_ok=True)
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
 
 
 def _jsonable(value: Any) -> Any:
@@ -99,6 +115,153 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     return value
+
+
+def _event_is_error(event: Any) -> bool:
+    normalized = _jsonable(event)
+    if not isinstance(normalized, Mapping):
+        return False
+    if bool(normalized.get("is_error")):
+        return True
+    item_kind = str(normalized.get("item_kind") or "").casefold()
+    if item_kind.rsplit(".", 1)[-1] == "error":
+        return True
+    event_type = str(normalized.get("type") or "").casefold()
+    if (
+        "error" in event_type
+        or event_type.endswith(("failed", "failure", "unavailable"))
+    ):
+        return True
+    data = normalized.get("data")
+    return isinstance(data, Mapping) and bool(data.get("error"))
+
+
+def _event_summary(
+    events: list[Any], event_path: Path | None
+) -> dict[str, Any]:
+    """回灌仅保留可判定摘要；逐条原文已由 call_tool 落盘。"""
+
+    return {
+        "count": len(events),
+        "error_count": sum(_event_is_error(event) for event in events),
+        "path": str(event_path) if event_path is not None else None,
+    }
+
+
+def _json_text(payload: Mapping[str, Any]) -> str:
+    return json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":")
+    )
+
+
+def _payload_with_kept_items(
+    payload: Mapping[str, Any], kept_items: int
+) -> dict[str, Any]:
+    bounded = dict(payload)
+    result = payload.get("result")
+    if isinstance(result, list):
+        bounded["result"] = result[:kept_items]
+        return bounded
+    if isinstance(result, Mapping) and isinstance(result.get("evidence"), list):
+        bounded_result = dict(result)
+        bounded_result["evidence"] = result["evidence"][:kept_items]
+        bounded["result"] = bounded_result
+        return bounded
+    return bounded
+
+
+def _result_item_count(payload: Mapping[str, Any]) -> int | None:
+    result = payload.get("result")
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, Mapping) and isinstance(result.get("evidence"), list):
+        return len(result["evidence"])
+    return None
+
+
+def _bounded_payload(
+    payload: Mapping[str, Any],
+    *,
+    full_payload_path: Path | None,
+    byte_limit: int,
+) -> tuple[dict[str, Any], str]:
+    """超限时仅丢弃尾部完整 item，绝不切割序列化后的 JSON。"""
+
+    text = _json_text(payload)
+    if len(text.encode("utf-8")) <= byte_limit:
+        return dict(payload), text
+
+    path_text = str(full_payload_path) if full_payload_path is not None else "未配置"
+
+    def mark_truncated(candidate: dict[str, Any], omitted: int) -> str:
+        candidate["truncation"] = {
+            "omitted_items": omitted,
+            "full_payload_path": (
+                str(full_payload_path) if full_payload_path is not None else None
+            ),
+            "message": f"已截断 {omitted} 条 / 全量见落盘文件 {path_text}",
+        }
+        return _json_text(candidate)
+
+    item_count = _result_item_count(payload)
+    if item_count is None:
+        candidate = dict(payload)
+        candidate["result"] = None
+        error = payload.get("error")
+        if isinstance(error, Mapping):
+            candidate["error"] = {
+                "type": str(error.get("type") or "Error"),
+                "message": f"错误详情已省略；全量见落盘文件 {path_text}",
+            }
+        candidate_text = mark_truncated(candidate, 1)
+        if len(candidate_text.encode("utf-8")) <= byte_limit:
+            return candidate, candidate_text
+        raise ValueError("OWLI_SOURCE_PAYLOAD_BYTE_LIMIT 小于回灌摘要所需字节数")
+
+    best: tuple[dict[str, Any], str] | None = None
+    low = 0
+    high = item_count - 1
+    while low <= high:
+        kept = (low + high) // 2
+        candidate = _payload_with_kept_items(payload, kept)
+        omitted = item_count - kept
+        candidate_text = mark_truncated(candidate, omitted)
+        if len(candidate_text.encode("utf-8")) <= byte_limit:
+            best = candidate, candidate_text
+            low = kept + 1
+        else:
+            high = kept - 1
+    if best is None:
+        raise ValueError("OWLI_SOURCE_PAYLOAD_BYTE_LIMIT 小于回灌摘要所需字节数")
+    return best
+
+
+def _build_tool_payload(
+    *,
+    result: Any,
+    events: list[Any],
+    error: Exception | None,
+    event_path: Path | None,
+    byte_limit: int,
+) -> tuple[dict[str, Any], str]:
+    payload = {
+        "result": _jsonable(result),
+        "events": _event_summary(events, event_path),
+        "error": (
+            {"type": type(error).__name__, "message": str(error)}
+            if error is not None
+            else None
+        ),
+    }
+    full_text = _json_text(payload)
+    archive_path = _payload_archive_path(event_path)
+    bounded_payload, bounded_text = _bounded_payload(
+        payload, full_payload_path=archive_path, byte_limit=byte_limit
+    )
+    if "truncation" in bounded_payload and archive_path is not None:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_text(full_text, encoding="utf-8")
+    return bounded_payload, bounded_text
 
 
 class SourceToolAdapter:
@@ -239,7 +402,7 @@ def stdio_server_config(
     child_env.update(
         {
             name: str(parent_env[name])
-            for name in _X_RUNTIME_ENV_NAMES
+            for name in _SOURCE_RUNTIME_ENV_NAMES
             if str(parent_env.get(name, "")).strip()
         }
     )
@@ -314,8 +477,10 @@ async def _serve(
     from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool
 
     from app.adapters.capability import Capability
+    from app.config import load_source_response_config
 
     adapter = SourceToolAdapter()
+    response_config = load_source_response_config()
     tools = [
         Tool(
             name=f"source.{source_id}",
@@ -376,16 +541,13 @@ async def _serve(
                             )
                             + "\n"
                         )
-        payload = {
-            "result": _jsonable(result),
-            "events": _jsonable(events),
-            "error": (
-                {"type": type(error).__name__, "message": str(error)}
-                if error is not None
-                else None
-            ),
-        }
-        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        payload, text = _build_tool_payload(
+            result=result,
+            events=events,
+            error=error,
+            event_path=event_path,
+            byte_limit=response_config.payload_byte_limit,
+        )
         return CallToolResult(
             content=[TextContent(text=text)],
             structuredContent=payload,
