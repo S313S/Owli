@@ -97,7 +97,7 @@ class WebContractTest(unittest.TestCase):
 
     def test_入口页通过_SSE_接收并渲染历史候选卡(self) -> None:
         source = (WEB / "src" / "ResearchInputPage.tsx").read_text(encoding="utf-8")
-        self.assertIn("similar", source)
+        self.assertNotIn("result.data.similar", source)
         self.assertIn("EventSource", source)
         self.assertIn("card_update", source)
         self.assertIn("<ActionCardView", source)

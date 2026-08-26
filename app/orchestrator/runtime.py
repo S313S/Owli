@@ -1573,19 +1573,40 @@ class RuntimeCoordinator:
             stored_path = str(report_path.relative_to(Path(__file__).resolve().parents[2]))
         except ValueError:
             stored_path = str(report_path)
-        self.store.finish_report(
-            research_id,
-            status=report_status,
-            completed_at=self.now_iso(),
-            summary="计划执行完成，报告已生成" if not report_missing else "报告未生成",
-            summary_line=(
+        finish_payload = {
+            "status": report_status,
+            "completed_at": self.now_iso(),
+            "summary": "计划执行完成，报告已生成" if not report_missing else "报告未生成",
+            "summary_line": (
                 "报告未生成" if report_missing
                 else "部分 goal 失败" if unfinished_goals
                 else "全部 goal 已完成"
             ),
-            report_path=stored_path,
-            agent_tags=self._completed_agent_tags(plan),
-        )
+            "report_path": stored_path,
+        }
+        agent_tags = self._completed_agent_tags(plan)
+        try:
+            self.store.finish_report(
+                research_id, **finish_payload, agent_tags=agent_tags,
+            )
+        except (TypeError, ValueError) as exc:
+            if agent_tags is None:
+                raise
+            logger.warning("tagging 产物不合规，忽略标签继续收尾：%s", exc)
+            await self.events.publish(
+                research_id,
+                {
+                    "type": "report_tagging_warning",
+                    "data": {
+                        "research_id": research_id,
+                        "reason": "invalid_agent_tags",
+                        "message": str(exc),
+                    },
+                },
+            )
+            self.store.finish_report(
+                research_id, **finish_payload, agent_tags=None,
+            )
         state = self.researches[research_id]
         state["status"] = report_status
         state["status_label"] = "执行失败" if report_missing else "已完成"

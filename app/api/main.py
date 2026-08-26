@@ -674,7 +674,6 @@ def create_app(
         )
         response = envelope({
             "research_id": research_id,
-            "similar": [],
             "recall_status": "pending",
         })
         request_cache[(scope, x_request_id)] = (200, copy.deepcopy(response))

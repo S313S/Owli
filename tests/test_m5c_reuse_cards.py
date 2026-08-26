@@ -146,7 +146,7 @@ def test_创建研究立即返回且真实候选通过_SSE_卡片后到(tmp_path
                 assert response.status_code == 200, response.text
                 assert elapsed < 0.25
                 data = response.json()["data"]
-                assert data["similar"] == []
+                assert "similar" not in data
                 assert data["recall_status"] == "pending"
                 research_id = data["research_id"]
 

@@ -10,46 +10,9 @@ const examples = [
   '帮我挖一下飞书主要竞品的优缺点，我们要决定下个季度补哪些能力',
 ]
 
-type SimilarResearch = {
-  id: string
-  title: string
-  summary_line?: string | null
-  completed_at?: string | null
-  similarity_reason: string
-  reusable_elements: string[]
-  sources: string[]
-  match_label: string
-}
-
 type CreateResearchData = {
   research_id: string
-  similar: SimilarResearch[]
   recall_status: 'pending' | 'complete'
-}
-
-function similarCard(researchId: string, item: SimilarResearch, index: number): ActionCard {
-  const reusable = item.reusable_elements.length ? item.reusable_elements.join('、') : '历史结论与信息源'
-  return {
-    card_id: `${researchId}-history-${index + 1}`,
-    card_type: 'HISTORY_REUSE',
-    research_id: researchId,
-    title: item.title,
-    body: `复用这份历史调研会更快、已验证。可复用：${reusable}；匹配理由：${item.similarity_reason}`,
-    blocking: 'research',
-    status: 'pending',
-    target: {
-      source_research_id: item.id,
-      display_name: item.title,
-      completed_at: item.completed_at,
-      summary_line: item.summary_line,
-      sources: item.sources,
-      match_label: item.match_label,
-    },
-    actions: [
-      { type: 'CHOICE_2', id: 'reuse', label: '复用这条历史', value: 'reuse' },
-      { type: 'CHOICE_2', id: 'new', label: '坚持新建', value: 'new' },
-    ],
-  }
 }
 
 export default function ResearchInputPage() {
@@ -160,13 +123,9 @@ export default function ResearchInputPage() {
       const result = await response.json() as ApiEnvelope<CreateResearchData>
       activeResearchId.current = result.data.research_id
       window.history.replaceState(null, '', `/?research_id=${encodeURIComponent(result.data.research_id)}`)
-      const immediateCards = result.data.similar.map((item, index) => similarCard(result.data.research_id, item, index))
-      pendingHistoryCards.current = new Set(immediateCards.map((card) => card.card_id))
-      setCards(immediateCards)
+      pendingHistoryCards.current.clear()
       openRecallStream(result.data.research_id)
-      setStatusMessage(result.data.similar.length
-        ? '发现可复用的历史调研，请选择下一步'
-        : '研究已创建，历史匹配在后台继续')
+      setStatusMessage('研究已创建，历史匹配在后台继续')
     } catch {
       setError('没能提交需求：本地服务没有响应（127.0.0.1:8721）。你输入的内容已保留，确认 Owli 仍在运行后可直接重试')
       setSubmitting(false)

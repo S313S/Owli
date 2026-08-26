@@ -478,9 +478,9 @@ def test_创建研究接口立即返回且判重候选随后进入卡片(tmp_pat
     response, card = asyncio.run(request())
 
     assert response.status_code == 200, response.text
-    similar = response.json()["data"]["similar"]
-    assert similar == []
-    assert response.json()["data"]["recall_status"] == "pending"
+    data = response.json()["data"]
+    assert "similar" not in data
+    assert data["recall_status"] == "pending"
     assert card["card_type"] == "HISTORY_REUSE"
     assert card["title"] == "OpenAI vs Claude Code"
     assert card["target"]["source_research_id"] == "r-openai"

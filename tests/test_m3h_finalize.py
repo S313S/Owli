@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,6 +114,51 @@ def test_收尾校验不过只发告警_研究仍然completed(tmp_path, monkeypa
     assert warnings and warnings[-1]["reason"] == "report_validation_failed"
     assert store.get_report("r-ledger")["status"] == "completed"
     assert coordinator.researches["r-ledger"]["status"] == "completed"
+
+
+def test_tagging产物不合规时降级收尾且召回索引仍自动写入(tmp_path, monkeypatch):
+    plan = _plan(report_format="markdown")
+    tagging = plan.goals[1].agents[0]
+    tagging.agent_id = "tagging"
+    tagging.capability["profile"] = "report-writer"
+    tagging.chapter["chapter_type"] = "tagging"
+    tagging.output["format"] = "json"
+    tagging.output["path"] = "goals/goal-2/tags.json"
+    tagging.chapter["closing"]["output"]["path"] = tagging.output["path"]
+
+    report = tmp_path / "runs" / "r-ledger" / "goals" / "goal-3" / "report.md"
+    _write(report, "# 结论\n\n- 标签异常不应阻断报告收尾。\n\n# 信息源\n\n- 无。\n")
+    _write(
+        tmp_path / "runs" / "r-ledger" / tagging.output["path"],
+        json.dumps(["竞品"], ensure_ascii=False),
+    )
+
+    def prepare(store):
+        store.ensure_chapters(
+            "r-ledger", [{"goal_id": "goal-2", "chapter_id": tagging.chapter["chapter_id"]}],
+            updated_at="2026-08-22T00:00:00Z",
+        )
+        store.finish_chapter(
+            "r-ledger", "goal-2", tagging.chapter["chapter_id"], status="done", reason=None,
+            actual_output_path=tagging.output["path"], actual_count=1,
+            updated_at="2026-08-22T00:01:00Z",
+        )
+
+    coordinator, store, events = _finalize(
+        tmp_path, plan, monkeypatch, prepare=prepare,
+    )
+
+    assert store.get_report("r-ledger")["status"] == "completed"
+    assert coordinator.researches["r-ledger"]["status"] == "completed"
+    with sqlite3.connect(store._database_path) as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM recall_fts WHERE report_id = ?", ("r-ledger",),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT count(*) FROM report_tags WHERE report_id = ?", ("r-ledger",),
+        ).fetchone()[0] == 0
+    warnings = [event for event in events if event.get("type") == "report_tagging_warning"]
+    assert warnings and warnings[-1]["data"]["reason"] == "invalid_agent_tags"
 
 
 def test_声明了报告章却没有产物才判failed(tmp_path, monkeypatch):
