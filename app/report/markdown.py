@@ -50,6 +50,9 @@ def render_source_list(evidence: Sequence[Mapping[str, Any]]) -> str:
         scores = []
         for label, field in zip(_LABELS, SCORE_FIELDS):
             value = item.get(field)
+            if value is None:
+                scores.append(f"{label}?")
+                continue
             if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 2:
                 raise ValueError(f"[{mark}] {field} 必须是 0–2 整数")
             scores.append(f"{label}{value}")

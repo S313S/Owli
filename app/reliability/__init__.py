@@ -8,6 +8,7 @@ from .scoring import (
     normalize_evidence_metrics,
     rating_notes_problem,
     score_evidence,
+    score_evidence_partial,
 )
 from .audit import (
     AUTHORITY_KINDS,
@@ -25,6 +26,7 @@ __all__ = [
     "normalize_evidence_metrics",
     "rating_notes_problem",
     "score_evidence",
+    "score_evidence_partial",
     "AUTHORITY_KINDS",
     "INTEREST_RELATIONS",
     "classify_and_score",

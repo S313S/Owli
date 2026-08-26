@@ -267,10 +267,14 @@ def _prepare_evidence(values: dict[str, Any]) -> dict[str, Any]:
     score_values = [payload[field] for field in _SCORE_FIELDS]
     if any(value is not None for value in score_values):
         if not all(
-            isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2
+            value is None or (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value <= 2
+            )
             for value in score_values
         ):
-            raise ValueError("五维分必须同时提供五个 0–2 整数")
+            raise ValueError("五维分必须是 NULL 或 0–2 整数")
         if not payload["rating_notes"]:
             raise ValueError("有五维分时 rating_notes 必填")
     if payload["rating_notes"] is not None:
@@ -986,6 +990,23 @@ class Store:
             if report[field] is not None:
                 report[field] = json.loads(report[field])
         return report
+
+    def list_evidence(self, report_id: str) -> list[dict[str, Any]]:
+        """按稳定顺序读取报告证据；JSON 冻结列恢复为 Python 值。"""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM evidence WHERE report_id = ? ORDER BY id",
+                (report_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            for field in ("author_meta", "raw_metrics", "norm_context", "extra"):
+                if item[field] is not None:
+                    item[field] = json.loads(item[field])
+            result.append(item)
+        return result
 
     def get_drafting_report(self, research_question: str) -> dict[str, Any] | None:
         """读取调用方已建、尚未写入计划快照的最新报告。"""

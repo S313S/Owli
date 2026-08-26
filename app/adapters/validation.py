@@ -570,7 +570,7 @@ def _citation_sets(ctx: Ctx, name: str) -> tuple[set[str], set[str], Result | No
 
 def _source_inventory_offenders(text: str) -> tuple[list[str], list[dict[str, str]]]:
     score_pattern = re.compile(
-        r"五维=权威([0-2])/时效([0-2])/交叉([0-2])/完整([0-2])/无关([0-2])"
+        r"五维=权威([0-2?])/时效([0-2?])/交叉([0-2?])/完整([0-2?])/无关([0-2?])"
     )
     offenders: list[str] = []
     detail: list[dict[str, str]] = []
@@ -595,7 +595,11 @@ def _source_inventory_offenders(text: str) -> tuple[list[str], list[dict[str, st
                 from app.reliability.scoring import SCORE_FIELDS, rating_notes_problem
 
                 scores = {
-                    field: int(score_match.group(index))
+                    field: (
+                        None
+                        if score_match.group(index) == "?"
+                        else int(score_match.group(index))
+                    )
                     for index, field in enumerate(SCORE_FIELDS, start=1)
                 }
                 problem = rating_notes_problem(notes, scores)

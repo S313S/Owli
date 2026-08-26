@@ -75,9 +75,9 @@ CROSSREF_REASONS = {
 }
 
 RATING_NOTES_PATTERN = re.compile(
-    r"^权威([0-2]):(.{1,14}) · 时效([0-2]):(.{1,14}) · "
-    r"交叉([0-2]):(.{1,14}) · 完整([0-2]):(.{1,14}) · "
-    r"无关([0-2]):(.{1,14})( ⚠️.{1,30})?$"
+    r"^权威([0-2?]):(.{1,14}) · 时效([0-2?]):(.{1,14}) · "
+    r"交叉([0-2?]):(.{1,14}) · 完整([0-2?]):(.{1,14}) · "
+    r"无关([0-2?]):(.{1,14})( ⚠️.{1,30})?$"
 )
 RATING_NOTES_FORBIDDEN = ("可能", "大概", "视情况", "疑似", "应该是")
 
@@ -246,10 +246,12 @@ def _baseline(platform: str, supplied: Mapping[str, int] | None) -> dict[str, in
     return result
 
 
-def _rating_notes(scores: Mapping[str, int], reasons: Sequence[str], warning: str | None) -> str:
+def _rating_notes(
+    scores: Mapping[str, int | None], reasons: Sequence[str], warning: str | None
+) -> str:
     labels = ("权威", "时效", "交叉", "完整", "无关")
     main = " · ".join(
-        f"{label}{scores[field]}:{reason[:14]}"
+        f"{label}{'?' if scores[field] is None else scores[field]}:{reason[:14]}"
         for label, field, reason in zip(labels, SCORE_FIELDS, reasons)
     )
     return main + (f" ⚠️{warning[:30]}" if warning else "")
@@ -275,7 +277,10 @@ def rating_notes_problem(
     if matched is None:
         return "rating_notes 不匹配五段式正则"
     if scores is not None:
-        actual = tuple(int(matched.group(index)) for index in (1, 3, 5, 7, 9))
+        actual = tuple(
+            None if matched.group(index) == "?" else int(matched.group(index))
+            for index in (1, 3, 5, 7, 9)
+        )
         expected_values = tuple(scores.get(field) for field in SCORE_FIELDS)
         if actual != expected_values:
             return f"rating_notes 分数 {actual} 与五维列 {expected_values} 不一致"
@@ -342,6 +347,48 @@ def score_evidence(
     if problem is not None:
         raise AssertionError(problem)
     return {**scores, "score_total": total, "grade": grade_for_total(total), "rating_notes": notes}
+
+
+def score_evidence_partial(
+    evidence: Mapping[str, Any], *,
+    missing_dimensions: Mapping[str, str] | None = None,
+    baseline: Mapping[str, int] | None = None,
+    cluster_stats: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按既有口径打分；信息不足的维度保留 NULL，并把原因写进五段式理由。"""
+
+    result = score_evidence(
+        evidence, baseline=baseline, cluster_stats=cluster_stats
+    )
+    missing = dict(missing_dimensions or {})
+    unknown = sorted(set(missing) - set(SCORE_FIELDS))
+    if unknown:
+        raise ValueError(f"诚实缺失维度不在闭集：{unknown}")
+    matched = RATING_NOTES_PATTERN.fullmatch(result["rating_notes"])
+    if matched is None:
+        raise AssertionError("既有评分理由无法解析")
+    reasons = [matched.group(index) for index in (2, 4, 6, 8, 10)]
+    scores: dict[str, int | None] = {
+        field: int(result[field]) for field in SCORE_FIELDS
+    }
+    for field, reason in missing.items():
+        normalized = str(reason).strip()
+        if not normalized:
+            raise ValueError(f"{field} 的诚实缺失原因不得为空")
+        scores[field] = None
+        reasons[SCORE_FIELDS.index(field)] = normalized
+    notes = _rating_notes(scores, reasons, None)
+    problem = rating_notes_problem(notes, scores)
+    if problem is not None:
+        raise AssertionError(problem)
+    complete = all(value is not None for value in scores.values())
+    total = sum(value for value in scores.values() if value is not None)
+    return {
+        **scores,
+        "score_total": total if complete else None,
+        "grade": grade_for_total(total) if complete else None,
+        "rating_notes": notes,
+    }
 
 
 def _stats(values: Sequence[float]) -> dict[str, float | None]:
