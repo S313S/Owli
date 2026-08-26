@@ -23,6 +23,18 @@ def _source_plan(source_id: str) -> dict:
     plan["research_id"] = source_id
     plan["status"] = "completed"
     plan["approved_at"] = "2026-08-25T10:30:00+00:00"
+    plan["market_profile_justification"] = "旧题目的市场说明哨兵"
+    plan["subjects"] = ["旧题目的研究实体哨兵"]
+    for goal_index, goal in enumerate(plan["goals"]):
+        for agent in goal["agents"]:
+            if goal_index == 0:
+                agent["entity"] = "旧题目的采集实体哨兵"
+                agent["chapter"]["chapter_type"] = "collection"
+                agent["chapter"]["closing"]["entities"] = ["旧题目的采集实体哨兵"]
+            else:
+                agent["entity"] = "旧题目的 Agent 实体哨兵"
+                agent["chapter"]["closing"]["entities"] = ["旧题目的章节实体哨兵"]
+            agent["chapter"]["closing"]["notes"] = {"legacy": "旧题目的章节哨兵"}
     return plan
 
 
@@ -233,7 +245,25 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                 assert reused_plan is not None
                 assert reused_plan.baseline_source == "reused:r-history-plan"
                 assert reused_plan.research_question == "比较两个编码 Agent"
-                assert "飞书" not in reused_plan.to_json()
+                assert reused_plan.use_case == "other"
+                reused_json = reused_plan.to_json()
+                for old_semantic in (
+                    "飞书",
+                    "旧题目的市场说明哨兵",
+                    "旧题目的研究实体哨兵",
+                    "旧题目的采集实体哨兵",
+                    "旧题目的 Agent 实体哨兵",
+                    "旧题目的章节实体哨兵",
+                    "旧题目的章节哨兵",
+                ):
+                    assert old_semantic not in reused_json
+                first_agent = reused_plan.goals[0].agents[0]
+                assert first_agent.entity == "比较两个编码 Agent"
+                assert first_agent.chapter["closing"]["entities"] == ["比较两个编码 Agent"]
+                for goal in reused_plan.goals[1:]:
+                    for agent in goal.agents:
+                        assert agent.entity is None
+                        assert agent.chapter["closing"]["entities"] == []
 
                 second_recall = ControlledRecall(_recall_result())
                 application.state.recall_service = second_recall
@@ -260,6 +290,85 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                 assert new_response.status_code == 200, new_response.text
                 assert prepared.count(new_id) == 1
                 assert load_plan(Store(database), new_id) is None
+
+    asyncio.run(scenario())
+
+
+def test_历史选择已很快回答时仍保留人工审核闸门(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        database = _database(tmp_path / "owli.db")
+        recall = ControlledRecall(_recall_result())
+
+        async def generated(query, store, adapter, **kwargs):
+            del adapter, kwargs
+            report = store.get_drafting_report(query)
+            raw = _source_plan(str(report["id"]))
+            raw.update({
+                "title": query,
+                "research_question": query,
+                "status": "awaiting_review",
+                "approved_at": None,
+                "baseline": None,
+            })
+            for question in raw["decision_balance"]:
+                question["answer"] = None
+                question["answered_at"] = None
+            from app.plan.model import Plan
+            return Plan.from_dict(raw)
+
+        monkeypatch.setattr("app.orchestrator.runtime.generate_plan", generated)
+        application = create_app(
+            database,
+            SCHEMA_PATH,
+            engine_probe=lambda: {},
+            recall_service=recall,
+            auto_confirm=True,
+        )
+        prepare_entered = asyncio.Event()
+        prepare_release = asyncio.Event()
+        original_prepare = application.state.runtime.prepare_research
+
+        async def delayed_prepare(research_id: str, query: str, *, scale: str):
+            prepare_entered.set()
+            await prepare_release.wait()
+            return await original_prepare(research_id, query, scale=scale)
+
+        application.state.runtime.prepare_research = delayed_prepare
+
+        async with application.router.lifespan_context(application):
+            transport = httpx.ASGITransport(app=application)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                created = await client.post(
+                    "/api/researches",
+                    json={"query": "快速选择新建也必须人工审核"},
+                    headers={"X-Request-ID": "m5c-fast-new-guard"},
+                )
+                research_id = created.json()["data"]["research_id"]
+                await recall.started.wait()
+                recall.release.set()
+                await _wait_until(lambda: bool(application.state.researches[research_id]["cards"]))
+                await prepare_entered.wait()
+                card = application.state.researches[research_id]["cards"][0]
+                answered = await client.post(
+                    f"/api/cards/{card['card_id']}/respond",
+                    json={"action": "new", "payload": {"choice": "new"}},
+                    headers={"X-Request-ID": "m5c-fast-new-choice"},
+                )
+                assert answered.status_code == 200, answered.text
+                prepare_release.set()
+                await _wait_until(
+                    lambda: application.state.researches[research_id]["status"] == "awaiting_review"
+                )
+                state = application.state.researches[research_id]
+                questions = [
+                    item for item in state["cards"]
+                    if item["card_type"] == "QUESTION"
+                ]
+                assert questions and questions[0]["status"] == "pending"
+                assert state["status"] == "awaiting_review"
 
     asyncio.run(scenario())
 

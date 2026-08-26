@@ -102,6 +102,12 @@ class WebContractTest(unittest.TestCase):
         self.assertIn("card_update", source)
         self.assertIn("<ActionCardView", source)
 
+    def test_入口刷新错过_SSE_但计划已就绪时直接恢复到计划页(self) -> None:
+        source = (WEB / "src" / "ResearchInputPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("result.data.status === 'awaiting_review'", source)
+        self.assertIn("pendingHistoryCards.current.size === 0", source)
+        self.assertIn("window.location.assign", source)
+
     def test_历史候选卡显示复用价值和后端退化标签(self) -> None:
         source = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
         self.assertIn("HISTORY_REUSE", source)

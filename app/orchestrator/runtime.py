@@ -358,12 +358,11 @@ class RuntimeCoordinator:
         *,
         scale: str = "standard",
     ) -> Plan:
-        pending_history_cards = [
+        history_cards_at_start = [
             item for item in self.researches.get(research_id, {}).get("cards", [])
             if item.get("card_type") == CardType.HISTORY_REUSE.value
-            and item.get("status") == CardStatus.PENDING.value
         ]
-        has_pending_history = bool(pending_history_cards)
+        history_gate_seen = bool(history_cards_at_start)
         adapter = self.adapter_factory()
         self._adapters[research_id] = adapter
         plan = await generate_plan(
@@ -383,7 +382,7 @@ class RuntimeCoordinator:
                 if str(item.get("card_id")) in self.cards
                 else copy.deepcopy(item)
             )
-            for item in pending_history_cards
+            for item in history_cards_at_start
         ]
         self.researches[research_id] = self._state_from_plan(plan)
         self.researches[research_id]["cards"] = current_history_cards
@@ -395,9 +394,9 @@ class RuntimeCoordinator:
             await self._publish_question(
                 plan,
                 question,
-                auto_respond=not has_pending_history,
+                auto_respond=not history_gate_seen,
             )
-        if self.auto_confirm and not has_pending_history:
+        if self.auto_confirm and not history_gate_seen:
             answered = load_plan(self.store, research_id)
             if answered is None:
                 raise RuntimeError("自动批准前无法读取计划")
@@ -454,8 +453,19 @@ class RuntimeCoordinator:
             "plan_rev": expected_rev + 1,
             "title": query[:40],
             "research_question": query,
+            "use_case": (
+                "social_competitor"
+                if any(word in query for word in ("社媒", "小红书", "抖音", "舆情"))
+                else "product_competitor"
+                if any(word in query for word in ("竞品", "优缺点", "对比", " vs "))
+                else "other"
+            ),
+            "market_profile_justification": (
+                "沿用同一研究事项历史计划的市场范围配置，用户需在计划编辑器核对。"
+            ),
+            "subjects": [],
             "subjects_justification": (
-                "复用同一研究事项的历史实体边界；用户需在计划编辑器核对。"
+                "复用历史方法时不携带旧题目的实体，用户需在计划编辑器按当前问题补充。"
             ),
             "scale": scale,
             "status": "awaiting_review",
@@ -495,6 +505,7 @@ class RuntimeCoordinator:
             }
             goal["status"] = "pending"
             for agent in goal["agents"]:
+                agent["entity"] = None
                 kind = agent_kind_of(
                     str(agent["agent_id"]),
                     agent.get("capability", {}).get("profile"),
@@ -515,10 +526,17 @@ class RuntimeCoordinator:
                 agent["status"] = "queued"
                 chapter = agent.get("chapter")
                 if isinstance(chapter, dict):
+                    is_collection = chapter.get("chapter_type") == "collection"
+                    if is_collection:
+                        agent["entity"] = query
                     opening = chapter.get("opening")
                     if isinstance(opening, dict):
                         opening["task"] = agent["task"]
                         opening["acceptance"] = list(goal["acceptance"])
+                    closing = chapter.get("closing")
+                    if isinstance(closing, dict):
+                        closing["entities"] = [query] if is_collection else []
+                        closing["notes"] = {}
         plan = Plan.from_dict(raw)
         save_plan(self.store, plan, expected_rev=expected_rev)
         history_cards = [

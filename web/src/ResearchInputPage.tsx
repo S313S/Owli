@@ -71,13 +71,17 @@ export default function ResearchInputPage() {
     setStatusMessage('正在恢复历史候选检查…')
     void fetch(`/api/researches/${encodeURIComponent(researchId)}`).then(async (response) => {
       if (!response.ok) throw new Error('恢复失败')
-      const result = await response.json() as ApiEnvelope<{ cards?: ActionCard[] }>
+      const result = await response.json() as ApiEnvelope<{ cards?: ActionCard[], status?: string }>
       const restored = (result.data.cards ?? []).filter((card) => card.card_type === 'HISTORY_REUSE')
       pendingHistoryCards.current = new Set(
         restored.filter((card) => card.status === 'pending').map((card) => card.card_id),
       )
       setCards(restored)
       setStatusMessage(restored.length ? '已恢复历史候选，请选择下一步' : '历史匹配仍在后台继续')
+      if (result.data.status === 'awaiting_review' && pendingHistoryCards.current.size === 0) {
+        window.location.assign(`/researches/${encodeURIComponent(researchId)}/plan`)
+        return
+      }
       openRecallStream(researchId)
     }).catch(() => setError('无法恢复这次历史匹配，请重新提交需求'))
     return () => stream.current?.close()
