@@ -135,17 +135,22 @@ async def _wait_until(predicate, *, rounds: int = 100) -> None:
     raise AssertionError("异步状态未在限定轮次内出现")
 
 
-def test_实体替换不会再次改写当前题目中的同名实体() -> None:
+def test_历史实体按声明顺序分别替换为稳定占位符() -> None:
     assert _replace_reused_subjects(
         "Notion vs Obsidian 的方法对比",
         ["Notion", "Obsidian"],
         "Notion vs Logseq",
-    ) == "Notion vs Logseq 的方法对比"
+    ) == "待定实体1 vs 待定实体2 的方法对比"
     assert _replace_reused_subjects(
         "汇集「Notion」与「Obsidian」的官方定位",
         ["Notion", "Obsidian"],
         "Coda vs Logseq",
-    ) == "汇集「Coda vs Logseq」的官方定位"
+    ) == "汇集「待定实体1」与「待定实体2」的官方定位"
+    assert _replace_reused_subjects(
+        "Obsidian 对比 Notion，Notion 再核验",
+        ["Notion", "Obsidian", "Notion"],
+        "整句当前题目",
+    ) == "待定实体2 对比 待定实体1，待定实体1 再核验"
     assert _replace_reused_subjects(
         "历史计划未声明实体",
         [],
@@ -289,13 +294,16 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                 assert reused_plan.research_question == "比较两个编码 Agent"
                 assert reused_plan.use_case == "other"
                 assert reused_plan.subjects == []
+                assert reused_plan.plan_rev == 1
+                assert reused_plan.status == "awaiting_review"
+                assert reused_plan.to_dict()["baseline"]["title"] == "比较两个编码 Agent"
                 assert reused_plan.market_profile_justification == (
                     "沿用同一研究事项历史计划的市场范围配置，用户需在计划编辑器核对。"
                 )
                 assert [goal.title for goal in reused_plan.goals] == [
-                    "历史方法阶段 1 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
-                    "历史方法阶段 2 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
-                    "历史方法阶段 3 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
+                    "历史方法阶段 1 · 待定实体1与待定实体2",
+                    "历史方法阶段 2 · 待定实体1与待定实体2",
+                    "历史方法阶段 3 · 待定实体1与待定实体2",
                 ]
                 for goal in reused_plan.goals:
                     method_fields = [
@@ -304,17 +312,19 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                         *goal.acceptance,
                         goal.intervention["prompt"],
                     ]
-                    assert all("比较两个编码 Agent" in value for value in method_fields)
-                    assert all(value.count("比较两个编码 Agent") == 1 for value in method_fields)
+                    assert all("待定实体" in value for value in method_fields)
+                    assert all("比较两个编码 Agent" not in value for value in method_fields)
                     assert all("旧题目的研究实体哨兵" not in value for value in method_fields)
                     assert all("旧题目的第二实体哨兵" not in value for value in method_fields)
                     assert goal.status == "pending"
                     for agent in goal.agents:
-                        assert "比较两个编码 Agent" in agent.task
-                        assert agent.task.count("比较两个编码 Agent") == 1
+                        assert "比较两个编码 Agent" not in agent.task
+                        assert "待定实体1" in agent.task
+                        assert "待定实体2" in agent.task
                         assert "旧题目的研究实体哨兵" not in agent.task
                         assert "旧题目的第二实体哨兵" not in agent.task
-                        assert "比较两个编码 Agent" in agent.prompt["body"]
+                        assert "比较两个编码 Agent" not in agent.prompt["body"]
+                        assert "待定实体1" in agent.prompt["body"]
                         assert "旧题目的研究实体哨兵" not in agent.prompt["body"]
                         assert "只复用方法与来源配置，不沿用旧报告结论" in agent.prompt["body"]
                         assert agent.chapter["closing"]["notes"] == {}
@@ -322,7 +332,7 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                         assert agent.status == "queued"
                 assert reused_plan.decision_balance == [{
                     "q_id": "q-history",
-                    "question": "比较两个编码 Agent优先服务哪类判断？",
+                    "question": "待定实体1 vs 待定实体2优先服务哪类判断？",
                     "options": ["产品路线", "市场话术"],
                     "input_type": "single",
                     "answer": None,

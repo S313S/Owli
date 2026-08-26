@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -74,37 +75,23 @@ REUSE_CONCLUSION_GUARD = "只复用方法与来源配置，不沿用旧报告结
 
 
 def _replace_reused_subjects(value: str, subjects: list[str], query: str) -> str:
-    """把历史研究实体机械替换成当前题目，不引入额外模型往返。"""
+    """把历史研究实体按声明顺序替换成可编辑占位符。"""
 
-    result = value
-    marker = "__OWLI_REUSED_CURRENT_QUERY__"
-    while marker in value or marker in query:
-        marker += "_"
+    del query
     declared_subjects = list(dict.fromkeys(
         subject.strip() for subject in subjects if subject.strip()
     ))
-    if len(declared_subjects) > 1:
-        orders = (declared_subjects, list(reversed(declared_subjects)))
-        combined_patterns = set()
-        quoted_patterns = set()
-        for ordered in orders:
-            combined_patterns.update({
-                " vs ".join(ordered),
-                " VS ".join(ordered),
-                " 与 ".join(ordered),
-                "与".join(ordered),
-                "和".join(ordered),
-                "、".join(ordered),
-            })
-            quoted_patterns.add("「" + "」与「".join(ordered) + "」")
-        for pattern in sorted(quoted_patterns, key=len, reverse=True):
-            result = result.replace(pattern, f"「{marker}」")
-        for pattern in sorted(combined_patterns, key=len, reverse=True):
-            result = result.replace(pattern, marker)
-    unique_subjects = sorted(declared_subjects, key=len, reverse=True)
-    for subject in unique_subjects:
-        result = result.replace(subject, marker)
-    return result.replace(marker, query)
+    if not declared_subjects:
+        return value
+    placeholders = {
+        subject: f"待定实体{index}"
+        for index, subject in enumerate(declared_subjects, start=1)
+    }
+    pattern = re.compile("|".join(
+        re.escape(subject)
+        for subject in sorted(declared_subjects, key=len, reverse=True)
+    ))
+    return pattern.sub(lambda match: placeholders[match.group(0)], value)
 
 
 class RuntimeCoordinator:
@@ -526,6 +513,9 @@ class RuntimeCoordinator:
             "updated_at": now,
         })
         for goal in raw["goals"]:
+            goal["title"] = _replace_reused_subjects(
+                goal["title"], source_subjects, query
+            )
             goal["objective"] = _replace_reused_subjects(
                 goal["objective"], source_subjects, query
             )
