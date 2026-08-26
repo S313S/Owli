@@ -46,6 +46,57 @@ def test_合格子集计划_lint_零_error() -> None:
     assert lint(make_plan_dict())["errors"] == []
 
 
+def test_待定实体占位符仅阻断批准且错误带定位() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    goal = plan["goals"][0]
+    agent = goal["agents"][0]
+    goal["title"] = "对比待定实体1与真实产品"
+    agent["entity"] = "待定实体1"
+    agent["task"] = "采集待定实体1的公开资料。"
+    agent["chapter"]["chapter_type"] = "collection"
+    agent["chapter"]["opening"]["task"] = agent["task"]
+    agent["chapter"]["closing"]["entities"] = ["待定实体1"]
+
+    assert lint(plan, for_approval=False)["errors"] == []
+    approval_errors = lint(plan, for_approval=True)["errors"]
+    matches = [error for error in approval_errors if error.startswith("[规则29]")]
+    assert len(matches) == 1
+    assert "goal-1.title" in matches[0]
+    assert "goal-1/agent-1.entity" in matches[0]
+
+    def replace_pending_entity(value):
+        if isinstance(value, dict):
+            return {key: replace_pending_entity(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [replace_pending_entity(child) for child in value]
+        if isinstance(value, str):
+            return value.replace("待定实体1", "飞书")
+        return value
+
+    completed = replace_pending_entity(plan)
+    assert lint(completed, for_approval=False)["errors"] == []
+    assert lint(completed, for_approval=True)["errors"] == []
+
+
+def test_批准闸门覆盖追问题干与章节派生文案() -> None:
+    from app.plan.lint import lint
+
+    plan = make_plan_dict()
+    plan["decision_balance"][0]["question"] = "待定实体1优先服务哪类判断？"
+    plan["goals"][0]["agents"][0]["chapter"]["opening"]["task"] = (
+        "采集待定实体2的公开资料。"
+    )
+
+    assert lint(plan, for_approval=False)["errors"] == []
+    errors = lint(plan, for_approval=True)["errors"]
+    rule_29 = [error for error in errors if error.startswith("[规则29]")]
+    assert len(rule_29) == 1
+    assert "decision_balance[0].question" in rule_29[0]
+    assert "chapter.opening.task" in rule_29[0]
+
+
 def test_goal_依赖成环报出环上的_id_列表() -> None:
     plan = make_plan_dict()
     plan["goals"][0]["depends_on"] = ["goal-3"]

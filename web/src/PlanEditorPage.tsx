@@ -8,6 +8,7 @@ import type {
 } from './types'
 
 const { TextArea } = Input
+const PENDING_ENTITY_PATTERN = /待定实体\d+/g
 
 type EditFailure = { message: string; details: unknown; conflict?: boolean }
 
@@ -18,6 +19,61 @@ function requestId(prefix: string) {
 function planFromResponse(value: ResearchPlan & { lint?: unknown }): ResearchPlan {
   const { lint: _lint, ...plan } = value
   return plan
+}
+
+function collectPendingEntityPlaceholders(plan: ResearchPlan) {
+  const activePlan = JSON.stringify({
+    decision_balance: plan.decision_balance,
+    goals: plan.goals,
+  })
+  return [...new Set(activePlan.match(PENDING_ENTITY_PATTERN) ?? [])]
+    .sort((left, right) => Number(left.slice(4)) - Number(right.slice(4)))
+}
+
+function replacePendingEntityText(value: string, mapping: Record<string, string>) {
+  let result = value
+  const longestPlaceholderFirst = Object.entries(mapping)
+    .sort(([left], [right]) => right.length - left.length)
+  for (const [placeholder, entity] of longestPlaceholderFirst) {
+    result = result.replaceAll(placeholder, entity)
+  }
+  return result
+}
+
+function applyPendingEntityMapping(
+  plan: ResearchPlan,
+  mapping: Record<string, string>,
+) {
+  const next = structuredClone(plan)
+  for (const question of next.decision_balance) {
+    question.question = replacePendingEntityText(question.question, mapping)
+    question.options = question.options.map((value) => replacePendingEntityText(value, mapping))
+    if (typeof question.answer === 'string') {
+      question.answer = replacePendingEntityText(question.answer, mapping)
+    } else if (Array.isArray(question.answer)) {
+      question.answer = question.answer.map((value) => replacePendingEntityText(value, mapping))
+    }
+  }
+  for (const goal of next.goals) {
+    goal.title = replacePendingEntityText(goal.title, mapping)
+    goal.objective = replacePendingEntityText(goal.objective, mapping)
+    goal.deliverable.description = replacePendingEntityText(goal.deliverable.description, mapping)
+    goal.acceptance = goal.acceptance.map((value) => replacePendingEntityText(value, mapping))
+    goal.intervention.prompt = replacePendingEntityText(goal.intervention.prompt, mapping)
+    for (const agent of goal.agents) {
+      if (agent.entity !== null) agent.entity = replacePendingEntityText(agent.entity, mapping)
+      agent.task = replacePendingEntityText(agent.task, mapping)
+      agent.prompt.body = replacePendingEntityText(agent.prompt.body, mapping)
+      if (agent.chapter) {
+        agent.chapter.opening.task = replacePendingEntityText(agent.chapter.opening.task, mapping)
+        agent.chapter.opening.acceptance = agent.chapter.opening.acceptance
+          .map((value) => replacePendingEntityText(value, mapping))
+        agent.chapter.closing.entities = agent.chapter.closing.entities
+          .map((value) => replacePendingEntityText(value, mapping))
+      }
+    }
+  }
+  return next
 }
 
 function changedCount(agent: PlanAgent) {
@@ -50,6 +106,7 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState<EditFailure | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
+  const [pendingEntityValues, setPendingEntityValues] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -58,6 +115,7 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
       const body = await response.json() as ApiEnvelope<ResearchPlan>
       if (!response.ok || !body.ok) throw new Error(body.error?.message ?? '计划读取失败')
       setPlan(body.data)
+      setPendingEntityValues({})
       setFailure(null)
     } catch (error) {
       setFailure({ message: `计划加载失败：${String(error)}。确认 Owli 仍在运行后重试`, details: null })
@@ -144,6 +202,22 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
     () => plan?.decision_balance.filter((item) => item.answer === null || item.answer === '' || (Array.isArray(item.answer) && item.answer.length === 0)).length ?? 0,
     [plan],
   )
+  const pendingEntityPlaceholders = useMemo(
+    () => plan ? collectPendingEntityPlaceholders(plan) : [],
+    [plan],
+  )
+  const entityMappingReady = pendingEntityPlaceholders.length > 0
+    && pendingEntityPlaceholders.every((placeholder) => pendingEntityValues[placeholder]?.trim())
+  const applyEntityMapping = () => {
+    if (!plan || !entityMappingReady) return
+    const mapping = Object.fromEntries(
+      pendingEntityPlaceholders.map((placeholder) => [
+        placeholder,
+        pendingEntityValues[placeholder].trim(),
+      ]),
+    )
+    void save(applyPendingEntityMapping(plan, mapping))
+  }
   const approved = Boolean(plan?.approved_at)
   const runtimeEdit = new URLSearchParams(window.location.search).get('runtime') === '1'
   const frozen = approved && !runtimeEdit
@@ -193,6 +267,32 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
 
     <div className="plan-layout">
       <section className="plan-main">
+        {reusedSource && pendingEntityPlaceholders.length > 0 && <Card
+          className="question-queue"
+          title={<Space>复用实体映射 <Tag color="warning">批准前必填</Tag></Space>}
+        >
+          <Typography.Paragraph type="secondary">
+            一次填入当前题目的真实实体，系统会同步替换追问、goal 文案、Agent 任务、采集实体和章节派生字段。
+          </Typography.Paragraph>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {pendingEntityPlaceholders.map((placeholder) => <Input
+              key={placeholder}
+              addonBefore={placeholder}
+              placeholder="输入真实实体"
+              disabled={frozen || saving}
+              value={pendingEntityValues[placeholder] ?? ''}
+              onChange={(event) => setPendingEntityValues((current) => ({
+                ...current,
+                [placeholder]: event.target.value,
+              }))}
+            />)}
+            <Button
+              type="primary"
+              disabled={frozen || saving || !entityMappingReady}
+              onClick={applyEntityMapping}
+            >应用实体映射并保存</Button>
+          </Space>
+        </Card>}
         <Card className="question-queue" title={<Space>决策天平追问 <Tag color={unanswered ? 'warning' : 'success'}>{unanswered ? `${unanswered} 个待回答` : '已全部回答'}</Tag></Space>}>
           {plan.decision_balance.length ? plan.decision_balance.map((question, index) =>
             <QuestionView key={question.q_id} question={question} disabled={approved || saving}

@@ -15,7 +15,7 @@ from app.store.dao import Store
 
 
 AGENT_EDITABLE_FIELDS = (
-    "agent_id", "display_name", "task", "depends_on", "inputs", "engine",
+    "agent_id", "display_name", "entity", "task", "depends_on", "inputs", "engine",
     "model", "capability", "output",
 )
 GOAL_EDITABLE_FIELDS = (
@@ -153,8 +153,12 @@ def _validate_and_collect(
         for index, (old, new) in enumerate(zip(old_questions, new_questions)):
             for field in set(old) | set(new):
                 path = f"decision_balance[{index}].{field}"
-                if field in {"answer", "answered_at"}:
-                    record("plan", current.research_id, path, old.get(field), new.get(field), "追问答案")
+                if field in {"answer", "answered_at", "question", "options"}:
+                    label = "追问答案" if field in {"answer", "answered_at"} else "追问文案"
+                    record(
+                        "plan", current.research_id, path,
+                        old.get(field), new.get(field), label,
+                    )
                 elif old.get(field) != new.get(field):
                     rejected.append(_reject(path, old.get(field), new.get(field)))
 
@@ -228,6 +232,18 @@ def _validate_and_collect(
                         f"goals[{new_index}].agents[{agent_index}].{field}",
                         old_value, new_value, field,
                     )
+                    if field == "entity":
+                        chapter = new_agent.get("chapter")
+                        if (
+                            isinstance(chapter, dict)
+                            and chapter.get("chapter_type") == "collection"
+                            and isinstance(chapter.get("closing"), dict)
+                        ):
+                            chapter["closing"]["entities"] = (
+                                [new_value]
+                                if isinstance(new_value, str) and new_value.strip()
+                                else []
+                            )
             old_prompt = old_agent.get("prompt", {})
             new_prompt = new_agent.get("prompt", {})
             for field in ("preamble_ref", "assumptions_policy"):

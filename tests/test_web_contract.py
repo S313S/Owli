@@ -33,6 +33,16 @@ class WebContractTest(unittest.TestCase):
         self.assertIn("baseline_source.startsWith('reused:')", source)
         self.assertIn("沿用自历史计划", source)
 
+    def test_复用计划提供一次性实体映射而不是逐字段碰运气(self) -> None:
+        source = (WEB / "src" / "PlanEditorPage.tsx").read_text(encoding="utf-8")
+        types = (WEB / "src" / "types.ts").read_text(encoding="utf-8")
+        self.assertIn("复用实体映射", source)
+        self.assertIn("pendingEntityPlaceholders", source)
+        self.assertIn("applyPendingEntityMapping", source)
+        self.assertIn("entity: string | null", types)
+        self.assertIn("if (agent.chapter)", source)
+        self.assertIn("} & Record<string, unknown>) | null", types)
+
     def test_工作板渲染_deadline_倒计时和重跑次数(self) -> None:
         source = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
         card = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")

@@ -99,6 +99,20 @@ async def test_追问未答完拒绝批准_答完后冻结并返回时间与新�
 
 
 @async_test
+async def test_复用实体映射允许同步改追问题干与选项(tmp_path: Path) -> None:
+    async with api_client(tmp_path) as (_, client, research_id, _):
+        plan = await get_plan(client, research_id)
+        plan["decision_balance"][0]["question"] = "飞书优先服务哪类判断？"
+        plan["decision_balance"][0]["options"] = ["飞书产品路线", "市场话术"]
+        saved = await client.put(f"/api/researches/{research_id}/plan", json=plan)
+
+    assert saved.status_code == 200, saved.text
+    question = saved.json()["data"]["decision_balance"][0]
+    assert question["question"] == "飞书优先服务哪类判断？"
+    assert question["options"] == ["飞书产品路线", "市场话术"]
+
+
+@async_test
 async def test_不可编辑字段_retry_policy_与_preamble_ref_均拒改并定位(tmp_path: Path) -> None:
     async with api_client(tmp_path) as (_, client, research_id, _):
         plan = await get_plan(client, research_id)

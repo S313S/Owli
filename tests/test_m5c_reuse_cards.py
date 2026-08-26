@@ -13,7 +13,7 @@ from app.plan.store import load_plan
 from app.orchestrator.runtime import _replace_reused_subjects
 from app.store.dao import Store
 from app.store.recall import RecallCandidate, RecallMatch, RecallResult
-from tests.plan_factory import make_plan_dict
+from tests.plan_factory import make_agent, make_plan_dict
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sql"
@@ -36,6 +36,9 @@ def _source_plan(source_id: str) -> dict:
         "answered_at": "2026-08-25T10:20:00+00:00",
     }]
     for goal_index, goal in enumerate(plan["goals"]):
+        goal["agents"].append(
+            make_agent(f"data-collection-{(goal_index + 1) * 2}", goal["goal_id"])
+        )
         goal["title"] = (
             f"历史方法阶段 {goal_index + 1} · "
             "旧题目的研究实体哨兵与旧题目的第二实体哨兵"
@@ -46,18 +49,19 @@ def _source_plan(source_id: str) -> dict:
         goal["deliverable"]["description"] = "旧题目的研究实体哨兵方法产物。"
         goal["acceptance"] = ["旧题目的研究实体哨兵至少有 3 条可追溯记录"]
         goal["intervention"]["prompt"] = "请核对旧题目的研究实体哨兵方法产物，是否继续？"
-        for agent in goal["agents"]:
+        for agent_index, agent in enumerate(goal["agents"]):
             agent["task"] = (
                 "采集旧题目的研究实体哨兵与旧题目的第二实体哨兵的方法证据。"
             )
             agent["prompt"]["body"] = "查询旧题目的研究实体哨兵并按来源交叉核对。"
-            if goal_index == 0:
-                agent["entity"] = "旧题目的采集实体哨兵"
-                agent["chapter"]["chapter_type"] = "collection"
-                agent["chapter"]["closing"]["entities"] = ["旧题目的采集实体哨兵"]
-            else:
-                agent["entity"] = "旧题目的 Agent 实体哨兵"
-                agent["chapter"]["closing"]["entities"] = ["旧题目的章节实体哨兵"]
+            source_id = ("web_search", "product_hunt", "hacker_news")[goal_index]
+            agent["entity"] = plan["subjects"][agent_index]
+            agent["capability"]["profile"] = "web-collector"
+            agent["capability"]["tools"] = [f"source.{source_id}", "fs.read"]
+            agent["capability"]["sources"] = [source_id]
+            agent["capability"]["network"] = "sources_only"
+            agent["chapter"]["chapter_type"] = "collection"
+            agent["chapter"]["closing"]["entities"] = [agent["entity"]]
             agent["chapter"]["closing"]["notes"] = {"legacy": "旧题目的章节哨兵"}
     return plan
 
@@ -339,13 +343,117 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                     "affects": ["goal-1", "goal-2"],
                     "answered_at": None,
                 }]
-                first_agent = reused_plan.goals[0].agents[0]
-                assert first_agent.entity == "比较两个编码 Agent"
-                assert first_agent.chapter["closing"]["entities"] == ["比较两个编码 Agent"]
-                for goal in reused_plan.goals[1:]:
-                    for agent in goal.agents:
-                        assert agent.entity is None
-                        assert agent.chapter["closing"]["entities"] == []
+                collection_agents = [
+                    agent
+                    for goal in reused_plan.goals
+                    for agent in goal.agents
+                    if agent.chapter["chapter_type"] == "collection"
+                ]
+                assert [agent.entity for agent in collection_agents] == [
+                    "待定实体1",
+                    "待定实体2",
+                    "待定实体1",
+                    "待定实体2",
+                    "待定实体1",
+                    "待定实体2",
+                ]
+                assert [
+                    agent.chapter["closing"]["entities"]
+                    for agent in collection_agents
+                ] == [
+                    ["待定实体1"], ["待定实体2"],
+                    ["待定实体1"], ["待定实体2"],
+                    ["待定实体1"], ["待定实体2"],
+                ]
+
+                from app.plan.lint import lint
+
+                reused_raw = reused_plan.to_dict()
+                assert lint(reused_raw, for_approval=False)["errors"] == []
+                approval_errors = lint(reused_raw, for_approval=True)["errors"]
+                assert any(error.startswith("[规则12]") for error in approval_errors)
+                assert any(error.startswith("[规则29]") for error in approval_errors)
+
+                replacements = {
+                    "待定实体1": "Figma",
+                    "待定实体2": "Sketch",
+                }
+
+                def replace_placeholders(value: str) -> str:
+                    for placeholder, entity in replacements.items():
+                        value = value.replace(placeholder, entity)
+                    return value
+
+                submitted = reused_plan.to_dict()
+                for question in submitted["decision_balance"]:
+                    question["question"] = replace_placeholders(question["question"])
+                    question["options"] = [
+                        replace_placeholders(value) for value in question["options"]
+                    ]
+                for goal in submitted["goals"]:
+                    goal["title"] = replace_placeholders(goal["title"])
+                    goal["objective"] = replace_placeholders(goal["objective"])
+                    goal["deliverable"]["description"] = replace_placeholders(
+                        goal["deliverable"]["description"]
+                    )
+                    goal["acceptance"] = [
+                        replace_placeholders(value) for value in goal["acceptance"]
+                    ]
+                    goal["intervention"]["prompt"] = replace_placeholders(
+                        goal["intervention"]["prompt"]
+                    )
+                    for agent in goal["agents"]:
+                        if agent["entity"] is not None:
+                            agent["entity"] = replace_placeholders(agent["entity"])
+                        agent["task"] = replace_placeholders(agent["task"])
+                        agent["prompt"]["body"] = replace_placeholders(
+                            agent["prompt"]["body"]
+                        )
+                        opening = agent["chapter"]["opening"]
+                        opening["task"] = replace_placeholders(opening["task"])
+                        opening["acceptance"] = [
+                            replace_placeholders(value)
+                            for value in opening["acceptance"]
+                        ]
+                        closing = agent["chapter"]["closing"]
+                        closing["entities"] = [
+                            replace_placeholders(value)
+                            for value in closing["entities"]
+                        ]
+
+                assert lint(submitted, for_approval=False)["errors"] == []
+                pending_answer_errors = lint(submitted, for_approval=True)["errors"]
+                assert len(pending_answer_errors) == 1
+                assert pending_answer_errors[0].startswith("[规则12]")
+                submitted["decision_balance"][0]["answer"] = "产品路线"
+                submitted["decision_balance"][0]["answered_at"] = (
+                    "2026-08-26T12:00:00+00:00"
+                )
+                assert lint(submitted, for_approval=True)["errors"] == []
+
+                saved = await client.put(
+                    f"/api/researches/{reuse_id}/plan",
+                    json=submitted,
+                )
+                assert saved.status_code == 200, saved.text
+                saved_plan = saved.json()["data"]
+                assert saved_plan["goals"][0]["agents"][0]["entity"] == "Figma"
+                assert saved_plan["goals"][0]["agents"][0]["origin"][
+                    "entity"
+                ] == "user"
+                assert saved_plan["goals"][0]["agents"][0]["chapter"]["closing"][
+                    "entities"
+                ] == ["Figma"]
+
+                async def skip_execution(_plan) -> None:
+                    return None
+
+                application.state.runtime.start_research = skip_execution
+                approved = await client.post(
+                    f"/api/researches/{reuse_id}/plan/approve",
+                    headers={"X-Request-ID": "d011-approve-after-fill"},
+                )
+                assert approved.status_code == 200, approved.text
 
                 second_recall = ControlledRecall(_recall_result())
                 application.state.recall_service = second_recall

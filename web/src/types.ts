@@ -51,6 +51,7 @@ export type Origin = Record<string, 'generated' | 'user' | 'reset'>
 export type PlanAgent = {
   agent_id: string
   display_name: string
+  entity: string | null
   task: string
   depends_on: string[]
   inputs: Array<Record<string, unknown>>
@@ -67,6 +68,10 @@ export type PlanAgent = {
   }
   prompt: { preamble_ref: string; body: string; assumptions_policy: string }
   output: { format: string; path: string; validators: string[] }
+  chapter: ({
+    opening: { task: string; acceptance: string[] } & Record<string, unknown>
+    closing: { entities: string[] } & Record<string, unknown>
+  } & Record<string, unknown>) | null
   extra_quota_credits: number | null
   origin: Origin
   status: string

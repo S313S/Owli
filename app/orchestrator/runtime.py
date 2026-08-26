@@ -94,6 +94,24 @@ def _replace_reused_subjects(value: str, subjects: list[str], query: str) -> str
     return pattern.sub(lambda match: placeholders[match.group(0)], value)
 
 
+def _reused_entity_order(raw: dict[str, Any], subjects: list[str]) -> list[str]:
+    """合并历史 subjects 与采集章 entity，固定复用占位符的唯一顺序。"""
+
+    entities = [subject.strip() for subject in subjects if subject.strip()]
+    for goal in raw.get("goals", []):
+        for agent in goal.get("agents", []):
+            chapter = agent.get("chapter")
+            if (
+                not isinstance(chapter, dict)
+                or chapter.get("chapter_type") != "collection"
+            ):
+                continue
+            entity = str(agent.get("entity") or "").strip()
+            if entity:
+                entities.append(entity)
+    return list(dict.fromkeys(entities))
+
+
 class RuntimeCoordinator:
     """每个 FastAPI 进程唯一的运行期协调器。"""
 
@@ -458,13 +476,14 @@ class RuntimeCoordinator:
             raise ValueError("这条历史记录没有可复用计划，请选择全新开始")
         raw = source.to_dict()
         source_subjects = list(raw.get("subjects", []))
+        source_entities = _reused_entity_order(raw, source_subjects)
         decision_balance = copy.deepcopy(raw["decision_balance"])
         for question in decision_balance:
             question["question"] = _replace_reused_subjects(
-                question["question"], source_subjects, query
+                question["question"], source_entities, query
             )
             question["options"] = [
-                _replace_reused_subjects(option, source_subjects, query)
+                _replace_reused_subjects(option, source_entities, query)
                 for option in question["options"]
             ]
             question["answer"] = None
@@ -514,23 +533,24 @@ class RuntimeCoordinator:
         })
         for goal in raw["goals"]:
             goal["title"] = _replace_reused_subjects(
-                goal["title"], source_subjects, query
+                goal["title"], source_entities, query
             )
             goal["objective"] = _replace_reused_subjects(
-                goal["objective"], source_subjects, query
+                goal["objective"], source_entities, query
             )
             goal["deliverable"]["description"] = _replace_reused_subjects(
-                goal["deliverable"]["description"], source_subjects, query
+                goal["deliverable"]["description"], source_entities, query
             )
             goal["acceptance"] = [
-                _replace_reused_subjects(item, source_subjects, query)
+                _replace_reused_subjects(item, source_entities, query)
                 for item in goal["acceptance"]
             ]
             goal["intervention"]["prompt"] = _replace_reused_subjects(
-                goal["intervention"]["prompt"], source_subjects, query
+                goal["intervention"]["prompt"], source_entities, query
             )
             goal["status"] = "pending"
             for agent in goal["agents"]:
+                source_entity = str(agent.get("entity") or "").strip()
                 agent["entity"] = None
                 kind = agent_kind_of(
                     str(agent["agent_id"]),
@@ -538,10 +558,10 @@ class RuntimeCoordinator:
                 )
                 agent["display_name"] = role_names.get(kind, "研究分析")
                 agent["task"] = _replace_reused_subjects(
-                    agent["task"], source_subjects, query
+                    agent["task"], source_entities, query
                 )
                 prompt_body = _replace_reused_subjects(
-                    agent["prompt"]["body"], source_subjects, query
+                    agent["prompt"]["body"], source_entities, query
                 )
                 if "只复用方法与来源配置，不沿用旧报告结论" not in prompt_body:
                     prompt_body = f"{prompt_body.rstrip()}\n复用边界：{REUSE_CONCLUSION_GUARD}"
@@ -555,14 +575,20 @@ class RuntimeCoordinator:
                 if isinstance(chapter, dict):
                     is_collection = chapter.get("chapter_type") == "collection"
                     if is_collection:
-                        agent["entity"] = query
+                        agent["entity"] = _replace_reused_subjects(
+                            source_entity, source_entities, query
+                        )
                     opening = chapter.get("opening")
                     if isinstance(opening, dict):
                         opening["task"] = agent["task"]
                         opening["acceptance"] = list(goal["acceptance"])
                     closing = chapter.get("closing")
                     if isinstance(closing, dict):
-                        closing["entities"] = [query] if is_collection else []
+                        closing["entities"] = (
+                            [agent["entity"]]
+                            if is_collection and agent["entity"]
+                            else []
+                        )
                         closing["notes"] = {}
         plan = Plan.from_dict(raw)
         save_plan(self.store, plan, expected_rev=expected_rev)

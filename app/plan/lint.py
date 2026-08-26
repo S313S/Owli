@@ -1,4 +1,4 @@
-"""计划树保存与批准前的 28 条阻断校验和 7 类质量提示。"""
+"""计划树保存与批准前的 29 条阻断校验和 7 类质量提示。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from app.plan.model import Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of
 _KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BAD_ACCEPTANCE = ("良好", "充分", "尽量", "合理")
 _QUESTION_INSTRUCTIONS = ("询问用户", "确认后再继续", "请告诉我")
+_PENDING_ENTITY = re.compile(r"待定实体\d+")
 _FORBIDDEN_FIELDS = {
     "estimated_minutes", "estimated_tokens", "estimated_cost",
     "planned_steps", "step_count",
@@ -348,6 +349,63 @@ def _rule_12(plan: dict[str, Any]) -> list[str]:
             q_id = question.get("q_id") or f"decision_balance[{index}]"
             messages.append(f"[规则12] {q_id}.answer 不能为空，否则不能批准计划")
     return messages
+
+
+def _rule_29(plan: dict[str, Any]) -> list[str]:
+    """批准前不允许活动计划里残留复用实体占位符。"""
+
+    locations: list[str] = []
+
+    def inspect(location: str, value: Any) -> None:
+        if isinstance(value, str):
+            if _PENDING_ENTITY.search(value):
+                locations.append(location)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                inspect(f"{location}[{index}]", child)
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                inspect(f"{location}.{key}", child)
+
+    for index, question in enumerate(plan.get("decision_balance", [])):
+        inspect(f"decision_balance[{index}].question", question.get("question"))
+        inspect(f"decision_balance[{index}].options", question.get("options"))
+    for goal in plan.get("goals", []):
+        goal_id = str(goal.get("goal_id") or "goal")
+        for field in ("title", "objective", "acceptance"):
+            inspect(f"{goal_id}.{field}", goal.get(field))
+        inspect(
+            f"{goal_id}.deliverable.description",
+            goal.get("deliverable", {}).get("description"),
+        )
+        inspect(
+            f"{goal_id}.intervention.prompt",
+            goal.get("intervention", {}).get("prompt"),
+        )
+        for agent in goal.get("agents", []):
+            agent_id = str(agent.get("agent_id") or "agent")
+            anchor = f"{goal_id}/{agent_id}"
+            for field in ("entity", "task"):
+                inspect(f"{anchor}.{field}", agent.get(field))
+            inspect(f"{anchor}.prompt.body", agent.get("prompt", {}).get("body"))
+            chapter = agent.get("chapter")
+            if isinstance(chapter, dict):
+                inspect(f"{anchor}.chapter.opening", chapter.get("opening"))
+                closing = chapter.get("closing")
+                if isinstance(closing, dict):
+                    inspect(
+                        f"{anchor}.chapter.closing.entities",
+                        closing.get("entities"),
+                    )
+
+    if not locations:
+        return []
+    unique_locations = list(dict.fromkeys(locations))
+    preview = "、".join(unique_locations[:12])
+    suffix = f" 等共 {len(unique_locations)} 处" if len(unique_locations) > 12 else ""
+    return [
+        f"[规则29] 批准前必须把待定实体占位符替换为真实实体：{preview}{suffix}"
+    ]
 
 
 def _validator_problem(specification: Any) -> str | None:
@@ -1063,7 +1121,7 @@ def lint(
     plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
     max_chapters_per_goal: int | None = None,
 ) -> dict[str, list[str]]:
-    """按 §10 返回问题；规则 12 是批准闸门，普通保存不阻断。"""
+    """按 §10 返回问题；规则 12/29 是批准闸门，普通保存不阻断。"""
     raw = _data(plan)
     goals = list(raw.get("goals", []))
     errors: list[str] = []
@@ -1080,6 +1138,7 @@ def lint(
     errors.extend(_rule_11(goals))
     if for_approval:
         errors.extend(_rule_12(raw))
+        errors.extend(_rule_29(raw))
     errors.extend(_rule_13(goals))
     errors.extend(_rule_14(goals))
     errors.extend(_rule_15(goals))
