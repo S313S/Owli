@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import logging
@@ -34,7 +35,7 @@ from app.plan.cards import (
 from app.plan.generate import generate_plan
 from app.plan.editing import apply_edit, approve
 from app.plan.model import Goal, Plan, agent_kind_of
-from app.plan.store import load_plan
+from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
     enrich_source_section,
     load_evidence_artifacts,
@@ -306,7 +307,13 @@ class RuntimeCoordinator:
             "events": [],
         }
 
-    async def _publish_question(self, plan: Plan, question: dict[str, Any]) -> None:
+    async def _publish_question(
+        self,
+        plan: Plan,
+        question: dict[str, Any],
+        *,
+        auto_respond: bool = True,
+    ) -> None:
         card = Card(
             card_id=f"{plan.research_id}-{question['q_id']}",
             card_type=CardType.QUESTION,
@@ -336,7 +343,7 @@ class RuntimeCoordinator:
         state = self.researches[plan.research_id]
         state["cards"].append(card.to_dict())
         await self.events.publish(plan.research_id, card.to_event())
-        if self.auto_confirm:
+        if self.auto_confirm and auto_respond:
             first = card.actions[0]
             await self.respond_card(
                 card.card_id,
@@ -345,8 +352,18 @@ class RuntimeCoordinator:
             )
 
     async def prepare_research(
-        self, research_id: str, query: str, *, scale: str = "standard"
+        self,
+        research_id: str,
+        query: str,
+        *,
+        scale: str = "standard",
     ) -> Plan:
+        pending_history_cards = [
+            item for item in self.researches.get(research_id, {}).get("cards", [])
+            if item.get("card_type") == CardType.HISTORY_REUSE.value
+            and item.get("status") == CardStatus.PENDING.value
+        ]
+        has_pending_history = bool(pending_history_cards)
         adapter = self.adapter_factory()
         self._adapters[research_id] = adapter
         plan = await generate_plan(
@@ -360,14 +377,27 @@ class RuntimeCoordinator:
             raise RuntimeError(
                 f"计划 research_id 与请求不一致：{plan.research_id} != {research_id}"
             )
+        current_history_cards = [
+            (
+                self.cards[str(item["card_id"])].to_dict()
+                if str(item.get("card_id")) in self.cards
+                else copy.deepcopy(item)
+            )
+            for item in pending_history_cards
+        ]
         self.researches[research_id] = self._state_from_plan(plan)
+        self.researches[research_id]["cards"] = current_history_cards
         await self.events.publish(
             research_id,
             {"type": "research_update", "data": self.researches[research_id]},
         )
         for question in plan.decision_balance:
-            await self._publish_question(plan, question)
-        if self.auto_confirm:
+            await self._publish_question(
+                plan,
+                question,
+                auto_respond=not has_pending_history,
+            )
+        if self.auto_confirm and not has_pending_history:
             answered = load_plan(self.store, research_id)
             if answered is None:
                 raise RuntimeError("自动批准前无法读取计划")
@@ -389,6 +419,122 @@ class RuntimeCoordinator:
             )
             await self.start_research(approved)
             return approved
+        return plan
+
+    async def reuse_plan(
+        self,
+        research_id: str,
+        source_research_id: str,
+        query: str,
+        *,
+        scale: str = "standard",
+    ) -> Plan:
+        """复用历史结构，重写为当前题目的可编辑初稿。"""
+
+        source = load_plan(self.store, source_research_id)
+        if source is None:
+            raise ValueError("这条历史记录没有可复用计划，请选择全新开始")
+        raw = source.to_dict()
+        now = self.now_iso()
+        current = load_plan(self.store, research_id)
+        expected_rev = 0 if current is None else current.plan_rev
+        goal_ids = [str(goal["goal_id"]) for goal in raw["goals"]]
+        role_names = {
+            "data_collection": "信息采集",
+            "data_cleaning": "数据清洗",
+            "reliability_audit": "可靠度审计",
+            "cross_validation": "交叉验证",
+            "consistency_check": "一致性检查",
+            "report_writing": "报告撰写",
+            "summary": "摘要生成",
+            "tagging": "标签生成",
+        }
+        raw.update({
+            "research_id": research_id,
+            "plan_rev": expected_rev + 1,
+            "title": query[:40],
+            "research_question": query,
+            "subjects_justification": (
+                "复用同一研究事项的历史实体边界；用户需在计划编辑器核对。"
+            ),
+            "scale": scale,
+            "status": "awaiting_review",
+            "approved_at": None,
+            "decision_balance": [{
+                "q_id": "q-1",
+                "question": f"「{query}」的结果优先服务哪类决策？",
+                "options": ["产品路线与功能取舍", "市场传播与销售话术", "两者兼顾"],
+                "input_type": "single",
+                "answer": None,
+                "affects": goal_ids,
+                "answered_at": None,
+            }],
+            "expert_panel": None,
+            "change_log": [],
+            "baseline": None,
+            "baseline_source": f"reused:{source_research_id}",
+            "created_at": now,
+            "updated_at": now,
+        })
+        for index, goal in enumerate(raw["goals"], start=1):
+            goal["title"] = f"阶段 {index} · 复用已验证方法"
+            goal["objective"] = (
+                f"围绕当前需求「{query}」完成第 {index} 阶段，"
+                "沿用历史计划的依赖与能力结构，产出可独立复核的新结果。"
+            )
+            goal["deliverable"]["description"] = (
+                f"针对「{query}」的第 {index} 阶段可复核产物。"
+            )
+            goal["acceptance"] = [
+                f"{goal['deliverable']['path']} 文件存在且通过声明的 validators",
+                f"产物至少包含 1 条明确对应当前需求「{query}」的可追溯记录",
+            ]
+            goal["intervention"] = {
+                "on_complete": True,
+                "prompt": f"请核对「{query}」第 {index} 阶段产物，是否继续？",
+            }
+            goal["status"] = "pending"
+            for agent in goal["agents"]:
+                kind = agent_kind_of(
+                    str(agent["agent_id"]),
+                    agent.get("capability", {}).get("profile"),
+                )
+                agent["display_name"] = role_names.get(kind, "研究分析")
+                agent["task"] = (
+                    f"按历史计划中已验证的能力与信息源配置，处理当前需求「{query}」，"
+                    "并把结果写入声明的 output.path。"
+                )
+                agent["prompt"]["body"] = (
+                    f"当前研究问题={query}；只复用方法与来源配置，不沿用旧报告结论；"
+                    "所有断言必须可追溯并满足本 agent 的产物校验。"
+                )
+                agent["origin"] = {
+                    key: "generated" for key in agent.get("origin", {"_node": "generated"})
+                }
+                agent["origin"].setdefault("_node", "generated")
+                agent["status"] = "queued"
+                chapter = agent.get("chapter")
+                if isinstance(chapter, dict):
+                    opening = chapter.get("opening")
+                    if isinstance(opening, dict):
+                        opening["task"] = agent["task"]
+                        opening["acceptance"] = list(goal["acceptance"])
+        plan = Plan.from_dict(raw)
+        save_plan(self.store, plan, expected_rev=expected_rev)
+        history_cards = [
+            item.to_dict()
+            for item in self.cards.values()
+            if item.research_id == research_id
+            and item.card_type is CardType.HISTORY_REUSE
+        ]
+        self.researches[research_id] = self._state_from_plan(plan)
+        self.researches[research_id]["cards"] = history_cards
+        await self.events.publish(
+            research_id,
+            {"type": "research_update", "data": self.researches[research_id]},
+        )
+        for question in plan.decision_balance:
+            await self._publish_question(plan, question, auto_respond=False)
         return plan
 
     def _agent_kind(self, agent: Any) -> str:

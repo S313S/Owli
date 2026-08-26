@@ -419,7 +419,7 @@ def test_主引擎结构化短调用断连保留原始原因(tmp_path: Path) -> 
         raise AssertionError("断连必须归类为主引擎不可用")
 
 
-def test_创建研究接口返回排好序的判重候选(tmp_path: Path) -> None:
+def test_创建研究接口立即返回且判重候选随后进入卡片(tmp_path: Path) -> None:
     import httpx
 
     from app.api.main import create_app
@@ -462,30 +462,28 @@ def test_创建研究接口返回排好序的判重候选(tmp_path: Path) -> Non
             async with httpx.AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                return await client.post(
+                response = await client.post(
                     "/api/researches",
                     json={"query": "对比 OpenAI 与 Claude Code 的开发体验"},
                     headers={"X-Request-ID": "m5b-api-1"},
                 )
+                research_id = response.json()["data"]["research_id"]
+                for _ in range(100):
+                    cards = application.state.researches[research_id]["cards"]
+                    if cards:
+                        return response, cards[0]
+                    await asyncio.sleep(0)
+                raise AssertionError("判重候选卡片未在限定轮次内出现")
 
-    response = asyncio.run(request())
+    response, card = asyncio.run(request())
 
     assert response.status_code == 200, response.text
     similar = response.json()["data"]["similar"]
-    assert len(similar) == 1
-    assert similar[0] == {
-        "id": "r-openai",
-        "title": "OpenAI vs Claude Code",
-        "completed_at": "2026-08-25T10:00:00+00:00",
-        "similarity_reason": "比较对象与报告骨架一致。",
-        "same_item": True,
-        "confidence": "高",
-        "reusable_elements": ["报告骨架"],
-        "tags": [],
-        "sources": [],
-        "match_label": "主引擎语义判断",
-        "query_mode": "fts5_bm25",
-        "bm25_score": similar[0]["bm25_score"],
-        "keyword_score": similar[0]["keyword_score"],
-    }
-    assert similar[0]["bm25_score"] < 0
+    assert similar == []
+    assert response.json()["data"]["recall_status"] == "pending"
+    assert card["card_type"] == "HISTORY_REUSE"
+    assert card["title"] == "OpenAI vs Claude Code"
+    assert card["target"]["source_research_id"] == "r-openai"
+    assert card["target"]["completed_at"] == "2026-08-25T10:00:00+00:00"
+    assert card["target"]["match_label"] == "主引擎语义判断"
+    assert "比较对象与报告骨架一致。" in card["body"]

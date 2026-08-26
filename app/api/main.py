@@ -30,7 +30,13 @@ from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.runtime import RuntimeCoordinator
 from app.plan.generate import PlanGenerationError
-from app.plan.cards import Card, CardStatus
+from app.plan.cards import (
+    Card,
+    CardActionType,
+    CardBlocking,
+    CardStatus,
+    CardType,
+)
 from app.plan.editing import (
     PlanApprovalRejected,
     PlanEditRejected,
@@ -108,6 +114,8 @@ def create_app(
     cards: dict[str, Card] = {}
     request_cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     background_tasks: set[asyncio.Task[Any]] = set()
+    plan_tasks: dict[str, asyncio.Task[Any]] = {}
+    history_choice_locks: dict[str, asyncio.Lock] = {}
 
     async def default_recall_judge(query: str, candidates: Any) -> Any:
         if adapter_factory is None:
@@ -208,6 +216,7 @@ def create_app(
             {
                 "id": item.candidate.report_id,
                 "title": item.candidate.title,
+                "summary_line": item.candidate.summary_line,
                 "completed_at": item.candidate.completed_at,
                 "similarity_reason": item.reason,
                 "same_item": item.same_item,
@@ -450,6 +459,177 @@ def create_app(
                 },
             )
 
+    def track_background(name: str, operation: Awaitable[Any]) -> asyncio.Task[Any]:
+        task = asyncio.create_task(operation, name=name)
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return task
+
+    def start_plan_generation(
+        research_id: str,
+        *,
+        start_gate: asyncio.Event | None = None,
+    ) -> None:
+        active = plan_tasks.get(research_id)
+        if active is not None and not active.done():
+            return
+        report = store.get_report(research_id)
+        if report is None:
+            raise RuntimeError("待规划研究不存在")
+        query = str(report["research_question"])
+        extra = report.get("extra") if isinstance(report.get("extra"), dict) else {}
+        scale = str(extra.get("scale", "standard"))
+        state = researches[research_id]
+        state["status"] = "planning"
+        state["status_label"] = "正在生成计划"
+        state["progress"]["summary"] = "正在生成全新调研计划"
+        prepare_kwargs: dict[str, Any] = {"scale": scale}
+
+        async def prepare_in_background() -> None:
+            if start_gate is not None:
+                await start_gate.wait()
+            await run_in_background(
+                research_id,
+                runtime.prepare_research(
+                    research_id,
+                    query,
+                    **prepare_kwargs,
+                ),
+            )
+
+        task = track_background(
+            f"owli:{research_id}",
+            prepare_in_background(),
+        )
+        plan_tasks[research_id] = task
+
+        def clear(completed: asyncio.Task[Any]) -> None:
+            if plan_tasks.get(research_id) is completed:
+                plan_tasks.pop(research_id, None)
+
+        task.add_done_callback(clear)
+
+    def create_reuse_card(
+        research_id: str,
+        item: dict[str, Any],
+        index: int,
+    ) -> Card:
+        reusable = "、".join(item["reusable_elements"]) or "历史结论与信息源"
+        card = Card(
+            card_id=f"{research_id}-history-{index}",
+            card_type=CardType.HISTORY_REUSE,
+            research_id=research_id,
+            goal_id=None,
+            agent_id=None,
+            title=str(item["title"]),
+            body=(
+                "复用这份历史调研会更快、已验证。"
+                f"可复用：{reusable}；匹配理由：{item['similarity_reason']}"
+            ),
+            target={
+                "source_research_id": item["id"],
+                "display_name": item["title"],
+                "completed_at": item["completed_at"],
+                "summary_line": item.get("summary_line"),
+                "sources": list(item["sources"]),
+                "match_label": item["match_label"],
+                "similarity_reason": item["similarity_reason"],
+            },
+            actions=[
+                {
+                    "type": CardActionType.CHOICE_2.value,
+                    "id": "reuse",
+                    "label": "复用这条历史",
+                    "value": "reuse",
+                },
+                {
+                    "type": CardActionType.CHOICE_2.value,
+                    "id": "new",
+                    "label": "坚持新建",
+                    "value": "new",
+                },
+            ],
+            blocking=CardBlocking.RESEARCH,
+            deadline=None,
+            status=CardStatus.PENDING,
+            result=None,
+            created_at=runtime.now_iso(),
+            resolved_at=None,
+        )
+        cards[card.card_id] = card
+        researches[research_id]["cards"].append(card.to_dict())
+        return card
+
+    async def recall_then_continue(
+        research_id: str,
+        query: str,
+    ) -> None:
+        try:
+            result = await product_recall_service.recall(query)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await events.publish(
+                research_id,
+                {
+                    "type": "reuse_check_complete",
+                    "data": {
+                        "has_matches": False,
+                        "message": "历史匹配不可用，已继续生成全新计划",
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    },
+                },
+            )
+            start_plan_generation(research_id)
+            return
+
+        candidates = [
+            item for item in similar_payload(result)
+            if item["same_item"] is not False
+        ]
+        await events.publish(
+            research_id,
+            {
+                "type": "reuse_check_complete",
+                "data": {"has_matches": bool(candidates), "count": len(candidates)},
+            },
+        )
+        if not candidates:
+            start_plan_generation(research_id)
+            return
+        reuse_cards = [
+            create_reuse_card(research_id, item, index)
+            for index, item in enumerate(candidates, start=1)
+        ]
+        # 先登记预生成任务，再把第一张可点击卡发给浏览器，避免用户抢先点击时
+        # 还找不到待取消任务，随后又被全新计划覆盖。
+        plan_start_gate = asyncio.Event()
+        start_plan_generation(research_id, start_gate=plan_start_gate)
+        try:
+            for card in reuse_cards:
+                await events.publish(research_id, card.to_event())
+        finally:
+            plan_start_gate.set()
+
+    async def run_recall_in_background(research_id: str, query: str) -> None:
+        try:
+            await recall_then_continue(research_id, query)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await events.publish(
+                research_id,
+                {
+                    "type": "reuse_check_complete",
+                    "data": {
+                        "has_matches": False,
+                        "message": "历史匹配处理异常，已继续生成全新计划",
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    },
+                },
+            )
+            start_plan_generation(research_id)
+
     @application.get("/api/health")
     async def health() -> dict:
         return {
@@ -473,7 +653,6 @@ def create_app(
         query = request.query.strip()
         if not query:
             raise HTTPException(status_code=422, detail="需求文本不能为空")
-        recall_result = await product_recall_service.recall(query)
         research_id = f"r-{uuid.uuid4().hex[:12]}"
         researches[research_id] = runtime.initial_state(research_id, query)
         created_at = runtime.now_iso()
@@ -489,18 +668,14 @@ def create_app(
             research_id,
             {"type": "research_snapshot", "data": researches[research_id]},
         )
-        task = asyncio.create_task(
-            run_in_background(
-                research_id,
-                runtime.prepare_research(research_id, query, scale=request.scale),
-            ),
-            name=f"owli:{research_id}",
+        track_background(
+            f"owli:recall:{research_id}",
+            run_recall_in_background(research_id, query),
         )
-        background_tasks.add(task)
-        task.add_done_callback(background_tasks.discard)
         response = envelope({
             "research_id": research_id,
-            "similar": similar_payload(recall_result),
+            "similar": [],
+            "recall_status": "pending",
         })
         request_cache[(scope, x_request_id)] = (200, copy.deepcopy(response))
         return response
@@ -850,6 +1025,103 @@ def create_app(
                 ),
                 status_code=422,
             )
+        if card.card_type is CardType.HISTORY_REUSE:
+            lock = history_choice_locks.setdefault(card.research_id, asyncio.Lock())
+            async with lock:
+                if card.status is not CardStatus.PENDING:
+                    return remember(
+                        scope,
+                        x_request_id,
+                        error_envelope(
+                            "card_already_resolved",
+                            "这组历史候选已经处理过，无需重复提交",
+                        ),
+                        status_code=409,
+                    )
+                source_research_id = str(card.target.get("source_research_id", ""))
+                report = store.get_report(card.research_id)
+                if report is None:
+                    return remember(
+                        scope,
+                        x_request_id,
+                        error_envelope(
+                            "research_not_found",
+                            "待处理研究不存在，请返回入口重新发起",
+                        ),
+                        status_code=404,
+                    )
+                reuse_source_to_apply: str | None = None
+                if request.action == "reuse":
+                    source_plan = load_plan(store, source_research_id)
+                    if source_plan is None:
+                        return remember(
+                            scope,
+                            x_request_id,
+                            error_envelope(
+                                "history_plan_unavailable",
+                                "这条历史记录没有可复用计划，请选择全新开始",
+                            ),
+                            status_code=409,
+                        )
+                    task = plan_tasks.get(card.research_id)
+                    if task is not None and not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                    # 全新预生成可能已发布 QUESTION 卡；改选历史模板时统一作废，
+                    # 防旧问题继续写入新计划。
+                    stale_cards = [
+                        item for item in cards.values()
+                        if item.research_id == card.research_id
+                        and item.card_type is not CardType.HISTORY_REUSE
+                        and item.status is CardStatus.PENDING
+                    ]
+                    for item in stale_cards:
+                        item.status = CardStatus.CANCELLED
+                        item.resolved_at = runtime.now_iso()
+                        await events.publish(card.research_id, item.to_event())
+                    reuse_source_to_apply = source_research_id
+
+                pending_cards = [
+                    item for item in cards.values()
+                    if item.research_id == card.research_id
+                    and item.card_type is CardType.HISTORY_REUSE
+                    and item.status is CardStatus.PENDING
+                ]
+                for item in pending_cards:
+                    item.status = CardStatus.ANSWERED
+                    item.result = {
+                        "action": request.action,
+                        "choice": request.action,
+                        "source_research_id": source_research_id,
+                        "selected": item.card_id == card.card_id,
+                    }
+                    item.resolved_at = runtime.now_iso()
+                    await events.publish(card.research_id, item.to_event())
+                state = researches[card.research_id]
+                if state.get("cards"):
+                    resolved_by_id = {
+                        item.card_id: item.to_dict() for item in pending_cards
+                    }
+                    state["cards"] = [
+                        resolved_by_id.get(str(item.get("card_id")), item)
+                        for item in state["cards"]
+                    ]
+                if reuse_source_to_apply is not None:
+                    extra = (
+                        report.get("extra")
+                        if isinstance(report.get("extra"), dict)
+                        else {}
+                    )
+                    await runtime.reuse_plan(
+                        card.research_id,
+                        reuse_source_to_apply,
+                        str(report["research_question"]),
+                        scale=str(extra.get("scale", "standard")),
+                    )
+                return remember(scope, x_request_id, envelope(card.to_dict()))
         payload = (
             copy.deepcopy(request.payload)
             if isinstance(request.payload, dict)

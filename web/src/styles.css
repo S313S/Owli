@@ -37,6 +37,11 @@ body { margin: 0; background: #f5f5f5; }
 .query-actions { display: flex; align-items: center; gap: 24px; margin-top: 24px; }
 .query-actions > span { flex: 1; }
 .inline-state { margin-top: 16px; }
+.history-candidates { margin-top: 16px; border-radius: 8px; }
+.history-candidate-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+.card-history_reuse { border-left-color: var(--cyan); }
+.history-candidate-meta { margin-bottom: 8px; }
+.history-reuse-value { margin-bottom: 8px; }
 .board-page { max-width: 1600px; min-width: 1232px; margin: 0 auto; padding: 16px 24px 32px; }
 .connection-banner { margin-bottom: 12px; }
 .board-top { border-radius: 8px; margin-bottom: 12px; }

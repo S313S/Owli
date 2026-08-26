@@ -8,9 +8,9 @@ __pycache__/
 venv/
 
 # Node.js
-node_modules/
+node_modules
 .npm/
-web/dist/
+web/dist
 
 # 凭证与本地配置
 .env

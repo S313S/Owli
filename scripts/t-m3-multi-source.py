@@ -297,13 +297,20 @@ class DemoEngine:
 
 
 async def _wait_completed(client: httpx.AsyncClient, research_id: str) -> dict[str, Any]:
-    for _ in range(300):
+    # M5-c 后创建接口立即返回，召回与规划均由后台任务推进；这里按真实墙钟
+    # 等终态，不能再假设 300 次零等待事件循环让步足够跑完整条链。
+    state: dict[str, Any] = {}
+    for _ in range(3000):
         response = await client.get(f"/api/researches/{research_id}")
         state = response.json()["data"]
         if state["status"] in {"completed", "failed"}:
             return state
-        await asyncio.sleep(0)
-    raise RuntimeError("三源回归未在限定轮次内进入终态")
+        await asyncio.sleep(0.01)
+    raise RuntimeError(
+        "三源回归未在限定轮次内进入终态："
+        f"status={state.get('status')} progress={state.get('progress')} "
+        f"cards={[item.get('card_type') for item in state.get('cards', [])]}"
+    )
 
 
 async def main() -> int:

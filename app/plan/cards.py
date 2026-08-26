@@ -9,6 +9,7 @@ from typing import Any
 
 
 class CardType(str, Enum):
+    HISTORY_REUSE = "HISTORY_REUSE"
     LOGIN_REPAIR = "LOGIN_REPAIR"
     AUTHORIZE = "AUTHORIZE"
     ENGINE_SWITCH_CONFIRM = "ENGINE_SWITCH_CONFIRM"

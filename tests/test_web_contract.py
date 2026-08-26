@@ -95,6 +95,20 @@ class WebContractTest(unittest.TestCase):
             source = (WEB / "src" / filename).read_text(encoding="utf-8")
             self.assertNotIn("onSnapshot", source)
 
+    def test_入口页通过_SSE_接收并渲染历史候选卡(self) -> None:
+        source = (WEB / "src" / "ResearchInputPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("similar", source)
+        self.assertIn("EventSource", source)
+        self.assertIn("card_update", source)
+        self.assertIn("<ActionCardView", source)
+
+    def test_历史候选卡显示复用价值和后端退化标签(self) -> None:
+        source = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
+        self.assertIn("HISTORY_REUSE", source)
+        self.assertIn("更快、已验证", source)
+        self.assertIn("match_label", source)
+        self.assertIn("关键词粗匹配", source)
+
 
 if __name__ == "__main__":
     unittest.main()

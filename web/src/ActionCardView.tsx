@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ActionCard, ServerAction } from './types'
 
 const typeNames: Record<string, string> = {
+  HISTORY_REUSE: '🕘 历史候选',
   LOGIN_REPAIR: '🔑 补登录', AUTHORIZE: '🛡️ 授权', ENGINE_SWITCH_CONFIRM: '🔀 确认换引擎',
   EXTRA_QUOTA_CONFIRM: '💳 确认额外额度', QUESTION: '❓ 决策天平追问',
   ARTIFACT_OPEN: '📄 产物文件', INTERVENE: '🚦 干预点确认',
@@ -21,7 +22,10 @@ function useDeadline(deadline?: string | null) {
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-export default function ActionCardView({ card }: { card: ActionCard }) {
+export default function ActionCardView({ card, onResolved }: {
+  card: ActionCard
+  onResolved?: (card: ActionCard, action: ServerAction) => void
+}) {
   const [sending, setSending] = useState(false)
   const [failure, setFailure] = useState('')
   const countdown = useDeadline(card.deadline)
@@ -47,6 +51,7 @@ export default function ActionCardView({ card }: { card: ActionCard }) {
       if (action.value === 'adjust' && card.research_id) {
         window.location.assign(`/researches/${encodeURIComponent(card.research_id)}/plan?runtime=1`)
       }
+      onResolved?.(card, action)
     } catch (error) {
       setFailure(`${String(error)}。卡片仍保留，可直接重试`)
     } finally {
@@ -54,11 +59,29 @@ export default function ActionCardView({ card }: { card: ActionCard }) {
     }
   }
 
-  return <Card size="small" className={`action-card card-${card.card_type.toLowerCase()} ${card.status !== 'pending' ? 'card-resolved' : ''}`}>
+  const isHistory = card.card_type === 'HISTORY_REUSE'
+  const matchLabel = String(card.target?.match_label ?? '')
+
+  return <Card size="small" data-card-id={card.card_id} data-card-type={card.card_type}
+    className={`action-card card-${card.card_type.toLowerCase()} ${card.status !== 'pending' ? 'card-resolved' : ''}`}>
     <div className="card-type"><b>{typeNames[card.card_type] ?? card.card_type}</b><Tag>{card.blocking}</Tag></div>
     <Typography.Title level={5}>{card.title}</Typography.Title>
-    {card.body && <Typography.Paragraph type="secondary">{card.body}</Typography.Paragraph>}
-    {card.target && Object.keys(card.target).length > 0 && <div className="card-target">{String(card.target.display_name ?? card.target.url ?? card.target.path ?? '动作对象')}</div>}
+    {isHistory ? <>
+      <Space wrap className="history-candidate-meta">
+        <Tag color={matchLabel === '关键词粗匹配' ? 'warning' : 'processing'}>{matchLabel}</Tag>
+        {card.target?.completed_at ? <Typography.Text type="secondary">完成于 {String(card.target.completed_at)}</Typography.Text> : null}
+      </Space>
+      <Alert className="history-reuse-value" type="success" showIcon
+        message="复用价值：更快、已验证" description={card.body} />
+      {card.target?.summary_line ? <Typography.Paragraph className="history-candidate-summary">
+        {String(card.target.summary_line)}
+      </Typography.Paragraph> : null}
+      {Array.isArray(card.target?.sources) && card.target.sources.length ? <div className="history-candidate-sources">
+        <Typography.Text type="secondary">信息源：</Typography.Text>
+        {(card.target.sources as unknown[]).map((source) => <Tag key={String(source)}>{String(source)}</Tag>)}
+      </div> : null}
+    </> : card.body ? <Typography.Paragraph type="secondary">{card.body}</Typography.Paragraph> : null}
+    {!isHistory && card.target && Object.keys(card.target).length > 0 && <div className="card-target">{String(card.target.display_name ?? card.target.url ?? card.target.path ?? '动作对象')}</div>}
     {failure && <Alert type="error" showIcon message={failure} />}
     {card.status === 'pending' && <Space wrap className="card-actions">
       {card.actions.map((action) => <Button key={action.id || action.type} size="small" loading={sending}
