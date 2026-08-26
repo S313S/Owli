@@ -147,6 +147,9 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
   const approved = Boolean(plan?.approved_at)
   const runtimeEdit = new URLSearchParams(window.location.search).get('runtime') === '1'
   const frozen = approved && !runtimeEdit
+  const reusedSource = plan?.baseline_source.startsWith('reused:')
+    ? plan.baseline_source.slice('reused:'.length)
+    : null
   const planModified = useMemo(() => {
     if (!plan) return false
     return plan.title !== plan.baseline.title
@@ -198,7 +201,13 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
         </Card>
 
         <div className="plan-heading">
-          <div><Typography.Title level={3}>{plan.title}</Typography.Title><Typography.Text type="secondary">plan_rev {plan.plan_rev} · {plan.goals.length} 个 goal</Typography.Text></div>
+          <div>
+            <Typography.Title level={3}>{plan.title}</Typography.Title>
+            <Space size={8}>
+              <Typography.Text type="secondary">plan_rev {plan.plan_rev} · {plan.goals.length} 个 goal</Typography.Text>
+              {reusedSource && <Tag color="blue">沿用自历史计划 · {reusedSource}</Tag>}
+            </Space>
+          </div>
           <Button disabled={frozen || !planModified} onClick={() => confirmReset('plan')}>全部恢复</Button>
         </div>
 

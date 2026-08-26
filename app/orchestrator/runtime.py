@@ -70,6 +70,42 @@ EMPTY_LLM_USAGE = {
     "costed_calls": 0,
 }
 
+REUSE_CONCLUSION_GUARD = "只复用方法与来源配置，不沿用旧报告结论。"
+
+
+def _replace_reused_subjects(value: str, subjects: list[str], query: str) -> str:
+    """把历史研究实体机械替换成当前题目，不引入额外模型往返。"""
+
+    result = value
+    marker = "__OWLI_REUSED_CURRENT_QUERY__"
+    while marker in value or marker in query:
+        marker += "_"
+    declared_subjects = list(dict.fromkeys(
+        subject.strip() for subject in subjects if subject.strip()
+    ))
+    if len(declared_subjects) > 1:
+        orders = (declared_subjects, list(reversed(declared_subjects)))
+        combined_patterns = set()
+        quoted_patterns = set()
+        for ordered in orders:
+            combined_patterns.update({
+                " vs ".join(ordered),
+                " VS ".join(ordered),
+                " 与 ".join(ordered),
+                "与".join(ordered),
+                "和".join(ordered),
+                "、".join(ordered),
+            })
+            quoted_patterns.add("「" + "」与「".join(ordered) + "」")
+        for pattern in sorted(quoted_patterns, key=len, reverse=True):
+            result = result.replace(pattern, f"「{marker}」")
+        for pattern in sorted(combined_patterns, key=len, reverse=True):
+            result = result.replace(pattern, marker)
+    unique_subjects = sorted(declared_subjects, key=len, reverse=True)
+    for subject in unique_subjects:
+        result = result.replace(subject, marker)
+    return result.replace(marker, query)
+
 
 class RuntimeCoordinator:
     """每个 FastAPI 进程唯一的运行期协调器。"""
@@ -434,10 +470,21 @@ class RuntimeCoordinator:
         if source is None:
             raise ValueError("这条历史记录没有可复用计划，请选择全新开始")
         raw = source.to_dict()
+        source_subjects = list(raw.get("subjects", []))
+        decision_balance = copy.deepcopy(raw["decision_balance"])
+        for question in decision_balance:
+            question["question"] = _replace_reused_subjects(
+                question["question"], source_subjects, query
+            )
+            question["options"] = [
+                _replace_reused_subjects(option, source_subjects, query)
+                for option in question["options"]
+            ]
+            question["answer"] = None
+            question["answered_at"] = None
         now = self.now_iso()
         current = load_plan(self.store, research_id)
         expected_rev = 0 if current is None else current.plan_rev
-        goal_ids = [str(goal["goal_id"]) for goal in raw["goals"]]
         role_names = {
             "data_collection": "信息采集",
             "data_cleaning": "数据清洗",
@@ -470,15 +517,7 @@ class RuntimeCoordinator:
             "scale": scale,
             "status": "awaiting_review",
             "approved_at": None,
-            "decision_balance": [{
-                "q_id": "q-1",
-                "question": f"「{query}」的结果优先服务哪类决策？",
-                "options": ["产品路线与功能取舍", "市场传播与销售话术", "两者兼顾"],
-                "input_type": "single",
-                "answer": None,
-                "affects": goal_ids,
-                "answered_at": None,
-            }],
+            "decision_balance": decision_balance,
             "expert_panel": None,
             "change_log": [],
             "baseline": None,
@@ -486,23 +525,20 @@ class RuntimeCoordinator:
             "created_at": now,
             "updated_at": now,
         })
-        for index, goal in enumerate(raw["goals"], start=1):
-            goal["title"] = f"阶段 {index} · 复用已验证方法"
-            goal["objective"] = (
-                f"围绕当前需求「{query}」完成第 {index} 阶段，"
-                "沿用历史计划的依赖与能力结构，产出可独立复核的新结果。"
+        for goal in raw["goals"]:
+            goal["objective"] = _replace_reused_subjects(
+                goal["objective"], source_subjects, query
             )
-            goal["deliverable"]["description"] = (
-                f"针对「{query}」的第 {index} 阶段可复核产物。"
+            goal["deliverable"]["description"] = _replace_reused_subjects(
+                goal["deliverable"]["description"], source_subjects, query
             )
             goal["acceptance"] = [
-                f"{goal['deliverable']['path']} 文件存在且通过声明的 validators",
-                f"产物至少包含 1 条明确对应当前需求「{query}」的可追溯记录",
+                _replace_reused_subjects(item, source_subjects, query)
+                for item in goal["acceptance"]
             ]
-            goal["intervention"] = {
-                "on_complete": True,
-                "prompt": f"请核对「{query}」第 {index} 阶段产物，是否继续？",
-            }
+            goal["intervention"]["prompt"] = _replace_reused_subjects(
+                goal["intervention"]["prompt"], source_subjects, query
+            )
             goal["status"] = "pending"
             for agent in goal["agents"]:
                 agent["entity"] = None
@@ -511,14 +547,15 @@ class RuntimeCoordinator:
                     agent.get("capability", {}).get("profile"),
                 )
                 agent["display_name"] = role_names.get(kind, "研究分析")
-                agent["task"] = (
-                    f"按历史计划中已验证的能力与信息源配置，处理当前需求「{query}」，"
-                    "并把结果写入声明的 output.path。"
+                agent["task"] = _replace_reused_subjects(
+                    agent["task"], source_subjects, query
                 )
-                agent["prompt"]["body"] = (
-                    f"当前研究问题={query}；只复用方法与来源配置，不沿用旧报告结论；"
-                    "所有断言必须可追溯并满足本 agent 的产物校验。"
+                prompt_body = _replace_reused_subjects(
+                    agent["prompt"]["body"], source_subjects, query
                 )
+                if "只复用方法与来源配置，不沿用旧报告结论" not in prompt_body:
+                    prompt_body = f"{prompt_body.rstrip()}\n复用边界：{REUSE_CONCLUSION_GUARD}"
+                agent["prompt"]["body"] = prompt_body
                 agent["origin"] = {
                     key: "generated" for key in agent.get("origin", {"_node": "generated"})
                 }

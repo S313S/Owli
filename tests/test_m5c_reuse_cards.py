@@ -10,6 +10,7 @@ import pytest
 
 from app.api.main import create_app
 from app.plan.store import load_plan
+from app.orchestrator.runtime import _replace_reused_subjects
 from app.store.dao import Store
 from app.store.recall import RecallCandidate, RecallMatch, RecallResult
 from tests.plan_factory import make_plan_dict
@@ -24,9 +25,32 @@ def _source_plan(source_id: str) -> dict:
     plan["status"] = "completed"
     plan["approved_at"] = "2026-08-25T10:30:00+00:00"
     plan["market_profile_justification"] = "旧题目的市场说明哨兵"
-    plan["subjects"] = ["旧题目的研究实体哨兵"]
+    plan["subjects"] = ["旧题目的研究实体哨兵", "旧题目的第二实体哨兵"]
+    plan["decision_balance"] = [{
+        "q_id": "q-history",
+        "question": "旧题目的研究实体哨兵 vs 旧题目的第二实体哨兵优先服务哪类判断？",
+        "options": ["产品路线", "市场话术"],
+        "input_type": "single",
+        "answer": "产品路线",
+        "affects": ["goal-1", "goal-2"],
+        "answered_at": "2026-08-25T10:20:00+00:00",
+    }]
     for goal_index, goal in enumerate(plan["goals"]):
+        goal["title"] = (
+            f"历史方法阶段 {goal_index + 1} · "
+            "旧题目的研究实体哨兵与旧题目的第二实体哨兵"
+        )
+        goal["objective"] = (
+            "围绕旧题目的研究实体哨兵与旧题目的第二实体哨兵整理可复核的方法证据。"
+        )
+        goal["deliverable"]["description"] = "旧题目的研究实体哨兵方法产物。"
+        goal["acceptance"] = ["旧题目的研究实体哨兵至少有 3 条可追溯记录"]
+        goal["intervention"]["prompt"] = "请核对旧题目的研究实体哨兵方法产物，是否继续？"
         for agent in goal["agents"]:
+            agent["task"] = (
+                "采集旧题目的研究实体哨兵与旧题目的第二实体哨兵的方法证据。"
+            )
+            agent["prompt"]["body"] = "查询旧题目的研究实体哨兵并按来源交叉核对。"
             if goal_index == 0:
                 agent["entity"] = "旧题目的采集实体哨兵"
                 agent["chapter"]["chapter_type"] = "collection"
@@ -109,6 +133,24 @@ async def _wait_until(predicate, *, rounds: int = 100) -> None:
             return
         await asyncio.sleep(0)
     raise AssertionError("异步状态未在限定轮次内出现")
+
+
+def test_实体替换不会再次改写当前题目中的同名实体() -> None:
+    assert _replace_reused_subjects(
+        "Notion vs Obsidian 的方法对比",
+        ["Notion", "Obsidian"],
+        "Notion vs Logseq",
+    ) == "Notion vs Logseq 的方法对比"
+    assert _replace_reused_subjects(
+        "汇集「Notion」与「Obsidian」的官方定位",
+        ["Notion", "Obsidian"],
+        "Coda vs Logseq",
+    ) == "汇集「Coda vs Logseq」的官方定位"
+    assert _replace_reused_subjects(
+        "历史计划未声明实体",
+        [],
+        "Notion vs Logseq",
+    ) == "历史计划未声明实体"
 
 
 def test_创建研究立即返回且真实候选通过_SSE_卡片后到(tmp_path: Path) -> None:
@@ -246,17 +288,47 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                 assert reused_plan.baseline_source == "reused:r-history-plan"
                 assert reused_plan.research_question == "比较两个编码 Agent"
                 assert reused_plan.use_case == "other"
-                reused_json = reused_plan.to_json()
-                for old_semantic in (
-                    "飞书",
-                    "旧题目的市场说明哨兵",
-                    "旧题目的研究实体哨兵",
-                    "旧题目的采集实体哨兵",
-                    "旧题目的 Agent 实体哨兵",
-                    "旧题目的章节实体哨兵",
-                    "旧题目的章节哨兵",
-                ):
-                    assert old_semantic not in reused_json
+                assert reused_plan.subjects == []
+                assert reused_plan.market_profile_justification == (
+                    "沿用同一研究事项历史计划的市场范围配置，用户需在计划编辑器核对。"
+                )
+                assert [goal.title for goal in reused_plan.goals] == [
+                    "历史方法阶段 1 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
+                    "历史方法阶段 2 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
+                    "历史方法阶段 3 · 旧题目的研究实体哨兵与旧题目的第二实体哨兵",
+                ]
+                for goal in reused_plan.goals:
+                    method_fields = [
+                        goal.objective,
+                        goal.deliverable["description"],
+                        *goal.acceptance,
+                        goal.intervention["prompt"],
+                    ]
+                    assert all("比较两个编码 Agent" in value for value in method_fields)
+                    assert all(value.count("比较两个编码 Agent") == 1 for value in method_fields)
+                    assert all("旧题目的研究实体哨兵" not in value for value in method_fields)
+                    assert all("旧题目的第二实体哨兵" not in value for value in method_fields)
+                    assert goal.status == "pending"
+                    for agent in goal.agents:
+                        assert "比较两个编码 Agent" in agent.task
+                        assert agent.task.count("比较两个编码 Agent") == 1
+                        assert "旧题目的研究实体哨兵" not in agent.task
+                        assert "旧题目的第二实体哨兵" not in agent.task
+                        assert "比较两个编码 Agent" in agent.prompt["body"]
+                        assert "旧题目的研究实体哨兵" not in agent.prompt["body"]
+                        assert "只复用方法与来源配置，不沿用旧报告结论" in agent.prompt["body"]
+                        assert agent.chapter["closing"]["notes"] == {}
+                        assert set(agent.origin.values()) == {"generated"}
+                        assert agent.status == "queued"
+                assert reused_plan.decision_balance == [{
+                    "q_id": "q-history",
+                    "question": "比较两个编码 Agent优先服务哪类判断？",
+                    "options": ["产品路线", "市场话术"],
+                    "input_type": "single",
+                    "answer": None,
+                    "affects": ["goal-1", "goal-2"],
+                    "answered_at": None,
+                }]
                 first_agent = reused_plan.goals[0].agents[0]
                 assert first_agent.entity == "比较两个编码 Agent"
                 assert first_agent.chapter["closing"]["entities"] == ["比较两个编码 Agent"]

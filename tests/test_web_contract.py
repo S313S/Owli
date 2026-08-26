@@ -28,6 +28,11 @@ class WebContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, source)
 
+    def test_计划编辑器渲染历史复用来源(self) -> None:
+        source = (WEB / "src" / "PlanEditorPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("baseline_source.startsWith('reused:')", source)
+        self.assertIn("沿用自历史计划", source)
+
     def test_工作板渲染_deadline_倒计时和重跑次数(self) -> None:
         source = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
         card = (WEB / "src" / "ActionCardView.tsx").read_text(encoding="utf-8")
