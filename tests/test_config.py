@@ -77,9 +77,9 @@ def test_调研规模配置默认值环境无关() -> None:
         "product_hunt": 10,
         "web_search": 5,
         "x": 10,
-        "xhs": 10,
-        "douyin": 5,
-        "reddit": 10,
+        "xhs": 25,
+        "douyin": 25,
+        "reddit": 25,
     }
 
 
