@@ -71,9 +71,13 @@ _CROSSREF_LIFT_KEYS = (
 def _claim_crossref_item(
     row: Mapping[str, Any], claim: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """把库存 extra 线程/血缘键提升到 crossref.py 约定的顶层。"""
+    """组装审计前的簇计算输入，并提升库存线程/血缘键。"""
 
     item = dict(row)
+    # 簇判定先于本轮五维实值回写。上一轮补评的生成列与
+    # 五维分不得成为下一轮 _grade() 的输入，否则会从平台基线漂移。
+    for key in (*SCORE_FIELDS, "score_total", "grade"):
+        item.pop(key, None)
     extra_value = item.get("extra")
     extra = dict(extra_value) if isinstance(extra_value, Mapping) else {}
     item["extra"] = extra

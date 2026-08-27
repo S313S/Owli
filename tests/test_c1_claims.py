@@ -223,6 +223,68 @@ def test_backfill_接通_PASS_X禁推_HN线程上限与次断言(tmp_path: Path)
     assert result.weak_claims == []
 
 
+def test_backfill_交叉维从第一遍起就是不动点(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    evidence = (
+        (
+            "ev-hn1", "hacker_news",
+            "https://news.ycombinator.com/item?id=401", "甲",
+            "2026-08-01T00:00:00+00:00",
+        ),
+        (
+            "ev-ws1", "web_search", "https://openai.com/index/one", "乙",
+            "2026-08-10T00:00:00+00:00",
+        ),
+        (
+            "ev-ws2", "web_search", "https://anthropic.com/news/two", "丙",
+            "2026-08-20T00:00:00+00:00",
+        ),
+    )
+    for evidence_id, platform, permalink, author, published_at in evidence:
+        add_evidence(
+            store,
+            "r-c1",
+            evidence_id,
+            platform=platform,
+            permalink=permalink,
+            author=author,
+            published_at=published_at,
+        )
+    register_claims(
+        store,
+        "r-c1",
+        [raw_claim("c-01", [
+            ref(permalink, firsthand=True)
+            for _, _, permalink, _, _ in evidence
+        ])],
+        source="chapter",
+    )
+
+    def snapshot() -> dict:
+        rows = {row["id"]: row for row in store.list_evidence("r-c1")}
+        return {
+            "evidence": {
+                evidence_id: {
+                    "score_crossref": row["score_crossref"],
+                    "crossref_verdict": row["extra"]["crossref_verdict"],
+                    "rating_notes": row["rating_notes"],
+                }
+                for evidence_id, row in rows.items()
+            },
+            "claims": store.get_report("r-c1")["extra"]["claims"],
+        }
+
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=NeverAdapter(), runs_root=tmp_path / "runs"
+    ))
+    first = snapshot()
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=NeverAdapter(), runs_root=tmp_path / "runs"
+    ))
+
+    assert snapshot() == first
+
+
 def test_D级独撑进入_weak_claims_补一条C以上后解除(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     weak_url = "https://weak.example/snippet"
