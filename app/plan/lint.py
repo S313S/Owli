@@ -18,10 +18,15 @@ _FORBIDDEN_FIELDS = {
     "estimated_minutes", "estimated_tokens", "estimated_cost",
     "planned_steps", "step_count",
 }
+# 这是 planner 可选信息源的许可名单，不是每档都必须选全的义务清单。
+# 分档依据是相关讨论发生在哪个语言/平台生态，而不是产品公司的国籍：实测小红书
+# 有大量海外产品讨论，Reddit 却几乎没有国内产品讨论，因此两档的许可范围有意不对称。
+# 放宽最多引入一个规划器可以不选的噪音源；卡死则会让该源永远不可达（D-013 即如此）。
 _SOURCE_MARKET_PROFILES = {
     "cn_product": {"web_search", "x", "xhs", "douyin"},
     "global_product": {
-        "web_search", "x", "hacker_news", "product_hunt", "reddit",
+        "web_search", "x", "hacker_news", "product_hunt", "reddit", "xhs",
+        "douyin",
     },
 }
 

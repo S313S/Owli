@@ -70,8 +70,8 @@ def test_规划与批准闸门共用三源市场归属() -> None:
         }
         for source_id in ("xhs", "douyin", "reddit")
     } == {
-        "xhs": {"cn_product"},
-        "douyin": {"cn_product"},
+        "xhs": {"cn_product", "global_product"},
+        "douyin": {"cn_product", "global_product"},
         "reddit": {"global_product"},
     }
 
@@ -80,6 +80,13 @@ def test_国内产品规划候选集包含小红书与抖音() -> None:
     from app.plan.generate import _MARKET_SOURCES
 
     assert {"xhs", "douyin"} <= _MARKET_SOURCES["cn_product"]
+    assert "reddit" not in _MARKET_SOURCES["cn_product"]
+
+
+def test_海外产品规划候选集也包含小红书与抖音() -> None:
+    from app.plan.generate import _MARKET_SOURCES
+
+    assert {"xhs", "douyin"} <= _MARKET_SOURCES["global_product"]
 
 
 def test_三源提示词采集条数使用真实_limit_参数() -> None:
