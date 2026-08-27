@@ -19,8 +19,10 @@ _FORBIDDEN_FIELDS = {
     "planned_steps", "step_count",
 }
 _SOURCE_MARKET_PROFILES = {
-    "cn_product": {"web_search", "x"},
-    "global_product": {"web_search", "x", "hacker_news", "product_hunt"},
+    "cn_product": {"web_search", "x", "xhs", "douyin"},
+    "global_product": {
+        "web_search", "x", "hacker_news", "product_hunt", "reddit",
+    },
 }
 
 # 值为 (最少参数个数, 最多参数个数, 参数是否必须为整数)。

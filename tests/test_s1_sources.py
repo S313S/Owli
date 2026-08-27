@@ -13,6 +13,100 @@ class ImmediateGate:
         return None
 
 
+def _cn_collection_plan(source_id: str) -> dict:
+    from tests.plan_factory import make_agent, make_plan_dict
+
+    plan = make_plan_dict()
+    plan["market_profile"] = "cn_product"
+    plan["market_profile_justification"] = "产品主要面向中国大陆用户。"
+    agent = make_agent("data-collection", "goal-1")
+    agent["entity"] = "通义听悟"
+    agent["capability"].update({
+        "profile": "web-collector",
+        "tools": [f"source.{source_id}", "fs.write", "db.write"],
+        "sources": [source_id],
+        "network": "sources_only",
+    })
+    agent["output"] = {
+        "format": "json",
+        "shape": "array",
+        "path": "goals/goal-1/data-collection.json",
+        "validators": [
+            "file_exists",
+            "json_array_min_items:1",
+            "each_item_has:permalink,fetched_at",
+        ],
+    }
+    agent["chapter"] = {
+        "chapter_id": "ch-1",
+        "chapter_type": "collection",
+        "plan_path": "goals/goal-1/ch-1.md",
+        "opening": {
+            "inputs": [],
+            "task": agent["task"],
+            "acceptance": ["文件存在且通过 validators"],
+        },
+        "closing": {
+            "output": {"path": agent["output"]["path"]},
+            "entities": ["通义听悟"],
+            "expected_count": 1,
+            "notes": {},
+        },
+    }
+    plan["goals"][0]["agents"] = [agent]
+    return plan
+
+
+def test_规划与批准闸门共用三源市场归属() -> None:
+    from app.plan.generate import _MARKET_SOURCES
+    from app.plan.lint import _SOURCE_MARKET_PROFILES
+
+    assert _MARKET_SOURCES == _SOURCE_MARKET_PROFILES
+    assert {
+        source_id: {
+            profile
+            for profile, sources in _MARKET_SOURCES.items()
+            if source_id in sources
+        }
+        for source_id in ("xhs", "douyin", "reddit")
+    } == {
+        "xhs": {"cn_product"},
+        "douyin": {"cn_product"},
+        "reddit": {"global_product"},
+    }
+
+
+def test_国内产品规划候选集包含小红书与抖音() -> None:
+    from app.plan.generate import _MARKET_SOURCES
+
+    assert {"xhs", "douyin"} <= _MARKET_SOURCES["cn_product"]
+
+
+def test_三源提示词采集条数使用真实_limit_参数() -> None:
+    from app.plan.generate import _SOURCE_LIMIT_PARAMETERS
+
+    assert {
+        source_id: _SOURCE_LIMIT_PARAMETERS[source_id]
+        for source_id in ("xhs", "douyin", "reddit")
+    } == {"xhs": "limit", "douyin": "limit", "reddit": "limit"}
+
+
+def test_国内产品小红书采集章能通过_lint() -> None:
+    from app.plan.lint import lint
+
+    assert lint(_cn_collection_plan("xhs"))["errors"] == []
+
+
+def test_国内产品_reddit_采集章仍被_lint_拦截() -> None:
+    from app.plan.lint import lint
+
+    errors = lint(_cn_collection_plan("reddit"))["errors"]
+    assert len(errors) == 1
+    assert errors[0].startswith("[规则23]")
+    assert "source_id=reddit" in errors[0]
+    assert "cn_product" in errors[0]
+
+
 def _xhs_note(index: int) -> dict:
     return {
         "model_type": "note",

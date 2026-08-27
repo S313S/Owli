@@ -21,7 +21,7 @@ from app.config import (
     load_resilience_config,
 )
 from app.plan.chapters import generate_chapter_specs
-from app.plan.lint import duplicate_collection_goal_ids, lint
+from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
 from app.plan.model import DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
@@ -30,15 +30,15 @@ from app.sources.registry import planning_catalog
 
 _FORMATS = {"table", "markdown", "excel", "json"}
 _SHAPES = {"object", "array"}
-_MARKET_SOURCES = {
-    "cn_product": {"web_search", "x"},
-    "global_product": {"web_search", "x", "hacker_news", "product_hunt"},
-}
+_MARKET_SOURCES = _SOURCE_MARKET_PROFILES
 _SOURCE_LIMIT_PARAMETERS = {
+    "douyin": "limit",
     "hacker_news": "hitsPerPage",
     "product_hunt": "limit",
+    "reddit": "limit",
     "web_search": "max_results",
     "x": "max_results",
+    "xhs": "limit",
 }
 _LINT_GOAL_HEADER = re.compile(
     r"^\[(?:规则\d+|结构)\]\s+goal-([1-9][0-9]*)(?=[./\s：:]|$)"

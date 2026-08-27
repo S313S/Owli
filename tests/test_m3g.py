@@ -125,7 +125,9 @@ def test_中文市场选源覆盖表进入规划提示且_lint_拦_HN_PH() -> No
     )
 
     assert '"market_profile":"cn_product"' in prompt
-    assert '"applicable_sources":["web_search","x"]' in prompt
+    assert (
+        '"applicable_sources":["douyin","web_search","x","xhs"]' in prompt
+    )
 
     plan = make_plan_dict()
     plan["market_profile"] = "cn_product"
