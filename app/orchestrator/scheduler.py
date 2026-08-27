@@ -23,7 +23,7 @@ from app.plan.cards import (
     CardStatus,
     CardType,
 )
-from app.plan.model import Agent, Goal, Plan
+from app.plan.model import Agent, Goal, Plan, agent_kind_of
 
 
 R8_CONFIRM_SECONDS = 15 * 60
@@ -61,8 +61,10 @@ class TaskContext:
     engine: str
     on_event: Callable[[Any], Awaitable[None]]
     failure_feedback: str | None = None
-    #: 本章墙钟的绝对到点时刻（None = 不设墙钟）；节级预算按它算剩余时间。
+    #: 本章墙钟的绝对到点时刻（None = 不设墙钟）。
     deadline_at: datetime | None = None
+    #: 节化章的单节墙钟；非节化章为 None。
+    section_deadline_seconds: float | None = None
     #: 在取消清理阶段读取 scheduler 已登记的原因；节化执行据此区分 timeout 与 /stop。
     cancellation_reason: Callable[[], str | None] | None = None
 
@@ -760,8 +762,19 @@ class Scheduler:
         total = per_round * int(policy["max_rounds"])
         ask_at = int(policy["ask_engine_switch_at"])
         deadline_seconds = policy.get("chapter_deadline_seconds")
+        section_deadline_seconds = None
         if deadline_seconds is not None:
             deadline_seconds = int(deadline_seconds)
+            # sectioning 模块级依赖 scheduler；此处只能函数内导入，避免互相引用成环。
+            from app.orchestrator.sectioning import _section_specs, should_section
+
+            kind = agent_kind_of(
+                agent.agent_id, agent.capability.get("profile"),
+            )
+            output_format = str(agent.output.get("format", ""))
+            if should_section(kind, output_format):
+                section_deadline_seconds = deadline_seconds
+                deadline_seconds *= len(_section_specs(self.plan, agent))
         self._agent_started_at.setdefault(agent.agent_id, self._clock())
         if self._chapter_ledger is not None and deadline_seconds is not None:
             self._arm_chapter_deadline(agent, deadline_seconds)
@@ -820,6 +833,7 @@ class Scheduler:
                 on_event=self._consume_signal,
                 failure_feedback=self._agent_feedback.get(agent.agent_id),
                 deadline_at=deadline_at,
+                section_deadline_seconds=section_deadline_seconds,
                 cancellation_reason=lambda agent_id=agent.agent_id: (
                     self._cancel_reasons.get(agent_id)
                 ),

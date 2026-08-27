@@ -73,6 +73,7 @@ class ResearchScaleProfile:
     max_sources_per_goal: int | None
     source_item_limits: Mapping[str, int]
     max_chapters_per_goal: int | None = None
+    # 节化章按「每节」使用，章总墙钟由编排层乘节数；其余章仍按「每章」使用。
     chapter_wall_clock_seconds: int | None = None
 
     def __post_init__(self) -> None:

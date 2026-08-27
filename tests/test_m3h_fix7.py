@@ -130,6 +130,80 @@ def test_selfcheck对claude同样校验墙钟大于引擎超时() -> None:
         )
 
 
+def _scheduled_wall_clock(
+    tmp_path: Path, *, scale: str, deadline: int,
+    agent_id: str, profile: str, output_format: str,
+) -> tuple[float, float | None]:
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+    from tests.test_m3h_ledger import make_plan_dict
+
+    tmp_path.mkdir(parents=True)
+    source = make_plan_dict()
+    source["research_id"] = "r-ledger"
+    source["scale"] = scale
+    source["baseline"] = None
+    first = source["goals"][0]["agents"][0]
+    first["agent_id"] = agent_id
+    first["capability"]["profile"] = profile
+    first["output"]["format"] = output_format
+    source["goals"][0]["retry_policy"].update(
+        max_attempts_per_round=1, max_rounds=1,
+        ask_engine_switch_at=1, chapter_deadline_seconds=deadline,
+    )
+    plan = Plan.from_dict(source)
+    callbacks: list[tuple[float, object]] = []
+    contexts = []
+
+    async def run_task(agent, context):
+        contexts.append(context)
+        return TaskRunResult(True, context.engine, actual_count=1)
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: None,
+        lambda: datetime(2026, 8, 27, tzinfo=timezone.utc),
+        lambda delay, callback: callbacks.append((delay, callback)),
+        chapter_ledger=_store(tmp_path),
+    )
+    goal = plan.goals[0]
+    scheduler.goal_statuses[goal.goal_id] = "running"
+    asyncio.run(scheduler._execute_agent(goal, goal.agents[0]))
+    return callbacks[0][0], contexts[0].section_deadline_seconds
+
+
+def test_节化章墙钟按节数放大而非节化与采集章不变(tmp_path: Path) -> None:
+    assert _scheduled_wall_clock(
+        tmp_path / "fast", scale="fast", deadline=330,
+        agent_id="report-writing", profile="report-writer", output_format="markdown",
+    ) == (990.0, 330)
+    assert _scheduled_wall_clock(
+        tmp_path / "standard", scale="standard", deadline=1800,
+        agent_id="report-writing", profile="report-writer", output_format="markdown",
+    ) == (5400.0, 1800)
+    for agent_id, profile, output_format in (
+        ("agent-1", "readonly-analyst", "markdown"),
+        ("data-collection", "web-collector", "json"),
+    ):
+        assert _scheduled_wall_clock(
+            tmp_path / agent_id, scale="fast", deadline=330,
+            agent_id=agent_id, profile=profile, output_format=output_format,
+        ) == (330.0, None)
+
+
+def test_单节墙钟严格大于引擎单次超时不变量() -> None:
+    from app.adapters.selfcheck import validate_runtime_config
+    from app.config import load_research_scale_config
+
+    config = load_research_scale_config()
+    report = validate_runtime_config(config)
+    assert config.fast.chapter_wall_clock_seconds == 330
+    assert report["codex_timeout_seconds"] == 300.0
+    assert report["claude_timeout_seconds"] == 300.0
+    assert 330 > max(
+        report["codex_timeout_seconds"], report["claude_timeout_seconds"],
+    )
+
+
 def _deadline_plan(*, deadline_seconds: int, per_round: int = 3, max_rounds: int = 1):
     from app.plan.model import Plan
     from tests.test_m3h_ledger import make_plan_dict
@@ -248,6 +322,72 @@ def test_假时钟到点取消节化章并把半截JSON节落timeout(tmp_path: P
     assert output_path.parent.joinpath("report/sec-1.rejected.md").is_file()
     assert "半截" not in output_path.parent.joinpath("report/sec-1.md").read_text()
     assert scheduler.agent_statuses[agent.agent_id] == "missing"
+
+
+def test_单节到点只取消当前节并保住同章已完成节(tmp_path: Path) -> None:
+    from app.adapters import validation
+    from app.adapters.contracts import EngineRunResult, OwliResult
+    from app.orchestrator.sectioning import run_sectioned_task
+
+    store = _store(tmp_path)
+    runs_root = tmp_path / "runs"
+    events: list[dict] = []
+    cancelled: list[str] = []
+
+    class SecondSectionHangs:
+        async def run(self, task, ctx, on_event=None):
+            del on_event
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if task.output_path.name == "sec-2.md":
+                task.output_path.write_text("半截原文", encoding="utf-8")
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.append(task.output_path.name)
+                    raise
+            task.output_path.write_text(
+                "## 结论\n\n已完成正文。\n\n## 信息源\n\n- 来源 A。\n",
+                encoding="utf-8",
+            )
+            return EngineRunResult(
+                conclusion=OwliResult(
+                    "done", str(task.output_path), "完成", [], [], [], None,
+                ),
+                conclusion_error=None,
+                validation=validation.validate(ctx, task.validators),
+                events=[], permission_denials=[],
+            )
+
+    context = SimpleNamespace(
+        goal_id="goal-3", engine="claude",
+        section_deadline_seconds=0.2,
+        cancellation_reason=lambda: None,
+    )
+    task = _task(runs_root, ["file_exists"])
+    result = asyncio.run(run_sectioned_task(
+        plan=_plan(1),
+        agent=SimpleNamespace(
+            chapter={"chapter_id": "ch-1", "opening": {"inputs": []}},
+            output={"format": "markdown", "shape": "object"},
+        ),
+        context=context, base_task=task, adapter=SecondSectionHangs(),
+        store=store, runs_root=runs_root,
+        now_iso=lambda: "2026-08-27T00:00:00+00:00",
+        on_event=lambda event: events.append(event),
+        engine_timeout_seconds=0.01,
+    ))
+
+    rows = {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+    assert rows["ch-1/sec-1"]["status"] == "done"
+    assert rows["ch-1/sec-2"]["status"] == "missing"
+    assert rows["ch-1/sec-2"]["reason"] == "timeout"
+    assert cancelled == ["sec-2.md"]
+    assert task.output_path.parent.joinpath("report/sec-2.rejected.md").is_file()
+    report = task.output_path.read_text(encoding="utf-8")
+    assert "已完成正文" in report and "原因：timeout" in report
+    assert "半截原文" not in report
+    assert result.succeeded is True and result.actual_count == 1
+    assert [event["data"]["reason"] for event in events] == ["timeout"]
 
 
 def test_墙钟在首次派活前误触发会按剩余预算重挂(tmp_path: Path) -> None:

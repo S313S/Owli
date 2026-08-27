@@ -42,6 +42,10 @@ class SectionAssemblyShapeError(ValueError):
     """确定性的组装失败：节产物形状与章声明的 shape 对不上。"""
 
 
+class SectionWallClockExpired(TimeoutError):
+    """单节墙钟到点；与适配器自身抛出的 TimeoutError 分开。"""
+
+
 def _section_attempt_budget() -> int:
     return SECTION_RETRY_MAX_ATTEMPTS
 
@@ -98,6 +102,49 @@ async def _wait_before_section_retry(timer: Any, delay: float) -> None:
 
     timer(delay, release)
     await ready
+
+
+async def _run_before_section_deadline(
+    adapter: Any,
+    task: EngineTask,
+    ctx: Any,
+    on_event: Any,
+    deadline: float | None,
+) -> Any:
+    """在单节绝对墙钟内完成一次引擎调用；到点会取消进行中的调用。"""
+
+    async def invoke() -> Any:
+        result = adapter.run(task, ctx, on_event=on_event)
+        return await result if inspect.isawaitable(result) else result
+
+    if deadline is None:
+        return await invoke()
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        raise SectionWallClockExpired
+    run = asyncio.create_task(invoke())
+    try:
+        done, _ = await asyncio.wait({run}, timeout=remaining)
+    except asyncio.CancelledError:
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+        raise
+    if run not in done:
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+        raise SectionWallClockExpired
+    return run.result()
+
+
+def _section_retry_within_deadline(
+    deadline: float | None, engine_timeout_seconds: float,
+) -> bool:
+    """剩余单节墙钟必须够一次完整引擎调用，才允许再次派活。"""
+
+    if deadline is None:
+        return True
+    remaining = deadline - asyncio.get_running_loop().time()
+    return remaining >= engine_timeout_seconds
 
 
 def _chapter_id(agent: Any) -> str:
@@ -236,6 +283,47 @@ def _conclusion_error_with_rejected_path(
         return conclusion_error
     path_note = f"rejected_path={rejected_path}"
     return f"{conclusion_error}\n{path_note}" if conclusion_error else path_note
+
+
+async def _finish_section_timeout(
+    *,
+    plan: Any,
+    context: Any,
+    section: dict[str, Any],
+    section_path: Path,
+    store: Any,
+    now_iso: Any,
+    on_event: Any,
+) -> None:
+    """单节到点落闭集终态，并隔离可能存在的半截产物。"""
+
+    rejected_path = _preserve_rejected_artifact(section_path)
+    conclusion_error = _conclusion_error_with_rejected_path(None, rejected_path)
+    section_path.write_text(_placeholder(section, "timeout"), encoding="utf-8")
+    store.finish_chapter(
+        plan.research_id,
+        context.goal_id,
+        section["section_id"],
+        status="missing",
+        reason="timeout",
+        actual_output_path=str(section_path),
+        actual_count=0,
+        conclusion_error=conclusion_error,
+        updated_at=now_iso(),
+    )
+    event_result = on_event({
+        "type": "section_error",
+        "data": {
+            "goal_id": context.goal_id,
+            "chapter_id": section["section_id"],
+            "reason": "timeout",
+            "engine_error": None,
+            "conclusion_error": conclusion_error,
+        },
+        "is_error": True,
+    })
+    if inspect.isawaitable(event_result):
+        await event_result
 
 
 def _invalid_conclusion_source(result: Any) -> str:
@@ -477,6 +565,9 @@ async def run_sectioned_task(
         if engine_timeout_seconds is not None
         else FALLBACK_ENGINE_TIMEOUT_SECONDS
     )
+    section_wall_clock = getattr(context, "section_deadline_seconds", None)
+    if section_wall_clock is not None:
+        section_wall_clock = float(section_wall_clock)
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
@@ -485,6 +576,11 @@ async def run_sectioned_task(
         if row and row["status"] in {"done", "missing"}:
             continue
         section_attempt = 0
+        section_deadline = (
+            asyncio.get_running_loop().time() + section_wall_clock
+            if section_wall_clock is not None
+            else None
+        )
         while True:
             started = store.start_chapter(
                 plan.research_id,
@@ -554,12 +650,21 @@ async def run_sectioned_task(
                 validators=["file_exists"],
                 capability=base_task.capability,
             )
-            result = adapter.run(
-                section_task, _ctx(section_task, runs_root, store), on_event=on_event,
-            )
             try:
-                if inspect.isawaitable(result):
-                    result = await result
+                result = await _run_before_section_deadline(
+                    adapter,
+                    section_task,
+                    _ctx(section_task, runs_root, store),
+                    on_event,
+                    section_deadline,
+                )
+            except SectionWallClockExpired:
+                await _finish_section_timeout(
+                    plan=plan, context=context, section=section,
+                    section_path=section_path, store=store,
+                    now_iso=now_iso, on_event=on_event,
+                )
+                break
             except asyncio.CancelledError:
                 cancellation_reason = getattr(
                     context, "cancellation_reason", None,
@@ -570,37 +675,11 @@ async def run_sectioned_task(
                     else None
                 )
                 if reason == "timeout":
-                    rejected_path = _preserve_rejected_artifact(section_path)
-                    conclusion_error = _conclusion_error_with_rejected_path(
-                        None, rejected_path,
+                    await _finish_section_timeout(
+                        plan=plan, context=context, section=section,
+                        section_path=section_path, store=store,
+                        now_iso=now_iso, on_event=on_event,
                     )
-                    section_path.write_text(
-                        _placeholder(section, "timeout"), encoding="utf-8",
-                    )
-                    store.finish_chapter(
-                        plan.research_id,
-                        context.goal_id,
-                        section["section_id"],
-                        status="missing",
-                        reason="timeout",
-                        actual_output_path=str(section_path),
-                        actual_count=0,
-                        conclusion_error=conclusion_error,
-                        updated_at=now_iso(),
-                    )
-                    event_result = on_event({
-                        "type": "section_error",
-                        "data": {
-                            "goal_id": context.goal_id,
-                            "chapter_id": section["section_id"],
-                            "reason": "timeout",
-                            "engine_error": None,
-                            "conclusion_error": conclusion_error,
-                        },
-                        "is_error": True,
-                    })
-                    if inspect.isawaitable(event_result):
-                        await event_result
                 raise
             try:
                 artifact_empty = (
@@ -627,13 +706,37 @@ async def run_sectioned_task(
                     ),
                     agent_id=f"{section_task.agent_id}-conclusion-retry",
                 )
-                result = adapter.run(
-                    retry_task,
-                    _ctx(retry_task, runs_root, store),
-                    on_event=on_event,
-                )
-                if inspect.isawaitable(result):
-                    result = await result
+                try:
+                    result = await _run_before_section_deadline(
+                        adapter,
+                        retry_task,
+                        _ctx(retry_task, runs_root, store),
+                        on_event,
+                        section_deadline,
+                    )
+                except SectionWallClockExpired:
+                    await _finish_section_timeout(
+                        plan=plan, context=context, section=section,
+                        section_path=section_path, store=store,
+                        now_iso=now_iso, on_event=on_event,
+                    )
+                    break
+                except asyncio.CancelledError:
+                    cancellation_reason = getattr(
+                        context, "cancellation_reason", None,
+                    )
+                    reason = (
+                        cancellation_reason()
+                        if callable(cancellation_reason)
+                        else None
+                    )
+                    if reason == "timeout":
+                        await _finish_section_timeout(
+                            plan=plan, context=context, section=section,
+                            section_path=section_path, store=store,
+                            now_iso=now_iso, on_event=on_event,
+                        )
+                    raise
             succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
             if succeeded:
                 store.finish_chapter(
@@ -657,7 +760,12 @@ async def run_sectioned_task(
                 ):
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
-                    if _retry_within_deadline(now, deadline_at, engine_timeout):
+                    if (
+                        _retry_within_deadline(now, deadline_at, engine_timeout)
+                        and _section_retry_within_deadline(
+                            section_deadline, engine_timeout,
+                        )
+                    ):
                         await _wait_before_section_retry(timer, retry_delay)
                         continue
                     # 剩余墙钟不足一次引擎超时：停派并按 timeout 定终态（期望 c）。
