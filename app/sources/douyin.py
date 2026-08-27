@@ -367,19 +367,31 @@ def search(
     except RuntimeError:
         return _unavailable(on_event, reason="tikhub_credential_missing", forced=False)
 
+    request_counts = {"video_search_v5": 0, "video_comments": 0}
+
+    def counted_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes | None,
+        timeout: float,
+    ) -> HttpResponse:
+        key = "video_comments" if _COMMENTS_PATH in url else "video_search_v5"
+        request_counts[key] += 1
+        return http_request(method, url, headers, body, timeout)
+
     videos: list[Mapping[str, Any]] = []
     pagination: Mapping[str, Any] = {
         "offset": 0, "search_id": "", "backtrace": "", "has_more": 1,
     }
     page = 1
-    search_calls = 0
     try:
         while len(videos) < limit and pagination.get("has_more"):
             data = _request_json(
                 _SEARCH_PATH,
                 method="POST",
                 token=api_token,
-                http_request=http_request,
+                http_request=counted_http_request,
                 timeout_seconds=timeout_seconds,
                 rate_gate=rate_gate,
                 body={
@@ -390,7 +402,6 @@ def search(
                     "backtrace": str(pagination.get("backtrace") or ""),
                 },
             )
-            search_calls += 1
             page_items = _video_items(data)
             videos.extend(page_items)
             next_pagination = data.get("pagination")
@@ -415,22 +426,20 @@ def search(
     )[:comment_video_limit]
     comments_by_index: dict[int, list[Mapping[str, Any]]] = {}
     completeness_by_index: dict[int, bool] = {}
-    comment_calls = 0
     for index in candidate_indices:
         declared = _integer(statistics[index], "comment_count")
         try:
-            comments, complete, calls = _fetch_comments(
+            comments, complete, _calls = _fetch_comments(
                 str(selected[index].get("aweme_id")),
                 declared_total=declared,
                 max_pages=max_comment_pages,
                 token=api_token,
-                http_request=http_request,
+                http_request=counted_http_request,
                 timeout_seconds=timeout_seconds,
                 rate_gate=rate_gate,
             )
             comments_by_index[index] = comments
             completeness_by_index[index] = complete
-            comment_calls += calls
         except RuntimeError:
             _emit(
                 on_event,
@@ -475,8 +484,8 @@ def search(
         "source_usage_reconciled",
         provider="tikhub",
         calls={
-            "video_search_v5": search_calls,
-            "video_comments": comment_calls,
+            "video_search_v5": request_counts["video_search_v5"],
+            "video_comments": request_counts["video_comments"],
         },
         returned=len(normalized),
         completeness_2=sum(
