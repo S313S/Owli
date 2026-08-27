@@ -122,8 +122,10 @@ def test_firsthand_声明来源区分撰写与存量回填(tmp_path: Path) -> No
     )
     claims = [raw_claim("c-01", [ref(url, firsthand=True)])]
 
-    writer = register_claims(store, "r-c1", claims, source="chapter")[0]
-    backfill = register_claims(store, "r-c1", claims, source="backfill")[0]
+    register_claims(store, "r-c1", claims, source="chapter")
+    writer = store.get_report("r-c1")["extra"]["claims"][0]
+    register_claims(store, "r-c1", claims, source="backfill")
+    backfill = store.get_report("r-c1")["extra"]["claims"][0]
 
     assert FIRSTHAND_SOURCES == {
         "declared_by_writer", "declared_by_backfill",
