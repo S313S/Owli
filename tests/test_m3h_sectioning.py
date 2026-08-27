@@ -59,7 +59,8 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     done_section = tmp_path / "runs" / "r-ledger" / "goals" / "goal-2" / "report" / "sec-1.md"
     done_section.parent.mkdir(parents=True)
     done_section.write_text(
-        "## 结论\n\n已有节。\n\n## 信息源\n\n- 来源 A。\n",
+        "## 结论\n\n- 已有节 [S01]。\n\n"
+        "## 信息源\n\n- [S01] [来源 A](https://example.com/goal-1)\n",
         encoding="utf-8",
     )
     store.ensure_chapters(

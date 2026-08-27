@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 from app.orchestrator.sectioning import run_sectioned_task
+from app.plan.model import Plan
 from tests.test_m3h_ledger import _store
 
 
@@ -84,6 +88,7 @@ def _run_sectioned(
     declared_paths: list[Path],
     seed=None,
     render=None,
+    mutate_during_run=None,
 ):
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
@@ -145,6 +150,8 @@ def _run_sectioned(
             del on_event
             bodies[section_task.output_path.name] = section_task.body
             pool = _pool_from_body(section_task.body)
+            if mutate_during_run is not None:
+                mutate_during_run(store, section_task)
             section_task.output_path.parent.mkdir(parents=True, exist_ok=True)
             if render is None:
                 index = int(section_task.output_path.stem.removeprefix("sec-")) - 1
@@ -339,6 +346,221 @@ def test_正文出现池外裸链接即使角标闭合也判红(tmp_path):
 
     assert result.succeeded is False
     assert result.chapter_status == "missing"
+
+
+@pytest.mark.parametrize(
+    "foreign_url",
+    [
+        "https://EVIDENCE.example/allowed/",
+        "HTTPS://outside.example/not-in-pool",
+    ],
+)
+def test_正文_URL_必须与证据池逐字一致(tmp_path, foreign_url):
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store,
+            evidence_id="ev-1",
+            goal_id=goal_id,
+            permalink="https://evidence.example/allowed",
+        )
+
+    def render(pool, section_task):
+        del section_task
+        item = pool["items"][0]
+        return (
+            f"## 结论\n\n- 引用 {item['citation']} 但写入 {foreign_url}\n\n"
+            "## 信息源\n\n"
+            f"- {item['citation']} [{item['title']}]({foreign_url})\n"
+        )
+
+    result, _, _, _, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+        render=render,
+    )
+
+    assert result.succeeded is False
+    assert result.chapter_status == "missing"
+
+
+def test_指定历史_plan_snapshot_的跨_goal_done_与证据池集合对齐():
+    """本地验收直接读指定整跑快照；其他环境没有私有跑数据时跳过。"""
+
+    database = Path("../Owli-fix/var/owli.db").resolve()
+    if not database.is_file():
+        pytest.skip("本机历史整跑数据库不可用")
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        plan_row = connection.execute(
+            "SELECT plan_snapshot FROM reports WHERE id = ?",
+            ("r-0f92790bfe37",),
+        ).fetchone()
+        assert plan_row is not None
+        plan = Plan.from_json(plan_row["plan_snapshot"])
+        rows = [dict(row) for row in connection.execute(
+            "SELECT * FROM chapter_progress WHERE research_id = ?",
+            (plan.research_id,),
+        )]
+        evidence_goal_ids = {
+            str(row[0]) for row in connection.execute(
+                "SELECT DISTINCT goal_id FROM evidence WHERE report_id = ? ",
+                (plan.research_id,),
+            )
+        }
+
+    writer = next(
+        agent for agent in plan.goals[0].agents
+        if agent.agent_id == "report-writing"
+    )
+    declared = writer.chapter["opening"]["inputs"]
+    from app.orchestrator.sectioning import (
+        _ledger_inputs,
+        _merge_declared_done_inputs,
+    )
+
+    inputs = _merge_declared_done_inputs(
+        _ledger_inputs(rows, "goal-1"),
+        rows,
+        declared,
+        research_root=database.parent.parent / "runs" / plan.research_id,
+    )
+    done_goal_ids = {str(item["goal_id"]) for item in inputs["done"]}
+
+    assert done_goal_ids == {"goal-1", "goal-2", "goal-3"}
+    assert evidence_goal_ids == done_goal_ids
+
+
+def test_父章写节期间直写新证据不改变已冻结_S_编号(tmp_path):
+    seeded: set[str] = set()
+
+    def seed(store, goal_id):
+        if goal_id in seeded:
+            return
+        seeded.add(goal_id)
+        _add_evidence(
+            store,
+            evidence_id=f"ev-z-{goal_id}",
+            goal_id=goal_id,
+            permalink=f"https://evidence.example/z-{goal_id}",
+        )
+
+    mutated = False
+
+    def mutate(store, section_task):
+        nonlocal mutated
+        if mutated or section_task.output_path.name != "sec-1.md":
+            return
+        mutated = True
+        _add_evidence(
+            store,
+            evidence_id="ev-a",
+            goal_id="goal-1",
+            permalink="https://evidence.example/a",
+        )
+
+    result, _, bodies, _, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1", "goal-2"],
+        declared_paths=[],
+        seed=seed,
+        mutate_during_run=mutate,
+    )
+
+    assert result.succeeded is True
+    first = _pool_from_body(bodies["sec-1.md"])
+    second = _pool_from_body(bodies["sec-2.md"])
+    assert [(item["evidence_id"], item["citation"]) for item in first["items"]] == [
+        ("ev-z-goal-1", "[S01]"),
+    ]
+    assert [(item["evidence_id"], item["citation"]) for item in second["items"]] == [
+        ("ev-z-goal-2", "[S02]"),
+    ]
+
+
+def test_恢复时新证据使旧_S_号失效则复位_done_节重写(tmp_path):
+    store = _store(tmp_path)
+    runs_root = tmp_path / "runs"
+    section_path = runs_root / "r-ledger/goals/goal-1/report/sec-1.md"
+    section_path.parent.mkdir(parents=True, exist_ok=True)
+    section_path.write_text(
+        "## 结论\n\n- 旧编号 [S01]\n\n"
+        "## 信息源\n\n- [S01] [旧证据](https://evidence.example/z)\n",
+        encoding="utf-8",
+    )
+    store.ensure_chapters(
+        "r-ledger", [{"goal_id": "goal-1", "chapter_id": "ch-report/sec-1"}],
+        updated_at="2026-08-27T00:00:00Z",
+    )
+    store.finish_chapter(
+        "r-ledger", "goal-1", "ch-report/sec-1",
+        status="done", reason=None, actual_output_path=str(section_path), actual_count=1,
+        updated_at="2026-08-27T00:00:01Z",
+    )
+    _add_evidence(
+        store, evidence_id="ev-z", goal_id="goal-1",
+        permalink="https://evidence.example/z",
+    )
+    _add_evidence(
+        store, evidence_id="ev-a", goal_id="goal-1",
+        permalink="https://evidence.example/a",
+    )
+    plan = SimpleNamespace(
+        research_id="r-ledger", title="恢复报告",
+        goals=[SimpleNamespace(goal_id="goal-1", title="goal-1")],
+    )
+    agent = SimpleNamespace(
+        output={"shape": "object"},
+        chapter={"chapter_id": "ch-report", "opening": {"inputs": []}},
+    )
+    output = runs_root / "r-ledger/goals/goal-1/report.md"
+    task = EngineTask(
+        body="恢复拼装", output_path=output, output_format="markdown",
+        research_id="r-ledger", goal_id="goal-1",
+        agent_id="report-writing", agent_kind="report_writing",
+        validators=["file_exists", "citation_marks_resolvable", "no_orphan_citation"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+    calls: list[str] = []
+
+    class Adapter:
+        async def run(self, section_task, ctx, on_event=None):
+            del on_event
+            calls.append(section_task.output_path.name)
+            pool = _pool_from_body(section_task.body)
+            item = next(row for row in pool["items"] if row["evidence_id"] == "ev-z")
+            section_task.output_path.write_text(
+                f"## 结论\n\n- 新编号 {item['citation']}\n\n"
+                f"## 信息源\n\n- {item['citation']} [旧证据]({item['permalink']})\n",
+                encoding="utf-8",
+            )
+            return EngineRunResult(
+                conclusion=OwliResult(
+                    "done", str(section_task.output_path), "完成", [], [], [], None,
+                ),
+                conclusion_error=None,
+                validation=validation.validate(ctx, section_task.validators),
+                events=[], permission_denials=[],
+            )
+
+    result = asyncio.run(run_sectioned_task(
+        plan=plan, agent=agent,
+        context=SimpleNamespace(goal_id="goal-1", engine="claude"),
+        base_task=task, adapter=Adapter(), store=store, runs_root=runs_root,
+        now_iso=lambda: "2026-08-27T00:00:02Z",
+        on_event=lambda event: asyncio.sleep(0),
+        persist_goal_evidence=lambda _plan, _goal: None,
+    ))
+
+    assert result.succeeded is True
+    assert calls == ["sec-1.md"]
+    assert "新编号 [S02]" in output.read_text(encoding="utf-8")
 
 
 def test_恢复态全部节已_done_仍按证据池全局编号拼装(tmp_path):

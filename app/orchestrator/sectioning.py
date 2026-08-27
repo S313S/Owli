@@ -18,7 +18,6 @@ from app.orchestrator.chapter_failure import (
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
 from app.report.markdown import merge_sectioned_markdown
-from app.store.dao import normalize_permalink
 
 
 SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
@@ -43,7 +42,10 @@ _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence",
 )
-_HTTP_URL = re.compile(r"https?://[^\s<>\"'()（）\[\]{}，。；：！？]+")
+_HTTP_URL = re.compile(
+    r"https?://[^\s<>\"'()（）\[\]{}，。；：！？]+",
+    re.IGNORECASE,
+)
 _MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 
 
@@ -316,14 +318,12 @@ async def _project_accessible_evidence(
         projected_goal_ids.add(goal_id)
 
 
-def _normalized_urls(text: str) -> set[str]:
+def _raw_urls(text: str) -> set[str]:
+    """提取原样 URL；撰写契约要求逐字取自证据池，不做归一化。"""
+
     urls: set[str] = set()
     for matched in _HTTP_URL.findall(text):
-        candidate = matched.rstrip(")]},.;:!?，。；：！？")
-        try:
-            urls.add(normalize_permalink(candidate))
-        except ValueError:
-            continue
+        urls.add(matched.rstrip(")]},.;:!?，。；：！？"))
     return urls
 
 
@@ -361,11 +361,11 @@ def _section_evidence_pool_result(
             claims = list(payload["claims"])
 
     by_mark = {str(item["citation"]): str(item["permalink"]) for item in items}
-    allowed_urls = {normalize_permalink(url) for url in by_mark.values()}
+    allowed_urls = set(by_mark.values())
     offenders: list[str] = []
     used_marks = set(validation._CITATION.findall(markdown))
     offenders.extend(sorted(used_marks - set(by_mark)))
-    offenders.extend(sorted(_normalized_urls(markdown) - allowed_urls))
+    offenders.extend(sorted(_raw_urls(markdown) - allowed_urls))
 
     in_sources = False
     for line in markdown.splitlines():
@@ -379,9 +379,9 @@ def _section_evidence_pool_result(
         if mark_match is None:
             continue
         mark = mark_match.group(0)
-        line_urls = _normalized_urls(line)
+        line_urls = _raw_urls(line)
         expected = by_mark.get(mark)
-        if expected is None or line_urls != {normalize_permalink(expected)}:
+        if expected is None or line_urls != {expected}:
             offenders.append(f"{mark} 未逐字映射到证据池 permalink")
 
     for claim in claims:
@@ -393,12 +393,9 @@ def _section_evidence_pool_result(
         for link in links:
             if not isinstance(link, Mapping):
                 continue
-            try:
-                normalized = normalize_permalink(str(link.get("permalink") or ""))
-            except ValueError:
-                continue
-            if normalized not in allowed_urls:
-                offenders.append(normalized)
+            permalink = str(link.get("permalink") or "")
+            if permalink not in allowed_urls:
+                offenders.append(permalink)
 
     inner_ctx = validation.Ctx(
         output_path=section_path,
@@ -771,20 +768,21 @@ async def run_sectioned_task(
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
-    projected_goal_ids: set[str] = set()
     report_goal_ids = {str(goal.goal_id) for goal in plan.goals}
+    # 父章一次尝试内冻结可读账本快照：若其它 goal 在写节期间刚完成，
+    # 它既不会半途进 done，也不会造成“读得到、引不得”或已用 S 号漂移。
+    input_rows = store.list_chapters(plan.research_id)
+    chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+    opening = chapter.get("opening", {})
+    declared_inputs = (
+        opening.get("inputs", []) if isinstance(opening, Mapping) else []
+    )
     if persist_goal_evidence is not None:
-        projection_rows = store.list_chapters(plan.research_id)
-        chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
-        opening = chapter.get("opening", {})
-        declared_inputs = (
-            opening.get("inputs", []) if isinstance(opening, Mapping) else []
-        )
         projection_goal_ids: set[str] = set()
         for section in sections:
             projection_inputs = _merge_declared_done_inputs(
-                _ledger_inputs(projection_rows, section["goal_id"]),
-                projection_rows,
+                _ledger_inputs(input_rows, section["goal_id"]),
+                input_rows,
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
@@ -796,11 +794,51 @@ async def run_sectioned_task(
             plan=plan,
             goal_ids=projection_goal_ids,
             persist_goal_evidence=persist_goal_evidence,
-            projected_goal_ids=projected_goal_ids,
+            projected_goal_ids=set(),
         )
+    # source_mcp 可在并发 goal 中直写 evidence，因此证据行也必须与
+    # input_rows 同时冻结；合并编号和每节证据池共用这一份快照。
+    evidence_rows = store.list_evidence(plan.research_id)
     _, citation_numbers = _evidence_index(
-        store.list_evidence(plan.research_id), report_goal_ids,
+        evidence_rows, report_goal_ids,
     )
+    if persist_goal_evidence is not None:
+        stale_done_ids: list[str] = []
+        for section in sections:
+            row = existing.get(section["section_id"])
+            if row is None or row["status"] != "done":
+                continue
+            frozen_inputs = _merge_declared_done_inputs(
+                _ledger_inputs(input_rows, section["goal_id"]),
+                input_rows,
+                declared_inputs,
+                research_root=runs_root / plan.research_id,
+            )
+            allowed_goal_ids = {
+                str(section["goal_id"]),
+                *(str(item["goal_id"]) for item in frozen_inputs["done"]),
+            }
+            frozen_pool, _ = _evidence_index(evidence_rows, allowed_goal_ids)
+            section_path = section_root / section["filename"]
+            if _section_evidence_pool_result(
+                section_path, frozen_pool,
+            ).verdict is not validation.Verdict.PASS:
+                stale_done_ids.append(section["section_id"])
+        if stale_done_ids:
+            store.reset_done_chapters(
+                plan.research_id,
+                context.goal_id,
+                stale_done_ids,
+                updated_at=now_iso(),
+            )
+            for section in sections:
+                if section["section_id"] in stale_done_ids:
+                    (section_root / section["filename"]).unlink(missing_ok=True)
+            existing = {
+                row["chapter_id"]: row
+                for row in store.list_chapters(plan.research_id)
+                if row["goal_id"] == context.goal_id
+            }
     truncation_event_emitted = False
     for section_number, section in enumerate(sections, start=1):
         row = existing.get(section["section_id"])
@@ -823,16 +861,10 @@ async def run_sectioned_task(
             if not started:
                 break
             section_attempt += 1
-            current_rows = store.list_chapters(plan.research_id)
-            inputs = _ledger_inputs(current_rows, section["goal_id"])
-            chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
-            opening = chapter.get("opening", {})
-            declared_inputs = (
-                opening.get("inputs", []) if isinstance(opening, Mapping) else []
-            )
+            inputs = _ledger_inputs(input_rows, section["goal_id"])
             inputs = _merge_declared_done_inputs(
                 inputs,
-                current_rows,
+                input_rows,
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
@@ -841,7 +873,7 @@ async def run_sectioned_task(
                 *(str(item["goal_id"]) for item in inputs["done"]),
             }
             evidence_pool, _ = _evidence_index(
-                store.list_evidence(plan.research_id), allowed_goal_ids,
+                evidence_rows, allowed_goal_ids,
             )
             omitted_count = int(evidence_pool["omitted_count"])
             if omitted_count and not truncation_event_emitted:

@@ -139,6 +139,15 @@ def test_规划器换措辞仍归一四字段且不覆盖适配器真值(tmp_pat
             capability={"sources": ["xhs"]},
         )],
     )
+    store.ensure_chapters(
+        "r-ledger", [{"goal_id": "goal-1", "chapter_id": "data-collection-xhs"}],
+        updated_at="2026-08-27T00:00:00Z",
+    )
+    store.finish_chapter(
+        "r-ledger", "goal-1", "data-collection-xhs",
+        status="done", reason=None, actual_output_path=str(artifact), actual_count=2,
+        updated_at="2026-08-27T00:00:01Z",
+    )
     runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
 
     rows = store.list_evidence("r-ledger")
@@ -147,6 +156,43 @@ def test_规划器换措辞仍归一四字段且不覆盖适配器真值(tmp_pat
     assert rows[0]["content_excerpt"] == "适配器正文"
     assert rows[0]["author_name"] == "适配器作者"
     assert rows[0]["raw_metrics"] == {"liked_count": 88}
+
+
+def test_产物存在但章账本未_done_时不提前投影(tmp_path: Path) -> None:
+    from app.orchestrator.runtime import RuntimeCoordinator
+
+    store = _store(tmp_path)
+    runs_root = tmp_path / "runs"
+    artifact = runs_root / "r-ledger/goals/goal-1/evidence.json"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text(json.dumps([{
+        "platform": "web_search",
+        "permalink": "https://example.com/pending",
+        "fetched_at": "2026-08-27T00:00:00+00:00",
+        "title": "未完成产物",
+    }], ensure_ascii=False), encoding="utf-8")
+    store.ensure_chapters(
+        "r-ledger", [{"goal_id": "goal-1", "chapter_id": "data-collection"}],
+        updated_at="2026-08-27T00:00:00Z",
+    )
+    runtime = RuntimeCoordinator(
+        store=store, event_buffer=SimpleNamespace(), researches={}, cards={},
+        adapter_factory=lambda: object(), runs_root=runs_root,
+        routing_utc_clock=lambda: datetime.now(timezone.utc),
+    )
+    goal = SimpleNamespace(
+        goal_id="goal-1",
+        agents=[SimpleNamespace(
+            agent_id="data-collection",
+            chapter={"chapter_id": "data-collection"},
+            output={"format": "json", "path": "goals/goal-1/evidence.json"},
+            capability={"sources": ["web_search"]},
+        )],
+    )
+
+    runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
+
+    assert store.list_evidence("r-ledger") == []
 
 
 def test_MCP配置携带局部Store路径且三新源都映射limit(tmp_path: Path) -> None:

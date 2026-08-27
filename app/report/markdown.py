@@ -202,7 +202,7 @@ def merge_sectioned_markdown(
             key = url_match.group(1) if url_match else f"sec-{index}:{old_mark}"
             if key not in inventory:
                 number = (
-                    citation_numbers.get(normalize_permalink(key))
+                    citation_numbers.get(key)
                     if citation_numbers is not None and url_match is not None
                     else None
                 )

@@ -1245,8 +1245,20 @@ class RuntimeCoordinator:
         """兼容/恢复投影：幂等写产物，四个内容字段不覆盖适配器真值。"""
 
         payloads: list[dict[str, Any]] = []
+        done_chapters = {
+            str(row["chapter_id"])
+            for row in self.store.list_chapters(plan.research_id)
+            if row["goal_id"] == goal.goal_id and row["status"] == "done"
+        }
         for agent in goal.agents:
-            if str(agent.output.get("format")) != "json":
+            chapter = agent.chapter if isinstance(
+                getattr(agent, "chapter", None), dict,
+            ) else {}
+            chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
+            if (
+                str(agent.output.get("format")) != "json"
+                or chapter_id not in done_chapters
+            ):
                 continue
             sources = list(agent.capability.get("sources", []))
             platform_hint = str(sources[0]) if len(sources) == 1 else None
