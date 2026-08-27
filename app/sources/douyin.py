@@ -89,7 +89,8 @@ def _load_token(env_path: Path = _ENV_PATH) -> str:
 
 
 def _assert_allowed_path(path: str) -> None:
-    assert path not in FORBIDDEN_TIKHUB_PATHS, f"禁止调用高价 TikHub 接口：{path}"
+    if path in FORBIDDEN_TIKHUB_PATHS:
+        raise ValueError(f"禁止调用高价 TikHub 接口：{path}")
 
 
 def _default_http_request(

@@ -260,7 +260,10 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
         "goal-1", "goal-2", "goal-3"
     ]
     for goal in raw["goals"]:
-        assert goal["retry_policy"] == DEFAULT_RETRY_POLICY
+        assert goal["retry_policy"] == {
+            **DEFAULT_RETRY_POLICY,
+            "chapter_deadline_seconds": 1800,
+        }
         assert goal["status"] == "pending"
         assert goal["intervention"]["on_complete"] is True
         for agent in goal["agents"]:

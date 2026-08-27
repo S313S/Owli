@@ -47,6 +47,19 @@ def test_三源声明可被自动注册() -> None:
     assert sources["reddit"].tool_name == "source.reddit"
 
 
+def test_两档墙钟通过运行配置自检且包含三源限额() -> None:
+    from app.adapters.selfcheck import validate_runtime_config
+    from app.config import load_research_scale_config
+
+    config = load_research_scale_config()
+
+    assert config.fast.chapter_wall_clock_seconds == 330
+    assert config.standard.chapter_wall_clock_seconds == 1800
+    validate_runtime_config(config)
+    for profile in (config.fast, config.standard):
+        assert {"xhs", "douyin", "reddit"} <= profile.source_item_limits.keys()
+
+
 def test_小红书原生过滤_双会话翻页_签名链接与相对时间不落库() -> None:
     from app.sources import xhs
 
@@ -210,10 +223,10 @@ def test_抖音搜索并全取评论正文_完整度实际到2() -> None:
         "/api/v1/douyin/app/v3/fetch_multi_video_statistics",
     ],
 )
-def test_抖音高价接口被断言拦截(path) -> None:
+def test_抖音高价接口被异常拦截(path) -> None:
     from app.sources.douyin import _assert_allowed_path
 
-    with pytest.raises(AssertionError, match="禁止调用高价"):
+    with pytest.raises(ValueError, match="禁止调用高价"):
         _assert_allowed_path(path)
 
 

@@ -176,13 +176,13 @@ def test_E1_v5账本迁移到v6后接受_timeout(tmp_path: Path) -> None:
     assert store.list_chapters("r-ledger")[0]["reason"] == "timeout"
 
 
-def test_E2_fast墙钟为600且启动自检拒绝不大于引擎超时的档位() -> None:
+def test_E2_默认墙钟且启动自检拒绝不大于引擎超时的档位() -> None:
     from app.adapters.selfcheck import RuntimeConfigCheckError, validate_runtime_config
     from app.config import load_research_scale_config
 
     product = load_research_scale_config()
-    assert product.fast.chapter_wall_clock_seconds == 600
-    assert product.standard.chapter_wall_clock_seconds is None
+    assert product.fast.chapter_wall_clock_seconds == 330
+    assert product.standard.chapter_wall_clock_seconds == 1800
     validate_runtime_config(product)
 
     invalid = load_research_scale_config({

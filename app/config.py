@@ -121,8 +121,11 @@ _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
             "product_hunt": 20,
             "web_search": 10,
             "x": 10,
+            "xhs": 20,
+            "douyin": 10,
+            "reddit": 20,
         },
-        "chapter_wall_clock_seconds": None,
+        "chapter_wall_clock_seconds": 1800,
     },
     "fast": {
         "max_goals": 3,
@@ -133,8 +136,11 @@ _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
             "product_hunt": 10,
             "web_search": 5,
             "x": 10,
+            "xhs": 10,
+            "douyin": 5,
+            "reddit": 10,
         },
-        "chapter_wall_clock_seconds": 600,
+        "chapter_wall_clock_seconds": 330,
     },
 }
 
