@@ -35,7 +35,12 @@ from app.plan.cards import (
 )
 from app.plan.generate import generate_plan
 from app.plan.editing import apply_edit, approve
-from app.plan.model import Goal, Plan, agent_kind_of
+from app.plan.model import (
+    SECTIONED_CHAPTER_KINDS,
+    Goal,
+    Plan,
+    agent_kind_of,
+)
 from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
     enrich_source_section,
@@ -43,6 +48,11 @@ from app.report.markdown import (
     source_citations,
 )
 from app.reliability.audit import degrade_after_closed_set_retry
+from app.reliability.claims import (
+    ClaimsRegistrationError,
+    claims_from_documents,
+    register_claims,
+)
 from app.store.evidence_artifacts import load_evidence_payloads
 
 
@@ -1517,6 +1527,34 @@ class RuntimeCoordinator:
             encoding="utf-8",
         )
 
+    def _claim_documents(self, plan: Plan) -> list[dict[str, Any]]:
+        """只读计划声明的 JSON 报告章，不扫描正文或其他 JSON 产物。"""
+
+        research_root = (self.runs_root / plan.research_id).resolve(strict=False)
+        documents: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        for goal in plan.goals:
+            for agent in goal.agents:
+                if (
+                    self._agent_kind(agent) not in SECTIONED_CHAPTER_KINDS
+                    or str(agent.output.get("format")) != "json"
+                ):
+                    continue
+                path = (research_root / str(agent.output.get("path", ""))).resolve(
+                    strict=False
+                )
+                if path in seen:
+                    continue
+                seen.add(path)
+                if not path.is_relative_to(research_root):
+                    raise ValueError(f"断言章产物路径越界：{path}")
+                if not path.is_file():
+                    continue
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(document, dict):
+                    documents.append(document)
+        return documents
+
     async def _finalize_if_terminal(self, research_id: str) -> None:
         if research_id in self._finalized:
             return
@@ -1563,6 +1601,8 @@ class RuntimeCoordinator:
         )
         validation_report = validation.validate(validation_ctx, report_validators)
         citation_error: str | None = None
+        claims_error: str | None = None
+        claims_offenders: list[str] = []
         if validation_report.verdict is validation.Verdict.PASS:
             try:
                 self.store.replace_evidence_citations(
@@ -1571,6 +1611,24 @@ class RuntimeCoordinator:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 citation_error = f"成稿角标回填失败：{exc}"
+        if (
+            validation_report.verdict is validation.Verdict.PASS
+            and citation_error is None
+        ):
+            try:
+                documents = self._claim_documents(plan)
+                if any("claims" in document for document in documents):
+                    register_claims(
+                        self.store,
+                        research_id,
+                        claims_from_documents(documents),
+                        source="chapter",
+                    )
+            except ClaimsRegistrationError as exc:
+                claims_error = str(exc)
+                claims_offenders = exc.offenders
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+                claims_error = f"断言登记失败：{type(exc).__name__}: {exc}"
         failures = [
             {"validator": item.name, "message": item.message, "offenders": item.offenders}
             for item in validation_report.results
@@ -1582,6 +1640,12 @@ class RuntimeCoordinator:
                 "message": citation_error,
                 "offenders": [],
             })
+        if claims_error is not None:
+            failures.append({
+                "validator": "claims_registration",
+                "message": claims_error,
+                "offenders": claims_offenders,
+            })
         await self.events.publish(
             research_id,
             {
@@ -1589,7 +1653,7 @@ class RuntimeCoordinator:
                 "data": {
                     "verdict": (
                         validation.Verdict.FAIL.value
-                        if citation_error is not None
+                        if citation_error is not None or claims_error is not None
                         else validation_report.verdict.value
                     ),
                     "validators": report_validators,
@@ -1600,6 +1664,7 @@ class RuntimeCoordinator:
         validation_failed = (
             validation_report.verdict is not validation.Verdict.PASS
             or citation_error is not None
+            or claims_error is not None
         )
         # 硬约束 4：报告能生成就 completed，failed 只留给「报告根本没生成」。
         # 校验没过是报告质量告警（已随 report_validation 事件发出），不是研究失败。

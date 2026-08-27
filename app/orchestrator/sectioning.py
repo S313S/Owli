@@ -256,6 +256,7 @@ def _write_object_document(
     output_path: Path,
     section_items: list[dict[str, Any]],
     missing_items: list[dict[str, Any]],
+    claims: list[Any] | None = None,
 ) -> None:
     document = {
         "title": plan.title,
@@ -266,6 +267,8 @@ def _write_object_document(
         ],
         "缺失清单": missing_items,
     }
+    if claims:
+        document["claims"] = claims
     output_path.write_text(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -288,6 +291,7 @@ def _assemble(
     （后缀是 .json、内容是 Markdown），下游按 json 解析必然失败。
     """
     section_items: list[dict[str, Any]] = []
+    chapter_claims: list[Any] = []
     for section in sections:
         path = section_root / section["filename"]
         row = next(
@@ -296,6 +300,24 @@ def _assemble(
         )
         if path.is_file():
             text = path.read_text(encoding="utf-8").strip()
+            if output_format == "json" and _declared_shape(agent) != "array":
+                try:
+                    fragment = json.loads(text)
+                except (json.JSONDecodeError, UnicodeError):
+                    fragment = None
+                if isinstance(fragment, Mapping) and "markdown" in fragment:
+                    markdown = fragment.get("markdown")
+                    claims = fragment.get("claims", [])
+                    if not isinstance(markdown, str) or not markdown.strip():
+                        raise SectionAssemblyShapeError(
+                            f"{section['section_id']} 的 markdown 缺失或为空"
+                        )
+                    if not isinstance(claims, list):
+                        raise SectionAssemblyShapeError(
+                            f"{section['section_id']} 的 claims 必须是数组"
+                        )
+                    text = markdown.strip()
+                    chapter_claims.extend(claims)
         else:
             reason = str(row["reason"] if row else "empty_result")
             text = _placeholder(section, reason).strip()
@@ -376,6 +398,7 @@ def _assemble(
         _write_object_document(
             plan=plan, agent=agent, output_path=output_path,
             section_items=section_items, missing_items=missing_items,
+            claims=chapter_claims,
         )
         return
     # Markdown 整卷报告做确定性归并：单结论、单信息源、全卷统一角标
@@ -452,7 +475,7 @@ async def run_sectioned_task(
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
-    for section in sections:
+    for section_number, section in enumerate(sections, start=1):
         row = existing.get(section["section_id"])
         if row and row["status"] in {"done", "missing"}:
             continue
@@ -505,6 +528,18 @@ async def run_sectioned_task(
                 "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
                 f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
             )
+            if base_task.output_format == "json" and _declared_shape(agent) != "array":
+                body += (
+                    "\n本章最终产物是 JSON 节化文档信封。本节须显式写 JSON object："
+                    "markdown 为本节 Markdown 正文；claims 为本节结论断言数组。"
+                    "每条断言必须含报告内唯一 id（c- 加至少两位数字）、非空 text、"
+                    "至少一条 evidence；evidence 用 permalink 联接，可选 stance="
+                    "contradicts、firsthand=true、origin_url。不得用 [Sxx] 代替 permalink，"
+                    "不得从正文事后抽取断言。"
+                    f"本节断言 id 固定使用 c-{section_number:02d}01、"
+                    f"c-{section_number:02d}02…的区间，避免跨节重号。"
+                    "若本节确无可证否结论，claims 写空数组。"
+                )
             section_task = replace(
                 base_task,
                 body=body,

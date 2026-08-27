@@ -775,6 +775,62 @@ def db_row_exists(ctx: Ctx, arguments: list[str]) -> Result:
     )
 
 
+@validator("claims_backfilled")
+def claims_backfilled(ctx: Ctx, arguments: list[str]) -> Result:
+    name = "claims_backfilled"
+    if not arguments or any(not argument for argument in arguments):
+        return _result(
+            Verdict.UNAVAILABLE,
+            name,
+            f"{name} 至少需要一个待回填键名",
+        )
+    reader = getattr(ctx.store, "read_validation_path", None)
+    if reader is None:
+        return _result(
+            Verdict.UNAVAILABLE,
+            name,
+            "沉淀层未提供固定读接口 read_validation_path",
+        )
+    try:
+        claims = reader("reports.extra.claims", ctx.research_id)
+    except Exception as exc:
+        return _result(
+            Verdict.UNAVAILABLE,
+            name,
+            f"读取断言失败：{type(exc).__name__}: {exc}",
+            detail={"exception": type(exc).__name__},
+        )
+    if not isinstance(claims, list) or not claims:
+        return _result(
+            Verdict.FAIL,
+            name,
+            "reports.extra.claims 缺失或为空",
+            ["reports.extra.claims"],
+        )
+    offenders: list[str] = []
+    for index, claim in enumerate(claims):
+        claim_id = (
+            claim.get("id")
+            if isinstance(claim, Mapping) and isinstance(claim.get("id"), str)
+            else f"claims[{index}]"
+        )
+        for key in arguments:
+            if not isinstance(claim, Mapping) or key not in claim or claim[key] is None:
+                offenders.append(f"{claim_id} 缺 {key}")
+    if offenders:
+        return _result(
+            Verdict.FAIL,
+            name,
+            f"{len(offenders)} 个断言回填键缺失",
+            offenders,
+        )
+    return _result(
+        Verdict.PASS,
+        name,
+        f"{len(claims)} 条断言均已回填 {','.join(arguments)}",
+    )
+
+
 @validator("no_item_missing_rating")
 def no_item_missing_rating(ctx: Ctx, arguments: list[str]) -> Result:
     name = "no_item_missing_rating"
@@ -940,7 +996,6 @@ _UNIMPLEMENTED = (
     "table_no_empty_cells",
     "each_row_urls_reachable",
     "db_field_non_empty",
-    "claims_backfilled",
     "no_baseline_prefix_left",
     "norm_method_in_enum",
     "norm_context_required_keys",

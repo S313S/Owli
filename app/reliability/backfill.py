@@ -20,8 +20,10 @@ from app.reliability.scoring import (
     RATING_NOTES_PATTERN,
     SCORE_FIELDS,
     normalize_evidence_metrics,
+    claim_support_is_valid,
     score_evidence_partial,
 )
+from app.reliability.crossref import build_claim_clusters
 from app.report.markdown import render_source_list
 from app.store.dao import normalize_permalink
 
@@ -55,6 +57,122 @@ class BackfillResult:
     total_cells: int
     citations: int
     summary_line: str | None
+    weak_claims: list[str]
+
+
+_CROSSREF_LIFT_KEYS = (
+    "story_id", "conversation_id", "video_id", "note_id", "thread_key",
+    "parent_permalink", "top_level_permalink", "root_permalink",
+    "ancestor_permalinks", "is_top_level_comment", "institution_key",
+    "canonical_url",
+)
+
+
+def _claim_crossref_item(
+    row: Mapping[str, Any], claim: Mapping[str, Any]
+) -> dict[str, Any]:
+    """把库存 extra 线程/血缘键提升到 crossref.py 约定的顶层。"""
+
+    item = dict(row)
+    extra_value = item.get("extra")
+    extra = dict(extra_value) if isinstance(extra_value, Mapping) else {}
+    item["extra"] = extra
+    for key in _CROSSREF_LIFT_KEYS:
+        if key in extra:
+            item[key] = extra[key]
+    claim_id = str(claim["id"])
+    evidence_id = str(item["id"])
+    stance = claim.get("stance")
+    stance_value = (
+        stance.get(evidence_id, "supports")
+        if isinstance(stance, Mapping)
+        else "supports"
+    )
+    item["stance_by_claim"] = {claim_id: stance_value}
+    firsthand = claim.get("firsthand")
+    item["firsthand_by_claim"] = {
+        claim_id: evidence_id in firsthand
+        if isinstance(firsthand, list)
+        else False
+    }
+    origins = claim.get("origin_overrides")
+    if isinstance(origins, Mapping) and origins.get(evidence_id):
+        item["explicit_origin_by_claim"] = {
+            claim_id: origins[evidence_id]
+        }
+    return item
+
+
+def _backfill_claim_clusters(
+    store: Any,
+    report: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """按 reports.extra.claims 顺序累积主/次断言簇并回写两端。"""
+
+    report_extra = report.get("extra")
+    claims_value = (
+        report_extra.get("claims")
+        if isinstance(report_extra, Mapping)
+        else None
+    )
+    if not isinstance(claims_value, list) or not claims_value:
+        return [dict(row) for row in rows], set()
+    claims = [dict(claim) for claim in claims_value if isinstance(claim, Mapping)]
+    accumulated = {str(row["id"]): dict(row) for row in rows}
+    referenced_ids: set[str] = set()
+    aliases = (
+        report_extra.get("author_aliases")
+        if isinstance(report_extra, Mapping)
+        else None
+    )
+    for claim in claims:
+        claim_id = claim.get("id")
+        evidence_ids = claim.get("evidence_ids")
+        if not isinstance(claim_id, str) or not isinstance(evidence_ids, list):
+            continue
+        items = []
+        for evidence_id in evidence_ids:
+            row = accumulated.get(str(evidence_id))
+            if row is None:
+                continue
+            referenced_ids.add(str(evidence_id))
+            items.append(_claim_crossref_item(row, claim))
+        if not items:
+            continue
+        result = build_claim_clusters(
+            items,
+            claim_id,
+            author_aliases=aliases,
+            conflict_explained=bool(claim.get("conflict_note")),
+        )
+        for evidence_id, computed_extra in result["evidence_extra"].items():
+            row = accumulated[evidence_id]
+            existing_extra = row.get("extra")
+            merged = (
+                dict(existing_extra)
+                if isinstance(existing_extra, Mapping)
+                else {}
+            )
+            merged.update(computed_extra)
+            row["extra"] = merged
+        claim.update(
+            clusters=result["clusters"],
+            k=result["k"],
+            verdict=result["verdict"],
+        )
+
+    payloads = [
+        {
+            key: value for key, value in accumulated[evidence_id].items()
+            if key not in {"score_total", "grade"}
+        }
+        for evidence_id in sorted(referenced_ids)
+    ]
+    if payloads:
+        store.upsert_evidence_batch(payloads)
+    store.set_report_claims(str(report["id"]), claims)
+    return store.list_evidence(str(report["id"])), referenced_ids
 
 
 def _prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> str:
@@ -704,6 +822,8 @@ async def backfill_report(
         raise KeyError(f"报告不存在：{report_id}")
     rows = store.list_evidence(report_id)
     before_rows = len(rows)
+    rows, clustered_ids = _backfill_claim_clusters(store, report, rows)
+    report = store.get_report(report_id) or report
     computed_at = str(report.get("completed_at") or max(
         (str(item.get("fetched_at") or "") for item in rows), default=""
     ))
@@ -711,6 +831,7 @@ async def backfill_report(
     targets = [
         item for item in rows
         if force
+        or str(item.get("id")) in clustered_ids
         or any(item.get(field) is None for field in SCORE_FIELDS)
         or _crossref_verdict(
             item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
@@ -810,6 +931,26 @@ async def backfill_report(
     complete_cells = sum(
         item.get(field) is not None for item in after for field in SCORE_FIELDS
     )
+    claims_value = (
+        (store.get_report(report_id) or {}).get("extra", {}).get("claims", [])
+    )
+    after_by_id = {str(item["id"]): item for item in after}
+    weak_claims = []
+    for claim in claims_value if isinstance(claims_value, list) else []:
+        if not isinstance(claim, Mapping) or not isinstance(claim.get("id"), str):
+            continue
+        evidence_ids = claim.get("evidence_ids")
+        if not isinstance(evidence_ids, list):
+            weak_claims.append(str(claim["id"]))
+            continue
+        grades = [
+            after_by_id[str(evidence_id)].get("grade")
+            for evidence_id in evidence_ids
+            if str(evidence_id) in after_by_id
+            and isinstance(after_by_id[str(evidence_id)].get("grade"), str)
+        ]
+        if not claim_support_is_valid(grades):
+            weak_claims.append(str(claim["id"]))
     return BackfillResult(
         report_id=report_id,
         before_rows=before_rows,
@@ -822,6 +963,7 @@ async def backfill_report(
         total_cells=len(after) * len(SCORE_FIELDS),
         citations=citations,
         summary_line=summary,
+        weak_claims=weak_claims,
     )
 
 

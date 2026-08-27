@@ -9,7 +9,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -553,6 +553,82 @@ class Store:
                     WHERE report_id = ? AND permalink = ?
                     """,
                     (citation_no, report_id, permalink),
+                )
+
+    def set_report_claims(
+        self, report_id: str, claims: Sequence[Mapping[str, Any]]
+    ) -> None:
+        """把规范化断言合并进 reports.extra，并登记 claims 扩展键。"""
+
+        if isinstance(claims, (str, bytes)) or not isinstance(claims, Sequence):
+            raise TypeError("claims 必须是 object 数组")
+        normalized = []
+        for claim in claims:
+            if not isinstance(claim, Mapping):
+                raise TypeError("claims 必须是 object 数组")
+            normalized.append(copy.deepcopy(dict(claim)))
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT extra FROM reports WHERE id = ?", (report_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"报告不存在：{report_id}")
+            extra = json.loads(row["extra"] or "{}")
+            existing_keys = set(extra)
+            extra["claims"] = normalized
+            connection.execute(
+                "UPDATE reports SET extra = ? WHERE id = ?",
+                (_extra_text(extra), report_id),
+            )
+            self._register_extra(
+                connection,
+                "reports",
+                report_id,
+                {"claims": normalized},
+                existing_keys,
+            )
+
+    def attach_claim_ids(
+        self, report_id: str, mapping: Mapping[str, Sequence[str]]
+    ) -> None:
+        """把 claim_ids 稳定合并进 evidence.extra；重复执行不重复追加。"""
+
+        if not isinstance(mapping, Mapping):
+            raise TypeError("mapping 必须是 evidence_id 到 claim_id 数组的映射")
+        normalized: dict[str, list[str]] = {}
+        for evidence_id, claim_ids in mapping.items():
+            if not isinstance(evidence_id, str) or not evidence_id:
+                raise ValueError("evidence_id 必须是非空字符串")
+            if isinstance(claim_ids, (str, bytes)) or not _string_list(list(claim_ids)):
+                raise TypeError("claim_ids 必须是 string[]")
+            normalized[evidence_id] = list(dict.fromkeys(claim_ids))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, extra FROM evidence WHERE report_id = ? ORDER BY id",
+                (report_id,),
+            ).fetchall()
+            stored = {str(row["id"]): row for row in rows}
+            unknown = sorted(set(normalized) - set(stored))
+            if unknown:
+                raise KeyError(f"证据不属于该报告：{unknown}")
+            for evidence_id, claim_ids in normalized.items():
+                extra = json.loads(stored[evidence_id]["extra"] or "{}")
+                existing = list(extra.get("claim_ids") or [])
+                extra["claim_ids"] = list(dict.fromkeys([*existing, *claim_ids]))
+                _validate_evidence_extra(extra)
+                existing_keys = self._existing_evidence_extra_keys(
+                    connection, report_id, {"claim_ids": extra["claim_ids"]}
+                )
+                connection.execute(
+                    "UPDATE evidence SET extra = ? WHERE id = ?",
+                    (_extra_text(extra), evidence_id),
+                )
+                self._register_extra(
+                    connection,
+                    "evidence",
+                    report_id,
+                    {"claim_ids": extra["claim_ids"]},
+                    existing_keys,
                 )
 
     def _evidence_identity(
