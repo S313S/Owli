@@ -285,7 +285,7 @@ def _apify_items(
         "time": _prowlo_time(days),
         "maxItems": limit,
         "maxPostCount": limit,
-        "maxComments": 20,
+        "skipComments": True,
         "includeMediaLinks": True,
     }
     start = http_request(
@@ -544,6 +544,19 @@ def search(
             failures.append("apify_unavailable")
     elif not items:
         failures.append("apify_credential_missing")
+
+    untitled_count = sum(
+        1 for item in items if not str(item.get("title") or "").strip()
+    )
+    if untitled_count:
+        items = [
+            item for item in items if str(item.get("title") or "").strip()
+        ]
+        _emit(
+            on_event, "source_items_dropped", provider=provider,
+            reason="missing_title", dropped=untitled_count,
+            task_continues=True,
+        )
 
     unique = _deduplicate(items)[:limit]
     if not unique:

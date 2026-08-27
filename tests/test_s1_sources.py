@@ -321,6 +321,8 @@ def test_reddit主路径失败后走Apify异步三步且显式relevance() -> Non
         if path.endswith("/runs"):
             actor_input = json.loads(body)
             assert actor_input["sort"] == "relevance"
+            assert actor_input["skipComments"] is True
+            assert "maxComments" not in actor_input
             return reddit.HttpResponse(
                 201, {}, json.dumps({"data": {"id": "run-1"}}).encode()
             )
@@ -357,6 +359,57 @@ def test_reddit主路径失败后走Apify异步三步且显式relevance() -> Non
     assert len(result) == 1
     assert result[0]["extra"]["provider"] == "apify"
     assert result[0]["norm_method"] == "none"
+
+
+def test_reddit丢弃Apify无标题条目并发出事件() -> None:
+    from app.sources import reddit
+
+    events = []
+
+    def http_request(method, url, headers, body, timeout):
+        if "api.prowlo.com" in url:
+            return reddit.HttpResponse(503, {}, b"{}")
+        path = urlparse(url).path
+        if path.endswith("/runs"):
+            return reddit.HttpResponse(
+                201, {}, json.dumps({"data": {"id": "run-untitled"}}).encode()
+            )
+        if "/actor-runs/run-untitled" in path:
+            data = {"status": "SUCCEEDED", "defaultDatasetId": "dataset-untitled"}
+            return reddit.HttpResponse(200, {}, json.dumps({"data": data}).encode())
+        if "/datasets/dataset-untitled/items" in path:
+            untitled = {
+                **_reddit_item(4),
+                "title": None,
+                "permalink": "/r/productivity/comments/post4/title/comment/p18mv0a",
+            }
+            return reddit.HttpResponse(
+                200, {}, json.dumps([untitled, _reddit_item(5)]).encode()
+            )
+        pytest.fail(f"未预期请求：{url}")
+
+    result = reddit.search(
+        "AI meeting",
+        "30d",
+        limit=2,
+        prowlo_token="prowlo-runtime",
+        apify_token="apify-runtime",
+        http_request=http_request,
+        sleeper=lambda _: None,
+        monotonic=lambda: 0.0,
+        on_event=events.append,
+        now=lambda: datetime(2026, 8, 27, tzinfo=timezone.utc),
+    )
+
+    assert [item["title"] for item in result] == ["Reddit 标题 5"]
+    dropped = next(event for event in events if event["type"] == "source_items_dropped")
+    assert dropped["data"] == {
+        "source": "reddit",
+        "provider": "apify",
+        "reason": "missing_title",
+        "dropped": 1,
+        "task_continues": True,
+    }
 
 
 def test_三源各五条可经固定DAO原子入evidence表(tmp_path) -> None:
