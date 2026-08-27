@@ -34,6 +34,7 @@ def _add_evidence(
     permalink: str,
     excerpt: str = "可复核正文",
     scored: bool = False,
+    platform: str = "web_search",
 ) -> None:
     scores = {
         "score_authority": 2,
@@ -47,7 +48,7 @@ def _add_evidence(
         id=evidence_id,
         report_id="r-ledger",
         goal_id=goal_id,
-        platform="web_search",
+        platform=platform,
         permalink=permalink,
         fetched_at="2026-08-27T00:00:00+00:00",
         title=f"标题 {evidence_id}",
@@ -262,6 +263,55 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
                 scored=index == 1,
             )
 
+    result, store, bodies, events, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+    )
+
+    assert result.succeeded is True
+    pool = _pool_from_body(bodies["sec-1.md"])
+    assert len(pool["items"]) == 30
+    assert pool["omitted_count"] == 71
+    assert pool["items"][-1]["citation"] == "[S30]"
+    assert pool["items"][0]["content_excerpt"] == "甲" * 120
+    assert pool["items"][0]["content_excerpt_truncated"] is True
+    assert pool["items"][0]["score_authority"] == 2
+    assert pool["items"][0]["rating_notes"]
+    truncations = [event for event in events if event["type"] == "evidence_pool_truncated"]
+    assert len(truncations) == 1
+    assert truncations[0]["data"]["omitted_count"] == 71
+    assert truncations[0]["data"]["limit"] == 30
+    assert "本节可引用证据已裁剪至 30 条，未列出的不得引用" in bodies["sec-1.md"]
+    assert validation._CITATION.fullmatch("[S99]")
+    assert validation._CITATION.fullmatch("[S100]") is None
+
+    from app.orchestrator.sectioning import _evidence_index
+
+    _, citations = _evidence_index(store_rows := store.list_evidence("r-ledger"), {"goal-1"})
+    assert len(store_rows) == 101
+    assert len(citations) == 99
+    assert citations["https://evidence.example/099"] == 99
+    assert "https://evidence.example/100" not in citations
+
+
+def test_81条证据单节只喂30条并记录裁剪事件(tmp_path):
+    seeded = False
+
+    def seed(store, goal_id):
+        nonlocal seeded
+        if seeded:
+            return
+        seeded = True
+        for index in range(1, 82):
+            _add_evidence(
+                store,
+                evidence_id=f"ev-{index:03d}",
+                goal_id=goal_id,
+                permalink=f"https://evidence.example/{index:03d}",
+            )
+
     result, _, bodies, events, _, _ = _run_sectioned(
         tmp_path,
         goal_ids=["goal-1"],
@@ -271,19 +321,235 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
 
     assert result.succeeded is True
     pool = _pool_from_body(bodies["sec-1.md"])
-    assert len(pool["items"]) == 99
-    assert pool["omitted_count"] == 2
-    assert pool["items"][-1]["citation"] == "[S99]"
-    assert pool["items"][0]["content_excerpt"] == "甲" * 120
-    assert pool["items"][0]["content_excerpt_truncated"] is True
-    assert pool["items"][0]["score_authority"] == 2
-    assert pool["items"][0]["rating_notes"]
+    assert len(pool["items"]) == 30
+    assert pool["omitted_count"] == 51
     truncations = [event for event in events if event["type"] == "evidence_pool_truncated"]
     assert len(truncations) == 1
-    assert truncations[0]["data"]["omitted_count"] == 2
-    assert "已截断 2 条，未列出的不得引用" in bodies["sec-1.md"]
-    assert validation._CITATION.fullmatch("[S99]")
-    assert validation._CITATION.fullmatch("[S100]") is None
+    assert truncations[0]["data"]["omitted_count"] == 51
+    assert truncations[0]["data"]["limit"] == 30
+
+
+def test_按平台轮转裁剪且同输入结果逐字节确定(tmp_path):
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        for index in range(1, 76):
+            _add_evidence(
+                store,
+                evidence_id=f"xhs-{index:03d}",
+                goal_id=goal_id,
+                permalink=f"https://xhs.example/{index:03d}",
+                platform="xhs",
+            )
+        for index in range(1, 7):
+            _add_evidence(
+                store,
+                evidence_id=f"web-{index:03d}",
+                goal_id=goal_id,
+                permalink=f"https://web.example/{index:03d}",
+                platform="web_search",
+            )
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _run_sectioned(
+        first_root,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+    )[2]
+    second = _run_sectioned(
+        second_root,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+    )[2]
+    first_pool = _pool_from_body(first["sec-1.md"])
+    second_pool = _pool_from_body(second["sec-1.md"])
+
+    assert len(first_pool["items"]) == 30
+    assert {item["platform"] for item in first_pool["items"]} == {"xhs", "web_search"}
+    assert json.dumps(first_pool, ensure_ascii=False) == json.dumps(
+        second_pool, ensure_ascii=False,
+    )
+
+
+def test_同一证据在不同节裁剪后仍沿用全局_S_编号():
+    from app.orchestrator.sectioning import _evidence_index
+
+    rows = [
+        {
+            "id": "shared",
+            "goal_id": "goal-1",
+            "platform": "shared_platform",
+            "permalink": "https://evidence.example/shared",
+        },
+        *[
+            {
+                "id": f"a-{index:02d}",
+                "goal_id": "goal-1",
+                "platform": "xhs",
+                "permalink": f"https://evidence.example/a-{index:02d}",
+            }
+            for index in range(20)
+        ],
+        *[
+            {
+                "id": f"b-{index:02d}",
+                "goal_id": "goal-2",
+                "platform": "web_search",
+                "permalink": f"https://evidence.example/b-{index:02d}",
+            }
+            for index in range(20)
+        ],
+    ]
+    first, _ = _evidence_index(
+        rows, {"goal-1", "goal-2"}, section_goal_id="goal-1",
+    )
+    second, _ = _evidence_index(
+        rows, {"goal-1", "goal-2"}, section_goal_id="goal-2",
+    )
+
+    first_mark = next(
+        item["citation"] for item in first["items"] if item["evidence_id"] == "shared"
+    )
+    second_mark = next(
+        item["citation"] for item in second["items"] if item["evidence_id"] == "shared"
+    )
+    assert first_mark == second_mark == "[S21]"
+
+
+def test_done链中撰写章传递覆盖其上游_goal(tmp_path):
+    from app.orchestrator.sectioning import _declared_done_goal_closure
+
+    research_root = tmp_path / "runs/r-ledger"
+    collector_path = research_root / "goals/goal-1/data.json"
+    writer_path = research_root / "goals/goal-3/consistency-check.md"
+    rows = [
+        {
+            "goal_id": "goal-1", "chapter_id": "ch-data", "status": "done",
+            "actual_output_path": str(collector_path), "actual_count": 1,
+        },
+        {
+            "goal_id": "goal-3", "chapter_id": "ch-2", "status": "done",
+            "actual_output_path": str(writer_path), "actual_count": 1,
+        },
+    ]
+    plan = SimpleNamespace(goals=[
+        SimpleNamespace(goal_id="goal-1", agents=[SimpleNamespace(
+            chapter={"chapter_id": "ch-data", "opening": {"inputs": []}},
+        )]),
+        SimpleNamespace(goal_id="goal-3", agents=[SimpleNamespace(
+            chapter={
+                "chapter_id": "ch-2",
+                "opening": {"inputs": [{"path": "goals/goal-1/data.json"}]},
+            },
+        )]),
+    ])
+    inputs = {"done": [{
+        "goal_id": "goal-3", "chapter_id": "ch-2",
+        "path": str(writer_path), "actual_count": 1,
+    }], "missing": []}
+
+    assert _declared_done_goal_closure(
+        plan, rows, inputs, research_root=research_root,
+    ) == {"goal-1", "goal-3"}
+
+
+def test_evidence非空且done只有撰写章产物时本节池仍非空(tmp_path):
+    runs_root = tmp_path / "runs"
+    artifact_store = _store(tmp_path)
+    writer_path = _mark_done(
+        artifact_store, runs_root, "goal-3", "consistency-check",
+    )
+    (tmp_path / "owli.db").unlink()
+
+    def seed(store, _goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store,
+            evidence_id="ev-upstream",
+            goal_id="goal-1",
+            permalink="https://evidence.example/upstream",
+            platform="xhs",
+        )
+
+    def render(pool, section_task):
+        del section_task
+        assert pool["items"]
+        item = pool["items"][0]
+        return (
+            f"## 结论\n\n- 回退池可引用 {item['citation']}\n\n"
+            f"## 信息源\n\n- {item['citation']} [{item['title']}]({item['permalink']})\n"
+        )
+
+    result, _, bodies, _, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-3"],
+        declared_paths=[writer_path],
+        seed=seed,
+        render=render,
+    )
+
+    assert result.succeeded is True
+    assert _pool_from_body(bodies["sec-1.md"])["items"][0]["goal_id"] == "goal-1"
+
+
+def test_evidence只有无goal归属行时回退池仍非空():
+    from app.orchestrator.sectioning import _evidence_index
+
+    pool, citations = _evidence_index(
+        [{
+            "id": "ev-orphan",
+            "goal_id": None,
+            "platform": "web_search",
+            "permalink": "https://evidence.example/orphan",
+        }],
+        {"goal-3"},
+        section_goal_id="goal-3",
+    )
+
+    assert len(pool["items"]) == 1
+    assert pool["items"][0]["citation"] == "[S01]"
+    assert pool["items"][0]["goal_id"] is None
+    assert citations == {"https://evidence.example/orphan": 1}
+
+
+def test_被单节裁掉的_URL_出现在正文则节校验失败(tmp_path):
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        for index in range(1, 32):
+            _add_evidence(
+                store,
+                evidence_id=f"ev-{index:03d}",
+                goal_id=goal_id,
+                permalink=f"https://evidence.example/{index:03d}",
+            )
+
+    def render(pool, section_task):
+        del section_task
+        assert len(pool["items"]) == 30
+        assert all(item["evidence_id"] != "ev-031" for item in pool["items"])
+        item = pool["items"][0]
+        return (
+            f"## 结论\n\n- 错引被裁条目 {item['citation']}\n\n"
+            f"## 信息源\n\n- {item['citation']} [被裁证据](https://evidence.example/031)\n"
+        )
+
+    result, _, _, _, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+        render=render,
+    )
+
+    assert result.succeeded is False
+    assert result.chapter_status == "missing"
 
 
 def test_证据池为空不回退_done_产物_URL_且整章判红(tmp_path):

@@ -38,6 +38,7 @@ SECTION_RETRY_MAX_ATTEMPTS = 3
 #: 拿不到适配器超时时的「一次引擎超时」兜底口径，与两个引擎的默认值同档。
 FALLBACK_ENGINE_TIMEOUT_SECONDS = 300.0
 EVIDENCE_POOL_LIMIT = 99
+SECTION_EVIDENCE_POOL_LIMIT = 30
 _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence",
@@ -248,28 +249,181 @@ def _merge_declared_done_inputs(
     return inputs
 
 
+def _declared_done_goal_closure(
+    plan: Any,
+    rows: list[dict[str, Any]],
+    inputs: Mapping[str, Any],
+    *,
+    research_root: Path,
+) -> set[str]:
+    """沿已完成产物的 opening.inputs 传递追溯其可引用 goal。"""
+
+    done_rows_by_path: dict[str, dict[str, Any]] = {}
+    done_rows_by_chapter: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        if row.get("status") != "done":
+            continue
+        goal_id = str(row.get("goal_id") or "")
+        chapter_id = str(row.get("chapter_id") or "")
+        done_rows_by_chapter[(goal_id, chapter_id)] = row
+        key = _artifact_key(row.get("actual_output_path"), research_root)
+        if key is not None:
+            done_rows_by_path.setdefault(key, row)
+
+    agents_by_chapter: dict[tuple[str, str], Any] = {}
+    for goal in getattr(plan, "goals", []):
+        goal_id = str(getattr(goal, "goal_id", "") or "")
+        for candidate in getattr(goal, "agents", []):
+            chapter = getattr(candidate, "chapter", None)
+            if not isinstance(chapter, Mapping):
+                continue
+            chapter_id = str(chapter.get("chapter_id") or "")
+            if chapter_id:
+                agents_by_chapter[(goal_id, chapter_id)] = candidate
+
+    closure: set[str] = set()
+    pending: list[dict[str, Any]] = []
+    for item in inputs.get("done", []):
+        if not isinstance(item, Mapping):
+            continue
+        goal_id = str(item.get("goal_id") or "")
+        chapter_id = str(item.get("chapter_id") or "")
+        if goal_id:
+            closure.add(goal_id)
+        row = done_rows_by_chapter.get((goal_id, chapter_id))
+        if row is None:
+            key = _artifact_key(item.get("path"), research_root)
+            row = done_rows_by_path.get(key) if key is not None else None
+        if row is not None:
+            pending.append(row)
+
+    visited: set[tuple[str, str]] = set()
+    while pending:
+        row = pending.pop()
+        row_key = (str(row.get("goal_id") or ""), str(row.get("chapter_id") or ""))
+        if row_key in visited:
+            continue
+        visited.add(row_key)
+        agent = agents_by_chapter.get(row_key)
+        chapter = getattr(agent, "chapter", None)
+        if not isinstance(chapter, Mapping):
+            continue
+        opening = chapter.get("opening", {})
+        declared = opening.get("inputs", []) if isinstance(opening, Mapping) else []
+        for declared_item in declared if isinstance(declared, list) else []:
+            if not isinstance(declared_item, Mapping):
+                continue
+            artifact_key = _artifact_key(declared_item.get("path"), research_root)
+            upstream = (
+                done_rows_by_path.get(artifact_key)
+                if artifact_key is not None
+                else None
+            )
+            if upstream is None:
+                continue
+            upstream_goal_id = str(upstream.get("goal_id") or "")
+            if upstream_goal_id:
+                closure.add(upstream_goal_id)
+            pending.append(upstream)
+    return closure
+
+
+def _allowed_evidence_goal_ids(
+    plan: Any,
+    rows: list[dict[str, Any]],
+    inputs: Mapping[str, Any],
+    section_goal_id: str,
+    *,
+    research_root: Path,
+) -> set[str]:
+    return {
+        str(section_goal_id),
+        *_declared_done_goal_closure(
+            plan, rows, inputs, research_root=research_root,
+        ),
+    }
+
+
+def _section_evidence_rows(
+    rows: list[dict[str, Any]], section_goal_id: str | None,
+) -> list[dict[str, Any]]:
+    """goal 相关项在各平台内优先，再按平台名稳定轮转。"""
+
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        platform = str(row.get("platform") or "")
+        buckets.setdefault(platform, []).append(row)
+    for platform_rows in buckets.values():
+        platform_rows.sort(key=lambda row: (
+            0 if str(row.get("goal_id")) == section_goal_id else 1,
+            str(row.get("id") or ""),
+        ))
+
+    selected: list[dict[str, Any]] = []
+    offsets = {platform: 0 for platform in buckets}
+    platforms = sorted(buckets)
+    while len(selected) < SECTION_EVIDENCE_POOL_LIMIT:
+        advanced = False
+        for platform in platforms:
+            offset = offsets[platform]
+            platform_rows = buckets[platform]
+            if offset >= len(platform_rows):
+                continue
+            selected.append(platform_rows[offset])
+            offsets[platform] += 1
+            advanced = True
+            if len(selected) == SECTION_EVIDENCE_POOL_LIMIT:
+                break
+        if not advanced:
+            break
+    return selected
+
+
 def _evidence_index(
-    rows: list[dict[str, Any]], allowed_goal_ids: set[str],
+    rows: list[dict[str, Any]],
+    allowed_goal_ids: set[str],
+    *,
+    section_goal_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    """按全报告稳定序号生成本节可见子集；S 编号不会随节输入变化。"""
+    """先按全报告稳定编号，再生成不超过 30 条的本节可见子集。"""
 
     ordered = sorted(
         (
             row for row in rows
-            if str(row.get("goal_id") or "").strip()
-            and str(row.get("id") or "").strip()
+            if str(row.get("id") or "").strip()
         ),
-        key=lambda row: (str(row["goal_id"]), str(row["id"])),
+        key=lambda row: (
+            str(row.get("goal_id") or ""),
+            str(row["id"]),
+        ),
     )
     numbered = ordered[:EVIDENCE_POOL_LIMIT]
+    citation_by_id = {
+        str(row["id"]): index
+        for index, row in enumerate(numbered, start=1)
+    }
     citations = {
         str(row["permalink"]): index
         for index, row in enumerate(numbered, start=1)
     }
+    eligible = [
+        row for row in numbered
+        if str(row.get("goal_id") or "") in allowed_goal_ids
+    ]
+    eligible_count = sum(
+        1
+        for row in ordered
+        if str(row.get("goal_id") or "") in allowed_goal_ids
+    )
+    if not eligible and numbered:
+        # evidence 已存在却被 goal 过滤成空集时，回退到本 research 全池。
+        eligible = numbered
+        eligible_count = len(ordered)
+    visible = _section_evidence_rows(eligible, section_goal_id)
+    visible.sort(key=lambda row: citation_by_id[str(row["id"])])
     items: list[dict[str, Any]] = []
-    for index, row in enumerate(numbered, start=1):
-        if str(row["goal_id"]) not in allowed_goal_ids:
-            continue
+    for row in visible:
+        index = citation_by_id[str(row["id"])]
         excerpt = row.get("content_excerpt")
         excerpt_text = None if excerpt is None else str(excerpt)
         truncated = bool(excerpt_text is not None and len(excerpt_text) > 120)
@@ -295,7 +449,7 @@ def _evidence_index(
         items.append(item)
     return {
         "items": items,
-        "omitted_count": max(0, len(ordered) - EVIDENCE_POOL_LIMIT),
+        "omitted_count": max(0, eligible_count - len(items)),
     }, citations
 
 
@@ -786,9 +940,14 @@ async def run_sectioned_task(
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
-            projection_goal_ids.add(str(section["goal_id"]))
             projection_goal_ids.update(
-                str(item["goal_id"]) for item in projection_inputs["done"]
+                _allowed_evidence_goal_ids(
+                    plan,
+                    input_rows,
+                    projection_inputs,
+                    str(section["goal_id"]),
+                    research_root=runs_root / plan.research_id,
+                )
             )
         await _project_accessible_evidence(
             plan=plan,
@@ -814,11 +973,18 @@ async def run_sectioned_task(
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
-            allowed_goal_ids = {
+            allowed_goal_ids = _allowed_evidence_goal_ids(
+                plan,
+                input_rows,
+                frozen_inputs,
                 str(section["goal_id"]),
-                *(str(item["goal_id"]) for item in frozen_inputs["done"]),
-            }
-            frozen_pool, _ = _evidence_index(evidence_rows, allowed_goal_ids)
+                research_root=runs_root / plan.research_id,
+            )
+            frozen_pool, _ = _evidence_index(
+                evidence_rows,
+                allowed_goal_ids,
+                section_goal_id=str(section["goal_id"]),
+            )
             section_path = section_root / section["filename"]
             if _section_evidence_pool_result(
                 section_path, frozen_pool,
@@ -868,12 +1034,17 @@ async def run_sectioned_task(
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
-            allowed_goal_ids = {
+            allowed_goal_ids = _allowed_evidence_goal_ids(
+                plan,
+                input_rows,
+                inputs,
                 str(section["goal_id"]),
-                *(str(item["goal_id"]) for item in inputs["done"]),
-            }
+                research_root=runs_root / plan.research_id,
+            )
             evidence_pool, _ = _evidence_index(
-                evidence_rows, allowed_goal_ids,
+                evidence_rows,
+                allowed_goal_ids,
+                section_goal_id=str(section["goal_id"]),
             )
             omitted_count = int(evidence_pool["omitted_count"])
             if omitted_count and not truncation_event_emitted:
@@ -884,7 +1055,7 @@ async def run_sectioned_task(
                         "goal_id": context.goal_id,
                         "chapter_id": _chapter_id(agent),
                         "omitted_count": omitted_count,
-                        "limit": EVIDENCE_POOL_LIMIT,
+                        "limit": SECTION_EVIDENCE_POOL_LIMIT,
                     },
                     "is_error": False,
                 })
@@ -904,7 +1075,8 @@ async def run_sectioned_task(
                 )
             if omitted_count:
                 pool_notice += (
-                    f" 证据池已截断 {omitted_count} 条，未列出的不得引用。"
+                    f" 本节可引用证据已裁剪至 {len(evidence_pool['items'])} 条，"
+                    "未列出的不得引用。"
                 )
             body = (
                 f"{base_task.body}\n\n"
