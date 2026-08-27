@@ -604,7 +604,11 @@ async def test_必失败_goal_下游_skipped_独立_goal_完成且报告如实�
     assert any(task.agent_kind == "reliability_audit" for task in engine.tasks)
     assert any(task.agent_id.startswith("report-writing-2-sec-") for task in engine.tasks)
     assert "retry_exhausted" in text
-    assert "# 结论" in text and "# 信息源" in text and "[^q-1]" in text
+    # W-1：采集全失败导致证据池为空时，撰写章必须如实判红并落缺失，
+    # 不得从 done 产物 URL 回退拼出一份伪引用报告。
+    assert "conclusion_invalid" in text
+    assert "# 结论" not in text and "# 信息源" not in text
+    assert "[^q-1]" in text
 
 
 @async_test

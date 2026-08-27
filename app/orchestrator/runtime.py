@@ -826,6 +826,7 @@ class RuntimeCoordinator:
                     now=self.now,
                     deadline_at=getattr(context, "deadline_at", None),
                     engine_timeout_seconds=getattr(adapter, "timeout_seconds", None),
+                    persist_goal_evidence=self._persist_goal_evidence,
                 )
             except asyncio.CancelledError:
                 # 墙钟取消 / stop 打断落在节执行中：在跑节复位成 pending，不留

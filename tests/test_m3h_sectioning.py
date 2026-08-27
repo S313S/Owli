@@ -16,6 +16,17 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     from app.plan.model import Plan
 
     store = _store(tmp_path)
+    for index, goal_id in enumerate(("goal-1", "goal-2"), start=1):
+        store.add_evidence(
+            id=f"ev-{index}",
+            report_id="r-ledger",
+            goal_id=goal_id,
+            platform="web_search",
+            permalink=f"https://example.com/{goal_id}",
+            fetched_at="2026-08-22T00:00:00Z",
+            title=f"来源 {goal_id}",
+            content_excerpt="可复核正文",
+        )
     source = make_plan_dict()
     source["research_id"] = "r-ledger"
     source["scale"] = "standard"
@@ -92,7 +103,11 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
                 (
                     "\n"
                     if task.output_path.name in empty_sections
-                    else "## 结论\n\n正文。\n\n## 信息源\n\n- 来源 A。\n"
+                    else (
+                        f"## 结论\n\n- 正文 [S{int(task.output_path.stem[-1]):02d}]\n\n"
+                        f"## 信息源\n\n- [S{int(task.output_path.stem[-1]):02d}] "
+                        f"[来源](https://example.com/goal-{task.output_path.stem[-1]})\n"
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -306,7 +321,8 @@ def _run_章级声明输入_case(tmp_path, *, upstream_status, include_upstream_
 
 
 def _节输入_from_body(body):
-    return json.loads(body[body.rfind("\n{") + 1:])
+    raw = body.split("本节上游输入 JSON：\n", 1)[1]
+    return json.JSONDecoder().raw_decode(raw)[0]
 
 
 def test_章级声明且账本done的上游路径注入节输入并按路径去重(tmp_path):
@@ -326,9 +342,8 @@ def test_章级声明且账本done的上游路径注入节输入并按路径去�
     assert "章级 opening.inputs 声明且账本 status=done 的上游产物" in bodies["sec-2.md"]
     assert "产物 path 只用于定位，不是 permalink" in bodies["sec-2.md"]
     assert "不得把本地路径改写成 file:// 角标" in bodies["sec-2.md"]
-    assert "结构化派生产物若同时给出实体条目及该实体的 permalink 来源" in bodies["sec-2.md"]
-    assert "permalink 中无歧义的品牌或模型标识" in bodies["sec-2.md"]
-    assert "不得只按 sources 数组顺序猜测实体对应" in bodies["sec-2.md"]
+    assert "done 产物只作事实与上下文来源，不作引用来源" in bodies["sec-2.md"]
+    assert "本节可引用证据池 JSON（唯一引用源）" in bodies["sec-2.md"]
     assert "节输入只含该 goal 下 done 章" not in bodies["sec-2.md"]
 
 

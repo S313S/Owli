@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -17,6 +18,7 @@ from app.orchestrator.chapter_failure import (
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
 from app.report.markdown import merge_sectioned_markdown
+from app.store.dao import normalize_permalink
 
 
 SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
@@ -36,6 +38,13 @@ SECTION_RETRY_MAX_ATTEMPTS = 3
 
 #: 拿不到适配器超时时的「一次引擎超时」兜底口径，与两个引擎的默认值同档。
 FALLBACK_ENGINE_TIMEOUT_SECONDS = 300.0
+EVIDENCE_POOL_LIMIT = 99
+_EVIDENCE_SCORE_FIELDS = (
+    "score_authority", "score_freshness", "score_crossref",
+    "score_completeness", "score_independence",
+)
+_HTTP_URL = re.compile(r"https?://[^\s<>\"'()（）\[\]{}，。；：！？]+")
+_MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 
 
 class SectionAssemblyShapeError(ValueError):
@@ -237,6 +246,194 @@ def _merge_declared_done_inputs(
     return inputs
 
 
+def _evidence_index(
+    rows: list[dict[str, Any]], allowed_goal_ids: set[str],
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """按全报告稳定序号生成本节可见子集；S 编号不会随节输入变化。"""
+
+    ordered = sorted(
+        (
+            row for row in rows
+            if str(row.get("goal_id") or "").strip()
+            and str(row.get("id") or "").strip()
+        ),
+        key=lambda row: (str(row["goal_id"]), str(row["id"])),
+    )
+    numbered = ordered[:EVIDENCE_POOL_LIMIT]
+    citations = {
+        str(row["permalink"]): index
+        for index, row in enumerate(numbered, start=1)
+    }
+    items: list[dict[str, Any]] = []
+    for index, row in enumerate(numbered, start=1):
+        if str(row["goal_id"]) not in allowed_goal_ids:
+            continue
+        excerpt = row.get("content_excerpt")
+        excerpt_text = None if excerpt is None else str(excerpt)
+        truncated = bool(excerpt_text is not None and len(excerpt_text) > 120)
+        item = {
+            "citation": f"[S{index:02d}]",
+            "permalink": row.get("permalink"),
+            "title": row.get("title"),
+            "content_excerpt": (
+                excerpt_text[:120] if excerpt_text is not None else None
+            ),
+            "content_excerpt_truncated": truncated,
+            "author_name": row.get("author_name"),
+            "platform": row.get("platform"),
+            "evidence_id": row.get("id"),
+            "goal_id": row.get("goal_id"),
+            "fetched_at": row.get("fetched_at"),
+        }
+        for field in _EVIDENCE_SCORE_FIELDS:
+            if row.get(field) is not None:
+                item[field] = row[field]
+        if row.get("rating_notes") not in (None, ""):
+            item["rating_notes"] = row["rating_notes"]
+        items.append(item)
+    return {
+        "items": items,
+        "omitted_count": max(0, len(ordered) - EVIDENCE_POOL_LIMIT),
+    }, citations
+
+
+async def _project_accessible_evidence(
+    *,
+    plan: Any,
+    goal_ids: set[str],
+    persist_goal_evidence: Any,
+    projected_goal_ids: set[str],
+) -> None:
+    if persist_goal_evidence is None:
+        return
+    for goal in plan.goals:
+        goal_id = str(goal.goal_id)
+        if goal_id not in goal_ids or goal_id in projected_goal_ids:
+            continue
+        result = persist_goal_evidence(plan, goal)
+        if inspect.isawaitable(result):
+            await result
+        projected_goal_ids.add(goal_id)
+
+
+def _normalized_urls(text: str) -> set[str]:
+    urls: set[str] = set()
+    for matched in _HTTP_URL.findall(text):
+        candidate = matched.rstrip(")]},.;:!?，。；：！？")
+        try:
+            urls.add(normalize_permalink(candidate))
+        except ValueError:
+            continue
+    return urls
+
+
+def _section_evidence_pool_result(
+    section_path: Path, pool: Mapping[str, Any],
+) -> validation.Result:
+    """校验节正文的角标、来源 URL 与 claims permalink 均来自本节证据池。"""
+
+    items = list(pool.get("items", []))
+    if not items:
+        return validation.Result(
+            validation.Verdict.FAIL,
+            "evidence_pool_only",
+            "本节无可引用证据，不能登记正文角标或信息源",
+            [],
+        )
+    try:
+        raw_text = section_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return validation.Result(
+            validation.Verdict.UNAVAILABLE,
+            "evidence_pool_only",
+            f"无法读取节产物：{type(exc).__name__}: {exc}",
+            [],
+        )
+    markdown = raw_text
+    claims: list[Any] = []
+    try:
+        payload = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+    if isinstance(payload, Mapping) and isinstance(payload.get("markdown"), str):
+        markdown = payload["markdown"]
+        if isinstance(payload.get("claims"), list):
+            claims = list(payload["claims"])
+
+    by_mark = {str(item["citation"]): str(item["permalink"]) for item in items}
+    allowed_urls = {normalize_permalink(url) for url in by_mark.values()}
+    offenders: list[str] = []
+    used_marks = set(validation._CITATION.findall(markdown))
+    offenders.extend(sorted(used_marks - set(by_mark)))
+    offenders.extend(sorted(_normalized_urls(markdown) - allowed_urls))
+
+    in_sources = False
+    for line in markdown.splitlines():
+        heading = _MARKDOWN_HEADING.match(line)
+        if heading:
+            in_sources = "信息源" in heading.group(1)
+            continue
+        if not in_sources:
+            continue
+        mark_match = validation._CITATION.search(line)
+        if mark_match is None:
+            continue
+        mark = mark_match.group(0)
+        line_urls = _normalized_urls(line)
+        expected = by_mark.get(mark)
+        if expected is None or line_urls != {normalize_permalink(expected)}:
+            offenders.append(f"{mark} 未逐字映射到证据池 permalink")
+
+    for claim in claims:
+        if not isinstance(claim, Mapping):
+            continue
+        links = claim.get("evidence", [])
+        if not isinstance(links, list):
+            continue
+        for link in links:
+            if not isinstance(link, Mapping):
+                continue
+            try:
+                normalized = normalize_permalink(str(link.get("permalink") or ""))
+            except ValueError:
+                continue
+            if normalized not in allowed_urls:
+                offenders.append(normalized)
+
+    inner_ctx = validation.Ctx(
+        output_path=section_path,
+        output_format="markdown",
+        research_id="",
+        goal_id="",
+        agent_id="report-writing",
+        read_text=lambda: markdown,
+        read_json=lambda: {},
+        store=None,
+        source_domains=frozenset(),
+    )
+    inner_results = (
+        validation.sections_exist(inner_ctx, ["结论", "信息源"]),
+        validation.citation_marks_resolvable(inner_ctx, []),
+        validation.no_orphan_citation(inner_ctx, []),
+    )
+    for failure in inner_results:
+        if failure.verdict is not validation.Verdict.PASS:
+            offenders.extend(failure.offenders or [failure.message])
+    if offenders:
+        return validation.Result(
+            validation.Verdict.FAIL,
+            "evidence_pool_only",
+            f"节正文违反证据池唯一引用源契约，共 {len(offenders)} 处",
+            offenders,
+        )
+    return validation.Result(
+        validation.Verdict.PASS,
+        "evidence_pool_only",
+        f"正文引用均来自本节 {len(items)} 条可引用证据",
+        [],
+    )
+
+
 def _ctx(task: EngineTask, runs_root: Path, store: Any) -> validation.Ctx:
     return validation.Ctx(
         output_path=task.output_path,
@@ -372,6 +569,7 @@ def _assemble(
     section_root: Path,
     sections: list[dict[str, Any]],
     rows: list[dict[str, Any]],
+    citation_numbers: Mapping[str, int] | None = None,
 ) -> None:
     """把各节产物拼成父章产物；**按声明的 output.format 落盘**。
 
@@ -501,6 +699,7 @@ def _assemble(
             plan.title,
             [item["markdown"] for item in section_items],
             [item["text"] for item in missing_items],
+            citation_numbers=citation_numbers,
         ),
         encoding="utf-8",
     )
@@ -521,6 +720,7 @@ async def run_sectioned_task(
     now: Any = None,
     deadline_at: Any = None,
     engine_timeout_seconds: float | None = None,
+    persist_goal_evidence: Any = None,
 ) -> TaskRunResult:
     sections = _section_specs(plan, agent)
     store.ensure_chapters(
@@ -571,6 +771,37 @@ async def run_sectioned_task(
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
+    projected_goal_ids: set[str] = set()
+    report_goal_ids = {str(goal.goal_id) for goal in plan.goals}
+    if persist_goal_evidence is not None:
+        projection_rows = store.list_chapters(plan.research_id)
+        chapter = agent.chapter if isinstance(agent.chapter, Mapping) else {}
+        opening = chapter.get("opening", {})
+        declared_inputs = (
+            opening.get("inputs", []) if isinstance(opening, Mapping) else []
+        )
+        projection_goal_ids: set[str] = set()
+        for section in sections:
+            projection_inputs = _merge_declared_done_inputs(
+                _ledger_inputs(projection_rows, section["goal_id"]),
+                projection_rows,
+                declared_inputs,
+                research_root=runs_root / plan.research_id,
+            )
+            projection_goal_ids.add(str(section["goal_id"]))
+            projection_goal_ids.update(
+                str(item["goal_id"]) for item in projection_inputs["done"]
+            )
+        await _project_accessible_evidence(
+            plan=plan,
+            goal_ids=projection_goal_ids,
+            persist_goal_evidence=persist_goal_evidence,
+            projected_goal_ids=projected_goal_ids,
+        )
+    _, citation_numbers = _evidence_index(
+        store.list_evidence(plan.research_id), report_goal_ids,
+    )
+    truncation_event_emitted = False
     for section_number, section in enumerate(sections, start=1):
         row = existing.get(section["section_id"])
         if row and row["status"] in {"done", "missing"}:
@@ -605,7 +836,44 @@ async def run_sectioned_task(
                 declared_inputs,
                 research_root=runs_root / plan.research_id,
             )
+            allowed_goal_ids = {
+                str(section["goal_id"]),
+                *(str(item["goal_id"]) for item in inputs["done"]),
+            }
+            evidence_pool, _ = _evidence_index(
+                store.list_evidence(plan.research_id), allowed_goal_ids,
+            )
+            omitted_count = int(evidence_pool["omitted_count"])
+            if omitted_count and not truncation_event_emitted:
+                event_result = on_event({
+                    "type": "evidence_pool_truncated",
+                    "data": {
+                        "research_id": plan.research_id,
+                        "goal_id": context.goal_id,
+                        "chapter_id": _chapter_id(agent),
+                        "omitted_count": omitted_count,
+                        "limit": EVIDENCE_POOL_LIMIT,
+                    },
+                    "is_error": False,
+                })
+                if inspect.isawaitable(event_result):
+                    await event_result
+                truncation_event_emitted = True
             section_path = section_root / section["filename"]
+            if evidence_pool["items"]:
+                pool_notice = (
+                    "下方证据池是本节唯一引用源。正文角标与『信息源』清单里的 Sxx "
+                    "必须逐字取自池；清单只列正文实际引用过的池条目。"
+                )
+            else:
+                pool_notice = (
+                    "本节无可引用证据；请按缺失清单如实产出，不得回退到 done "
+                    "产物里的 URL，也不得编造。"
+                )
+            if omitted_count:
+                pool_notice += (
+                    f" 证据池已截断 {omitted_count} 条，未列出的不得引用。"
+                )
             body = (
                 f"{base_task.body}\n\n"
                 "本次只写一个报告节；禁止生成整份报告。\n"
@@ -620,14 +888,14 @@ async def run_sectioned_task(
                 "每条都带 goal_id/chapter_id/path/actual_count。\n"
                 "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
                 "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
-                "产物 path 只用于定位，不是 permalink；角标 permalink 必须逐字取自 done 产物内容。"
-                "结构化派生产物若同时给出实体条目及该实体的 permalink 来源，"
-                "可逐字复用该 permalink 支撑同一实体条目中的判断；不得跨实体挪用。"
-                "实体对应可由显式字段，或 permalink 中无歧义的品牌或模型标识确认；"
-                "不得只按 sources 数组顺序猜测实体对应。"
-                "若内容没有可支撑判断的 permalink，原位标注缺失；"
+                "done 产物只作事实与上下文来源，不作引用来源；产物 path 只用于定位，"
+                "不是 permalink。池外 URL 一律不得出现在正文，包括散文里的裸链接。"
                 "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
-                f"{json.dumps(inputs, ensure_ascii=False, indent=2)}"
+                f"本节上游输入 JSON：\n{json.dumps(inputs, ensure_ascii=False, indent=2)}\n"
+                f"{pool_notice}\n"
+                "content_excerpt_truncated=true 表示该摘要已截到 120 个 Unicode 字符。\n"
+                "本节可引用证据池 JSON（唯一引用源）：\n"
+                f"{json.dumps(evidence_pool, ensure_ascii=False, indent=2)}"
             )
             if base_task.output_format == "json" and _declared_shape(agent) != "array":
                 body += (
@@ -737,7 +1005,20 @@ async def run_sectioned_task(
                             now_iso=now_iso, on_event=on_event,
                         )
                     raise
-            succeeded = bool(getattr(result, "succeeded", False)) and not artifact_empty
+            pool_result = (
+                _section_evidence_pool_result(section_path, evidence_pool)
+                if persist_goal_evidence is not None and not artifact_empty
+                else None
+            )
+            pool_failed = bool(
+                pool_result is not None
+                and pool_result.verdict is not validation.Verdict.PASS
+            )
+            succeeded = (
+                bool(getattr(result, "succeeded", False))
+                and not artifact_empty
+                and not pool_failed
+            )
             if succeeded:
                 store.finish_chapter(
                     plan.research_id,
@@ -751,9 +1032,15 @@ async def run_sectioned_task(
                 )
                 break
             else:
-                reason = section_failure_reason(result, section_path)
+                reason = (
+                    "conclusion_invalid"
+                    if pool_failed
+                    else section_failure_reason(result, section_path)
+                )
                 engine_error = getattr(result, "engine_error", None)
                 conclusion_error = getattr(result, "conclusion_error", None)
+                if pool_failed and pool_result is not None:
+                    conclusion_error = pool_result.message
                 if (
                     section_attempt < attempt_budget
                     and _is_transport_failure(result, reason)
@@ -819,6 +1106,7 @@ async def run_sectioned_task(
             section_root=section_root,
             sections=sections,
             rows=rows,
+            citation_numbers=citation_numbers,
         )
     except SectionAssemblyShapeError as exc:
         # 形状对不上是确定性失败：换一轮也是同样结果，直接定终态、不进第二轮（期望 d）。

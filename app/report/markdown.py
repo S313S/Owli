@@ -171,7 +171,11 @@ def _split_section_structures(text: str) -> tuple[str, str, list[str]]:
 
 
 def merge_sectioned_markdown(
-    title: str, section_texts: Sequence[str], missing_lines: Sequence[str]
+    title: str,
+    section_texts: Sequence[str],
+    missing_lines: Sequence[str],
+    *,
+    citation_numbers: Mapping[str, int] | None = None,
 ) -> str:
     """把各节 Markdown 归并成单结论、单信息源的整卷报告。
 
@@ -197,7 +201,16 @@ def merge_sectioned_markdown(
             url_match = _LINK_URL.search(line)
             key = url_match.group(1) if url_match else f"sec-{index}:{old_mark}"
             if key not in inventory:
-                new_mark = f"[S{len(inventory) + 1:02d}]"
+                number = (
+                    citation_numbers.get(normalize_permalink(key))
+                    if citation_numbers is not None and url_match is not None
+                    else None
+                )
+                new_mark = (
+                    f"[S{number:02d}]"
+                    if number is not None
+                    else f"[S{len(inventory) + 1:02d}]"
+                )
                 inventory[key] = (new_mark, line.replace(old_mark, new_mark, 1))
             mapping[old_mark] = inventory[key][0]
 

@@ -353,6 +353,18 @@ def _cancel_scenario(tmp_path, store, plan, adapter, *, hang_from_call: int):
 
     from app.orchestrator.runtime import RuntimeCoordinator
 
+    if not store.list_evidence("r-ledger"):
+        store.add_evidence(
+            id="ev-cancel-1",
+            report_id="r-ledger",
+            goal_id="goal-1",
+            platform="web_search",
+            permalink="https://example.com/a",
+            fetched_at="2026-08-24T00:00:00Z",
+            title="来源 A",
+            content_excerpt="可复核正文",
+        )
+
     coordinator = RuntimeCoordinator(
         store=store,
         event_buffer=SimpleNamespace(publish=_noop_publish),
