@@ -145,6 +145,7 @@ class RuntimeCoordinator:
         self.adapter_factory = adapter_factory or (
             lambda: RoutedAdapter(
                 utc_clock=routing_utc_clock,
+                source_store=self.store,
             )
         )
         self.runs_root = Path(runs_root)
@@ -725,6 +726,7 @@ class RuntimeCoordinator:
             model=agent.model,
             user_override=context.engine,
             source_item_limit=source_item_limit,
+            source_store_path=getattr(self.store, "_database_path", None),
             runs_root=self.runs_root,
         )
 
@@ -1239,7 +1241,7 @@ class RuntimeCoordinator:
         return restored
 
     def _persist_goal_evidence(self, plan: Plan, goal: Goal) -> None:
-        """在 goal 成功闸门内，把其 JSON 证据产物幂等写入 Store。"""
+        """兼容/恢复投影：幂等写产物，四个内容字段不覆盖适配器真值。"""
 
         payloads: list[dict[str, Any]] = []
         for agent in goal.agents:
@@ -1255,8 +1257,24 @@ class RuntimeCoordinator:
                 agent_name=agent.agent_id,
                 platform_hint=platform_hint,
             ))
-        if payloads:
-            self.store.upsert_evidence_batch(payloads)
+        if not payloads:
+            return
+        existing = {
+            str(item["permalink"]): item
+            for item in self.store.list_evidence(plan.research_id)
+        }
+        content_fields = (
+            "title", "content_excerpt", "author_name", "raw_metrics",
+        )
+        for payload in payloads:
+            stored = existing.get(str(payload["permalink"]))
+            if stored is None:
+                continue
+            for field in content_fields:
+                value = stored.get(field)
+                if value not in (None, "", {}):
+                    payload[field] = value
+        self.store.upsert_evidence_batch(payloads)
 
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]

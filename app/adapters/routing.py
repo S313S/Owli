@@ -72,6 +72,7 @@ class RoutedAdapter:
         utc_clock: Callable[[], datetime] | None = None,
         adapters: Mapping[str, Any] | None = None,
         source_tools: Mapping[str, Any] | None = None,
+        source_store: Any = None,
         resilience_config: ResilienceConfig | None = None,
         backoff_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -97,7 +98,7 @@ class RoutedAdapter:
         self._manual_research_alternates: set[str] = set()
         self._manual_agent_alternates: dict[tuple[str, str], int] = {}
         self._agent_runs: dict[tuple[str, str], int] = {}
-        self._source_adapter = SourceToolAdapter(source_tools)
+        self._source_adapter = SourceToolAdapter(source_tools, store=source_store)
 
     @property
     def timeout_seconds(self) -> float | None:

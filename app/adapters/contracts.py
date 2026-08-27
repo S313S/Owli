@@ -40,6 +40,7 @@ class EngineTask:
     model: str | None = None
     user_override: str | None = None
     source_item_limit: int | None = None
+    source_store_path: Path | None = None
     runs_root: Path | None = None
 
 

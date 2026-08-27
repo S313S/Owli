@@ -32,6 +32,13 @@ _SOURCE_TYPES = frozenset({
     "post", "comment", "video", "article", "search_snippet",
     "ranking_item", "profile", "other",
 })
+_TEXT_ALIASES = ("text", "body", "content", "description", "summary", "snippet")
+_AUTHOR_ALIASES = ("author", "creator", "user_name", "username", "nickname")
+_METRIC_ALIASES = frozenset({
+    "like_count", "liked_count", "digg_count", "comment_count",
+    "comments_count", "collect_count", "collected_count", "share_count",
+    "view_count", "play_count", "points", "num_comments", "votes_count",
+})
 
 
 def _items(value: Any) -> list[Any]:
@@ -53,6 +60,43 @@ def _evidence_id(
         f"{report_id}\0{platform}\0{identity}".encode("utf-8")
     ).hexdigest()[:24]
     return f"ev-{digest}"
+
+
+def _first_text(raw: Mapping[str, Any], names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = raw.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _content_contract(raw: Mapping[str, Any]) -> dict[str, Any] | None:
+    """把规划器常见同义键收敛到四个冻结内容字段；全空行拒收。"""
+
+    excerpt = _first_text(raw, ("content_excerpt", *_TEXT_ALIASES))
+    title = _first_text(raw, ("title", "headline", "name"))
+    if title is None and excerpt is not None:
+        title = excerpt[:120]
+    if excerpt is None and title is not None:
+        excerpt = title
+    author = _first_text(raw, ("author_name", *_AUTHOR_ALIASES))
+    raw_metrics = (
+        dict(raw.get("raw_metrics") or {})
+        if isinstance(raw.get("raw_metrics"), Mapping)
+        else {}
+    )
+    for key in _METRIC_ALIASES:
+        value = raw.get(key)
+        if value not in (None, ""):
+            raw_metrics.setdefault(key, value)
+    if title is None and excerpt is None and author is None and not raw_metrics:
+        return None
+    return {
+        "title": title,
+        "content_excerpt": excerpt,
+        "author_name": author,
+        "raw_metrics": raw_metrics,
+    }
 
 
 def load_evidence_payloads(
@@ -77,6 +121,9 @@ def load_evidence_payloads(
         permalink = str(raw.get("permalink") or "").strip()
         fetched_at = str(raw.get("fetched_at") or "").strip()
         if not platform or not permalink or not fetched_at:
+            continue
+        content = _content_contract(raw)
+        if content is None:
             continue
         normalized = normalize_permalink(permalink)
         item_id_value = raw.get("platform_item_id")
@@ -113,6 +160,7 @@ def load_evidence_payloads(
             "permalink": normalized,
             "fetched_at": fetched_at,
             "extra": extra,
+            **content,
         })
         if source_type and source_type not in _SOURCE_TYPES:
             payload["source_type"] = "other"

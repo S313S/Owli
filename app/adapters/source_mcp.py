@@ -264,11 +264,78 @@ def _build_tool_payload(
     return bounded_payload, bounded_text
 
 
+def _result_evidence(result: Any) -> list[Mapping[str, Any]]:
+    normalized = _jsonable(result)
+    if isinstance(normalized, list):
+        values = normalized
+    elif isinstance(normalized, Mapping) and isinstance(
+        normalized.get("evidence"), list
+    ):
+        values = normalized["evidence"]
+    else:
+        return []
+    return [item for item in values if isinstance(item, Mapping)]
+
+
+def _persist_returned_evidence(
+    store: Any,
+    result: Any,
+    *,
+    report_id: str,
+    goal_id: str,
+    agent_id: str,
+) -> None:
+    """不接收 Store 的旧入口也按适配器返回体完成采集即入库。"""
+
+    from app.reliability.scoring import SCORE_FIELDS, score_evidence
+
+    payloads: list[dict[str, Any]] = []
+    for raw in _result_evidence(result):
+        platform = str(raw.get("platform") or "").strip()
+        permalink = str(raw.get("permalink") or "").strip()
+        fetched_at = str(raw.get("fetched_at") or "").strip()
+        if not platform or not permalink or not fetched_at:
+            continue
+        payload = dict(raw)
+        identity = str(payload.get("platform_item_id") or permalink)
+        digest = hashlib.sha256(
+            f"{report_id}\0{platform}\0{identity}".encode("utf-8")
+        ).hexdigest()[:24]
+        payload.update({
+            "id": str(payload.get("id") or f"ev-{digest}"),
+            "report_id": report_id,
+            "goal_id": goal_id,
+            "agent_name": agent_id,
+        })
+        has_scores = any(payload.get(field) is not None for field in SCORE_FIELDS)
+        if has_scores and not payload.get("rating_notes"):
+            baseline = {
+                field: int(payload[field])
+                for field in SCORE_FIELDS
+                if isinstance(payload.get(field), int)
+            }
+            scored = score_evidence(
+                payload,
+                baseline=baseline if len(baseline) == len(SCORE_FIELDS) else None,
+            )
+            payload.update(scored)
+        payload["rated_by"] = f"baseline:{platform}@v1"
+        payloads.append(payload)
+    if payloads:
+        store.upsert_evidence_batch(payloads)
+
+
 class SourceToolAdapter:
     """source.* 统一调用面；工具发现与实现细节只留在适配层。"""
 
-    def __init__(self, source_tools: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        source_tools: Mapping[str, Any] | None = None,
+        *,
+        store: Any = None,
+    ) -> None:
         self._source_tools = dict(source_tools) if source_tools is not None else None
+        self._store = store
 
     def _entrypoint(self, tool_name: str) -> Any:
         if self._source_tools is None:
@@ -330,11 +397,19 @@ class SourceToolAdapter:
             else:
                 buffered_events.append(event)
 
-        parameters = inspect.signature(entrypoint).parameters.values()
+        parameters = inspect.signature(entrypoint).parameters
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+
+        def accepts(name: str) -> bool:
+            return name in parameters or accepts_kwargs
+
         accepts_events = any(
             parameter.name == "on_event"
             or parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters
+            for parameter in parameters.values()
         )
         call_kwargs = dict(kwargs)
         if item_limit is not None:
@@ -345,9 +420,19 @@ class SourceToolAdapter:
                 "product_hunt": "limit",
                 "web_search": "max_results",
                 "x": "max_results",
+                "xhs": "limit",
+                "douyin": "limit",
+                "reddit": "limit",
             }.get(source_id)
             if parameter is not None:
                 call_kwargs[parameter] = item_limit
+        store_passed = self._store is not None and accepts("store")
+        if store_passed:
+            call_kwargs["store"] = self._store
+        if accepts("report_id"):
+            call_kwargs["report_id"] = research_id
+        if accepts("goal_id"):
+            call_kwargs["goal_id"] = goal_id
         if accepts_events:
             call_kwargs["on_event"] = capture
         try:
@@ -359,6 +444,14 @@ class SourceToolAdapter:
                 )
             if inspect.isawaitable(result):
                 result = await result
+            if self._store is not None and not store_passed:
+                _persist_returned_evidence(
+                    self._store,
+                    result,
+                    report_id=research_id,
+                    goal_id=goal_id,
+                    agent_id=agent_id,
+                )
             return result
         finally:
             if on_event is not None:
@@ -376,6 +469,7 @@ def stdio_server_config(
     goal_id: str = "mcp",
     agent_id: str = "mcp",
     item_limit: int | None = None,
+    store_path: str | Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Claude SDK 可直接消费的 stdio MCP 配置。"""
@@ -397,6 +491,8 @@ def stdio_server_config(
     )
     if item_limit is not None:
         args.extend(["--item-limit", str(item_limit)])
+    if store_path is not None:
+        args.extend(["--store-path", str(store_path)])
     parent_env = os.environ if environ is None else environ
     child_env = {"PYTHONPATH": str(PROJECT_ROOT)}
     child_env.update(
@@ -422,6 +518,7 @@ def codex_mcp_args(
     goal_id: str = "mcp",
     agent_id: str = "mcp",
     item_limit: int | None = None,
+    store_path: str | Path | None = None,
 ) -> list[str]:
     """Codex CLI 单次任务 MCP 配置，不写入隔离 CODEX_HOME。"""
 
@@ -432,6 +529,7 @@ def codex_mcp_args(
         goal_id=goal_id,
         agent_id=agent_id,
         item_limit=item_limit,
+        store_path=store_path,
     )
     env_toml = ",".join(
         f"{name}={json.dumps(value, ensure_ascii=False)}"
@@ -460,6 +558,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--goal-id", default="mcp")
     parser.add_argument("--agent-id", default="mcp")
     parser.add_argument("--item-limit", type=int)
+    parser.add_argument("--store-path", type=Path)
     return parser
 
 
@@ -471,6 +570,7 @@ async def _serve(
     goal_id: str = "mcp",
     agent_id: str = "mcp",
     item_limit: int | None = None,
+    store_path: Path | None = None,
 ) -> None:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -478,8 +578,11 @@ async def _serve(
 
     from app.adapters.capability import Capability
     from app.config import load_source_response_config
+    from app.store.dao import Store
 
-    adapter = SourceToolAdapter()
+    adapter = SourceToolAdapter(
+        store=Store(store_path) if store_path is not None else None,
+    )
     response_config = load_source_response_config()
     tools = [
         Tool(
@@ -579,6 +682,7 @@ def main(argv: list[str] | None = None) -> None:
             goal_id=args.goal_id,
             agent_id=args.agent_id,
             item_limit=args.item_limit,
+            store_path=args.store_path,
         )
     )
 
