@@ -104,6 +104,7 @@ def test_断言登记双向可达且重复执行不追加(tmp_path: Path) -> Non
 
     assert first == second
     stored_claim = store.get_report("r-c1")["extra"]["claims"][0]
+    assert store.get_report("r-c1")["extra"]["claims_dropped"] == []
     assert stored_claim["evidence_ids"] == ["ev-a", "ev-b"]
     assert stored_claim["stance"] == {"ev-b": "contradicts"}
     assert stored_claim["firsthand"] == ["ev-a"]
@@ -137,22 +138,134 @@ def test_firsthand_声明来源区分撰写与存量回填(tmp_path: Path) -> No
     assert writer["firsthand_source"] != backfill["firsthand_source"]
 
 
-def test_悬空_permalink_不产生半份登记(tmp_path: Path) -> None:
+def test_悬空条目被丢且非悬空条目保留(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     add_evidence(
         store, "r-c1", "ev-a", platform="web_search",
         permalink="https://example.com/a", author="甲",
     )
-    with pytest.raises(ClaimsRegistrationError, match="断言登记失败") as caught:
+    registered = register_claims(
+        store,
+        "r-c1",
+        [raw_claim("c-01", [
+            ref("https://example.com/a"),
+            ref("https://missing.example/x"),
+        ])],
+        source="chapter",
+    )
+
+    assert registered[0]["evidence_ids"] == ["ev-a"]
+    extra = store.get_report("r-c1")["extra"]
+    assert extra["claims"] == registered
+    assert extra["claims_dropped"] == [{
+        "claim_id": "c-01",
+        "reason": "dangling_evidence",
+        "permalinks": ["https://missing.example/x"],
+    }]
+    assert set(extra) == {"claims", "claims_dropped"}
+    assert store.list_evidence("r-c1")[0]["extra"]["claim_ids"] == ["c-01"]
+
+
+def test_全悬空断言整条丢弃并按闭集原因记账(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+
+    registered = register_claims(
+        store,
+        "r-c1",
+        [raw_claim("c-01", [ref("https://missing.example/x")])],
+        source="chapter",
+    )
+
+    assert registered == []
+    extra = store.get_report("r-c1")["extra"]
+    assert extra["claims"] == []
+    assert extra["claims_dropped"] == [{
+        "claim_id": "c-01",
+        "reason": "all_evidence_dangling",
+        "permalinks": ["https://missing.example/x"],
+    }]
+    assert {item["reason"] for item in extra["claims_dropped"]} <= {
+        "dangling_evidence", "all_evidence_dangling",
+    }
+
+
+def test_结构违规仍整批拒绝且不写丢弃账(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_evidence(
+        store, "r-c1", "ev-a", platform="web_search",
+        permalink="https://example.com/a", author="甲",
+    )
+
+    caught_error = None
+    try:
         register_claims(
             store,
             "r-c1",
-            [raw_claim("c-01", [ref("https://missing.example/x")])],
+            [raw_claim("c-01", [ref("https://example.com/a", stance="maybe")])],
             source="chapter",
         )
-    assert "悬空 permalink" in caught.value.offenders[0]
-    assert "claims" not in store.get_report("r-c1")["extra"]
+    except ClaimsRegistrationError as caught:
+        assert "断言登记失败" in str(caught)
+        caught_error = caught
+    else:
+        raise AssertionError("结构违规必须整批拒绝")
+
+    assert caught_error is not None
+    assert "stance 只能是" in caught_error.offenders[0]
+    extra = store.get_report("r-c1")["extra"]
+    assert "claims" not in extra
+    assert "claims_dropped" not in extra
     assert "claim_ids" not in store.list_evidence("r-c1")[0]["extra"]
+
+
+def test_悬空条目同时结构违规仍整批拒绝(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+
+    with pytest.raises(ClaimsRegistrationError) as caught:
+        register_claims(
+            store,
+            "r-c1",
+            [raw_claim("c-01", [ref(
+                "https://missing.example/x",
+                stance="maybe",
+                firsthand="yes",
+                origin_url="not-http",
+            )])],
+            source="chapter",
+        )
+
+    message = "\n".join(caught.value.offenders)
+    assert "stance 只能是" in message
+    assert "firsthand 必须是 bool" in message
+    assert "origin_url 不是 HTTP(S)" in message
+    extra = store.get_report("r-c1")["extra"]
+    assert "claims" not in extra
+    assert "claims_dropped" not in extra
+
+
+def test_断言登记同一输入两遍_reports_extra_逐字节相同(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    add_evidence(
+        store, "r-c1", "ev-a", platform="web_search",
+        permalink="https://example.com/a", author="甲",
+    )
+    claims = [raw_claim("c-01", [
+        ref("https://example.com/a"),
+        ref("https://missing.example/x"),
+    ])]
+
+    def raw_extra() -> str:
+        with sqlite3.connect(tmp_path / "r-c1.db") as connection:
+            return connection.execute(
+                "SELECT extra FROM reports WHERE id = ?", ("r-c1",)
+            ).fetchone()[0]
+
+    register_claims(store, "r-c1", claims, source="chapter")
+    first = raw_extra()
+    register_claims(store, "r-c1", claims, source="chapter")
+    second = raw_extra()
+
+    assert first == second
 
 
 def test_JSON_节显式_claims_聚合进父章信封(tmp_path: Path) -> None:
@@ -486,7 +599,7 @@ def test_runtime_在角标回填后登记全部JSON报告章(tmp_path: Path, mon
     assert validation_events[-1]["data"]["verdict"] == "pass"
 
 
-def test_runtime_悬空断言走报告失败事件而不崩收尾(tmp_path: Path, monkeypatch) -> None:
+def test_runtime_全悬空断言降级记账且不把报告判失败(tmp_path: Path, monkeypatch) -> None:
     from tests.test_m3h_finalize import _finalize, _plan
 
     path = "goals/goal-3/report.json"
@@ -508,7 +621,11 @@ def test_runtime_悬空断言走报告失败事件而不崩收尾(tmp_path: Path
     validations = [
         event["data"] for event in events if event.get("type") == "report_validation"
     ]
-    assert validations[-1]["verdict"] == "fail"
-    assert validations[-1]["failures"][-1]["validator"] == "claims_registration"
-    assert "悬空 permalink" in validations[-1]["failures"][-1]["offenders"][0]
+    assert validations[-1]["verdict"] == "pass"
+    assert store.get_report("r-ledger")["extra"]["claims"] == []
+    assert store.get_report("r-ledger")["extra"]["claims_dropped"] == [{
+        "claim_id": "c-01",
+        "reason": "all_evidence_dangling",
+        "permalinks": ["https://missing.example/x"],
+    }]
     assert store.get_report("r-ledger")["status"] == "completed"

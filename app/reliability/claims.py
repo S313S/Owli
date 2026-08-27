@@ -21,6 +21,9 @@ _FIRSTHAND_SOURCE_BY_CLAIMS_SOURCE = {
     "chapter": "declared_by_writer",
     "backfill": "declared_by_backfill",
 }
+CLAIM_DROP_REASONS = frozenset({
+    "dangling_evidence", "all_evidence_dangling",
+})
 
 
 @dataclass(frozen=True)
@@ -57,8 +60,12 @@ def prepare_claim_registration(
     raw_claims: Sequence[Any],
     *,
     source: str,
-) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
-    """校验断言并把 permalink 联接成 evidence id。"""
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, list[str]],
+    list[dict[str, Any]],
+]:
+    """校验断言并联接 evidence；只把悬空 permalink 降级为丢弃账。"""
 
     if source not in {"chapter", "backfill"}:
         raise ValueError("claims_source 只能是 chapter 或 backfill")
@@ -74,6 +81,7 @@ def prepare_claim_registration(
 
     registered: list[dict[str, Any]] = []
     mapping: dict[str, list[str]] = {}
+    dropped: list[dict[str, Any]] = []
     seen_claim_ids: set[str] = set()
     offenders: list[str] = []
     for index, raw_claim in enumerate(raw_claims):
@@ -104,6 +112,7 @@ def prepare_claim_registration(
         contradicts: dict[str, str] = {}
         firsthand: list[str] = []
         origins: dict[str, str] = {}
+        dangling_permalinks: list[str] = []
         seen_urls: set[str] = set()
         for evidence_index, raw_link in enumerate(raw_evidence):
             link_location = f"{location}.evidence[{evidence_index}]"
@@ -123,10 +132,6 @@ def prepare_claim_registration(
                 offenders.append(f"{link_location}.permalink 在断言内重复")
                 continue
             seen_urls.add(normalized)
-            evidence_id = evidence_by_url.get(normalized)
-            if evidence_id is None:
-                offenders.append(f"{claim_id} 悬空 permalink：{normalized}")
-                continue
             stance = raw_link.get("stance", "supports")
             if stance not in {"supports", "contradicts"}:
                 offenders.append(f"{link_location}.stance 只能是 supports/contradicts")
@@ -139,6 +144,11 @@ def prepare_claim_registration(
                     normalized_origin = normalize_permalink(str(origin_url))
                 except ValueError:
                     offenders.append(f"{link_location}.origin_url 不是 HTTP(S) 绝对链接")
+            # 悬空只改变证据的登记去向，不能让同一 link 绕过结构契约。
+            evidence_id = evidence_by_url.get(normalized)
+            if evidence_id is None:
+                dangling_permalinks.append(normalized)
+                continue
             evidence_ids.append(evidence_id)
             mapping.setdefault(evidence_id, []).append(claim_id)
             if stance == "contradicts":
@@ -167,11 +177,24 @@ def prepare_claim_registration(
             claim["firsthand"] = firsthand
         if origins:
             claim["origin_overrides"] = origins
-        registered.append(claim)
+        if dangling_permalinks:
+            dropped.append({
+                "claim_id": claim_id,
+                "reason": (
+                    "dangling_evidence"
+                    if evidence_ids
+                    else "all_evidence_dangling"
+                ),
+                "permalinks": dangling_permalinks,
+            })
+        # 全悬空断言若保留，会违反至少一条 evidence 的既有契约，也无法计算证据簇；
+        # 丢弃正文登记项但保留 claims_dropped 审计记录。
+        if evidence_ids:
+            registered.append(claim)
 
     if offenders:
         raise _error(f"断言登记失败，共 {len(offenders)} 处", offenders)
-    return registered, mapping
+    return registered, mapping, dropped
 
 
 def register_claims(
@@ -183,16 +206,17 @@ def register_claims(
 ) -> list[dict[str, Any]]:
     """两条生产路径共用的固定落库入口。"""
 
-    claims, mapping = prepare_claim_registration(
+    claims, mapping, dropped = prepare_claim_registration(
         store.list_evidence(report_id), raw_claims, source=source
     )
-    store.set_report_claims(report_id, claims)
+    store.set_report_claims(report_id, claims, dropped=dropped)
     store.attach_claim_ids(report_id, mapping)
     return claims
 
 
 __all__ = [
     "CLAIM_ID_PATTERN",
+    "CLAIM_DROP_REASONS",
     "FIRSTHAND_SOURCES",
     "ClaimsRegistrationError",
     "claims_from_documents",

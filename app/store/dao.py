@@ -556,9 +556,13 @@ class Store:
                 )
 
     def set_report_claims(
-        self, report_id: str, claims: Sequence[Mapping[str, Any]]
+        self,
+        report_id: str,
+        claims: Sequence[Mapping[str, Any]],
+        *,
+        dropped: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
-        """把规范化断言合并进 reports.extra，并登记 claims 扩展键。"""
+        """同事务写断言与可选丢弃账，并登记对应 reports.extra 扩展键。"""
 
         if isinstance(claims, (str, bytes)) or not isinstance(claims, Sequence):
             raise TypeError("claims 必须是 object 数组")
@@ -567,6 +571,25 @@ class Store:
             if not isinstance(claim, Mapping):
                 raise TypeError("claims 必须是 object 数组")
             normalized.append(copy.deepcopy(dict(claim)))
+        normalized_dropped: list[dict[str, Any]] | None = None
+        if dropped is not None:
+            if isinstance(dropped, (str, bytes)) or not isinstance(dropped, Sequence):
+                raise TypeError("claims_dropped 必须是 object 数组")
+            normalized_dropped = []
+            allowed_reasons = {"dangling_evidence", "all_evidence_dangling"}
+            for item in dropped:
+                if not isinstance(item, Mapping):
+                    raise TypeError("claims_dropped 必须是 object 数组")
+                value = copy.deepcopy(dict(item))
+                if set(value) != {"claim_id", "reason", "permalinks"}:
+                    raise ValueError("claims_dropped 每项键必须为 claim_id/reason/permalinks")
+                if not isinstance(value["claim_id"], str) or not value["claim_id"]:
+                    raise ValueError("claims_dropped.claim_id 必须是非空字符串")
+                if value["reason"] not in allowed_reasons:
+                    raise ValueError("claims_dropped.reason 不在闭集")
+                if not _string_list(value["permalinks"]):
+                    raise TypeError("claims_dropped.permalinks 必须是 string[]")
+                normalized_dropped.append(value)
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT extra FROM reports WHERE id = ?", (report_id,)
@@ -576,6 +599,10 @@ class Store:
             extra = json.loads(row["extra"] or "{}")
             existing_keys = set(extra)
             extra["claims"] = normalized
+            registered = {"claims": normalized}
+            if normalized_dropped is not None:
+                extra["claims_dropped"] = normalized_dropped
+                registered["claims_dropped"] = normalized_dropped
             connection.execute(
                 "UPDATE reports SET extra = ? WHERE id = ?",
                 (_extra_text(extra), report_id),
@@ -584,7 +611,7 @@ class Store:
                 connection,
                 "reports",
                 report_id,
-                {"claims": normalized},
+                registered,
                 existing_keys,
             )
 
