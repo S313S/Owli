@@ -181,14 +181,19 @@ def _to_evidence(
     note_id = str(note.get("id") or "")
     token = str(note.get("xsec_token") or "")
     note_kind = str(note.get("type") or "")
+    title = str(note.get("title") or "").strip()
+    description = str(note.get("desc") or "").strip()
+    author = str(
+        user.get("nickname") or user.get("red_id") or user.get("userid") or ""
+    ).strip()
     return {
         "platform": "xhs",
         "source_type": "video" if note_kind == "video" else "post",
         "platform_item_id": note_id,
         "permalink": build_xhs_permalink(note_id, token),
-        "title": str(note.get("title") or "") or None,
-        "content_excerpt": str(note.get("desc") or "") or None,
-        "author_name": str(user.get("nickname") or "") or None,
+        "title": title or description[:80] or f"小红书笔记 {note_id}",
+        "content_excerpt": description or title or None,
+        "author_name": author or None,
         "author_meta": {
             "user_id": str(user.get("userid") or ""),
             "red_id": str(user.get("red_id") or ""),
