@@ -298,12 +298,19 @@ def _assemble(
             (item for item in rows if item["chapter_id"] == section["section_id"]),
             None,
         )
-        if path.is_file():
+        section_done = bool(
+            path.is_file() and (row is None or row["status"] == "done")
+        )
+        if section_done:
             text = path.read_text(encoding="utf-8").strip()
             if output_format == "json" and _declared_shape(agent) != "array":
                 try:
                     fragment = json.loads(text)
                 except (json.JSONDecodeError, UnicodeError):
+                    if text.lstrip().casefold().startswith(("{", "[", "```json")):
+                        raise SectionAssemblyShapeError(
+                            f"{section['section_id']} 的 JSON 节产物不完整或不可解析"
+                        )
                     fragment = None
                 if isinstance(fragment, Mapping) and "markdown" in fragment:
                     markdown = fragment.get("markdown")
@@ -327,9 +334,7 @@ def _assemble(
             "title": section["title"],
             "markdown": text,
             # 有产物且账本没判它失败，就按「本节有内容」参与组装。
-            "done": bool(
-                path.is_file() and (row is None or row["status"] == "done")
-            ),
+            "done": section_done,
         })
     missing = [
         row for row in rows
@@ -552,8 +557,51 @@ async def run_sectioned_task(
             result = adapter.run(
                 section_task, _ctx(section_task, runs_root, store), on_event=on_event,
             )
-            if inspect.isawaitable(result):
-                result = await result
+            try:
+                if inspect.isawaitable(result):
+                    result = await result
+            except asyncio.CancelledError:
+                cancellation_reason = getattr(
+                    context, "cancellation_reason", None,
+                )
+                reason = (
+                    cancellation_reason()
+                    if callable(cancellation_reason)
+                    else None
+                )
+                if reason == "timeout":
+                    rejected_path = _preserve_rejected_artifact(section_path)
+                    conclusion_error = _conclusion_error_with_rejected_path(
+                        None, rejected_path,
+                    )
+                    section_path.write_text(
+                        _placeholder(section, "timeout"), encoding="utf-8",
+                    )
+                    store.finish_chapter(
+                        plan.research_id,
+                        context.goal_id,
+                        section["section_id"],
+                        status="missing",
+                        reason="timeout",
+                        actual_output_path=str(section_path),
+                        actual_count=0,
+                        conclusion_error=conclusion_error,
+                        updated_at=now_iso(),
+                    )
+                    event_result = on_event({
+                        "type": "section_error",
+                        "data": {
+                            "goal_id": context.goal_id,
+                            "chapter_id": section["section_id"],
+                            "reason": "timeout",
+                            "engine_error": None,
+                            "conclusion_error": conclusion_error,
+                        },
+                        "is_error": True,
+                    })
+                    if inspect.isawaitable(event_result):
+                        await event_result
+                raise
             try:
                 artifact_empty = (
                     not section_path.is_file()

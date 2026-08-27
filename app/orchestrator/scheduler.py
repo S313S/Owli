@@ -63,6 +63,8 @@ class TaskContext:
     failure_feedback: str | None = None
     #: 本章墙钟的绝对到点时刻（None = 不设墙钟）；节级预算按它算剩余时间。
     deadline_at: datetime | None = None
+    #: 在取消清理阶段读取 scheduler 已登记的原因；节化执行据此区分 timeout 与 /stop。
+    cancellation_reason: Callable[[], str | None] | None = None
 
 
 RunTask = Callable[[Agent, TaskContext], Awaitable[TaskRunResult | Any]]
@@ -207,6 +209,7 @@ class Scheduler:
         self._cancel_reasons: dict[str, str] = {}
         self._deadline_expired: set[str] = set()
         self._deadline_armed: set[str] = set()
+        self._deadline_rearming: set[str] = set()
         if self._chapter_ledger is not None:
             self._chapter_ledger.ensure_chapters(
                 plan.research_id,
@@ -670,8 +673,24 @@ class Scheduler:
 
         def expire() -> None:
             # 一次都还没派活就到点的，只可能是假时钟把定时器提前触发了：
-            # 此时没有可取消的对象，交给事后墙钟分支收口，不凭空判 timeout。
+            # 此时没有可取消的对象；按绝对 deadline 的剩余时间重挂，不能永久放弃。
             if self._attempts.get(agent.agent_id, 0) < 1:
+                # 同步假 timer 会在 `_timer()` 栈内立刻再调 expire；只抑制这种
+                # 重入，真实异步 timer 返回后标记即清，下一次到点仍正常生效。
+                if agent.agent_id in self._deadline_rearming:
+                    return
+                started_at = self._agent_started_at.get(agent.agent_id)
+                elapsed = (
+                    (self._clock() - started_at).total_seconds()
+                    if started_at is not None
+                    else 0.0
+                )
+                remaining = max(0.0, float(deadline_seconds) - elapsed)
+                self._deadline_rearming.add(agent.agent_id)
+                try:
+                    self._timer(remaining, expire)
+                finally:
+                    self._deadline_rearming.discard(agent.agent_id)
                 return
             self._deadline_expired.add(agent.agent_id)
             self._cancel_running_run(agent.agent_id, "timeout")
@@ -801,6 +820,9 @@ class Scheduler:
                 on_event=self._consume_signal,
                 failure_feedback=self._agent_feedback.get(agent.agent_id),
                 deadline_at=deadline_at,
+                cancellation_reason=lambda agent_id=agent.agent_id: (
+                    self._cancel_reasons.get(agent_id)
+                ),
             )
             run_future = asyncio.ensure_future(
                 self._invoke_run_task(agent, context)

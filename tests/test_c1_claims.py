@@ -187,6 +187,44 @@ def test_JSON_节显式_claims_聚合进父章信封(tmp_path: Path) -> None:
     assert document["sections"][0]["markdown"].startswith("## 结论")
 
 
+def test_timeout半截JSON整节作废且已完成节的claims保留(tmp_path: Path) -> None:
+    section_root = tmp_path / "sections"
+    section_root.mkdir()
+    claim = raw_claim("c-01", [ref("https://example.com/a")])
+    (section_root / "sec-1.md").write_text(json.dumps({
+        "markdown": "## 结论\n\n完成内容\n\n## 信息源\n\nhttps://example.com/a",
+        "claims": [claim],
+    }, ensure_ascii=False), encoding="utf-8")
+    (section_root / "sec-2.md").write_text(
+        "## goal-2｜范围二\n\n- 此处缺失：goal-2/ch-1/sec-2；原因：timeout\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "report.json"
+    agent = SimpleNamespace(
+        agent_id="report-writing", chapter={"chapter_id": "ch-1"},
+        output={"shape": "object"},
+    )
+    sections = [
+        {"section_id": "ch-1/sec-1", "filename": "sec-1.md", "title": "范围一", "goal_id": "goal-1"},
+        {"section_id": "ch-1/sec-2", "filename": "sec-2.md", "title": "范围二", "goal_id": "goal-2"},
+    ]
+    rows = [
+        {"chapter_id": "ch-1/sec-1", "goal_id": "goal-1", "status": "done", "reason": None},
+        {"chapter_id": "ch-1/sec-2", "goal_id": "goal-2", "status": "missing", "reason": "timeout"},
+    ]
+
+    _assemble(
+        plan=SimpleNamespace(title="夹具"), agent=agent, output_path=output,
+        output_format="json", section_root=section_root, sections=sections, rows=rows,
+    )
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert document["claims"] == [claim]
+    assert "完成内容" in document["sections"][0]["markdown"]
+    assert "原因：timeout" in document["sections"][1]["markdown"]
+    assert document["缺失清单"][0]["reason"] == "timeout"
+
+
 def test_backfill_接通_PASS_X禁推_HN线程上限与次断言(tmp_path: Path) -> None:
     store = make_store(tmp_path)
     urls = {

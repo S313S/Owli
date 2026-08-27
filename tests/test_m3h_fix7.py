@@ -182,6 +182,96 @@ def test_墙钟到点主动取消在跑任务并落timeout(tmp_path: Path) -> No
     assert scheduler.agent_statuses["agent-1"] == "missing"
 
 
+def test_假时钟到点取消节化章并把半截JSON节落timeout(tmp_path: Path) -> None:
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.contracts import EngineTask
+    from app.orchestrator.scheduler import Scheduler
+    from app.orchestrator.sectioning import run_sectioned_task
+
+    store = _store(tmp_path)
+    plan = _deadline_plan(deadline_seconds=330, per_round=1, max_rounds=1)
+    agent = plan.goals[0].agents[0]
+    agent.output.update(format="json", shape="object", validators=["file_exists"])
+    agent.chapter = {"chapter_id": "ch-sectioned", "opening": {"inputs": []}}
+    runs_root = tmp_path / "runs"
+    output_path = runs_root / "r-ledger/goals/goal-1/report.json"
+    started = asyncio.Event()
+    callbacks: list[tuple[float, object]] = []
+
+    class HangingAdapter:
+        async def run(self, task, ctx, on_event=None):
+            del ctx, on_event
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            task.output_path.write_text('{"markdown":"半截', encoding="utf-8")
+            started.set()
+            await asyncio.Event().wait()
+
+    async def run_task(current_agent, context):
+        task = EngineTask(
+            body="写节", output_path=output_path, output_format="json",
+            research_id="r-ledger", goal_id="goal-1",
+            agent_id=current_agent.agent_id, agent_kind="report",
+            validators=["file_exists"],
+            capability=Capability(
+                tools=("fs.write",),
+                fs=FileSystemScope(write=("goals/goal-1/**",)),
+            ),
+        )
+        return await run_sectioned_task(
+            plan=plan, agent=current_agent, context=context, base_task=task,
+            adapter=HangingAdapter(), store=store, runs_root=runs_root,
+            now_iso=lambda: "2026-08-27T00:00:00+00:00",
+            on_event=lambda event: None,
+        )
+
+    def timer(delay, callback):
+        callbacks.append((delay, callback))
+        return object()
+
+    async def scenario():
+        scheduler = Scheduler(
+            plan, run_task, lambda event: None,
+            lambda: datetime.now(timezone.utc), timer, chapter_ledger=store,
+        )
+        driving = asyncio.create_task(scheduler.start())
+        await asyncio.wait_for(started.wait(), timeout=5)
+        chapter_deadline = next(item for item in callbacks if item[0] == 330)
+        chapter_deadline[1]()
+        await asyncio.wait_for(driving, timeout=5)
+        return scheduler
+
+    scheduler = asyncio.run(scenario())
+    rows = {row["chapter_id"]: row for row in store.list_chapters("r-ledger")}
+    section = rows["ch-sectioned/sec-1"]
+    assert any(delay == 330 for delay, _ in callbacks)
+    assert section["status"] == "missing" and section["reason"] == "timeout"
+    assert output_path.parent.joinpath("report/sec-1.rejected.md").is_file()
+    assert "半截" not in output_path.parent.joinpath("report/sec-1.md").read_text()
+    assert scheduler.agent_statuses[agent.agent_id] == "missing"
+
+
+def test_墙钟在首次派活前误触发会按剩余预算重挂(tmp_path: Path) -> None:
+    from app.orchestrator.scheduler import Scheduler
+
+    plan = _deadline_plan(deadline_seconds=330, per_round=1, max_rounds=1)
+    current = [datetime(2026, 8, 27, tzinfo=timezone.utc)]
+    callbacks: list[tuple[float, object]] = []
+    scheduler = Scheduler(
+        plan, lambda agent, context: None, lambda event: None,
+        lambda: current[0],
+        lambda delay, callback: callbacks.append((delay, callback)),
+        chapter_ledger=_store(tmp_path),
+    )
+    agent = plan.goals[0].agents[0]
+    scheduler._agent_started_at[agent.agent_id] = current[0]
+    scheduler._arm_chapter_deadline(agent, 330)
+    current[0] += timedelta(seconds=2)
+    callbacks[0][1]()
+
+    assert [delay for delay, _ in callbacks] == [330.0, 328.0]
+    assert agent.agent_id not in scheduler._deadline_expired
+
+
 def test_stop取消在跑任务走与墙钟同一条取消路径(tmp_path: Path) -> None:
     """/stop 不再等在跑的 adapter 自己返回：与墙钟取消共用 _cancel_running_run。"""
     from app.orchestrator.scheduler import Scheduler
