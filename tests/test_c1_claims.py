@@ -11,7 +11,11 @@ import pytest
 from app.adapters import validation
 from app.orchestrator.sectioning import _assemble
 from app.reliability.backfill import backfill_report
-from app.reliability.claims import ClaimsRegistrationError, register_claims
+from app.reliability.claims import (
+    FIRSTHAND_SOURCES,
+    ClaimsRegistrationError,
+    register_claims,
+)
 from app.store.dao import Store
 
 
@@ -107,6 +111,28 @@ def test_断言登记双向可达且重复执行不追加(tmp_path: Path) -> Non
     rows = {row["id"]: row for row in store.list_evidence("r-c1")}
     assert rows["ev-a"]["extra"]["claim_ids"] == ["c-01"]
     assert rows["ev-b"]["extra"]["claim_ids"] == ["c-01"]
+
+
+def test_firsthand_声明来源区分撰写与存量回填(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    url = "https://example.com/firsthand"
+    add_evidence(
+        store, "r-c1", "ev-firsthand", platform="web_search",
+        permalink=url, author="甲",
+    )
+    claims = [raw_claim("c-01", [ref(url, firsthand=True)])]
+
+    writer = register_claims(store, "r-c1", claims, source="chapter")[0]
+    backfill = register_claims(store, "r-c1", claims, source="backfill")[0]
+
+    assert FIRSTHAND_SOURCES == {
+        "declared_by_writer", "declared_by_backfill",
+    }
+    assert writer["firsthand_source"] in FIRSTHAND_SOURCES
+    assert backfill["firsthand_source"] in FIRSTHAND_SOURCES
+    assert writer["firsthand_source"] == "declared_by_writer"
+    assert backfill["firsthand_source"] == "declared_by_backfill"
+    assert writer["firsthand_source"] != backfill["firsthand_source"]
 
 
 def test_悬空_permalink_不产生半份登记(tmp_path: Path) -> None:

@@ -14,6 +14,13 @@ CLAIM_FIELDS = frozenset({"id", "text", "evidence", "conflict_note"})
 CLAIM_EVIDENCE_FIELDS = frozenset({
     "permalink", "stance", "firsthand", "origin_url",
 })
+FIRSTHAND_SOURCES = frozenset({
+    "declared_by_writer", "declared_by_backfill",
+})
+_FIRSTHAND_SOURCE_BY_CLAIMS_SOURCE = {
+    "chapter": "declared_by_writer",
+    "backfill": "declared_by_backfill",
+}
 
 
 @dataclass(frozen=True)
@@ -146,6 +153,7 @@ def prepare_claim_registration(
             "text": text.strip() if isinstance(text, str) else "",
             "evidence_ids": evidence_ids,
             "claims_source": source,
+            "firsthand_source": _FIRSTHAND_SOURCE_BY_CLAIMS_SOURCE[source],
         }
         conflict_note = raw_claim.get("conflict_note")
         if conflict_note is not None:
@@ -185,6 +193,7 @@ def register_claims(
 
 __all__ = [
     "CLAIM_ID_PATTERN",
+    "FIRSTHAND_SOURCES",
     "ClaimsRegistrationError",
     "claims_from_documents",
     "prepare_claim_registration",
