@@ -46,7 +46,8 @@ from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
     enrich_source_section,
     load_evidence_artifacts,
-    source_citations,
+    report_citations,
+    report_cites_but_lists_nothing,
 )
 from app.reliability.audit import degrade_after_closed_set_retry
 from app.reliability.claims import (
@@ -1768,10 +1769,20 @@ class RuntimeCoordinator:
         claims_offenders: list[str] = []
         if validation_report.verdict is validation.Verdict.PASS:
             try:
-                self.store.replace_evidence_citations(
-                    research_id,
-                    source_citations(report_path.read_text(encoding="utf-8")),
-                )
+                # §SRC-1 货 7（D-022）：JSON 成稿也要能读出角标，
+                # 且**解析到 0 个时不准清空**——`replace_evidence_citations`
+                # 会把未列出的行 citation_no 置 NULL，空映射等于全库清零。
+                report_text = report_path.read_text(encoding="utf-8")
+                if report_cites_but_lists_nothing(report_text):
+                    # 正文有角标却解析不出清单 = 没读懂格式；清空是灾难，报错。
+                    citation_error = (
+                        "成稿角标回填中止：正文有 [Sxx] 角标却解析出 0 条信息源，"
+                        f"不清空既有 citation_no（成稿={report_path.name}）"
+                    )
+                else:
+                    self.store.replace_evidence_citations(
+                        research_id, report_citations(report_text),
+                    )
             except (KeyError, TypeError, ValueError) as exc:
                 citation_error = f"成稿角标回填失败：{exc}"
         if (

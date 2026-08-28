@@ -239,6 +239,78 @@ def merge_sectioned_markdown(
     return "\n".join(blocks).rstrip() + "\n"
 
 
+def report_citations(text: str) -> dict[str, int]:
+    """从成稿正文提取角标，Markdown 与 JSON 两种产物都认。
+
+    §SRC-1 货 7（D-022）：`source_citations` 是逐行扫 Markdown 标题的，
+    而 JSON 成稿把正文以转义 `\n` 塞在字符串里——整份文件没有一行是标题，
+    于是解析出 0 个角标，`replace_evidence_citations` 反手把全库
+    `citation_no` 清成 NULL。D-013 那轮「全库 0 条非空」就是这么来的，
+    与写手引不引国内源无关。
+    """
+
+    stripped = text.lstrip()
+    if not stripped.startswith(("{", "[")):
+        return source_citations(text)
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        return source_citations(text)
+    merged: dict[str, int] = {}
+    numbers: dict[int, str] = {}
+    for block in _markdown_blocks(document):
+        for permalink, number in source_citations(block).items():
+            existing = merged.get(permalink)
+            if existing is not None and existing != number:
+                raise ValueError(
+                    f"同一 permalink 在不同节拿到不同角标：{permalink}"
+                )
+            owner = numbers.get(number)
+            if owner is not None and owner != permalink:
+                raise ValueError(f"角标 {number} 在不同节指向不同 permalink")
+            merged[permalink] = number
+            numbers[number] = permalink
+    return merged
+
+
+def report_cites_but_lists_nothing(text: str) -> bool:
+    """正文有 [Sxx] 角标、却一条『信息源』都解析不出来 —— 格式没读懂。
+
+    §SRC-1 货 7（D-022）的护栏判据：`replace_evidence_citations` 会把未列出的
+    行 `citation_no` 置 NULL，空映射等于全库清零。但「报告确实一条都没引」
+    也会得到空映射，那时清零是对的。两者的区别就在正文有没有角标。
+    """
+
+    if report_citations(text):
+        return False
+    stripped = text.lstrip()
+    if stripped.startswith(("{", "[")):
+        try:
+            blocks = _markdown_blocks(json.loads(text))
+        except json.JSONDecodeError:
+            blocks = [text]
+    else:
+        blocks = [text]
+    return any(_MARK.search(block) for block in blocks)
+
+
+def _markdown_blocks(document: Any) -> list[str]:
+    """深搜出所有 `markdown` 字段值；节化产物是 sections[].markdown。"""
+
+    blocks: list[str] = []
+    stack: list[Any] = [document]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Mapping):
+            value = node.get("markdown")
+            if isinstance(value, str) and value.strip():
+                blocks.append(value)
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return blocks
+
+
 def source_citations(markdown: str) -> dict[str, int]:
     """从成稿信息源章节提取归一化 permalink 与角标编号。"""
 
