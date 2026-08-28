@@ -44,6 +44,9 @@ SECTION_RETRY_MAX_ATTEMPTS = 3
 SECTION_RESUME_COST_FLOOR_SECONDS = 136.0
 
 EVIDENCE_POOL_LIMIT = 99
+#: 四个对比主体分在两个采集 goal 里；每个非空 goal 至少要拿到足以支撑
+#: 一节论证的 20 个号。空 goal 不占保底额，保底总量超过 S01-S99 时按比例退化。
+EVIDENCE_POOL_GOAL_FLOOR = 20
 SECTION_EVIDENCE_POOL_LIMIT = 30
 _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
@@ -375,7 +378,10 @@ def _allowed_evidence_goal_ids(
 
 
 def _section_evidence_rows(
-    rows: list[dict[str, Any]], section_goal_id: str | None,
+    rows: list[dict[str, Any]],
+    section_goal_id: str | None,
+    *,
+    limit: int = SECTION_EVIDENCE_POOL_LIMIT,
 ) -> list[dict[str, Any]]:
     """goal 相关项在各平台内优先，再按平台名稳定轮转。"""
 
@@ -392,7 +398,7 @@ def _section_evidence_rows(
     selected: list[dict[str, Any]] = []
     offsets = {platform: 0 for platform in buckets}
     platforms = sorted(buckets)
-    while len(selected) < SECTION_EVIDENCE_POOL_LIMIT:
+    while len(selected) < limit:
         advanced = False
         for platform in platforms:
             offset = offsets[platform]
@@ -402,11 +408,128 @@ def _section_evidence_rows(
             selected.append(platform_rows[offset])
             offsets[platform] += 1
             advanced = True
-            if len(selected) == SECTION_EVIDENCE_POOL_LIMIT:
+            if len(selected) == limit:
                 break
         if not advanced:
             break
     return selected
+
+
+def _proportional_evidence_slots(
+    counts: Mapping[str, int],
+    capacities: Mapping[str, int],
+    slots: int,
+) -> dict[str, int]:
+    """按条数权重用最大余数法分配；容量不足时确定性地继续分剩余名额。"""
+
+    allocated = {goal_id: 0 for goal_id in sorted(capacities)}
+    remaining_slots = min(max(0, slots), sum(max(0, value) for value in capacities.values()))
+    while remaining_slots:
+        eligible = [
+            goal_id
+            for goal_id in sorted(capacities)
+            if allocated[goal_id] < max(0, capacities[goal_id])
+        ]
+        if not eligible:
+            break
+        weight_total = sum(max(0, counts.get(goal_id, 0)) for goal_id in eligible)
+        if weight_total <= 0:
+            weight_total = len(eligible)
+            weights = {goal_id: 1 for goal_id in eligible}
+        else:
+            weights = {
+                goal_id: max(0, counts.get(goal_id, 0))
+                for goal_id in eligible
+            }
+        round_slots = remaining_slots
+        raw = {
+            goal_id: round_slots * weights[goal_id] / weight_total
+            for goal_id in eligible
+        }
+        whole = {
+            goal_id: min(
+                capacities[goal_id] - allocated[goal_id],
+                int(raw[goal_id]),
+            )
+            for goal_id in eligible
+        }
+        distributed = sum(whole.values())
+        for goal_id, value in whole.items():
+            allocated[goal_id] += value
+        remaining_slots -= distributed
+        if not remaining_slots:
+            break
+        ranked = sorted(
+            eligible,
+            key=lambda goal_id: (-(raw[goal_id] - int(raw[goal_id])), goal_id),
+        )
+        gave_remainder = False
+        for goal_id in ranked:
+            if allocated[goal_id] >= capacities[goal_id]:
+                continue
+            allocated[goal_id] += 1
+            remaining_slots -= 1
+            gave_remainder = True
+            if not remaining_slots:
+                break
+        if not gave_remainder:
+            break
+    return allocated
+
+
+def _numbered_evidence_rows(
+    ordered: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, int], bool]:
+    """先按非空 goal 分 S01-S99 配额，再保持旧的全局编号顺序。"""
+
+    by_goal: dict[str, list[dict[str, Any]]] = {}
+    unassigned: list[dict[str, Any]] = []
+    for row in ordered:
+        goal_id = str(row.get("goal_id") or "")
+        if goal_id:
+            by_goal.setdefault(goal_id, []).append(row)
+        else:
+            unassigned.append(row)
+    counts = {goal_id: len(goal_rows) for goal_id, goal_rows in by_goal.items()}
+    if len(ordered) <= EVIDENCE_POOL_LIMIT:
+        quotas = dict(sorted(counts.items()))
+        return ordered, quotas, dict(quotas), False
+
+    floor_degraded = len(counts) * EVIDENCE_POOL_GOAL_FLOOR > EVIDENCE_POOL_LIMIT
+    if floor_degraded:
+        base = {goal_id: 0 for goal_id in counts}
+    else:
+        base = {
+            goal_id: min(count, EVIDENCE_POOL_GOAL_FLOOR)
+            for goal_id, count in counts.items()
+        }
+    remaining = EVIDENCE_POOL_LIMIT - sum(base.values())
+    capacities = {
+        goal_id: counts[goal_id] - base[goal_id]
+        for goal_id in counts
+    }
+    extras = _proportional_evidence_slots(counts, capacities, remaining)
+    quotas = {
+        goal_id: base[goal_id] + extras[goal_id]
+        for goal_id in sorted(counts)
+    }
+
+    selected: list[dict[str, Any]] = []
+    actual: dict[str, int] = {}
+    for goal_id in sorted(by_goal):
+        goal_selected = _section_evidence_rows(
+            by_goal[goal_id], goal_id, limit=quotas[goal_id],
+        )
+        selected.extend(goal_selected)
+        actual[goal_id] = len(goal_selected)
+    unfilled = EVIDENCE_POOL_LIMIT - len(selected)
+    if unfilled > 0 and unassigned:
+        selected.extend(_section_evidence_rows(unassigned, None, limit=unfilled))
+    selected.sort(key=lambda row: (
+        str(row.get("goal_id") or ""),
+        str(row["id"]),
+    ))
+    return selected, quotas, actual, floor_degraded
 
 
 def _evidence_index(
@@ -427,7 +550,9 @@ def _evidence_index(
             str(row["id"]),
         ),
     )
-    numbered = ordered[:EVIDENCE_POOL_LIMIT]
+    numbered, goal_quotas, goal_selected_counts, goal_floor_degraded = (
+        _numbered_evidence_rows(ordered)
+    )
     citation_by_id = {
         str(row["id"]): index
         for index, row in enumerate(numbered, start=1)
@@ -480,6 +605,9 @@ def _evidence_index(
     return {
         "items": items,
         "omitted_count": max(0, eligible_count - len(items)),
+        "goal_quotas": goal_quotas,
+        "goal_selected_counts": goal_selected_counts,
+        "goal_floor_degraded": goal_floor_degraded,
     }, citations
 
 
@@ -1099,6 +1227,13 @@ async def run_sectioned_task(
                         "chapter_id": _chapter_id(agent),
                         "omitted_count": omitted_count,
                         "limit": SECTION_EVIDENCE_POOL_LIMIT,
+                        "goal_quotas": dict(evidence_pool["goal_quotas"]),
+                        "goal_selected_counts": dict(
+                            evidence_pool["goal_selected_counts"]
+                        ),
+                        "goal_floor_degraded": bool(
+                            evidence_pool["goal_floor_degraded"]
+                        ),
                     },
                     "is_error": False,
                 })

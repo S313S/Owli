@@ -283,6 +283,9 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
     assert len(truncations) == 1
     assert truncations[0]["data"]["omitted_count"] == 71
     assert truncations[0]["data"]["limit"] == 30
+    assert truncations[0]["data"]["goal_quotas"] == {"goal-1": 99}
+    assert truncations[0]["data"]["goal_selected_counts"] == {"goal-1": 99}
+    assert truncations[0]["data"]["goal_floor_degraded"] is False
     assert "本节可见角标池已裁剪至 30 条" in bodies["sec-1.md"]
     assert "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面" in bodies[
         "sec-1.md"
@@ -379,7 +382,7 @@ def test_按平台轮转裁剪且同输入结果逐字节确定(tmp_path):
     )
 
 
-def test_同一证据在不同节裁剪后仍沿用全局_S_编号():
+def test_同一证据在不同节不同章仍沿用全局_S_编号():
     from app.orchestrator.sectioning import _evidence_index
 
     rows = [
@@ -408,20 +411,125 @@ def test_同一证据在不同节裁剪后仍沿用全局_S_编号():
             for index in range(20)
         ],
     ]
-    first, _ = _evidence_index(
+    # 章 ID 不参与全局编号；两次调用代表两个父章里 goal 不同的报告节。
+    first_chapter, _ = _evidence_index(
         rows, {"goal-1", "goal-2"}, section_goal_id="goal-1",
     )
-    second, _ = _evidence_index(
+    second_chapter, _ = _evidence_index(
         rows, {"goal-1", "goal-2"}, section_goal_id="goal-2",
     )
 
     first_mark = next(
-        item["citation"] for item in first["items"] if item["evidence_id"] == "shared"
+        item["citation"]
+        for item in first_chapter["items"]
+        if item["evidence_id"] == "shared"
     )
     second_mark = next(
-        item["citation"] for item in second["items"] if item["evidence_id"] == "shared"
+        item["citation"]
+        for item in second_chapter["items"]
+        if item["evidence_id"] == "shared"
     )
     assert first_mark == second_mark == "[S21]"
+
+
+def test_全局99号按goal配额避免467条吃光136条且空goal不占额():
+    from app.orchestrator.sectioning import _evidence_index
+
+    rows = [
+        {
+            "id": f"g1-{index:03d}",
+            "goal_id": "goal-1",
+            "platform": "xhs" if index % 2 else "web_search",
+            "permalink": f"https://goal-1.example/{index:03d}",
+        }
+        for index in range(467)
+    ] + [
+        {
+            "id": f"g2-{index:03d}",
+            "goal_id": "goal-2",
+            "platform": "douyin" if index % 2 else "web_search",
+            "permalink": f"https://goal-2.example/{index:03d}",
+        }
+        for index in range(136)
+    ]
+
+    pool, citations = _evidence_index(
+        rows,
+        {"goal-1", "goal-2", "goal-3"},
+        section_goal_id="goal-1",
+    )
+
+    selected_counts = {
+        goal_id: sum(goal_id in permalink for permalink in citations)
+        for goal_id in ("goal-1", "goal-2", "goal-3")
+    }
+    assert len(citations) <= 99
+    assert selected_counts["goal-2"] > 0
+    assert selected_counts["goal-3"] == 0
+    assert pool["goal_quotas"] == {"goal-1": 66, "goal-2": 33}
+    assert pool["goal_selected_counts"] == {"goal-1": 66, "goal-2": 33}
+    assert pool["goal_floor_degraded"] is False
+
+
+def test_同一证据输入顺序变化后全局编号逐条相同():
+    from app.orchestrator.sectioning import _evidence_index
+
+    rows = [
+        {
+            "id": f"{goal_id}-{index:03d}",
+            "goal_id": goal_id,
+            "platform": ("xhs", "web_search", "douyin")[index % 3],
+            "permalink": f"https://{goal_id}.example/{index:03d}",
+        }
+        for goal_id, count in (("goal-1", 120), ("goal-2", 80))
+        for index in range(count)
+    ]
+
+    first_pool, first_citations = _evidence_index(
+        rows,
+        {"goal-1", "goal-2"},
+        section_goal_id="goal-1",
+    )
+    second_pool, second_citations = _evidence_index(
+        list(reversed(rows)),
+        {"goal-1", "goal-2"},
+        section_goal_id="goal-1",
+    )
+
+    assert first_citations == second_citations
+    assert first_pool == second_pool
+
+
+def test_非空goal超过四个时退化为比例配额并记账():
+    from app.orchestrator.sectioning import _evidence_index
+
+    rows = [
+        {
+            "id": f"{goal_id}-{index:03d}",
+            "goal_id": goal_id,
+            "platform": "web_search",
+            "permalink": f"https://{goal_id}.example/{index:03d}",
+        }
+        for goal_id, count in (
+            ("goal-1", 50),
+            ("goal-2", 40),
+            ("goal-3", 30),
+            ("goal-4", 20),
+            ("goal-5", 10),
+        )
+        for index in range(count)
+    ]
+
+    pool, citations = _evidence_index(
+        rows,
+        {f"goal-{index}" for index in range(1, 6)},
+        section_goal_id="goal-1",
+    )
+
+    assert len(citations) == 99
+    assert sum(pool["goal_quotas"].values()) == 99
+    assert pool["goal_selected_counts"] == pool["goal_quotas"]
+    assert pool["goal_floor_degraded"] is True
 
 
 def test_done链中撰写章传递覆盖其上游_goal(tmp_path):
