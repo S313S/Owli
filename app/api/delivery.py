@@ -1,0 +1,80 @@
+"""§DLV-1 交付面路由：报告结构化只读 / 证据清单 / 导出。
+
+独立成模块只为少碰 `app/api/main.py`（RP-1 同期在改同一文件）；
+状态、白名单读盘、信封格式全部由 main.py 注入，这里不持有任何运行态。
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any, Callable
+
+from fastapi import FastAPI, HTTPException
+
+from app.reliability.scoring import SCORE_FIELDS
+from app.report.render import parse_report
+
+EVIDENCE_FIELDS: tuple[str, ...] = (
+    "id", "citation_no", "permalink", "title", "content_excerpt", "platform",
+    "source_type", "fetch_method", "author_name", "published_at", "fetched_at",
+    "goal_id", *SCORE_FIELDS, "score_total", "grade", "rating_notes", "rated_by",
+    "raw_metrics",
+)
+
+
+def evidence_view(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """证据清单：角标行在前按角标号，未引用行按 id；只读评分不重算。"""
+    items = [{field: row.get(field) for field in EVIDENCE_FIELDS} for row in rows]
+    items.sort(key=lambda item: (item["citation_no"] is None, item["citation_no"] or 0, item["id"]))
+    return {
+        "items": items,
+        "counts": {
+            "total": len(items),
+            "cited": sum(item["citation_no"] is not None for item in items),
+            "by_platform": dict(Counter(str(item["platform"]) for item in items)),
+            "by_grade": dict(Counter(str(item["grade"] or "?") for item in items)),
+        },
+        "score_fields": list(SCORE_FIELDS),
+    }
+
+
+def register_delivery_routes(
+    application: FastAPI,
+    *,
+    store: Any,
+    read_report: Callable[[str, str | None], str | None],
+    envelope: Callable[[Any], dict[str, Any]],
+) -> None:
+    def require_report(research_id: str) -> dict[str, Any]:
+        report = store.get_report(research_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+        return report
+
+    @application.get("/api/researches/{research_id}/report")
+    async def get_research_report(research_id: str) -> dict[str, Any]:
+        report = require_report(research_id)
+        text = read_report(research_id, report.get("report_path"))
+        if text is None:
+            raise HTTPException(status_code=404, detail="报告正文不可用")
+        view = parse_report(text)
+        view["research_id"] = research_id
+        view["status"] = report.get("status")
+        view["report_path"] = report.get("report_path")
+        view["title"] = view.get("title") or report.get("title")
+        view["summary"] = report.get("summary")
+        view["summary_line"] = report.get("summary_line")
+        view["exports"] = (report.get("extra") or {}).get("exports") or []
+        view["feishu"] = {
+            "status": report.get("feishu_sync_status"),
+            "doc_token": report.get("feishu_doc_token"),
+            "record_id": report.get("feishu_record_id"),
+            "synced_at": report.get("feishu_synced_at"),
+            **((report.get("extra") or {}).get("feishu") or {}),
+        }
+        return envelope(view)
+
+    @application.get("/api/researches/{research_id}/evidence")
+    async def get_research_evidence(research_id: str) -> dict[str, Any]:
+        require_report(research_id)
+        return envelope(evidence_view(store.list_evidence(research_id)))

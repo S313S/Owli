@@ -27,6 +27,7 @@ from app.adapters.selfcheck import (
     validate_runtime_config,
 )
 from app.adapters.recall import PrimaryEngineRecallJudge
+from app.api.delivery import register_delivery_routes
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.background import guard_task
@@ -1377,6 +1378,14 @@ def create_app(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    # §DLV-1 交付面：报告结构化只读 / 证据清单 / 导出（app/api/delivery.py）
+    register_delivery_routes(
+        application,
+        store=store,
+        read_report=read_historical_report,
+        envelope=envelope,
+    )
 
     application.mount(
         "/assets",
