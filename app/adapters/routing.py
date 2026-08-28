@@ -165,7 +165,12 @@ class RoutedAdapter:
         key = (research_id, engine)
         backoff = self._backoff_tasks.get(key)
         if backoff is not None:
-            await backoff
+            # D-023：用 asyncio.wait 而不是直接 await——直接 await 会在等待者被
+            # 章墙钟 / stop 取消时连带 cancel 这个共享的退避任务，尸体留在表里，
+            # 下一个等待者一 await 就抛 CancelledError 静默退出（整个研究冻住）。
+            # asyncio.wait 只等不牵连；退避任务自己被取消也按「已释放」处理。
+            if not backoff.done():
+                await asyncio.wait({backoff})
             released_cause = self._backoff_causes.get(key)
             if self._backoff_tasks.get(key) is backoff:
                 self._backoff_tasks.pop(key, None)
