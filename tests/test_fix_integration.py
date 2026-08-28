@@ -148,7 +148,9 @@ def test_规划器换措辞仍归一四字段且不覆盖适配器真值(tmp_pat
         status="done", reason=None, actual_output_path=str(artifact), actual_count=2,
         updated_at="2026-08-27T00:00:01Z",
     )
-    runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
+    asyncio.run(
+        runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
+    )
 
     rows = store.list_evidence("r-ledger")
     assert len(rows) == 1
@@ -190,7 +192,9 @@ def test_产物存在但章账本未_done_时不提前投影(tmp_path: Path) -> 
         )],
     )
 
-    runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
+    asyncio.run(
+        runtime._persist_goal_evidence(SimpleNamespace(research_id="r-ledger"), goal)
+    )
 
     assert store.list_evidence("r-ledger") == []
 

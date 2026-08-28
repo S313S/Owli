@@ -53,6 +53,7 @@ from app.reliability.claims import (
     claims_from_documents,
     register_claims,
 )
+from app.store import evidence_artifacts
 from app.store.evidence_artifacts import load_evidence_payloads
 
 
@@ -1241,8 +1242,13 @@ class RuntimeCoordinator:
             restored.append(plan.research_id)
         return restored
 
-    def _persist_goal_evidence(self, plan: Plan, goal: Goal) -> None:
-        """兼容/恢复投影：幂等写产物，四个内容字段不覆盖适配器真值。"""
+    async def _persist_goal_evidence(self, plan: Plan, goal: Goal) -> None:
+        """兼容/恢复投影：幂等写产物，四个内容字段不覆盖适配器真值。
+
+        D-020：产物里 `platform` 越出七值闭集时（引擎把发布方名写进了平台列），
+        投影层已把列收回闭集、原值留痕到 `extra.artifact_platform`；这里把这件事
+        发成事件，让它**不是静默发生**的——两个调用点都已按 awaitable 处理。
+        """
 
         payloads: list[dict[str, Any]] = []
         done_chapters = {
@@ -1288,6 +1294,38 @@ class RuntimeCoordinator:
                 if value not in (None, "", {}):
                     payload[field] = value
         self.store.upsert_evidence_batch(payloads)
+        downgraded = [
+            {
+                "permalink": str(payload["permalink"]),
+                "artifact_platform": str(
+                    payload["extra"][evidence_artifacts.ARTIFACT_PLATFORM_KEY]
+                ),
+                "platform": str(payload["platform"]),
+            }
+            for payload in payloads
+            if isinstance(payload.get("extra"), dict)
+            and payload["extra"].get(evidence_artifacts.ARTIFACT_PLATFORM_KEY)
+        ]
+        if downgraded:
+            logger.warning(
+                "产物 platform 越出闭集，已降级并留痕：research=%s goal=%s 条数=%d",
+                plan.research_id, goal.goal_id, len(downgraded),
+            )
+            await self.events.publish(
+                plan.research_id,
+                {
+                    "type": "evidence_platform_downgraded",
+                    "data": {
+                        "research_id": plan.research_id,
+                        "goal_id": goal.goal_id,
+                        "count": len(downgraded),
+                        "vocabulary": sorted(
+                            evidence_artifacts.PLATFORM_VOCABULARY
+                        ),
+                        "items": downgraded,
+                    },
+                },
+            )
 
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]
@@ -1599,7 +1637,7 @@ class RuntimeCoordinator:
         # 兼容升级前已经越过 goal 闸门、但原始采集项尚未投影入库的运行。
         # upsert 使用稳定身份键，因此终态补扫与逐 goal 写入可以安全并存。
         for goal in plan.goals:
-            self._persist_goal_evidence(plan, goal)
+            await self._persist_goal_evidence(plan, goal)
         report_path, report_format, report_declared = self._report_target(plan)
         # 收尾**之前**报告产物是否已存在，是「报告到底生成了没有」的唯一依据；
         # _append_decision_notes 之后文件必然存在，那时再判就永远判不出来。
