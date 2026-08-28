@@ -28,6 +28,41 @@ _CONSUMED_FIELDS = frozenset({
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence", "rating_notes",
 })
+# 引擎会把平台名写成自由文本（第 5 轮真实产物里 16 条全是 "xiaohongshu"，
+# 而采集期适配器写的是 "xhs"）。两套词让 dao._evidence_identity 的
+# native-identity 查认不出同一行，落到 INSERT 上撞 UNIQUE(report_id, permalink)——
+# 即 D-019。词表以 app/sources/*.py 里适配器写的值为准，别名一律归到那一侧。
+_PLATFORM_CANON = ("xhs", "douyin", "web_search", "reddit", "product_hunt",
+                   "hacker_news", "x")
+_PLATFORM_ALIASES = {
+    "xiaohongshu": "xhs", "xiao_hong_shu": "xhs", "xiaohongshu.com": "xhs",
+    "redbook": "xhs", "red_book": "xhs", "rednote": "xhs",
+    "littleredbook": "xhs", "little_red_book": "xhs", "小红书": "xhs",
+    "douyin.com": "douyin", "dou_yin": "douyin", "抖音": "douyin",
+    "websearch": "web_search", "web-search": "web_search",
+    "producthunt": "product_hunt", "product-hunt": "product_hunt",
+    "hackernews": "hacker_news", "hacker-news": "hacker_news",
+    "hn": "hacker_news",
+    "twitter": "x", "twitter.com": "x", "x.com": "x",
+}
+
+
+def normalize_platform(value: str) -> str:
+    """把引擎写的平台自由文本归到适配器的词表；不认识的原样返回。
+
+    ⚠️ 不认识的**不改写**——产物里还出现过 "36氪AI测评""搜狐号""人人都是产品经理"
+    这类**发布方名**（web_search 条目），它们不是平台别名，硬映射会把来源信息抹掉。
+    这类值单独登记，不在本函数里猜。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return text
+    lowered = text.casefold()
+    if lowered in _PLATFORM_CANON:
+        return lowered
+    return _PLATFORM_ALIASES.get(lowered, text)
+
+
 _SOURCE_TYPES = frozenset({
     "post", "comment", "video", "article", "search_snippet",
     "ranking_item", "profile", "other",
@@ -117,7 +152,7 @@ def load_evidence_payloads(
     for raw in _items(value):
         if not isinstance(raw, Mapping):
             continue
-        platform = str(raw.get("platform") or platform_hint or "").strip()
+        platform = normalize_platform(raw.get("platform") or platform_hint or "")
         permalink = str(raw.get("permalink") or "").strip()
         fetched_at = str(raw.get("fetched_at") or "").strip()
         if not platform or not permalink or not fetched_at:
