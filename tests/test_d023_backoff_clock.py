@@ -169,3 +169,34 @@ def test_退避开始事件带时长与预计恢复时刻(tmp_path):
     assert "60 秒后重试" in started[0].text
     assert slept == [60.0]
 
+
+def test_scheduler_无原因取消不再无声结束_至少发一条事件():
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from tests.test_scheduler import FakeClockTimer, goal, plan_with_goals
+
+    calls: list[int] = []
+    events: list[dict] = []
+    fake_time = FakeClockTimer()
+
+    async def run_task(agent, context):
+        calls.append(context.attempt)
+        # 模拟 await 到了别人的取消尸体：既不是墙钟也不是 stop
+        raise asyncio.CancelledError
+
+    async def scenario() -> None:
+        scheduler = Scheduler(
+            plan_with_goals(goal(1)), run_task, events.append,
+            fake_time.clock, fake_time.timer,
+        )
+        try:
+            await asyncio.wait_for(scheduler.start(), timeout=1)
+        except asyncio.TimeoutError:
+            pass  # 语义未改：派活无声结束后调度仍挂着，本包只求它可见
+
+    asyncio.run(scenario())
+    cancelled = [e for e in events if e.get("type") == "agent_run_cancelled"]
+    assert calls == [1]
+    assert len(cancelled) == 1
+    assert cancelled[0]["data"]["cancel_reason"] is None
+    assert cancelled[0]["data"]["goal_id"] == "goal-1"
+    assert cancelled[0]["is_error"] is True

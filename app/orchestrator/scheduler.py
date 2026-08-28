@@ -867,6 +867,22 @@ class Scheduler:
                         (goal.goal_id, self._chapter_id(agent)), None,
                     )
                     await self._abort_agent_on_stop(goal, agent, None)
+                else:
+                    # D-023：既不是墙钟也不是 stop 的取消——多半是 await 到了
+                    # 别人的取消尸体（共享退避任务被牵连 cancel）。以前这里一声
+                    # 不吭直接 return，研究就永远 running；现在只加事件不改语义。
+                    await self._emit({
+                        "type": "agent_run_cancelled",
+                        "data": {
+                            "goal_id": goal.goal_id,
+                            "agent_id": agent.agent_id,
+                            "chapter_id": self._chapter_id(agent),
+                            "cancel_reason": cancel_reason,
+                            "scheduler_status": self.status,
+                            "note": "run 被取消但没有取消原因；派活无声结束",
+                        },
+                        "is_error": True,
+                    })
                 return
             self._cancel_reasons.pop(agent.agent_id, None)
             try:
