@@ -61,6 +61,14 @@ from app.store.evidence_artifacts import load_evidence_payloads
 AdapterFactory = Callable[[], Any]
 logger = logging.getLogger(__name__)
 
+#: 哪些章状态的产物可以投影入库（§SRC-1 货 4）。
+#: `done` 是原口径；`missing`/`deferred` 是「章没跑完但文件已经落盘」，
+#: 捡回来比丢掉划算——第 6 轮白丢过 20 条带 permalink 的网页搜索证据。
+#: 刻意**不含** `running`/`pending`：那时文件可能正写到一半。
+_EVIDENCE_PROJECTABLE_STATUSES = frozenset({"done", "missing", "deferred"})
+#: 捡回来的证据在 extra 里的留痕键，下游据此分辨来源章没跑完。
+_INCOMPLETE_CHAPTER_KEY = "from_incomplete_chapter"
+
 #: 调度器状态 → 工作板状态文案。API 只做映射，不自己猜研究处于什么状态。
 SCHEDULER_STATUS_LABELS = {
     "ready": "等待开始",
@@ -1281,31 +1289,57 @@ class RuntimeCoordinator:
         """
 
         payloads: list[dict[str, Any]] = []
-        done_chapters = {
-            str(row["chapter_id"])
+        rows_by_chapter = {
+            str(row["chapter_id"]): row
             for row in self.store.list_chapters(plan.research_id)
-            if row["goal_id"] == goal.goal_id and row["status"] == "done"
+            if row["goal_id"] == goal.goal_id
         }
+        salvaged: list[dict[str, str]] = []
         for agent in goal.agents:
             chapter = agent.chapter if isinstance(
                 getattr(agent, "chapter", None), dict,
             ) else {}
             chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
-            if (
-                str(agent.output.get("format")) != "json"
-                or chapter_id not in done_chapters
-            ):
+            if str(agent.output.get("format")) != "json":
+                continue
+            row = rows_by_chapter.get(chapter_id)
+            status = str(row["status"]) if row is not None else ""
+            if status not in _EVIDENCE_PROJECTABLE_STATUSES:
                 continue
             sources = list(agent.capability.get("sources", []))
             platform_hint = str(sources[0]) if len(sources) == 1 else None
             path = self.runs_root / plan.research_id / str(agent.output["path"])
-            payloads.extend(load_evidence_payloads(
+            items = load_evidence_payloads(
                 path,
                 report_id=plan.research_id,
                 goal_id=goal.goal_id,
                 agent_name=agent.agent_id,
                 platform_hint=platform_hint,
-            ))
+            )
+            if status != "done" and items:
+                # §SRC-1 货 4：章超时/失败不再把已落盘的产物整章作废。
+                # 第 6 轮 goal-1 四章全 timeout，盘上却躺着 20 条带 permalink 的
+                # 网页搜索证据，一条都没进库——搜到了却当没搜过。
+                # 这里只捡「文件仍能解析成合法 evidence」的那部分，并逐条留痕，
+                # 让下游分得清它来自一个没跑完的章。
+                reason = str(row["reason"] or "") if row is not None else ""
+                for payload in items:
+                    extra = payload.get("extra")
+                    if not isinstance(extra, dict):
+                        extra = {}
+                        payload["extra"] = extra
+                    extra[_INCOMPLETE_CHAPTER_KEY] = True
+                    extra["incomplete_chapter_id"] = chapter_id
+                    extra["incomplete_chapter_status"] = status
+                    if reason:
+                        extra["incomplete_chapter_reason"] = reason
+                salvaged.append({
+                    "chapter_id": chapter_id,
+                    "status": status,
+                    "reason": reason,
+                    "count": str(len(items)),
+                })
+            payloads.extend(items)
         if not payloads:
             return
         existing = {
@@ -1324,6 +1358,24 @@ class RuntimeCoordinator:
                 if value not in (None, "", {}):
                     payload[field] = value
         self.store.upsert_evidence_batch(payloads)
+        if salvaged:
+            total = sum(int(item["count"]) for item in salvaged)
+            logger.warning(
+                "未完成章的产物已捡回入库：research=%s goal=%s 章数=%d 条数=%d",
+                plan.research_id, goal.goal_id, len(salvaged), total,
+            )
+            await self.events.publish(
+                plan.research_id,
+                {
+                    "type": "evidence_salvaged_from_incomplete_chapter",
+                    "data": {
+                        "research_id": plan.research_id,
+                        "goal_id": goal.goal_id,
+                        "count": total,
+                        "chapters": salvaged,
+                    },
+                },
+            )
         downgraded = [
             {
                 "permalink": str(payload["permalink"]),
