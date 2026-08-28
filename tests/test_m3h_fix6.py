@@ -135,8 +135,10 @@ def test_节级传输断连退避重试后成功_不落missing也不换引擎(tm
     assert run.rows["ch-1/sec-2"]["reason"] is None
     assert run.rows["ch-1/sec-2"]["attempts"] == 2
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
-    # 中途断连不发 section_error，只有真耗尽才发
-    assert [e["type"] for e in run.events] == []
+    # 中途断连只发可观测的 section_retry，不发 section_error
+    assert [e["type"] for e in run.events] == ["section_retry"]
+    assert run.events[0]["data"]["resume"] is False
+    assert run.events[0]["data"]["session_id"] is None
     # 退避沿用章级口径：fast = 5s
     assert run.delays == [5.0]
     assert run.result.succeeded is True
@@ -151,7 +153,9 @@ def test_连续断连耗尽max_attempts_per_round才落retry_exhausted(tmp_path)
     assert run.rows["ch-1/sec-2"]["attempts"] == 3
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
     assert run.delays == [5.0, 5.0]
-    assert [e["type"] for e in run.events] == ["section_error"]
+    assert [e["type"] for e in run.events] == [
+        "section_retry", "section_retry", "section_error",
+    ]
 
 
 def test_真429不走传输重试_仍归quota_exhausted(tmp_path):

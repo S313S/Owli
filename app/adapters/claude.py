@@ -225,7 +225,13 @@ def make_pre_tool_hook(permission_callback, *, sdk=None):
     return sdk.HookMatcher(matcher=None, hooks=[enforce])
 
 
-def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
+def build_claude_options(
+    task: TaskSpec,
+    permission_callback,
+    *,
+    sdk=None,
+    resume_session_id: str | None = None,
+):
     sdk = sdk or _load_sdk()
     translated = _claude_capability(task)
     if translated is None:
@@ -275,6 +281,8 @@ def build_claude_options(task: TaskSpec, permission_callback, *, sdk=None):
         values["strict_mcp_config"] = True
     if task.model:
         values["model"] = task.model
+    if resume_session_id:
+        values["resume"] = resume_session_id
     return sdk.ClaudeAgentOptions(**values)
 
 
@@ -441,6 +449,9 @@ def _unavailable_run(
     error: Exception,
     events: list[NormalizedEvent],
     denials: list[str],
+    *,
+    session_id: str | None = None,
+    resume_failed: bool = False,
 ) -> ClaudeRunResult:
     message = f"Claude Agent SDK 不可用：{type(error).__name__}: {error}"
     result = artifact_validation.Result(
@@ -453,7 +464,16 @@ def _unavailable_run(
     report = artifact_validation.ValidationReport(
         artifact_validation.Verdict.UNAVAILABLE, [result]
     )
-    return ClaudeRunResult(None, message, report, events, denials, message)
+    return ClaudeRunResult(
+        None,
+        message,
+        report,
+        events,
+        denials,
+        message,
+        session_id=session_id,
+        resume_failed=resume_failed,
+    )
 
 
 class ClaudeAdapter:
@@ -683,13 +703,28 @@ class ClaudeAdapter:
         events: list[NormalizedEvent] = []
         output_text: list[str] = []
         structured_output: Any = None
+        resume_session_id = str(
+            getattr(ctx, "resume_session_id", None) or ""
+        ) or None
+        session_id = resume_session_id
         try:
             sdk = self._sdk or _load_sdk()
         except Exception as exc:
-            return _unavailable_run(exc, events, denials)
+            return _unavailable_run(
+                exc,
+                events,
+                denials,
+                session_id=session_id,
+                resume_failed=bool(resume_session_id),
+            )
         try:
             callback = make_permission_callback(task, denials, sdk=sdk)
-            options = build_claude_options(task, callback, sdk=sdk)
+            options = build_claude_options(
+                task,
+                callback,
+                sdk=sdk,
+                resume_session_id=resume_session_id,
+            )
         except (CapabilityValidationError, ValueError) as exc:
             failure = artifact_validation.Result(
                 artifact_validation.Verdict.FAIL,
@@ -710,7 +745,13 @@ class ClaudeAdapter:
         try:
             client = sdk.ClaudeSDKClient(options)
         except Exception as exc:
-            return _unavailable_run(exc, events, denials)
+            return _unavailable_run(
+                exc,
+                events,
+                denials,
+                session_id=session_id,
+                resume_failed=bool(resume_session_id),
+            )
         self._clients[token] = client
         self._client = client
         fallback_thread_id = f"{task.research_id}:{task.goal_id}:{task.agent_id}"
@@ -720,6 +761,9 @@ class ClaudeAdapter:
             async for message in client.receive_response():
                 output_text.extend(_assistant_text(message, sdk))
                 if isinstance(message, sdk.ResultMessage):
+                    native_session_id = getattr(message, "session_id", None)
+                    if native_session_id:
+                        session_id = str(native_session_id)
                     candidate = getattr(message, "structured_output", None)
                     if candidate is not None:
                         structured_output = candidate
@@ -775,7 +819,13 @@ class ClaudeAdapter:
                     callback_result = on_event(event)
                     if inspect.isawaitable(callback_result):
                         await callback_result
-            return _unavailable_run(exc, events, denials)
+            return _unavailable_run(
+                exc,
+                events,
+                denials,
+                session_id=session_id,
+                resume_failed=bool(resume_session_id),
+            )
         finally:
             self._clients.pop(token, None)
             if self._client is client:
@@ -832,6 +882,7 @@ class ClaudeAdapter:
             events,
             denials,
             _engine_error_from_events(events),
+            session_id=session_id,
         )
 
 

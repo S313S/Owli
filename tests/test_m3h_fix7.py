@@ -8,7 +8,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.test_m3h_fix6 import TRANSPORT_ERROR, RATE_LIMIT_ERROR, _plan, _task
+from tests.test_m3h_fix6 import (
+    RATE_LIMIT_ERROR,
+    SECTION_BODY,
+    TRANSPORT_ERROR,
+    _plan,
+    _task,
+)
 from tests.test_m3h_ledger import _store
 
 
@@ -274,7 +280,7 @@ def test_假时钟到点取消节化章并把半截JSON节落timeout(tmp_path: P
 
     class HangingAdapter:
         async def run(self, task, ctx, on_event=None):
-            del ctx, on_event
+            del on_event
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
             task.output_path.write_text('{"markdown":"半截', encoding="utf-8")
             started.set()
@@ -410,6 +416,36 @@ def test_墙钟在首次派活前误触发会按剩余预算重挂(tmp_path: Pat
 
     assert [delay for delay, _ in callbacks] == [330.0, 328.0]
     assert agent.agent_id not in scheduler._deadline_expired
+
+
+def test_断连停表仅延长调度器到点时刻而不改基础330(tmp_path: Path) -> None:
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+
+    plan = _deadline_plan(deadline_seconds=330, per_round=1, max_rounds=1)
+    current = [datetime(2026, 8, 27, tzinfo=timezone.utc)]
+    callbacks: list[tuple[float, object]] = []
+    contexts = []
+
+    async def run_task(agent, context):
+        contexts.append(context)
+        context.extend_deadline(200)
+        return TaskRunResult(True, context.engine, actual_count=1)
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: None,
+        lambda: current[0],
+        lambda delay, callback: callbacks.append((delay, callback)),
+        chapter_ledger=_store(tmp_path),
+    )
+    goal = plan.goals[0]
+    scheduler.goal_statuses[goal.goal_id] = "running"
+    asyncio.run(scheduler._execute_agent(goal, goal.agents[0]))
+
+    assert callbacks[0][0] == 330.0
+    current[0] += timedelta(seconds=330)
+    callbacks[0][1]()
+    assert callbacks[1][0] == 200.0
+    assert goal.agents[0].agent_id not in scheduler._deadline_expired
 
 
 def test_stop取消在跑任务走与墙钟同一条取消路径(tmp_path: Path) -> None:
@@ -558,47 +594,74 @@ def test_声明json但整章都是叙述体时仍落对象文档(tmp_path: Path)
     assert run.result.succeeded is True
 
 
-def _transport_adapter(calls: list[str], clock: list[datetime], step: float):
+def _failing_adapter(
+    calls: list[str], clock: list[datetime], step: float, engine_error: str,
+):
     from app.adapters import validation
-    from app.adapters.contracts import EngineRunResult
+    from app.adapters.contracts import EngineRunResult, OwliResult
 
     class Adapter:
         async def run(self, task, ctx, on_event=None):
-            del ctx, on_event
+            del on_event
             calls.append(task.output_path.name)
+            if task.output_path.name == "sec-1.md":
+                task.output_path.parent.mkdir(parents=True, exist_ok=True)
+                task.output_path.write_text(SECTION_BODY, encoding="utf-8")
+                return EngineRunResult(
+                    conclusion=OwliResult(
+                        "done", str(task.output_path), "完成", [], [], [], None,
+                    ),
+                    conclusion_error=None,
+                    validation=validation.validate(ctx, task.validators),
+                    events=[], permission_denials=[],
+                )
             clock[0] += timedelta(seconds=step)
             return EngineRunResult(
                 conclusion=None, conclusion_error=None,
                 validation=validation.ValidationReport(validation.Verdict.PASS, []),
-                events=[], permission_denials=[], engine_error=TRANSPORT_ERROR,
+                events=[], permission_denials=[], engine_error=engine_error,
             )
 
     return Adapter()
 
 
-def _run_budget(tmp_path, *, budget_seconds, step, engine_timeout=300.0):
+def _run_budget(
+    tmp_path, *, budget_seconds, step, engine_timeout=300.0,
+    engine_error=TRANSPORT_ERROR,
+):
     from app.orchestrator.sectioning import run_sectioned_task
 
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
     calls: list[str] = []
+    paused: list[float] = []
     clock = [datetime(2026, 8, 24, tzinfo=timezone.utc)]
     deadline_at = None if budget_seconds is None else clock[0] + timedelta(
         seconds=budget_seconds,
     )
+    context = SimpleNamespace(
+        goal_id="goal-3",
+        engine="claude",
+        extend_deadline=lambda seconds: paused.append(seconds),
+    )
+
+    def timer(delay, callback):
+        clock[0] += timedelta(seconds=delay)
+        callback()
+
     result = asyncio.run(run_sectioned_task(
         plan=_plan(10), agent=SimpleNamespace(
             chapter={"chapter_id": "ch-1", "opening": {"inputs": []}}),
-        context=SimpleNamespace(goal_id="goal-3", engine="claude"),
+        context=context,
         base_task=_task(runs_root, ["file_exists"]),
-        adapter=_transport_adapter(calls, clock, step), store=store,
+        adapter=_failing_adapter(calls, clock, step, engine_error), store=store,
         runs_root=runs_root, now_iso=lambda: clock[0].isoformat(),
-        on_event=lambda event: None, timer=lambda d, cb: cb(),
+        on_event=lambda event: None, timer=timer,
         now=lambda: clock[0], deadline_at=deadline_at,
         engine_timeout_seconds=engine_timeout,
     ))
     rows = {r["chapter_id"]: r for r in store.list_chapters("r-ledger")}
-    return SimpleNamespace(result=result, rows=rows, calls=calls)
+    return SimpleNamespace(result=result, rows=rows, calls=calls, paused=paused)
 
 
 def test_节级重试次数上限是独立常量不沿用max_attempts_per_round(tmp_path: Path) -> None:
@@ -611,9 +674,125 @@ def test_节级重试次数上限是独立常量不沿用max_attempts_per_round(
     assert run.rows["ch-1/sec-2"]["reason"] == "retry_exhausted"
 
 
-def test_剩余墙钟不足一次引擎超时就停派并落timeout(tmp_path: Path) -> None:
-    # 预算 400 s、一次引擎超时 300 s：首派必发，跑掉 200 s 后剩 200 s < 300 s 即停派
-    run = _run_budget(tmp_path, budget_seconds=400, step=200)
+def test_传输断连三次均重试且尝试与退避期间停表(tmp_path: Path) -> None:
+    # 基础预算只有 330 s；每次断连占 200 s，中间退避各 5 s。
+    run = _run_budget(tmp_path, budget_seconds=330, step=200)
+    from app.orchestrator.sectioning import SECTION_RETRY_MAX_ATTEMPTS
+
+    assert run.calls.count("sec-2.md") == SECTION_RETRY_MAX_ATTEMPTS == 3
+    assert run.rows["ch-1/sec-2"]["attempts"] == 3
+    assert run.rows["ch-1/sec-2"]["reason"] == "retry_exhausted"
+    assert sum(run.paused) == 610
+
+
+def test_非断连的引擎超时不重试(tmp_path: Path) -> None:
+    run = _run_budget(
+        tmp_path,
+        budget_seconds=100_000,
+        step=300,
+        engine_error="Claude 任务超时（300 秒），已终止并要求整任务重跑",
+    )
     assert run.calls.count("sec-2.md") == 1
     assert run.rows["ch-1/sec-2"]["status"] == "missing"
     assert run.rows["ch-1/sec-2"]["reason"] == "timeout"
+    assert run.rows["ch-1/sec-2"]["attempts"] == 1
+    assert run.paused == []
+
+
+def _resume_result(*, engine_error=None, session_id=None, resume_failed=False):
+    from app.adapters import validation
+
+    return SimpleNamespace(
+        succeeded=False,
+        conclusion=None,
+        conclusion_error=None,
+        validation=validation.ValidationReport(validation.Verdict.PASS, []),
+        events=[],
+        permission_denials=[],
+        engine_error=engine_error,
+        session_id=session_id,
+        resume_failed=resume_failed,
+    )
+
+
+def _run_resume_case(tmp_path: Path, *, fail_resume: bool):
+    from app.adapters import validation
+    from app.adapters.contracts import EngineRunResult, OwliResult
+    from app.orchestrator.sectioning import run_sectioned_task
+
+    store = _store(tmp_path)
+    runs_root = tmp_path / "runs"
+    contexts: list[str | None] = []
+    events: list[dict] = []
+
+    class Adapter:
+        async def run(self, task, ctx, on_event=None):
+            del on_event
+            if task.output_path.name == "sec-1.md":
+                task.output_path.parent.mkdir(parents=True, exist_ok=True)
+                task.output_path.write_text(SECTION_BODY, encoding="utf-8")
+                return EngineRunResult(
+                    conclusion=OwliResult(
+                        "done", str(task.output_path), "完成", [], [], [], None,
+                    ),
+                    conclusion_error=None,
+                    validation=validation.validate(ctx, task.validators),
+                    events=[], permission_denials=[],
+                )
+            resume_session_id = getattr(ctx, "resume_session_id", None)
+            contexts.append(resume_session_id)
+            if len(contexts) == 1:
+                return _resume_result(
+                    engine_error=TRANSPORT_ERROR, session_id="session-d014",
+                )
+            if fail_resume and len(contexts) == 2:
+                return _resume_result(
+                    engine_error="Claude resume 不可用",
+                    session_id="session-d014",
+                    resume_failed=True,
+                )
+            task.output_path.write_text(SECTION_BODY, encoding="utf-8")
+            return EngineRunResult(
+                conclusion=OwliResult(
+                    "done", str(task.output_path), "完成", [], [], [], None,
+                ),
+                conclusion_error=None,
+                validation=validation.validate(ctx, task.validators),
+                events=[], permission_denials=[],
+            )
+
+    result = asyncio.run(run_sectioned_task(
+        plan=_plan(3),
+        agent=SimpleNamespace(
+            chapter={"chapter_id": "ch-1", "opening": {"inputs": []}},
+        ),
+        context=SimpleNamespace(goal_id="goal-3", engine="claude"),
+        base_task=_task(runs_root, ["file_exists"]),
+        adapter=Adapter(), store=store, runs_root=runs_root,
+        now_iso=lambda: "2026-08-28T00:00:00+00:00",
+        on_event=lambda event: events.append(event), timer=lambda delay, callback: callback(),
+    ))
+    return SimpleNamespace(result=result, contexts=contexts, events=events)
+
+
+def test_断连重试优先带_session_id_resume_且事件可观测(tmp_path: Path) -> None:
+    run = _run_resume_case(tmp_path, fail_resume=False)
+
+    assert run.result.succeeded is True
+    assert run.contexts == [None, "session-d014"]
+    retry_events = [event for event in run.events if event["type"] == "section_retry"]
+    assert [(event["data"]["resume"], event["data"]["session_id"])
+            for event in retry_events] == [(True, "session-d014")]
+
+
+def test_resume_失败同一次重试回退从头跑且事件_resume_false(tmp_path: Path) -> None:
+    run = _run_resume_case(tmp_path, fail_resume=True)
+
+    assert run.result.succeeded is True
+    assert run.contexts == [None, "session-d014", None]
+    retry_events = [event for event in run.events if event["type"] == "section_retry"]
+    assert [(event["data"]["resume"], event["data"]["session_id"])
+            for event in retry_events] == [
+        (True, "session-d014"),
+        (False, "session-d014"),
+    ]

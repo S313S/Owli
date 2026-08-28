@@ -54,6 +54,10 @@ class EngineRunResult:
     events: list[NormalizedEvent]
     permission_denials: list[str]
     engine_error: str | None = None
+    #: Claude ResultMessage 的原生会话 ID；其他引擎保持 None。
+    session_id: str | None = None
+    #: resume 连接阶段未成功，节级可在同一次重试内从头回退。
+    resume_failed: bool = False
 
     @property
     def succeeded(self) -> bool:

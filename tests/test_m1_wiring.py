@@ -724,6 +724,148 @@ def test_claude_执行章把正常收尾消息里的错误原文汇入engine_err
     assert section_failure_reason(result, output_path) == "retry_exhausted"
 
 
+def test_claude_断连结果保留_session_id_且重试上下文写入_resume(
+    tmp_path, monkeypatch,
+):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    class ResultMessage:
+        is_error = True
+        api_error_status = None
+        subtype = "error_during_execution"
+        session_id = "session-new"
+        uuid = "result-error"
+        result = "API Error: The socket connection was closed unexpectedly"
+        structured_output = None
+        errors = [result]
+
+    class Options:
+        values = None
+
+        def __init__(self, **values):
+            Options.values = values
+
+    class Client:
+        def __init__(self, options):
+            self.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+
+        async def receive_response(self):
+            yield ResultMessage()
+
+        async def disconnect(self):
+            pass
+
+    class Sdk:
+        ClaudeAgentOptions = Options
+        ClaudeSDKClient = Client
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    Sdk.ResultMessage = ResultMessage
+
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-1/goals/goal-1/result.md"
+    task = EngineTask(
+        body="续写报告", output_path=output_path, output_format="markdown",
+        research_id="r-1", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+    ctx = _ctx(validation, output_path)
+    ctx.resume_session_id = "session-old"
+
+    result = asyncio.run(ClaudeAdapter(sdk=Sdk).run(task, ctx))
+
+    assert Options.values["resume"] == "session-old"
+    assert result.session_id == "session-new"
+    assert result.resume_failed is False
+
+
+def test_claude_resume_连接失败显式回报供节级从头回退(tmp_path, monkeypatch):
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    class Options:
+        def __init__(self, **values):
+            self.values = values
+
+    class Client:
+        def __init__(self, options):
+            self.options = options
+
+        async def connect(self, prompt):
+            async for _ in prompt:
+                pass
+            raise RuntimeError("session cannot be resumed")
+
+        async def receive_response(self):
+            if False:
+                yield None
+
+        async def disconnect(self):
+            pass
+
+    class Sdk:
+        ClaudeAgentOptions = Options
+        ClaudeSDKClient = Client
+        ResultMessage = type("ResultMessage", (), {})
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-1/goals/goal-1/result.md"
+    task = EngineTask(
+        body="续写报告", output_path=output_path, output_format="markdown",
+        research_id="r-1", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+    ctx = _ctx(validation, output_path)
+    ctx.resume_session_id = "session-old"
+
+    result = asyncio.run(ClaudeAdapter(sdk=Sdk).run(task, ctx))
+
+    assert result.resume_failed is True
+    assert result.session_id == "session-old"
+
+
 def test_codex_adapter_feeds_jsonl_into_rate_route(tmp_path, monkeypatch):
     from app.adapters import validation
     from app.adapters.capability import Capability, FileSystemScope

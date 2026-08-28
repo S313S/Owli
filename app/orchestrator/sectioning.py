@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import re
+from datetime import timedelta
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -114,6 +115,30 @@ async def _wait_before_section_retry(timer: Any, delay: float) -> None:
 
     timer(delay, release)
     await ready
+
+
+async def _emit_section_retry(
+    on_event: Any,
+    *,
+    context: Any,
+    section: Mapping[str, Any],
+    attempt: int,
+    resume: bool,
+    session_id: str | None,
+) -> None:
+    event_result = on_event({
+        "type": "section_retry",
+        "data": {
+            "goal_id": context.goal_id,
+            "chapter_id": section["section_id"],
+            "attempt": attempt,
+            "resume": resume,
+            "session_id": session_id,
+        },
+        "is_error": False,
+    })
+    if inspect.isawaitable(event_result):
+        await event_result
 
 
 async def _run_before_section_deadline(
@@ -586,8 +611,14 @@ def _section_evidence_pool_result(
     )
 
 
-def _ctx(task: EngineTask, runs_root: Path, store: Any) -> validation.Ctx:
-    return validation.Ctx(
+def _ctx(
+    task: EngineTask,
+    runs_root: Path,
+    store: Any,
+    *,
+    resume_session_id: str | None = None,
+) -> validation.Ctx:
+    context = validation.Ctx(
         output_path=task.output_path,
         output_format=task.output_format,
         research_id=task.research_id,
@@ -599,6 +630,11 @@ def _ctx(task: EngineTask, runs_root: Path, store: Any) -> validation.Ctx:
         source_domains=frozenset({"news.ycombinator.com"}),
         runs_root=runs_root,
     )
+    if resume_session_id:
+        # Ctx 仍是统一验证上下文；Claude 适配器只选读这个扩展属性，
+        # Codex 与其他适配器无需参与，编排层也不分支引擎。
+        context.resume_session_id = resume_session_id
+    return context
 
 
 def _placeholder(section: dict[str, Any], reason: str) -> str:
@@ -920,6 +956,10 @@ async def run_sectioned_task(
     section_wall_clock = getattr(context, "section_deadline_seconds", None)
     if section_wall_clock is not None:
         section_wall_clock = float(section_wall_clock)
+    # D-014 调度代拍，待用户追认：传输断连的引擎调用与退避停表后，
+    # “单节实际墙钟 <= 330/1800 s”不再成立；上限变为基础节墙钟 +
+    # 断连重试的实际消耗，最坏可有 3 次各接近 300 s。因此“章墙钟 =
+    # 节数 × 每节值”只对无断连路径成立；基础数值和按节计算公式本轮不改。
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
@@ -1022,6 +1062,31 @@ async def run_sectioned_task(
             if section_wall_clock is not None
             else None
         )
+        resume_session_id: str | None = None
+
+        def pause_deadlines(loop_started: float, clock_started: Any) -> None:
+            """仅在已判定断连或 resume 连接失败后补回这段墙钟。"""
+
+            nonlocal section_deadline, deadline_at
+            loop_elapsed = max(
+                0.0, asyncio.get_running_loop().time() - loop_started,
+            )
+            clock_elapsed = loop_elapsed
+            if callable(now) and clock_started is not None:
+                try:
+                    clock_elapsed = max(
+                        0.0, (now() - clock_started).total_seconds(),
+                    )
+                except (AttributeError, TypeError):
+                    clock_elapsed = loop_elapsed
+            if section_deadline is not None:
+                section_deadline += loop_elapsed
+            if deadline_at is not None:
+                deadline_at += timedelta(seconds=clock_elapsed)
+            extend_deadline = getattr(context, "extend_deadline", None)
+            if callable(extend_deadline):
+                extend_deadline(clock_elapsed)
+
         while True:
             started = store.start_chapter(
                 plan.research_id,
@@ -1128,11 +1193,18 @@ async def run_sectioned_task(
                 validators=["file_exists"],
                 capability=base_task.capability,
             )
+            attempt_loop_started = asyncio.get_running_loop().time()
+            attempt_clock_started = now() if callable(now) else None
             try:
                 result = await _run_before_section_deadline(
                     adapter,
                     section_task,
-                    _ctx(section_task, runs_root, store),
+                    _ctx(
+                        section_task,
+                        runs_root,
+                        store,
+                        resume_session_id=resume_session_id,
+                    ),
                     on_event,
                     section_deadline,
                 )
@@ -1159,6 +1231,56 @@ async def run_sectioned_task(
                         now_iso=now_iso, on_event=on_event,
                     )
                 raise
+            if resume_session_id and bool(getattr(result, "resume_failed", False)):
+                # resume 未建立可用会话时，这段不吃墙钟；同一次节重试
+                # 立即清空 resume 从头跑，不额外占用 SECTION_RETRY_MAX_ATTEMPTS。
+                pause_deadlines(attempt_loop_started, attempt_clock_started)
+                failed_session_id = resume_session_id
+                resume_session_id = None
+                fallback_loop_started = asyncio.get_running_loop().time()
+                fallback_clock_started = now() if callable(now) else None
+                await _emit_section_retry(
+                    on_event,
+                    context=context,
+                    section=section,
+                    attempt=section_attempt,
+                    resume=False,
+                    session_id=failed_session_id,
+                )
+                pause_deadlines(fallback_loop_started, fallback_clock_started)
+                attempt_loop_started = asyncio.get_running_loop().time()
+                attempt_clock_started = now() if callable(now) else None
+                try:
+                    result = await _run_before_section_deadline(
+                        adapter,
+                        section_task,
+                        _ctx(section_task, runs_root, store),
+                        on_event,
+                        section_deadline,
+                    )
+                except SectionWallClockExpired:
+                    await _finish_section_timeout(
+                        plan=plan, context=context, section=section,
+                        section_path=section_path, store=store,
+                        now_iso=now_iso, on_event=on_event,
+                    )
+                    break
+                except asyncio.CancelledError:
+                    cancellation_reason = getattr(
+                        context, "cancellation_reason", None,
+                    )
+                    reason = (
+                        cancellation_reason()
+                        if callable(cancellation_reason)
+                        else None
+                    )
+                    if reason == "timeout":
+                        await _finish_section_timeout(
+                            plan=plan, context=context, section=section,
+                            section_path=section_path, store=store,
+                            now_iso=now_iso, on_event=on_event,
+                        )
+                    raise
             try:
                 artifact_empty = (
                     not section_path.is_file()
@@ -1253,10 +1375,12 @@ async def run_sectioned_task(
                 conclusion_error = getattr(result, "conclusion_error", None)
                 if pool_failed and pool_result is not None:
                     conclusion_error = pool_result.message
-                if (
-                    section_attempt < attempt_budget
-                    and _is_transport_failure(result, reason)
-                ):
+                transport_failure = _is_transport_failure(result, reason)
+                if transport_failure:
+                    # 只有复用 classify_transport_error() 闭集判定为断连才停表；
+                    # 干净引擎超时和其他闭集 reason 一律不经过这里。
+                    pause_deadlines(attempt_loop_started, attempt_clock_started)
+                if section_attempt < attempt_budget and transport_failure:
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
                     if (
@@ -1265,7 +1389,22 @@ async def run_sectioned_task(
                             section_deadline, engine_timeout,
                         )
                     ):
+                        next_session_id = str(
+                            getattr(result, "session_id", None) or ""
+                        ) or None
+                        retry_loop_started = asyncio.get_running_loop().time()
+                        retry_clock_started = now() if callable(now) else None
+                        await _emit_section_retry(
+                            on_event,
+                            context=context,
+                            section=section,
+                            attempt=section_attempt + 1,
+                            resume=bool(next_session_id),
+                            session_id=next_session_id,
+                        )
                         await _wait_before_section_retry(timer, retry_delay)
+                        pause_deadlines(retry_loop_started, retry_clock_started)
+                        resume_session_id = next_session_id
                         continue
                     # 剩余墙钟不足一次引擎超时：停派并按 timeout 定终态（期望 c）。
                     reason = "timeout"
