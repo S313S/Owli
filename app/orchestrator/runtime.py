@@ -1579,8 +1579,81 @@ class RuntimeCoordinator:
                 latest = list(value)
         return latest
 
-    def _missing_entries(self, research_id: str) -> list[dict[str, Any]]:
-        """章节缺失 + unmet，逐条带 goal/chapter/reason 与成文文本。"""
+    def _source_yield_summary(self, research_id: str, plan: Plan | None) -> dict[str, Any]:
+        """§X-1 货 3：源对账——计划里声明的源 vs 实际入库的 evidence.platform vs 源失败事件。
+
+        planned：各采集 agent `capability.sources` 计章数；yielded：evidence 按 platform 计数；
+        unavailable：`source_unavailable / source_empty` 事件按 data.source|platform|provider 归并。
+        missing = 计划有（或报过失败）但入库 0；degraded = 报过失败但仍入库 >0。
+        """
+        planned: Counter[str] = Counter()
+        first_goal: dict[str, str] = {}
+        for goal in (plan.goals if plan is not None else []):
+            for agent in goal.agents:
+                capability = agent.capability if isinstance(agent.capability, dict) else {}
+                for source in capability.get("sources") or []:
+                    planned[str(source)] += 1
+                    first_goal.setdefault(str(source), goal.goal_id)
+        yielded: Counter[str] = Counter(
+            str(row.get("platform") or "") for row in self.store.list_evidence(research_id)
+        )
+        unavailable: dict[str, dict[str, Any]] = {}
+        for event in self.store.list_events_window(research_id, created_since="", limit=5000):
+            payload = event.get("payload") or {}
+            if payload.get("type") not in {"source_unavailable", "source_empty"}:
+                continue
+            data = payload.get("data") or {}
+            source = str(data.get("source") or data.get("platform") or data.get("provider") or "")
+            if not source:
+                continue
+            entry = unavailable.setdefault(source, {"count": 0, "reasons": []})
+            entry["count"] += 1
+            reason = str(data.get("closed_reason") or data.get("reason") or payload["type"])
+            if reason not in entry["reasons"]:
+                entry["reasons"].append(reason)
+        candidates = sorted(set(planned) | set(unavailable))
+        return {
+            "planned": dict(planned),
+            "yielded": {k: v for k, v in yielded.items() if k},
+            "unavailable": unavailable,
+            "first_goal": first_goal,
+            "missing": [s for s in candidates if yielded.get(s, 0) == 0],
+            "degraded": [s for s in candidates if s in unavailable and yielded.get(s, 0) > 0],
+        }
+
+    def _source_yield_entries(self, summary: dict[str, Any], fallback_goal: str) -> list[dict[str, Any]]:
+        """把源对账结果变成缺失清单条目（chapter_id = source/<platform>，两路落盘自动带上）。"""
+        entries: list[dict[str, Any]] = []
+        for source in summary["missing"]:
+            failure = summary["unavailable"].get(source)
+            tail = (
+                f"；失败事件 {failure['count']} 次，原因：{'、'.join(failure['reasons'])}"
+                if failure else ""
+            )
+            entries.append({
+                "goal_id": summary["first_goal"].get(source, fallback_goal),
+                "chapter_id": f"source/{source}",
+                "reason": "source_missing",
+                "text": (
+                    f"未取到的源：{source}（计划 {summary['planned'].get(source, 0)} 章引用，"
+                    f"入库 0 条{tail}）"
+                ),
+            })
+        for source in summary["degraded"]:
+            failure = summary["unavailable"][source]
+            entries.append({
+                "goal_id": summary["first_goal"].get(source, fallback_goal),
+                "chapter_id": f"source/{source}",
+                "reason": "source_degraded",
+                "text": (
+                    f"信息源曾不可用：{source}（失败事件 {failure['count']} 次，"
+                    f"原因：{'、'.join(failure['reasons'])}；仍入库 {summary['yielded'][source]} 条）"
+                ),
+            })
+        return entries
+
+    def _missing_entries(self, research_id: str, plan: Plan | None = None) -> list[dict[str, Any]]:
+        """章节缺失 + unmet + 源对账（§X-1 货 3），逐条带 goal/chapter/reason 与成文文本。"""
         entries = [
             {
                 "goal_id": row["goal_id"],
@@ -1605,6 +1678,12 @@ class RuntimeCoordinator:
                         f"此处缺失：{item['goal_id']}/{chapter_id}；原因：{unmet_text}"
                     ),
                 })
+        if plan is None:
+            plan = load_plan(self.store, research_id)
+        fallback_goal = plan.goals[0].goal_id if plan is not None and plan.goals else "goal-1"
+        entries.extend(self._source_yield_entries(
+            self._source_yield_summary(research_id, plan), fallback_goal,
+        ))
         return entries
 
     def _finalization_notes(self, plan: Plan, scheduler: Any) -> dict[str, Any]:
@@ -1621,7 +1700,7 @@ class RuntimeCoordinator:
                 goal_id for goal_id, status in scheduler.goal_statuses.items()
                 if status in {"failed", "skipped"}
             ],
-            "缺失清单": self._missing_entries(plan.research_id),
+            "缺失清单": self._missing_entries(plan.research_id, plan),
         }
 
     def _summary_body(self, plan: Plan) -> str:
@@ -1801,6 +1880,19 @@ class RuntimeCoordinator:
         # _append_decision_notes 之后文件必然存在，那时再判就永远判不出来。
         report_ready = report_path.is_file()
         self._append_decision_notes(report_path, plan, scheduler)
+        # §X-1 货 3：源对账结果也发事件，判据落 events 表与成稿文本。
+        yield_summary = self._source_yield_summary(research_id, plan)
+        await self.events.publish(research_id, {
+            "type": "source_yield_summary",
+            "data": {
+                "research_id": research_id,
+                "planned": yield_summary["planned"],
+                "yielded": yield_summary["yielded"],
+                "missing": yield_summary["missing"],
+                "degraded": yield_summary["degraded"],
+                "unavailable": yield_summary["unavailable"],
+            },
+        })
         if report_format == "markdown":
             report_validators = [
                 "file_exists",
