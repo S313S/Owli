@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 import inspect
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Mapping
 
 from app.adapters.contracts import PlanningSegmentRequest, PlanningSegmentResult
@@ -251,6 +251,36 @@ class RoutedAdapter:
                 self._backoff_counts.pop(key, None)
 
         self._backoff_tasks[key] = asyncio.create_task(sleep_then_release())
+        return delay
+
+    def _backoff_started_event(
+        self, research_id: str, engine: str, delay: float, cause: str | None
+    ) -> NormalizedEvent:
+        """D-023：退避开始就把「睡多久」写进事件，60 秒和 3 小时不能长一样。"""
+
+        resume_at = None
+        if self._utc_clock is not None:
+            resume_at = (
+                self._utc_clock() + timedelta(seconds=delay)
+            ).isoformat()
+        text = f"退避开始：{int(delay)} 秒后重试"
+        if resume_at is not None:
+            text += f"（预计 {resume_at} 恢复）"
+        return NormalizedEvent(
+            engine=engine,
+            thread_id=research_id,
+            turn_id=None,
+            item_kind=ItemKind.THINKING,
+            text=text,
+            is_error=False,
+            raw={
+                "event": "BACKOFF_STARTED",
+                "delay_seconds": delay,
+                "resume_at": resume_at,
+            },
+            route_state="BACKOFF",
+            cause=cause,
+        )
 
     @staticmethod
     def _event_cause(event: Any) -> str | None:
@@ -312,8 +342,11 @@ class RoutedAdapter:
         async def routed_event(event: Any) -> None:
             route_state = getattr(event, "route_state", None)
             state_value = getattr(route_state, "value", route_state)
+            started_delay = None
             if state_value == "BACKOFF":
-                self._start_backoff(task.research_id, selected_engine, event)
+                started_delay = self._start_backoff(
+                    task.research_id, selected_engine, event
+                )
             reason = str(getattr(event, "reason", None) or getattr(event, "text", ""))
             if state_value == "WARN" and "继续跑会计费" in reason:
                 self._quota_gates.setdefault(task.research_id, asyncio.Event())
@@ -324,6 +357,13 @@ class RoutedAdapter:
                     raise ValueError(f"未知限流让路目标：{target}")
                 self._route_overrides[task.research_id] = target
             await self._emit(on_event, event)
+            if started_delay is not None:
+                await self._emit(on_event, self._backoff_started_event(
+                    task.research_id,
+                    selected_engine,
+                    started_delay,
+                    self._backoff_causes.get((task.research_id, selected_engine)),
+                ))
 
         self._active = adapter
         prepare_source_events(task)

@@ -515,12 +515,15 @@ async def test_BACKOFF_样本挂起同引擎后续_agent_并沿_SSE_恢复(tmp_p
         completed = await wait_for_status(client, research_id, "completed")
         replay = await application.state.event_buffer.replay_after(research_id, None)
 
-    route_states = [
-        event.payload["data"]["state"]
+    route_updates = [
+        event.payload["data"]
         for event in replay.events
         if event.payload.get("type") == "route_update"
     ]
-    assert route_states[:2] == ["BACKOFF", "CONTINUE"]
+    route_states = [item["state"] for item in route_updates]
+    # D-023：退避开始多发一条带时长的 BACKOFF（「睡多久」要在事件里可读）
+    assert route_states[:3] == ["BACKOFF", "BACKOFF", "CONTINUE"]
+    assert "秒后重试" in route_updates[1]["reason"]
     assert [task.agent_id for task in engine.tasks].count("data-collection-2") == 1
     assert completed["status"] == "completed"
 

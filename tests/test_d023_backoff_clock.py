@@ -115,3 +115,57 @@ def test_真限流resets_at在封顶内时照旧睡到重置点():
 
     assert asyncio.run(scenario()) == 300.0
 
+
+def test_退避开始事件带时长与预计恢复时刻(tmp_path):
+    import inspect
+
+    from app.adapters.capability import Capability
+    from app.adapters.contracts import EngineTask
+    from app.adapters.events import ItemKind, NormalizedEvent
+
+    jitter = NormalizedEvent(
+        engine="Claude", thread_id="s-1", turn_id="t-1",
+        item_kind=ItemKind.ERROR, is_error=True,
+        text="疑似网络抖动（代理/传输层）：success，原引擎退避重试",
+        raw={"subtype": "success", "is_error": True},
+        route_state="BACKOFF", suspend_new_tasks=True, cause="transport",
+    )
+
+    class FakeAdapter:
+        def __init__(self, event=None):
+            self.event = event
+
+        async def run(self, task, ctx, on_event=None):
+            del task, ctx
+            if self.event is not None:
+                returned = on_event(self.event)
+                if inspect.isawaitable(returned):
+                    await returned
+            return "ok"
+
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    adapter = RoutedAdapter(
+        adapters={"claude": FakeAdapter(jitter), "codex": FakeAdapter()},
+        resilience_config=CONFIG, backoff_sleep=fake_sleep, utc_clock=lambda: NOW,
+    )
+    task = EngineTask(
+        body="退避可见", output_path=tmp_path / "result.md",
+        output_format="markdown", research_id="r-1", goal_id="goal-1",
+        agent_id="agent-1", agent_kind="report", validators=["file_exists"],
+        capability=Capability(),
+    )
+    observed: list[NormalizedEvent] = []
+    asyncio.run(adapter.run(task, object(), on_event=observed.append))
+
+    started = [e for e in observed if e.raw.get("event") == "BACKOFF_STARTED"]
+    assert [e.raw.get("event") for e in observed] == [None, "BACKOFF_STARTED"]
+    assert started[0].raw["delay_seconds"] == 60.0
+    assert started[0].raw["resume_at"] == "2026-08-28T17:38:34+00:00"
+    assert started[0].route_state == "BACKOFF" and started[0].cause == "transport"
+    assert "60 秒后重试" in started[0].text
+    assert slept == [60.0]
+
