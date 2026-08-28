@@ -75,7 +75,8 @@ def test_调研规模配置默认值环境无关() -> None:
     assert config.fast.source_item_limits == {
         "hacker_news": 100,
         "product_hunt": 10,
-        "web_search": 5,
+        # §SRC-1 货 8：5 → 20，与 xhs/douyin 同量级。
+        "web_search": 20,
         "x": 10,
         "xhs": 25,
         "douyin": 25,
@@ -97,7 +98,7 @@ def test_调研规模配置可由产品配置覆盖() -> None:
     assert config.fast.max_goals == 4
     assert config.fast.max_sources_per_goal == 1
     assert config.fast.source_item_limits["hacker_news"] == 42
-    assert config.fast.source_item_limits["web_search"] == 5
+    assert config.fast.source_item_limits["web_search"] == 20
 
 
 def test_采集响应字节上限有部署默认值且可覆盖() -> None:

@@ -545,11 +545,25 @@ def _agent_prompt(
             (item for item in planning_catalog() if item.source_id == source_id),
             None,
         )
-        method = (
-            f"查询式={query}；调用 {spec.tool_name}；{spec.prompt_hint}。"
-            if spec is not None
-            else f"查询式={query}；按 capability 声明的信息源执行采集。"
-        )
+        # §SRC-1 货 8：原文只说「调用 source.xxx」，模型照样用引擎自带的
+        # web_search——六轮里 source.web_search 零调用，89/76 次搜索全走自带工具。
+        # 自带工具的结果只落在产物文件里，章一超时就整批作废；而 source.* 走 MCP
+        # 是直接落库的。所以这里把它变成硬约束，而不是一句建议。
+        if spec is not None:
+            exclusive_rule = (
+                f"本章证据**只能**来自 {spec.tool_name} 的返回值："
+                "产物里每一条记录的 permalink 都必须是该工具这次返回过的。"
+                "引擎自带的联网搜索只可用来想查询式，"
+                "其结果一律不得写进产物、不得当作证据来源。"
+                f"若 {spec.tool_name} 取不到，按结构化缺口口径如实记录，"
+                "不得用自带搜索补位。"
+            )
+            method = (
+                f"查询式={query}；调用 {spec.tool_name}；"
+                f"{spec.prompt_hint}。{exclusive_rule}"
+            )
+        else:
+            method = f"查询式={query}；按 capability 声明的信息源执行采集。"
         if scale == "fast" and source_id and source_item_limit is not None:
             parameter = _SOURCE_LIMIT_PARAMETERS.get(source_id, "limit")
             method += f"快速档以 {parameter}={source_item_limit} 覆盖默认采集条数。"

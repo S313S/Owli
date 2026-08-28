@@ -135,7 +135,10 @@ _SCALE_DEFAULTS: dict[str, dict[str, Any]] = {
         "source_item_limits": {
             "hacker_news": 100,
             "product_hunt": 10,
-            "web_search": 5,
+            # §SRC-1 货 8：原值 5 是 xhs/douyin(25) 的 1/5，「网页搜索少」是
+            # 这个数字写死的天花板，不是源取不到——实测同一适配器
+            # max_results=20 是 3.02 秒 20 条（解禁依据：decision-log 19:0x）。
+            "web_search": 20,
             "x": 10,
             "xhs": 25,
             "douyin": 25,
