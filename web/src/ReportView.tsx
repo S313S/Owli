@@ -105,7 +105,11 @@ function Markdown({ text, lookup }: { text: string; lookup: Lookup }) {
 }
 
 function References({ report, evidence }: { report: ReportData; evidence: EvidenceView | null }) {
-  const cited = evidence ? evidence.items.filter((i) => i.citation_no != null) : []
+  const listedTitle = new Map(report.sources.map((s) => [s.citation_no, s.title]))
+  const cited = evidence
+    ? evidence.items.filter((i) => i.citation_no != null)
+        .map((i) => (i.title ? i : { ...i, title: listedTitle.get(i.citation_no!) ?? '' }))
+    : []
   const uncited = evidence ? evidence.items.filter((i) => i.citation_no == null) : []
   const rows: EvidenceItem[] = cited.length ? cited : report.sources.map((s) => ({
     id: `src-${s.citation_no}`, citation_no: s.citation_no, permalink: s.permalink, title: s.title, platform: '—',
@@ -154,7 +158,10 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
   const lookup = useMemo<Lookup>(() => {
     const byNo = new Map<number, EvidenceItem | { permalink: string; title: string }>()
     for (const s of report?.sources ?? []) byNo.set(s.citation_no, { permalink: s.permalink, title: s.title })
-    for (const e of evidence?.items ?? []) if (e.citation_no != null) byNo.set(e.citation_no, e)
+    for (const e of evidence?.items ?? []) if (e.citation_no != null) {
+      const listed = byNo.get(e.citation_no)
+      byNo.set(e.citation_no, e.title ? e : { ...e, title: listed?.title ?? '' })
+    }
     return { byNo, listed: new Set(byNo.keys()) }
   }, [report, evidence])
 
