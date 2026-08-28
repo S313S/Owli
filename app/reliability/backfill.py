@@ -804,6 +804,40 @@ def _sync_report_artifact(
     return len(global_citations), summaries[0] if summaries else None
 
 
+def _scored_payloads(
+    pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any], bool]],
+    engine_preference: str,
+) -> list[dict[str, Any]]:
+    """(证据, 标签, 是否本轮引擎判定) → 五维回写载荷；口径与拆分前逐字相同。"""
+
+    payloads: list[dict[str, Any]] = []
+    for item, label, used_engine in pairs:
+        scoring_view = _scoring_view(item, label)
+        missing_dimensions = dict(label.get("missing_dimensions") or {})
+        crossref_verdict = _crossref_verdict(scoring_view["extra"])
+        cluster_stats = None
+        if crossref_verdict in CROSSREF_SCORES:
+            cluster_stats = {"verdict": crossref_verdict}
+        else:
+            missing_dimensions["score_crossref"] = "缺断言血缘簇"
+        scored = score_evidence_partial(
+            scoring_view,
+            missing_dimensions=missing_dimensions,
+            cluster_stats=cluster_stats,
+        )
+        payload = {
+            key: value for key, value in item.items()
+            if key not in {"score_total", "grade"}
+        }
+        payload.update(scored)
+        payload["extra"] = scoring_view["extra"]
+        payload["rated_by"] = _rating_provenance(
+            item, used_engine=used_engine, engine_preference=engine_preference,
+        )
+        payloads.append(payload)
+    return payloads
+
+
 async def backfill_report(
     store: Any,
     report_id: str,
@@ -847,70 +881,38 @@ async def backfill_report(
     target_goals = sorted({str(item.get("goal_id") or "goal-1") for item in targets})
     for goal_id in target_goals:
         goal_targets = [
-            item for item in targets
+            normalized[str(item["id"])] for item in targets
             if str(item.get("goal_id") or "goal-1") == goal_id
         ]
-        for batch_number, start in enumerate(
-            range(0, len(goal_targets), batch_size), 1
-        ):
-            batch = [
-                normalized[str(item["id"])]
-                for item in goal_targets[start:start + batch_size]
-            ]
-            output_path = _batch_output_path(
-                root, report_id, goal_id, batch_number
+        # §X-1 货 1b：先分「本地可复用」与「要进引擎」，只有后者切批——
+        # 此前按全部 targets 每 25 条切，再挑没标签的送引擎，26 条会散成 7 次调用。
+        reusable: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
+        pending: list[dict[str, Any]] = []
+        for item in goal_targets:
+            stored = None if force else _stored_labels([item])
+            if stored is None:
+                pending.append(item)
+            else:
+                reusable.append((item, stored[0], False))
+        if reusable:
+            payloads = _scored_payloads(reusable, engine_preference)
+            store.upsert_evidence_batch(payloads)
+            rated += len(payloads)
+        for batch_number, start in enumerate(range(0, len(pending), batch_size), 1):
+            batch = pending[start:start + batch_size]
+            output_path = _batch_output_path(root, report_id, goal_id, batch_number)
+            engine_labels = await _classify_batch(
+                batch, adapter=adapter, output_path=output_path,
+                report_id=report_id, goal_id=goal_id,
+                engine_preference=engine_preference,
             )
-            labels: list[dict[str, Any] | None] = [None] * len(batch)
-            engine_indexes: list[int] = []
-            for index, item in enumerate(batch):
-                reusable = None if force else _stored_labels([item])
-                if reusable is None:
-                    engine_indexes.append(index)
-                else:
-                    labels[index] = reusable[0]
-            if engine_indexes:
-                engine_labels = await _classify_batch(
-                    [batch[index] for index in engine_indexes],
-                    adapter=adapter,
-                    output_path=output_path,
-                    report_id=report_id,
-                    goal_id=goal_id,
-                    engine_preference=engine_preference,
-                )
-                if engine_labels is None:
-                    failed += len(engine_indexes)
-                else:
-                    for index, label in zip(engine_indexes, engine_labels):
-                        labels[index] = label
-            payloads: list[dict[str, Any]] = []
-            for index, (item, label) in enumerate(zip(batch, labels)):
-                if label is None:
-                    continue
-                scoring_view = _scoring_view(item, label)
-                missing_dimensions = dict(label.get("missing_dimensions") or {})
-                crossref_verdict = _crossref_verdict(scoring_view["extra"])
-                cluster_stats = None
-                if crossref_verdict in CROSSREF_SCORES:
-                    cluster_stats = {"verdict": crossref_verdict}
-                else:
-                    missing_dimensions["score_crossref"] = "缺断言血缘簇"
-                scored = score_evidence_partial(
-                    scoring_view,
-                    missing_dimensions=missing_dimensions,
-                    cluster_stats=cluster_stats,
-                )
-                payload = {
-                    key: value for key, value in item.items()
-                    if key not in {"score_total", "grade"}
-                }
-                payload.update(scored)
-                payload["extra"] = scoring_view["extra"]
-                payload["rated_by"] = _rating_provenance(
-                    item,
-                    used_engine=index in engine_indexes,
-                    engine_preference=engine_preference,
-                )
-                payloads.append(payload)
+            if engine_labels is None:
+                failed += len(batch)
+                continue
+            payloads = _scored_payloads(
+                [(item, label, True) for item, label in zip(batch, engine_labels)],
+                engine_preference,
+            )
             store.upsert_evidence_batch(payloads)
             rated += len(payloads)
 

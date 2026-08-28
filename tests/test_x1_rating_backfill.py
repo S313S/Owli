@@ -136,3 +136,52 @@ def test_环境开关可跳过且默认跑(tmp_path, monkeypatch):
     assert auditor.calls == 0
     assert _events_of(events, "reliability_backfill_skipped")[0]["reason"] == "env_skip"
     assert store.get_report("r-ledger")["status"] == "completed"
+
+
+def _backfill_store(tmp_path: Path, *, pending: int, reusable: int):
+    from tests.test_m4fork_followup import _database, _evidence
+
+    _, store = _database(tmp_path)
+    store.create_report(id="r-batch", title="切批", research_question="引擎调用次数",
+                        created_at="2026-08-29T00:00:00Z")
+    labels = {"authority_kind": "named_secondary", "content_kind": "industry_view",
+              "interest_relation": "arms_length"}
+    # 待评行按 id 顺序打散在可复用行之间（重放里就是这种分布）；
+    # 待评行若排在一起，旧切法也只调 2 次，测不出问题。
+    pending_idx = {i * 7 for i in range(pending)}
+    rows = []
+    for i in range(pending + reusable):
+        extra = {} if i in pending_idx else {
+            "claim_ids": ["c-1"], "crossref_n_clusters": 1, "crossref_verdict": "SINGLE", **labels,
+        }
+        rows.append(_evidence("r-batch", f"{i:03d}", goal_id="goal-1",
+                              permalink=f"https://e.example/{i}", extra=extra))
+    store.upsert_evidence_batch(rows)
+    return store, sorted(pending_idx)
+
+
+def test_货1b_切批只按要进引擎的行_26待评165可复用最多两次调用(tmp_path: Path) -> None:
+    from app.reliability.backfill import backfill_report
+    from tests.test_m4fork_followup import BackfillEngine
+
+    store, pending_idx = _backfill_store(tmp_path, pending=26, reusable=165)
+    engine = BackfillEngine()
+    result = asyncio.run(backfill_report(store, "r-batch", adapter=engine, runs_root=tmp_path / "runs"))
+
+    assert engine.calls <= 2, f"26 条待评不该散成 {engine.calls} 次调用"
+    assert result.rated == 191 and result.failed == 0
+    rows = {row["id"]: row for row in store.list_evidence("r-batch")}
+    assert all(rows[f"ev-{i:03d}"]["rated_by"] == "agent:reliability-auditor@claude" for i in pending_idx)
+    assert rows["ev-001"]["rated_by"] == "rule:reliability-backfill@v1"
+    assert all(row["score_authority"] is not None for row in rows.values())
+
+
+def test_货1b_没有待评行时零次引擎调用(tmp_path: Path) -> None:
+    from app.reliability.backfill import backfill_report
+    from tests.test_m4fork_followup import BackfillEngine
+
+    store, _ = _backfill_store(tmp_path, pending=0, reusable=30)
+    engine = BackfillEngine()
+    result = asyncio.run(backfill_report(store, "r-batch", adapter=engine, runs_root=tmp_path / "runs"))
+
+    assert engine.calls == 0 and result.rated == 30 and result.failed == 0
