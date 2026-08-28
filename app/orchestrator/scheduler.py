@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Mapping
 
 from app.adapters.ratelimit import RouteState
+from app.orchestrator.background import guard_task
 from app.orchestrator.chapter_failure import (
     CHAPTER_FAILURE_REASONS,
     chapter_failure_reason,
@@ -25,6 +27,7 @@ from app.plan.cards import (
 )
 from app.plan.model import Agent, Goal, Plan, agent_kind_of
 
+logger = logging.getLogger(__name__)
 
 R8_CONFIRM_SECONDS = 15 * 60
 repeat_cause_limit = 3
@@ -33,6 +36,7 @@ _MISSING_REASONS = CHAPTER_FAILURE_REASONS
 _ISO_TIMESTAMP_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})"
 )
+
 _LONG_TOKEN_PATTERN = re.compile(r"(?<![0-9A-Za-z])(?:0x)?[0-9A-Fa-f]{8,}(?![0-9A-Za-z])")
 
 
@@ -441,10 +445,11 @@ class Scheduler:
             await task
 
     def _spawn_drive(self) -> asyncio.Task[Any]:
-        task = asyncio.create_task(self._drive())
+        task = asyncio.create_task(self._drive(), name="owli:drive")
         self._drive_tasks.add(task)
         task.add_done_callback(self._drive_tasks.discard)
-        return task
+        # D-013 货 2：`_drive` 死在后台就是整卷停摆，异常必须留痕
+        return guard_task(task, logger=logger, context="调度驱动")
 
     @property
     def drive_pending(self) -> bool:
@@ -569,7 +574,7 @@ class Scheduler:
         if self.goal_statuses[goal_id] != "running":
             return
         await self._fail_goal(goal_id, "goal_deadline")
-        asyncio.create_task(self._drive())
+        self._spawn_drive()
 
     def _set_completed_if_terminal(self) -> None:
         if self.status in {"stopped", "paused"}:
@@ -1119,6 +1124,24 @@ class Scheduler:
             lambda: self._expire_r8(card.card_id),
         )
 
+    def _claim_card(self, entry: dict[str, Any], status: CardStatus) -> bool:
+        """原子占卡（D-013 货 1）。
+
+        「先检查 PENDING、再置状态」中间**一个 await 都不能有**——只要让出一次控制权，
+        第二路回复就能挤进来通过同一个检查，然后在 `_resolve_card` 之后撞上
+        `RuntimeError("卡片已处理")`。这个异常多半落在 `asyncio.create_task` 里没人接
+        （§W-1 第 4/6 轮实测），goal 就此死等。asyncio 单线程，
+        只要这两行之间不 await，check-and-set 就是原子的。
+
+        返回 True 表示占卡成功、由调用方继续跑副作用；False 表示已经有人答过，
+        调用方直接幂等返回。
+        """
+        card: Card = entry["card"]
+        if card.status is not CardStatus.PENDING:
+            return False
+        card.status = status
+        return True
+
     async def _resolve_card(
         self, entry: dict[str, Any], result: dict[str, Any], status: CardStatus
     ) -> None:
@@ -1132,10 +1155,11 @@ class Scheduler:
         try:
             entry = self._cards[card_id]
         except KeyError as exc:
+            # 幂等只覆盖「这张卡已经答过」；不认识的 card_id 是另一回事，继续报错。
             raise ValueError(f"未知卡片：{card_id}") from exc
         card: Card = entry["card"]
-        if card.status is not CardStatus.PENDING:
-            raise RuntimeError(f"卡片已处理：{card_id}")
+        if not self._claim_card(entry, CardStatus.ANSWERED):
+            return
         await self._resolve_card(entry, result, CardStatus.ANSWERED)
         kind = entry["kind"]
         choice = str(
@@ -1193,8 +1217,7 @@ class Scheduler:
         entry = self._cards.get(card_id)
         if entry is None:
             return
-        card: Card = entry["card"]
-        if card.status is not CardStatus.PENDING:
+        if not self._claim_card(entry, CardStatus.EXPIRED_DEFAULTED):
             return
         await self._resolve_card(
             entry,

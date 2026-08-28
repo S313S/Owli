@@ -19,6 +19,7 @@ from app.adapters.capability import Capability
 from app.adapters.contracts import EngineTask
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
+from app.orchestrator.background import guard_task
 from app.orchestrator.scheduler import Scheduler, TaskRunResult
 from app.orchestrator.sectioning import (
     _assemble as assemble_sections,
@@ -239,6 +240,9 @@ class RuntimeCoordinator:
     def _track_auto_task(self, task: asyncio.Task[Any]) -> None:
         self._auto_tasks.add(task)
         task.add_done_callback(self._auto_tasks.discard)
+        # D-013 货 2：后台任务的异常必须被取走并留痕，
+        # 否则只剩解释器那句 `Task exception was never retrieved`，goal 已经死等完了。
+        guard_task(task, logger=logger, context="自动操作")
 
     async def _drain_auto_tasks(
         self,
@@ -1330,7 +1334,18 @@ class RuntimeCoordinator:
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]
         if card.status is not CardStatus.PENDING:
-            raise RuntimeError(f"卡片已处理：{card_id}")
+            # D-013 货 1：重复回复幂等成功。这里检查的是 runtime 自己那份 Card **副本**
+            # （`_emit_scheduler_event` 里 `_external_card` 重建的），scheduler 才是权威，
+            # 副本落后一拍时第二路调用照样能过这道检查。抛出去只有两种下场：
+            # 走后台任务就被吞（goal 死等），走 API 就给用户一句「卡片仍保留，可直接重试」——
+            # 而卡片其实已经答过了。故一律幂等返回已解析的卡片。
+            logger.info(
+                "卡片已处理，忽略重复回复：card_id=%s status=%s action=%s",
+                card_id,
+                card.status.value,
+                action,
+            )
+            return card
         if card.card_type is CardType.QUESTION:
             plan = load_plan(self.store, card.research_id)
             if plan is None:
@@ -1387,6 +1402,7 @@ class RuntimeCoordinator:
         )
         self._drive_watchers.add(task)
         task.add_done_callback(self._drive_watchers.discard)
+        guard_task(task, logger=logger, context="resume 收尾")
 
     async def _finalize_after_drive(self, research_id: str, scheduler: Any) -> None:
         """后台驱动跑完（含自动干预派生的续跑）后收尾，`/resume` 不必阻塞到整轮结束。"""
