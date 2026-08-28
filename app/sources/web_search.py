@@ -449,7 +449,7 @@ def collect_and_store(
             }
         item.update(score_evidence(item))
         item["rated_by"] = "rule:reliability@v1"
-    store.add_evidence_batch(normalized)
+    store.upsert_evidence_batch(normalized)
     return normalized
 
 

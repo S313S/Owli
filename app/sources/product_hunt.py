@@ -332,7 +332,7 @@ def search(
         scored.append(item)
     if store is not None:
         assert report_id is not None and goal_id is not None
-        store.add_evidence_batch([
+        store.upsert_evidence_batch([
             {
                 **item,
                 "id": f"ev-{report_id}-product-hunt-{item['platform_item_id']}",
