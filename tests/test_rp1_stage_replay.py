@@ -21,7 +21,6 @@ import json
 import sqlite3
 from functools import wraps
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 
