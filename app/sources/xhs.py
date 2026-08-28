@@ -15,7 +15,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from app.reliability.scoring import normalize_evidence_metrics
-from app.sources.spec import SourceSpec
+from app.sources.spec import SourceSpec, WindowParam
 
 
 __all__ = ["SOURCE_SPEC", "search"]
@@ -24,6 +24,7 @@ _API_BASE = "https://api.tikhub.io"
 _SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 _ENV_PATH = Path.home() / ".owli" / ".env"
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
+_WINDOW_PARAM = WindowParam()
 _SORT_TYPES = {
     "general", "time_descending", "popularity_descending",
     "comment_descending", "collect_descending",
@@ -32,6 +33,82 @@ _NOTE_TYPES = {"不限", "视频笔记", "普通笔记", "直播笔记"}
 
 # 第二供应商仅保留接缝形态；当前未实现，也不会读取其凭证。
 _FALLBACK_PROVIDER: Callable[..., Any] | None = None
+
+
+_SECRETISH = re.compile(r"[A-Za-z0-9_\-]{24,}")
+_BODY_SUMMARY_LIMIT = 200
+
+
+class TikHubError(RuntimeError):
+    """带上「谁拒绝了我们」的 TikHub 失败（与 `app.sources.douyin` 同构）。
+
+    §SRC-1 诊断：此前只抛裸 `RuntimeError`，事件里被抹平成一个笼统的
+    `tikhub_request_failed`，整轮跑完查不到状态码。这里把端点、HTTP 状态、
+    上游 code 与响应体摘要一路带到事件里。
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        *,
+        endpoint: str,
+        http_status: int | None = None,
+        upstream_code: Any = None,
+        detail: str | None = None,
+    ) -> None:
+        self.kind = kind
+        self.endpoint = _endpoint_path(endpoint)
+        self.http_status = http_status
+        self.upstream_code = upstream_code
+        self.detail = detail
+        super().__init__(
+            f"TikHub 小红书{kind}失败：endpoint={self.endpoint} "
+            f"http={http_status} code={upstream_code} {detail or ''}".strip()
+        )
+
+    @property
+    def closed_reason(self) -> str:
+        if self.kind == "transport":
+            return "tikhub_transport"
+        if self.kind == "bad_response":
+            return "tikhub_bad_response"
+        status = self.http_status
+        if status in {401, 403}:
+            return "tikhub_auth"
+        if status == 429:
+            return "tikhub_http_429"
+        if isinstance(status, int) and 500 <= status < 600:
+            return "tikhub_http_5xx"
+        if isinstance(status, int) and status != 200:
+            return f"tikhub_http_{status}"
+        return "tikhub_upstream_code"
+
+    def event_fields(self) -> dict[str, Any]:
+        return {
+            "endpoint": self.endpoint,
+            "http_status": self.http_status,
+            "upstream_code": self.upstream_code,
+            "detail": self.detail,
+        }
+
+
+def _endpoint_path(url: str) -> str:
+    """只留路径，别把带签名的完整 URL 写进事件。"""
+
+    text = str(url or "")
+    return text.split("?", 1)[0].replace(_API_BASE, "") or text[:80]
+
+
+def _body_summary(payload: Mapping[str, Any]) -> str:
+    """响应体摘要：截断并抹掉任何长串，避免把凭证写进事件与日志。"""
+
+    for key in ("message", "detail", "msg", "error"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return _SECRETISH.sub("<REDACTED>", value.strip())[:_BODY_SUMMARY_LIMIT]
+    return _SECRETISH.sub(
+        "<REDACTED>", json.dumps(payload, ensure_ascii=False)
+    )[:_BODY_SUMMARY_LIMIT]
 
 
 @dataclass(frozen=True)
@@ -99,13 +176,21 @@ def _default_http_get(
         raw = error.read()
         status = error.code
     except (URLError, OSError) as error:
-        raise RuntimeError("TikHub 小红书网络请求失败") from error
+        raise TikHubError(
+            "transport", endpoint=url, detail=type(error).__name__,
+        ) from error
     try:
         payload = json.loads(raw.decode("utf-8")) if raw else {}
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise RuntimeError("TikHub 小红书响应不是合法 JSON") from error
+        raise TikHubError(
+            "bad_response", endpoint=url, http_status=status,
+            detail="响应不是合法 JSON",
+        ) from error
     if not isinstance(payload, Mapping):
-        raise RuntimeError("TikHub 小红书响应不是 JSON 对象")
+        raise TikHubError(
+            "bad_response", endpoint=url, http_status=status,
+            detail="响应不是 JSON 对象",
+        )
     return HttpResponse(status=status, payload=payload)
 
 
@@ -149,13 +234,23 @@ def _integer(item: Mapping[str, Any], *names: str) -> int:
 
 def _response_data(response: HttpResponse) -> Mapping[str, Any]:
     payload = response.payload
-    if response.status != 200 or payload.get("code") != 200:
-        raise RuntimeError(f"TikHub 小红书请求不可用：HTTP {response.status}")
+    upstream_code = payload.get("code")
+    if response.status != 200 or upstream_code != 200:
+        raise TikHubError(
+            "http", endpoint=_SEARCH_PATH, http_status=response.status,
+            upstream_code=upstream_code, detail=_body_summary(payload),
+        )
     data = payload.get("data")
     if not isinstance(data, Mapping):
-        raise RuntimeError("TikHub 小红书响应缺少 data")
+        raise TikHubError(
+            "bad_response", endpoint=_SEARCH_PATH,
+            http_status=response.status, detail="响应缺少 data",
+        )
     if data.get("success") is False or data.get("code") not in {None, 0, 200}:
-        raise RuntimeError("TikHub 小红书上游返回失败")
+        raise TikHubError(
+            "http", endpoint=_SEARCH_PATH, http_status=response.status,
+            upstream_code=data.get("code"), detail="上游返回失败",
+        )
     return data
 
 
@@ -163,7 +258,9 @@ def _notes(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     nested = data.get("data")
     values = nested.get("items") if isinstance(nested, Mapping) else data.get("items")
     if not isinstance(values, list):
-        raise RuntimeError("TikHub 小红书响应缺少 data.items")
+        raise TikHubError(
+            "bad_response", endpoint=_SEARCH_PATH, detail="响应缺少 data.items",
+        )
     notes: list[Mapping[str, Any]] = []
     for item in values:
         if not isinstance(item, Mapping) or item.get("model_type") != "note":
@@ -232,7 +329,11 @@ def _to_evidence(
 
 
 def _unavailable(
-    on_event: EventCallback | None, *, reason: str, forced: bool
+    on_event: EventCallback | None,
+    *,
+    reason: str,
+    forced: bool,
+    error: TikHubError | None = None,
 ) -> list[dict[str, Any]]:
     _emit(
         on_event,
@@ -243,6 +344,7 @@ def _unavailable(
         fallback_available=False,
         forced=forced,
         task_continues=True,
+        **(error.event_fields() if error is not None else {}),
     )
     return []
 
@@ -269,9 +371,11 @@ def search(
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
-    matched = _WINDOW_PATTERN.fullmatch(window)
-    if matched is None:
-        raise ValueError('window 必须形如 "7d" 或 "90d"')
+    # §SRC-1 货 2：先按说明书折算人话时间窗，折不出来才报错，
+    # 且报错要连「该怎么写」一起说（引擎此前传 all / 不限时间 / recent_1_year）。
+    matched = _WINDOW_PATTERN.fullmatch(_WINDOW_PARAM.normalize(window))
+    if matched is None:  # normalize 的输出恒为 Nd，这里只是兜底
+        raise ValueError(_WINDOW_PARAM.rejection_message(window))
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
         raise ValueError("limit 必须为 1–100 整数")
     if sort_type not in _SORT_TYPES:
@@ -328,10 +432,15 @@ def search(
             if not page_notes or not next_page or len(collected) >= limit:
                 break
             if not search_id or not session_id:
-                raise RuntimeError("TikHub 小红书翻页缺少 search_id/session_id")
+                raise TikHubError(
+                    "bad_response", endpoint=_SEARCH_PATH,
+                    detail="翻页缺少 search_id/session_id",
+                )
             page = int(next_page) if isinstance(next_page, int) else page + 1
-    except RuntimeError:
-        return _unavailable(on_event, reason="tikhub_request_failed", forced=False)
+    except TikHubError as error:
+        return _unavailable(
+            on_event, reason=error.closed_reason, forced=False, error=error,
+        )
 
     fetched_at = now().astimezone(timezone.utc).isoformat()
     evidence = [

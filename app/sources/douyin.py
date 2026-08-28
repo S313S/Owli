@@ -24,13 +24,92 @@ _API_BASE = "https://api.tikhub.io"
 _SEARCH_PATH = "/api/v1/douyin/search/fetch_video_search_v5"
 _COMMENTS_PATH = "/api/v1/douyin/app/v3/fetch_video_comments"
 _ENV_PATH = Path.home() / ".owli" / ".env"
-_WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 
 FORBIDDEN_TIKHUB_PATHS = frozenset({
     "/api/v1/douyin/app/v3/fetch_multi_video_high_quality_play_url",
     "/api/v1/douyin/app/v3/fetch_multi_video_v2",
     "/api/v1/douyin/app/v3/fetch_multi_video_statistics",
 })
+
+
+_SECRETISH = re.compile(r"[A-Za-z0-9_\-]{24,}")
+_BODY_SUMMARY_LIMIT = 200
+
+
+class TikHubError(RuntimeError):
+    """带上「谁拒绝了我们」的 TikHub 失败。
+
+    §SRC-1 诊断：此前这里只抛裸 `RuntimeError`，`_unavailable` 又把它抹平成一个
+    笼统的 `tikhub_request_failed`，于是整轮跑完，「抖音为什么失败」在事件、
+    日志里都查不到状态码——B 类原因（供应商/网络瞬时失败）永远无法定性。
+    这里把端点、HTTP 状态、上游 code 与响应体摘要一路带到事件里。
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        *,
+        endpoint: str,
+        http_status: int | None = None,
+        upstream_code: Any = None,
+        detail: str | None = None,
+    ) -> None:
+        self.kind = kind
+        self.endpoint = _endpoint_path(endpoint)
+        self.http_status = http_status
+        self.upstream_code = upstream_code
+        self.detail = detail
+        super().__init__(
+            f"TikHub 抖音{kind}失败：endpoint={self.endpoint} "
+            f"http={http_status} code={upstream_code} {detail or ''}".strip()
+        )
+
+    @property
+    def closed_reason(self) -> str:
+        """事件里的失败分类；细到能直接分诊，不再是一个笼统的字符串。"""
+
+        if self.kind == "transport":
+            return "tikhub_transport"
+        if self.kind == "bad_response":
+            return "tikhub_bad_response"
+        status = self.http_status
+        if status in {401, 403}:
+            return "tikhub_auth"
+        if status == 429:
+            return "tikhub_http_429"
+        if isinstance(status, int) and 500 <= status < 600:
+            return "tikhub_http_5xx"
+        if isinstance(status, int) and status != 200:
+            return f"tikhub_http_{status}"
+        # HTTP 200 但上游 code 非 200：TikHub 自己在响应体里说不行。
+        return "tikhub_upstream_code"
+
+    def event_fields(self) -> dict[str, Any]:
+        return {
+            "endpoint": self.endpoint,
+            "http_status": self.http_status,
+            "upstream_code": self.upstream_code,
+            "detail": self.detail,
+        }
+
+
+def _endpoint_path(url: str) -> str:
+    """只留路径，别把带签名的完整 URL 写进事件。"""
+
+    text = str(url or "")
+    return text.split("?", 1)[0].replace(_API_BASE, "") or text[:80]
+
+
+def _body_summary(payload: Mapping[str, Any]) -> str:
+    """响应体摘要：截断并抹掉任何长串，避免把凭证写进事件与日志。"""
+
+    for key in ("message", "detail", "msg", "error"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return _SECRETISH.sub("<REDACTED>", value.strip())[:_BODY_SUMMARY_LIMIT]
+    return _SECRETISH.sub(
+        "<REDACTED>", json.dumps(payload, ensure_ascii=False)
+    )[:_BODY_SUMMARY_LIMIT]
 
 
 @dataclass(frozen=True)
@@ -109,13 +188,21 @@ def _default_http_request(
         raw = error.read()
         status = error.code
     except (URLError, OSError) as error:
-        raise RuntimeError("TikHub 抖音网络请求失败") from error
+        raise TikHubError(
+            "transport", endpoint=url, detail=type(error).__name__,
+        ) from error
     try:
         payload = json.loads(raw.decode("utf-8")) if raw else {}
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise RuntimeError("TikHub 抖音响应不是合法 JSON") from error
+        raise TikHubError(
+            "bad_response", endpoint=url, http_status=status,
+            detail="响应不是合法 JSON",
+        ) from error
     if not isinstance(payload, Mapping):
-        raise RuntimeError("TikHub 抖音响应不是 JSON 对象")
+        raise TikHubError(
+            "bad_response", endpoint=url, http_status=status,
+            detail="响应不是 JSON 对象",
+        )
     return HttpResponse(status=status, payload=payload)
 
 
@@ -154,11 +241,19 @@ def _request_json(
         encoded,
         timeout_seconds,
     )
-    if response.status != 200 or response.payload.get("code") != 200:
-        raise RuntimeError(f"TikHub 抖音请求不可用：HTTP {response.status}")
+    upstream_code = response.payload.get("code")
+    if response.status != 200 or upstream_code != 200:
+        raise TikHubError(
+            "http", endpoint=path, http_status=response.status,
+            upstream_code=upstream_code,
+            detail=_body_summary(response.payload),
+        )
     data = response.payload.get("data")
     if not isinstance(data, Mapping):
-        raise RuntimeError("TikHub 抖音响应缺少 data")
+        raise TikHubError(
+            "bad_response", endpoint=path, http_status=response.status,
+            detail="响应缺少 data",
+        )
     return data
 
 
@@ -175,7 +270,9 @@ def _integer(item: Mapping[str, Any], *names: str) -> int:
 def _video_items(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     values = data.get("items")
     if not isinstance(values, list):
-        raise RuntimeError("TikHub 抖音搜索响应缺少 items")
+        raise TikHubError(
+            "bad_response", endpoint=_SEARCH_PATH, detail="搜索响应缺少 items",
+        )
     result = []
     for wrapper in values:
         if not isinstance(wrapper, Mapping):
@@ -219,7 +316,10 @@ def _fetch_comments(
         calls += 1
         values = data.get("comments")
         if not isinstance(values, list):
-            raise RuntimeError("TikHub 抖音评论响应缺少 comments")
+            raise TikHubError(
+                "bad_response", endpoint=_COMMENTS_PATH,
+                detail="评论响应缺少 comments",
+            )
         comments.extend(item for item in values if isinstance(item, Mapping))
         has_more = bool(data.get("has_more"))
         response_total = _integer(data, "total")
@@ -315,7 +415,11 @@ def _to_evidence(
 
 
 def _unavailable(
-    on_event: EventCallback | None, *, reason: str, forced: bool
+    on_event: EventCallback | None,
+    *,
+    reason: str,
+    forced: bool,
+    error: TikHubError | None = None,
 ) -> list[dict[str, Any]]:
     _emit(
         on_event,
@@ -325,13 +429,14 @@ def _unavailable(
         provider="tikhub",
         forced=forced,
         task_continues=True,
+        **(error.event_fields() if error is not None else {}),
     )
     return []
 
 
 def search(
     query: str,
-    window: str,
+    window: str = "",
     *,
     limit: int = 10,
     comment_video_limit: int = 3,
@@ -347,12 +452,17 @@ def search(
     rate_gate: RateGate = _RATE_GATE,
     now: Callable[[], datetime] = _utc_now,
 ) -> list[dict[str, Any]]:
-    """搜索抖音视频，并为优先候选拉取评论正文。"""
+    """搜索抖音视频，并为优先候选拉取评论正文。
+
+    §SRC-1 货 3：`window` **不参与检索**——TikHub 的 video_search_v5 没有时间窗
+    参数，此前它只被一条正则校验然后丢掉，却打回了 25% 的调用。现在
+    `SOURCE_SPEC.window = None`，工具 schema 里不再向模型索取这个参数；
+    形参保留且默认空串，只是为了与 `SourceToolAdapter.call` 的位置参数对齐，
+    传什么都不影响结果。
+    """
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
-    if _WINDOW_PATTERN.fullmatch(window) is None:
-        raise ValueError('window 必须形如 "7d" 或 "90d"')
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
         raise ValueError("limit 必须为 1–100 整数")
     if not 1 <= comment_video_limit <= limit:
@@ -410,8 +520,10 @@ def search(
                 break
             pagination = next_pagination
             page += 1
-    except RuntimeError:
-        return _unavailable(on_event, reason="tikhub_request_failed", forced=False)
+    except TikHubError as error:
+        return _unavailable(
+            on_event, reason=error.closed_reason, forced=False, error=error,
+        )
 
     selected = videos[:limit]
     statistics = [
@@ -441,13 +553,14 @@ def search(
             )
             comments_by_index[index] = comments
             completeness_by_index[index] = complete
-        except RuntimeError:
+        except TikHubError as error:
             _emit(
                 on_event,
                 "source_comment_partial",
                 aweme_id=str(selected[index].get("aweme_id") or ""),
-                reason="comment_request_failed",
+                reason=error.closed_reason,
                 task_continues=True,
+                **error.event_fields(),
             )
 
     fetched_at = now().astimezone(timezone.utc).isoformat()
@@ -467,7 +580,8 @@ def search(
         report_id=report_id or "unpersisted",
         goal_id=goal_id or "unpersisted",
         queries=[query.strip()],
-        filters=f"window={window};video_search_v5;comments_app_v3",
+        # 不写 window：video_search_v5 没有时间窗过滤，写进参照集描述是假的。
+        filters="video_search_v5;comments_app_v3",
     )
     if store is not None:
         assert report_id is not None and goal_id is not None
@@ -505,4 +619,6 @@ SOURCE_SPEC = SourceSpec(
     collector_name="抖音数据抓取",
     capability_description="TikHub 视频搜索 V5、视频文案、互动指标与评论正文",
     prompt_hint="优先选择评论量可全取的视频，完整评论区可把完整度上探到 2",
+    # 抖音搜索没有时间窗，别向模型要一个用不上的参数（§SRC-1 货 3）。
+    window=None,
 )

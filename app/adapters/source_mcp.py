@@ -550,6 +550,46 @@ def codex_mcp_args(
     ]
 
 
+def _tool_definition(tool_cls: Any, source_id: str) -> Any:
+    """工具说明书从各源的 `SOURCE_SPEC` 读，不在本文件里硬编码每源参数。
+
+    §SRC-1 货 2/货 3（解禁依据：decision-log 2026-08-28 19:0x，仅 inputSchema
+    构建与 call_tool 的 window 透传两点）：
+    - 此前 `window` 只有 `{"type": "string"}`，模型无从知道要写 `7d`，
+      于是传 `all` / `不限时间` / `recent_1_year`，被源里的正则打回 25% 的调用；
+    - 现在把格式、枚举例子与人话映射写进 description，`enum` 不写死是为了
+      仍允许 `180d` 这类合法值，例子只做示范；
+    - `SOURCE_SPEC.window is None` 的源不再向模型索取这个参数。
+
+    加源只需在自己的 `SOURCE_SPEC` 里声明 window，不必回来改本文件。
+    """
+
+    from app.sources.registry import get_source
+
+    window = get_source(source_id).window
+    properties: dict[str, Any] = {
+        "query": {"type": "string", "description": "检索关键词"},
+    }
+    required = ["query"]
+    if window is not None:
+        properties["window"] = {
+            "type": "string",
+            "description": window.description,
+            "examples": list(window.examples),
+        }
+        required.append("window")
+    return tool_cls(
+        name=f"source.{source_id}",
+        description=f"调用 Owli 注册信息源 {source_id}",
+        inputSchema={
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        },
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Owli source.* stdio MCP server")
     parser.add_argument("--source", action="append", required=True)
@@ -584,22 +624,7 @@ async def _serve(
         store=Store(store_path) if store_path is not None else None,
     )
     response_config = load_source_response_config()
-    tools = [
-        Tool(
-            name=f"source.{source_id}",
-            description=f"调用 Owli 注册信息源 {source_id}",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "window": {"type": "string"},
-                },
-                "required": ["query", "window"],
-                "additionalProperties": False,
-            },
-        )
-        for source_id in source_ids
-    ]
+    tools = [_tool_definition(Tool, source_id) for source_id in source_ids]
 
     async def list_tools(_ctx: Any, _params: Any) -> ListToolsResult:
         return ListToolsResult(tools=tools)
@@ -616,6 +641,8 @@ async def _serve(
         error: Exception | None = None
         result: Any = None
         try:
+            # window 允许缺省：`SOURCE_SPEC.window is None` 的源（如抖音）
+            # schema 里根本没有这个参数（§SRC-1 货 3）。
             result = await adapter.call(
                 name,
                 str(arguments.get("query") or ""),

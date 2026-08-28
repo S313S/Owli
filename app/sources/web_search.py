@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.logging import DEFAULT_LOG_ROOT, append_routing_event
 from app.reliability import normalize_evidence_metrics, score_evidence
-from app.sources.spec import SourceSpec
+from app.sources.spec import SourceSpec, WindowParam
 
 
 __all__ = ["search", "collect_and_store"]
@@ -30,6 +30,7 @@ _EXA_KEY_PATTERN = re.compile(
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
+_WINDOW_PARAM = WindowParam()
 _REQUEST_TIMEOUT_SECONDS = 20.0
 
 HttpPost = Callable[[str, Mapping[str, str], Mapping[str, Any], float], Mapping[str, Any]]
@@ -314,9 +315,10 @@ def search(
         raise ValueError("query 必须是非空字符串")
     if not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1:
         raise ValueError("max_results 必须是正整数")
-    matched = _WINDOW_PATTERN.fullmatch(window)
-    if matched is None:
-        raise ValueError('window 必须形如 "90d" 或 "30d"')
+    # §SRC-1 货 2（解禁：仅时间窗归一一处）：先折算人话时间窗再校验。
+    matched = _WINDOW_PATTERN.fullmatch(_WINDOW_PARAM.normalize(window))
+    if matched is None:  # normalize 的输出恒为 Nd，这里只是兜底
+        raise ValueError(_WINDOW_PARAM.rejection_message(window))
     credentials = _load_credentials(env_path)
     fetched_at = _iso(clock())
     if fetched_at is None:
