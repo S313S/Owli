@@ -794,10 +794,18 @@ def _ctx(
     return context
 
 
-def _placeholder(section: dict[str, Any], reason: str) -> str:
+def _placeholder(
+    section: dict[str, Any],
+    reason: str,
+    *,
+    goal_id: str | None = None,
+) -> str:
+    # section.goal_id 表示本节对应的上游 goal；单节占位文件则必须
+    # 使用实际写入目录所属的 context.goal_id，避免路径与内容自相矛盾。
+    owner_goal_id = goal_id or section["goal_id"]
     return (
-        f"## {section['goal_id']}｜{section['title']}\n\n"
-        f"- 此处缺失：{section['goal_id']}/{section['section_id']}；原因：{reason}\n"
+        f"## {owner_goal_id}｜{section['title']}\n\n"
+        f"- 此处缺失：{owner_goal_id}/{section['section_id']}；原因：{reason}\n"
     )
 
 
@@ -841,7 +849,10 @@ async def _finish_section_timeout(
 
     rejected_path = _preserve_rejected_artifact(section_path)
     conclusion_error = _conclusion_error_with_rejected_path(None, rejected_path)
-    section_path.write_text(_placeholder(section, "timeout"), encoding="utf-8")
+    section_path.write_text(
+        _placeholder(section, "timeout", goal_id=context.goal_id),
+        encoding="utf-8",
+    )
     store.finish_chapter(
         plan.research_id,
         context.goal_id,
@@ -1544,7 +1555,10 @@ async def run_sectioned_task(
                 conclusion_error = _conclusion_error_with_rejected_path(
                     conclusion_error, rejected_path,
                 )
-                section_path.write_text(_placeholder(section, reason), encoding="utf-8")
+                section_path.write_text(
+                    _placeholder(section, reason, goal_id=context.goal_id),
+                    encoding="utf-8",
+                )
                 store.finish_chapter(
                     plan.research_id,
                     context.goal_id,

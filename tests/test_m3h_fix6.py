@@ -205,6 +205,23 @@ def test_真429不走传输重试_仍归quota_exhausted(tmp_path):
     assert run.delays == []
 
 
+def test_缺失占位文件使用所属目录goal_id而非节目标goal_id(tmp_path):
+    _run(
+        tmp_path,
+        per_round=3,
+        sec1_error=RATE_LIMIT_ERROR,
+        sec2_errors=[None],
+    )
+
+    placeholder = tmp_path / "runs/r-ledger/goals/goal-3/report/sec-1.md"
+    assert placeholder.is_file()
+    assert placeholder.parents[1].name == "goal-3"
+    text = placeholder.read_text(encoding="utf-8")
+    assert text.startswith("## goal-3｜")
+    assert "此处缺失：goal-3/ch-1/sec-1" in text
+    assert "goal-2/ch-1/sec-1" not in text
+
+
 def test_章级下一轮重新派活传输耗尽的节(tmp_path):
     store = _store(tmp_path)
     first = _run(tmp_path, per_round=1, sec2_errors=[TRANSPORT_ERROR], store=store)
