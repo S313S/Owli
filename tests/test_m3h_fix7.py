@@ -418,7 +418,7 @@ def test_墙钟在首次派活前误触发会按剩余预算重挂(tmp_path: Pat
     assert agent.agent_id not in scheduler._deadline_expired
 
 
-def test_断连停表仅延长调度器到点时刻而不改基础330(tmp_path: Path) -> None:
+def test_断连不产生第二次重挂且调度器到点时刻不变(tmp_path: Path) -> None:
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
 
     plan = _deadline_plan(deadline_seconds=330, per_round=1, max_rounds=1)
@@ -428,8 +428,12 @@ def test_断连停表仅延长调度器到点时刻而不改基础330(tmp_path: 
 
     async def run_task(agent, context):
         contexts.append(context)
-        context.extend_deadline(200)
-        return TaskRunResult(True, context.engine, actual_count=1)
+        return TaskRunResult(
+            False,
+            context.engine,
+            reason="retry_exhausted",
+            engine_error=TRANSPORT_ERROR,
+        )
 
     scheduler = Scheduler(
         plan, run_task, lambda event: None,
@@ -442,10 +446,11 @@ def test_断连停表仅延长调度器到点时刻而不改基础330(tmp_path: 
     asyncio.run(scheduler._execute_agent(goal, goal.agents[0]))
 
     assert callbacks[0][0] == 330.0
+    assert not hasattr(contexts[0], "extend_deadline")
     current[0] += timedelta(seconds=330)
     callbacks[0][1]()
-    assert callbacks[1][0] == 200.0
-    assert goal.agents[0].agent_id not in scheduler._deadline_expired
+    assert [delay for delay, _ in callbacks] == [330.0]
+    assert goal.agents[0].agent_id in scheduler._deadline_expired
 
 
 def test_stop取消在跑任务走与墙钟同一条取消路径(tmp_path: Path) -> None:
@@ -620,6 +625,7 @@ def _failing_adapter(
                 conclusion=None, conclusion_error=None,
                 validation=validation.ValidationReport(validation.Verdict.PASS, []),
                 events=[], permission_denials=[], engine_error=engine_error,
+                session_id=("session-b-prime" if engine_error == TRANSPORT_ERROR else None),
             )
 
     return Adapter()
@@ -634,7 +640,8 @@ def _run_budget(
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
     calls: list[str] = []
-    paused: list[float] = []
+    events: list[dict] = []
+    delays: list[float] = []
     clock = [datetime(2026, 8, 24, tzinfo=timezone.utc)]
     deadline_at = None if budget_seconds is None else clock[0] + timedelta(
         seconds=budget_seconds,
@@ -642,10 +649,11 @@ def _run_budget(
     context = SimpleNamespace(
         goal_id="goal-3",
         engine="claude",
-        extend_deadline=lambda seconds: paused.append(seconds),
+        section_deadline_seconds=budget_seconds,
     )
 
     def timer(delay, callback):
+        delays.append(delay)
         clock[0] += timedelta(seconds=delay)
         callback()
 
@@ -656,12 +664,14 @@ def _run_budget(
         base_task=_task(runs_root, ["file_exists"]),
         adapter=_failing_adapter(calls, clock, step, engine_error), store=store,
         runs_root=runs_root, now_iso=lambda: clock[0].isoformat(),
-        on_event=lambda event: None, timer=timer,
+        on_event=lambda event: events.append(event), timer=timer,
         now=lambda: clock[0], deadline_at=deadline_at,
         engine_timeout_seconds=engine_timeout,
     ))
     rows = {r["chapter_id"]: r for r in store.list_chapters("r-ledger")}
-    return SimpleNamespace(result=result, rows=rows, calls=calls, paused=paused)
+    return SimpleNamespace(
+        result=result, rows=rows, calls=calls, events=events, delays=delays,
+    )
 
 
 def test_节级重试次数上限是独立常量不沿用max_attempts_per_round(tmp_path: Path) -> None:
@@ -674,15 +684,32 @@ def test_节级重试次数上限是独立常量不沿用max_attempts_per_round(
     assert run.rows["ch-1/sec-2"]["reason"] == "retry_exhausted"
 
 
-def test_传输断连三次均重试且尝试与退避期间停表(tmp_path: Path) -> None:
-    # 基础预算只有 330 s；每次断连占 200 s，中间退避各 5 s。
-    run = _run_budget(tmp_path, budget_seconds=330, step=200)
-    from app.orchestrator.sectioning import SECTION_RETRY_MAX_ATTEMPTS
+def test_断连在预算内resume重试且预算耗尽即timeout(tmp_path: Path) -> None:
+    # 330 s 节墙钟：第一次断连耗 100 s 后仍够退避并 resume；第二次后不够 136 s。
+    run = _run_budget(tmp_path, budget_seconds=330, step=100)
 
-    assert run.calls.count("sec-2.md") == SECTION_RETRY_MAX_ATTEMPTS == 3
-    assert run.rows["ch-1/sec-2"]["attempts"] == 3
-    assert run.rows["ch-1/sec-2"]["reason"] == "retry_exhausted"
-    assert sum(run.paused) == 610
+    assert run.calls.count("sec-2.md") == 2
+    assert run.rows["ch-1/sec-2"]["attempts"] == 2
+    assert run.rows["ch-1/sec-2"]["reason"] == "timeout"
+    assert run.delays == [5.0]
+    retry_events = [event for event in run.events if event["type"] == "section_retry"]
+    assert [event["data"] for event in retry_events] == [{
+        "goal_id": "goal-3",
+        "chapter_id": "ch-1/sec-2",
+        "attempt": 2,
+        "resume": True,
+        "session_id": "session-b-prime",
+    }]
+
+
+def test_剩余节墙钟不足136秒时不重试且如实落timeout(tmp_path: Path) -> None:
+    run = _run_budget(tmp_path, budget_seconds=330, step=200)
+
+    assert run.calls.count("sec-2.md") == 1
+    assert run.rows["ch-1/sec-2"]["reason"] == "timeout"
+    assert run.rows["ch-1/sec-2"]["attempts"] == 1
+    assert not [event for event in run.events if event["type"] == "section_retry"]
+    assert run.delays == []
 
 
 def test_非断连的引擎超时不重试(tmp_path: Path) -> None:
@@ -696,7 +723,7 @@ def test_非断连的引擎超时不重试(tmp_path: Path) -> None:
     assert run.rows["ch-1/sec-2"]["status"] == "missing"
     assert run.rows["ch-1/sec-2"]["reason"] == "timeout"
     assert run.rows["ch-1/sec-2"]["attempts"] == 1
-    assert run.paused == []
+    assert run.delays == []
 
 
 def _resume_result(*, engine_error=None, session_id=None, resume_failed=False):

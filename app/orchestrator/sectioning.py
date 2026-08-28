@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import json
 import re
-from datetime import timedelta
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -36,8 +35,14 @@ def should_section(kind: str, output_format: str) -> bool:
 #: （D-008 期望 c —— 那个值是章级轮内次数，默认 10，节级照抄会把一章拖成黑洞）。
 SECTION_RETRY_MAX_ATTEMPTS = 3
 
-#: 拿不到适配器超时时的「一次引擎超时」兜底口径，与两个引擎的默认值同档。
-FALLBACK_ENGINE_TIMEOUT_SECONDS = 300.0
+#: 上一轮基线整跑 `r-0f92790bfe37` 中，全部 done 且只在同父章内相邻作差的
+#: 撰写节耗时为 136 / 159 / 201 / 213 / 244 / 248 / 267 / 275 / 283 秒；
+#: 最小值 136 s = `goal-1/ch-4/sec-2`（report-writing），首节无可靠起点不硬算。
+#: 唯一的真实 resume 样本（`r-6215aa582053`/`goal-3/ch-4/sec-3`）跑满约 336 s 未完成，
+#: 预算内重试大概率救不回；136 s 只保证不做明显跑不完的重试。
+#: 改这个数必须带新的实测来源，优先等一个 done 的 resume 样本。
+SECTION_RESUME_COST_FLOOR_SECONDS = 136.0
+
 EVIDENCE_POOL_LIMIT = 99
 SECTION_EVIDENCE_POOL_LIMIT = 30
 _EVIDENCE_SCORE_FIELDS = (
@@ -68,20 +73,6 @@ def _declared_shape(agent: Any) -> str:
     if isinstance(output, Mapping):
         return str(output.get("shape", "") or "").strip().casefold()
     return ""
-
-
-def _retry_within_deadline(
-    now: Any, deadline_at: Any, engine_timeout_seconds: float,
-) -> bool:
-    """剩余墙钟不足一次引擎超时就不再派：节级重试总和受章墙钟约束（期望 c）。"""
-
-    if deadline_at is None or now is None:
-        return True
-    try:
-        remaining = (deadline_at - now()).total_seconds()
-    except (AttributeError, TypeError):
-        return True
-    return remaining >= engine_timeout_seconds
 
 
 def _is_transport_failure(result: Any, reason: str) -> bool:
@@ -173,15 +164,29 @@ async def _run_before_section_deadline(
     return run.result()
 
 
-def _section_retry_within_deadline(
-    deadline: float | None, engine_timeout_seconds: float,
+def _section_resume_within_deadline(
+    deadline: float | None,
+    *,
+    retry_delay: float,
+    wall_clock_seconds: float | None,
+    wall_clock_started_at: Any,
+    now: Any,
 ) -> bool:
-    """剩余单节墙钟必须够一次完整引擎调用，才允许再次派活。"""
+    """退避照常吃节墙钟；退避后至少还剩一次 resume 的实测成本下限。"""
 
-    if deadline is None:
+    remaining: float | None = None
+    if wall_clock_seconds is not None and wall_clock_started_at is not None and callable(now):
+        try:
+            remaining = wall_clock_seconds - (
+                now() - wall_clock_started_at
+            ).total_seconds()
+        except (AttributeError, TypeError):
+            remaining = None
+    if remaining is None and deadline is not None:
+        remaining = deadline - asyncio.get_running_loop().time()
+    if remaining is None:
         return True
-    remaining = deadline - asyncio.get_running_loop().time()
-    return remaining >= engine_timeout_seconds
+    return remaining - retry_delay >= SECTION_RESUME_COST_FLOOR_SECONDS
 
 
 def _chapter_id(agent: Any) -> str:
@@ -946,20 +951,9 @@ async def run_sectioned_task(
             if row["goal_id"] == context.goal_id
         }
     attempt_budget = _section_attempt_budget()
-    if deadline_at is None:
-        deadline_at = getattr(context, "deadline_at", None)
-    engine_timeout = float(
-        engine_timeout_seconds
-        if engine_timeout_seconds is not None
-        else FALLBACK_ENGINE_TIMEOUT_SECONDS
-    )
     section_wall_clock = getattr(context, "section_deadline_seconds", None)
     if section_wall_clock is not None:
         section_wall_clock = float(section_wall_clock)
-    # D-014 调度代拍，待用户追认：传输断连的引擎调用与退避停表后，
-    # “单节实际墙钟 <= 330/1800 s”不再成立；上限变为基础节墙钟 +
-    # 断连重试的实际消耗，最坏可有 3 次各接近 300 s。因此“章墙钟 =
-    # 节数 × 每节值”只对无断连路径成立；基础数值和按节计算公式本轮不改。
     retry_delay = float(
         CHAPTER_RETRY_INTERVAL_SECONDS.get(getattr(plan, "scale", ""), 0.0)
     )
@@ -1062,30 +1056,8 @@ async def run_sectioned_task(
             if section_wall_clock is not None
             else None
         )
+        section_wall_clock_started_at = now() if callable(now) else None
         resume_session_id: str | None = None
-
-        def pause_deadlines(loop_started: float, clock_started: Any) -> None:
-            """仅在已判定断连或 resume 连接失败后补回这段墙钟。"""
-
-            nonlocal section_deadline, deadline_at
-            loop_elapsed = max(
-                0.0, asyncio.get_running_loop().time() - loop_started,
-            )
-            clock_elapsed = loop_elapsed
-            if callable(now) and clock_started is not None:
-                try:
-                    clock_elapsed = max(
-                        0.0, (now() - clock_started).total_seconds(),
-                    )
-                except (AttributeError, TypeError):
-                    clock_elapsed = loop_elapsed
-            if section_deadline is not None:
-                section_deadline += loop_elapsed
-            if deadline_at is not None:
-                deadline_at += timedelta(seconds=clock_elapsed)
-            extend_deadline = getattr(context, "extend_deadline", None)
-            if callable(extend_deadline):
-                extend_deadline(clock_elapsed)
 
         while True:
             started = store.start_chapter(
@@ -1193,8 +1165,6 @@ async def run_sectioned_task(
                 validators=["file_exists"],
                 capability=base_task.capability,
             )
-            attempt_loop_started = asyncio.get_running_loop().time()
-            attempt_clock_started = now() if callable(now) else None
             try:
                 result = await _run_before_section_deadline(
                     adapter,
@@ -1232,13 +1202,10 @@ async def run_sectioned_task(
                     )
                 raise
             if resume_session_id and bool(getattr(result, "resume_failed", False)):
-                # resume 未建立可用会话时，这段不吃墙钟；同一次节重试
-                # 立即清空 resume 从头跑，不额外占用 SECTION_RETRY_MAX_ATTEMPTS。
-                pause_deadlines(attempt_loop_started, attempt_clock_started)
+                # resume 未建立可用会话时，同一次节重试清空 resume 从头跑；
+                # 这段仍由原始绝对节墙钟约束，不补回任何时间。
                 failed_session_id = resume_session_id
                 resume_session_id = None
-                fallback_loop_started = asyncio.get_running_loop().time()
-                fallback_clock_started = now() if callable(now) else None
                 await _emit_section_retry(
                     on_event,
                     context=context,
@@ -1247,9 +1214,6 @@ async def run_sectioned_task(
                     resume=False,
                     session_id=failed_session_id,
                 )
-                pause_deadlines(fallback_loop_started, fallback_clock_started)
-                attempt_loop_started = asyncio.get_running_loop().time()
-                attempt_clock_started = now() if callable(now) else None
                 try:
                     result = await _run_before_section_deadline(
                         adapter,
@@ -1376,24 +1340,19 @@ async def run_sectioned_task(
                 if pool_failed and pool_result is not None:
                     conclusion_error = pool_result.message
                 transport_failure = _is_transport_failure(result, reason)
-                if transport_failure:
-                    # 只有复用 classify_transport_error() 闭集判定为断连才停表；
-                    # 干净引擎超时和其他闭集 reason 一律不经过这里。
-                    pause_deadlines(attempt_loop_started, attempt_clock_started)
                 if section_attempt < attempt_budget and transport_failure:
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
-                    if (
-                        _retry_within_deadline(now, deadline_at, engine_timeout)
-                        and _section_retry_within_deadline(
-                            section_deadline, engine_timeout,
-                        )
+                    if _section_resume_within_deadline(
+                        section_deadline,
+                        retry_delay=retry_delay,
+                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
                     ):
                         next_session_id = str(
                             getattr(result, "session_id", None) or ""
                         ) or None
-                        retry_loop_started = asyncio.get_running_loop().time()
-                        retry_clock_started = now() if callable(now) else None
                         await _emit_section_retry(
                             on_event,
                             context=context,
@@ -1403,10 +1362,9 @@ async def run_sectioned_task(
                             session_id=next_session_id,
                         )
                         await _wait_before_section_retry(timer, retry_delay)
-                        pause_deadlines(retry_loop_started, retry_clock_started)
                         resume_session_id = next_session_id
                         continue
-                    # 剩余墙钟不足一次引擎超时：停派并按 timeout 定终态（期望 c）。
+                    # 退避后的剩余节墙钟不足一次 resume 成本下限：如实 timeout。
                     reason = "timeout"
                 rejected_path = _preserve_rejected_artifact(section_path)
                 conclusion_error = _conclusion_error_with_rejected_path(

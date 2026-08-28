@@ -67,8 +67,6 @@ class TaskContext:
     section_deadline_seconds: float | None = None
     #: 在取消清理阶段读取 scheduler 已登记的原因；节化执行据此区分 timeout 与 /stop。
     cancellation_reason: Callable[[], str | None] | None = None
-    #: 传输断连停表时累加章墙钟延长量；其他失败不得调用。
-    extend_deadline: Callable[[float], None] | None = None
 
 
 RunTask = Callable[[Agent, TaskContext], Awaitable[TaskRunResult | Any]]
@@ -214,7 +212,6 @@ class Scheduler:
         self._deadline_expired: set[str] = set()
         self._deadline_armed: set[str] = set()
         self._deadline_rearming: set[str] = set()
-        self._deadline_extensions: dict[str, float] = {}
         if self._chapter_ledger is not None:
             self._chapter_ledger.ensure_chapters(
                 plan.research_id,
@@ -669,16 +666,6 @@ class Scheduler:
         self._cancel_reasons[agent_id] = reason
         task.cancel()
 
-    def _extend_chapter_deadline(self, agent_id: str, seconds: float) -> None:
-        """只为已判定的传输断连停表；基础章墙钟数值与按节计算不变。"""
-
-        extension = max(0.0, float(seconds))
-        if extension <= 0:
-            return
-        self._deadline_extensions[agent_id] = (
-            self._deadline_extensions.get(agent_id, 0.0) + extension
-        )
-
     def _arm_chapter_deadline(self, agent: Agent, deadline_seconds: float) -> None:
         """章第一次派活时挂上墙钟定时器：到点主动取消在跑任务，不等它自己返回。"""
 
@@ -687,25 +674,20 @@ class Scheduler:
         self._deadline_armed.add(agent.agent_id)
 
         def expire() -> None:
-            extension = self._deadline_extensions.get(agent.agent_id, 0.0)
-            started_at = self._agent_started_at.get(agent.agent_id)
-            elapsed = (
-                (self._clock() - started_at).total_seconds()
-                if started_at is not None
-                else 0.0
-            )
-            effective_deadline = float(deadline_seconds) + extension
-            # 假时钟提前触发，或传输断连已停表：按当前有效到点
-            # 时刻重挂。原始 timer 不撤销，到点回调自校即可避免竞态。
-            if (
-                self._attempts.get(agent.agent_id, 0) < 1
-                or (extension > 0 and elapsed < effective_deadline)
-            ):
+            # 一次都还没派活就到点的，只可能是假时钟把定时器提前触发了：
+            # 此时没有可取消的对象；按绝对 deadline 的剩余时间重挂，不能永久放弃。
+            if self._attempts.get(agent.agent_id, 0) < 1:
                 # 同步假 timer 会在 `_timer()` 栈内立刻再调 expire；只抑制这种
                 # 重入，真实异步 timer 返回后标记即清，下一次到点仍正常生效。
                 if agent.agent_id in self._deadline_rearming:
                     return
-                remaining = max(0.0, effective_deadline - elapsed)
+                started_at = self._agent_started_at.get(agent.agent_id)
+                elapsed = (
+                    (self._clock() - started_at).total_seconds()
+                    if started_at is not None
+                    else 0.0
+                )
+                remaining = max(0.0, float(deadline_seconds) - elapsed)
                 self._deadline_rearming.add(agent.agent_id)
                 try:
                     self._timer(remaining, expire)
@@ -838,11 +820,7 @@ class Scheduler:
             )
             deadline_at = (
                 self._agent_started_at[agent.agent_id]
-                + timedelta(
-                    seconds=deadline_seconds + self._deadline_extensions.get(
-                        agent.agent_id, 0.0,
-                    )
-                )
+                + timedelta(seconds=deadline_seconds)
                 if deadline_seconds is not None
                 else None
             )
@@ -858,9 +836,6 @@ class Scheduler:
                 section_deadline_seconds=section_deadline_seconds,
                 cancellation_reason=lambda agent_id=agent.agent_id: (
                     self._cancel_reasons.get(agent_id)
-                ),
-                extend_deadline=lambda seconds, agent_id=agent.agent_id: (
-                    self._extend_chapter_deadline(agent_id, seconds)
                 ),
             )
             run_future = asyncio.ensure_future(
@@ -948,7 +923,7 @@ class Scheduler:
                 self._chapter_ledger is not None
                 and deadline_seconds is not None
                 and (self._clock() - self._agent_started_at[agent.agent_id]).total_seconds()
-                >= deadline_seconds + self._deadline_extensions.get(agent.agent_id, 0.0)
+                >= deadline_seconds
                 and not result.succeeded
                 and result.chapter_status not in {"missing", "deferred"}
             ):

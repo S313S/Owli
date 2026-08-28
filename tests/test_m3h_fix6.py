@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from tests.test_m3h_ledger import _store
@@ -59,7 +60,14 @@ def _task(runs_root, validators):
     )
 
 
-def _adapter(sec2_errors: list[str | None], calls: list[str], sec1_error=None):
+def _adapter(
+    sec2_errors: list[str | None],
+    calls: list[str],
+    sec1_error=None,
+    *,
+    clock=None,
+    failure_step: float = 0.0,
+):
     """sec-1 默认恒成功；sec-2 依次按 sec2_errors 给结果（None = 成功）。"""
 
     from app.adapters import validation
@@ -74,6 +82,8 @@ def _adapter(sec2_errors: list[str | None], calls: list[str], sec1_error=None):
                 index = min(len([c for c in calls if c == "sec-2.md"]), len(sec2_errors))
                 engine_error = sec2_errors[index - 1]
             if engine_error is not None:
+                if clock is not None:
+                    clock[0] += timedelta(seconds=failure_step)
                 return EngineRunResult(
                     conclusion=None, conclusion_error=None,
                     validation=validation.ValidationReport(validation.Verdict.PASS, []),
@@ -94,7 +104,8 @@ def _adapter(sec2_errors: list[str | None], calls: list[str], sec1_error=None):
 
 
 def _run(tmp_path, *, per_round, sec2_errors, store=None, calls=None,
-         validators=None, events=None, delays=None, sec1_error=None):
+         validators=None, events=None, delays=None, sec1_error=None,
+         section_wall_clock=None, failure_step=0.0):
     from app.orchestrator.sectioning import run_sectioned_task
 
     store = store if store is not None else _store(tmp_path)
@@ -102,25 +113,38 @@ def _run(tmp_path, *, per_round, sec2_errors, store=None, calls=None,
     calls = calls if calls is not None else []
     events = events if events is not None else []
     delays = delays if delays is not None else []
+    clock = [datetime(2026, 8, 22, tzinfo=timezone.utc)]
 
     async def on_event(event):
         events.append(event)
 
     def timer(delay, callback):
         delays.append(delay)
+        clock[0] += timedelta(seconds=delay)
         callback()
 
     result = asyncio.run(run_sectioned_task(
         plan=_plan(per_round),
         agent=SimpleNamespace(chapter={"chapter_id": "ch-1", "opening": {"inputs": []}}),
-        context=SimpleNamespace(goal_id="goal-3", engine="claude"),
+        context=SimpleNamespace(
+            goal_id="goal-3",
+            engine="claude",
+            section_deadline_seconds=section_wall_clock,
+        ),
         base_task=_task(runs_root, validators or ["file_exists"]),
-        adapter=_adapter(sec2_errors, calls, sec1_error),
+        adapter=_adapter(
+            sec2_errors,
+            calls,
+            sec1_error,
+            clock=clock,
+            failure_step=failure_step,
+        ),
         store=store,
         runs_root=runs_root,
         now_iso=lambda: "2026-08-22T00:00:03Z",
         on_event=on_event,
         timer=timer,
+        now=lambda: clock[0],
     ))
     rows = {r["chapter_id"]: r for r in store.list_chapters("r-ledger")}
     return SimpleNamespace(result=result, rows=rows, calls=calls,
@@ -144,18 +168,31 @@ def test_节级传输断连退避重试后成功_不落missing也不换引擎(tm
     assert run.result.succeeded is True
 
 
-def test_连续断连耗尽max_attempts_per_round才落retry_exhausted(tmp_path):
-    run = _run(tmp_path, per_round=3, sec2_errors=[TRANSPORT_ERROR])
+def test_连续断连在剩余预算不足时落timeout并保留重试事件协议(tmp_path):
+    run = _run(
+        tmp_path,
+        per_round=3,
+        sec2_errors=[TRANSPORT_ERROR],
+        section_wall_clock=330,
+        failure_step=100,
+    )
 
-    assert run.calls.count("sec-2.md") == 3
+    assert run.calls.count("sec-2.md") == 2
     assert run.rows["ch-1/sec-2"]["status"] == "missing"
-    assert run.rows["ch-1/sec-2"]["reason"] == "retry_exhausted"
-    assert run.rows["ch-1/sec-2"]["attempts"] == 3
+    assert run.rows["ch-1/sec-2"]["reason"] == "timeout"
+    assert run.rows["ch-1/sec-2"]["attempts"] == 2
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
-    assert run.delays == [5.0, 5.0]
+    assert run.delays == [5.0]
     assert [e["type"] for e in run.events] == [
-        "section_retry", "section_retry", "section_error",
+        "section_retry", "section_error",
     ]
+    assert run.events[0]["data"] == {
+        "goal_id": "goal-3",
+        "chapter_id": "ch-1/sec-2",
+        "attempt": 2,
+        "resume": False,
+        "session_id": None,
+    }
 
 
 def test_真429不走传输重试_仍归quota_exhausted(tmp_path):
