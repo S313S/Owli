@@ -77,3 +77,41 @@ def test_退避任务自己被取消也按已释放处理_不向等待者抛取�
 
     assert asyncio.run(scenario()) == "transport"
 
+
+def test_status_allowed_的额度播报不得当限流时钟_回落档位表():
+    async def scenario() -> float | None:
+        adapter = _adapter([])
+        event = SimpleNamespace(
+            raw={"rate_limit_info": ALLOWED_INFO}, cause="transport"
+        )
+        return adapter._start_backoff("r", "claude", event)
+
+    delay = asyncio.run(scenario())
+    assert delay == 60.0
+    assert delay < 3 * 3600  # 修前 = 11546 秒（睡到 04:50）
+
+
+def test_真限流尊重resets_at但被backoff_max_seconds封顶():
+    async def scenario() -> float | None:
+        adapter = _adapter([])
+        event = SimpleNamespace(
+            raw={"rate_limit_info": {**ALLOWED_INFO, "status": "rejected"}},
+            cause="rate_limit",
+        )
+        return adapter._start_backoff("r", "claude", event)
+
+    assert asyncio.run(scenario()) == 900.0
+
+
+def test_真限流resets_at在封顶内时照旧睡到重置点():
+    async def scenario() -> float | None:
+        adapter = _adapter([])
+        resets_at = (NOW + timedelta(seconds=300)).isoformat()
+        event = SimpleNamespace(
+            raw={"api_error_status": 429, "resets_at": resets_at},
+            cause="rate_limit",
+        )
+        return adapter._start_backoff("r", "claude", event)
+
+    assert asyncio.run(scenario()) == 300.0
+

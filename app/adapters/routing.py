@@ -182,6 +182,13 @@ class RoutedAdapter:
         raw = getattr(event, "raw", None)
         raw = raw if isinstance(raw, Mapping) else {}
         info = raw.get("rate_limit_info") or raw.get("rateLimitInfo") or raw
+        if not isinstance(info, Mapping):
+            return None
+        # D-023：Claude CLI 会周期性播报 status="allowed" 的 rate_limit_info，
+        # 那是纯信息（额度窗口何时重置），不是限流；抖动退避不得借它的时钟睡觉。
+        status = info.get("status")
+        if isinstance(status, str) and status.strip().casefold() == "allowed":
+            return None
         value = next((
             info.get(name)
             for name in (
@@ -211,11 +218,15 @@ class RoutedAdapter:
             or "rateLimitInfo" in raw
         )
 
-    def _start_backoff(self, research_id: str, engine: str, event: Any) -> None:
+    def _start_backoff(
+        self, research_id: str, engine: str, event: Any
+    ) -> float | None:
+        """起一次退避；返回本次睡眠秒数，已有退避在跑时返回 None。"""
+
         key = (research_id, engine)
         current = self._backoff_tasks.get(key)
         if current is not None and not current.done():
-            return
+            return None
         count = self._backoff_counts.get(key, 0)
         reset_at = self._reset_at(event)
         if reset_at is None:
@@ -227,6 +238,9 @@ class RoutedAdapter:
                 0.0,
                 (reset_at - self._utc_clock()).total_seconds(),
             )
+        # D-023：无论时钟来自哪里，一次退避不得超过档位封顶；
+        # 到点重判，别让一条外部时间戳决定整个研究睡多久。
+        delay = min(delay, float(self._resilience_config.backoff_max_seconds))
         self._backoff_counts[key] = count + 1
         self._backoff_causes[key] = self._event_cause(event) or "normal"
 
