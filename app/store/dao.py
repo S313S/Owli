@@ -661,6 +661,17 @@ class Store:
     def _evidence_identity(
         self, connection: sqlite3.Connection, payload: dict[str, Any]
     ) -> str | None:
+        """按两个唯一键依次认行：native identity 认不出就回落 permalink。
+
+        evidence 有**两个**唯一键——`UNIQUE(report_id, permalink)` 永远生效，
+        `UNIQUE(report_id, platform, platform_item_id)` 在 platform_item_id 非空时生效。
+        原实现只查其中一个，认不出就直接 INSERT，于是同一条 permalink 只要
+        platform 那一列的词对不上（引擎写 "xiaohongshu"、适配器写 "xhs"），
+        就撞 UNIQUE(report_id, permalink) 抛 IntegrityError——D-019。
+        回落这一次查是保底：别名归一（evidence_artifacts.normalize_platform）漏掉
+        任何新词时，这里仍然认得出是同一行。
+        """
+        row = None
         platform_item_id = payload["platform_item_id"]
         if platform_item_id:
             row = connection.execute(
@@ -670,7 +681,7 @@ class Store:
                 """,
                 (payload["report_id"], payload["platform"], platform_item_id),
             ).fetchone()
-        else:
+        if row is None:
             row = connection.execute(
                 "SELECT id FROM evidence WHERE report_id = ? AND permalink = ?",
                 (payload["report_id"], payload["permalink"]),
