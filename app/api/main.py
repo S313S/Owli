@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
 import os
 import sys
 import uuid
@@ -28,6 +29,7 @@ from app.adapters.selfcheck import (
 from app.adapters.recall import PrimaryEngineRecallJudge
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
+from app.orchestrator.background import guard_task
 from app.orchestrator.runtime import RuntimeCoordinator
 from app.plan.generate import PlanGenerationError
 from app.plan.cards import (
@@ -54,6 +56,8 @@ from app.store.recall import RecallRepository, RecallResult, RecallService
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = ROOT / "var" / "owli.db"
@@ -463,7 +467,8 @@ def create_app(
         task = asyncio.create_task(operation, name=name)
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
-        return task
+        # D-013 货 2：后台任务的异常必须留痕，不许只剩解释器那句 never retrieved
+        return guard_task(task, logger=logger, context="HTTP 后台任务")
 
     def start_plan_generation(
         research_id: str,
@@ -893,12 +898,10 @@ def create_app(
                     },
                 },
             )
-        task = asyncio.create_task(
+        task = track_background(
+            f"owli:scheduler:{research_id}",
             run_in_background(research_id, runtime.start_research(updated)),
-            name=f"owli:scheduler:{research_id}",
         )
-        background_tasks.add(task)
-        task.add_done_callback(background_tasks.discard)
         return remember(
             scope,
             x_request_id,
@@ -930,6 +933,21 @@ def create_app(
             },
         )
 
+    def _require_started_scheduler(research_id: str, verb: str) -> None:
+        """规划期没有 scheduler，`/pause`、`/stop` 以前一律 500（§W-1 登记）。
+
+        500 是句假话——没有任何东西崩了，只是这一刻还没到能暂停的阶段。
+        照实说：研究不存在给 404，规划期给 409 并写清现在能做什么。
+        规划期真正可暂停（挂起计划生成任务）是另一件事，见 worklog 挂账。
+        """
+        if research_id not in researches:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+        if runtime.scheduler_for(research_id) is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"计划尚未开跑，现在还不能{verb}；请等计划批准后再试，或直接放弃这次调研。",
+            )
+
     @application.post("/api/researches/{research_id}/pause")
     async def pause_research(
         research_id: str,
@@ -939,6 +957,7 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        _require_started_scheduler(research_id, "暂停")
         await runtime.pause(research_id)
         response = await change_state(research_id, "paused", "已暂停")
         response["data"]["actions"] = [
@@ -974,6 +993,7 @@ def create_app(
         hit = cached(scope, x_request_id)
         if hit is not None:
             return hit
+        _require_started_scheduler(research_id, "终止")
         await runtime.stop(research_id)
         response = await change_state(research_id, "stopped", "已终止")
         # 终止后仍留一个恢复出口：停下的章已复位，/resume 会按未完成部分继续
