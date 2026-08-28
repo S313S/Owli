@@ -131,3 +131,20 @@ body { margin: 0; background: #f5f5f5; }
   .brand small { display: none; }
   .board-page { padding-inline: 16px; }
 }
+
+/* §DLV-1 报告可读页 */
+.report-view { line-height: 1.7; }
+.report-view h1 { font-size: 20px; margin: 12px 0 8px; }
+.report-view h2 { font-size: 17px; margin: 18px 0 8px; border-left: 3px solid #1f3864; padding-left: 8px; }
+.report-view h3 { font-size: 15px; margin: 14px 0 6px; }
+.report-view table { border-collapse: collapse; margin: 8px 0; }
+.report-view th, .report-view td { border: 1px solid #e5e5e5; padding: 4px 8px; }
+.report-view blockquote { border-left: 3px solid #b4c7e7; margin: 8px 0; padding: 2px 10px; color: #595959; }
+.report-view code { background: #f5f5f5; padding: 0 4px; border-radius: 3px; }
+.report-section-placeholder { background: #fff7e6; border: 1px dashed #ed7d31; padding: 6px 10px; border-radius: 6px; }
+.citation-mark { font-size: 12px; padding: 0 3px; color: #1f3864; background: #d9e1f2; border-radius: 3px; margin: 0 1px; text-decoration: none; }
+.citation-mark.dangling { background: #fce4d6; color: #ed7d31; }
+.citation-card { max-width: 420px; }
+.citation-card .dims { font-family: Calibri, monospace; }
+.report-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.report-missing-group { margin-bottom: 8px; }

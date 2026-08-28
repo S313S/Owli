@@ -1,5 +1,6 @@
 import { Alert, Card, Empty, List, Space, Tag, Typography } from 'antd'
 import type { ResearchSnapshot } from './types'
+import ReportView from './ReportView'
 
 const statusColor: Record<string, string> = {
   completed: 'success', failed: 'error', archived: 'default',
@@ -64,7 +65,7 @@ export default function HistoricalResearchView({ snapshot }: { snapshot: Researc
     <section className="history-grid">
       <Card title="报告产物" className="history-report" data-testid="history-report">
         {reportBody
-          ? <pre className="history-report-body">{reportBody}</pre>
+          ? <ReportView researchId={snapshot.research_id} fallback={reportBody} />
           : <Alert
               type="warning"
               showIcon
