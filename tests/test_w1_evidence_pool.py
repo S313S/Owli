@@ -283,7 +283,10 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
     assert len(truncations) == 1
     assert truncations[0]["data"]["omitted_count"] == 71
     assert truncations[0]["data"]["limit"] == 30
-    assert "本节可引用证据已裁剪至 30 条，未列出的不得引用" in bodies["sec-1.md"]
+    assert "本节可见角标池已裁剪至 30 条" in bodies["sec-1.md"]
+    assert "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面" in bodies[
+        "sec-1.md"
+    ]
     assert validation._CITATION.fullmatch("[S99]")
     assert validation._CITATION.fullmatch("[S100]") is None
 
@@ -518,29 +521,59 @@ def test_evidence只有无goal归属行时回退池仍非空():
     assert citations == {"https://evidence.example/orphan": 1}
 
 
-def test_被单节裁掉的_URL_出现在正文则节校验失败(tmp_path):
+def test_库内但被本节裁掉的_URL_出现在正文则节校验通过(tmp_path):
+    real_urls = [
+        "https://ai.36kr.com/note-detail/3568010593718096",
+        "https://apps.apple.com/cn/app/%E8%85%BE%E8%AE%AF%E4%BC%9A%E8%AE%AE-%E5%A4%9A%E4%BA%BA%E5%AE%9E%E6%97%B6%E8%A7%86%E9%A2%91%E4%BC%9A%E8%AE%AE%E8%BD%AF%E4%BB%B6/id1484048379?platform=mac",
+        "https://apps.apple.com/cn/app/%E8%AE%AF%E9%A3%9E%E5%90%AC%E8%A7%81-ai%E5%BD%95%E9%9F%B3%E8%BD%AC%E6%96%87%E5%AD%97%E8%AF%AD%E9%9F%B3%E7%BF%BB%E8%AF%91/id6468032133?mt=12",
+        "https://apps.apple.com/cn/app/%E9%80%9A%E4%B9%89%E5%90%AC%E6%82%9F-%E4%BC%9A%E8%AE%AE%E8%AE%B0%E5%BD%95-%E8%AF%AD%E9%9F%B3%E8%BD%AC%E6%96%87%E5%AD%97-%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81%E7%A5%9E%E5%99%A8-ai%E5%8A%A9%E6%89%8B/id6779209228",
+        "https://apps.apple.com/cn/app/%E9%A3%9E%E4%B9%A6-%E5%AD%97%E8%8A%82%E8%B7%B3%E5%8A%A8%E6%97%97%E4%B8%8B-ai-%E5%B7%A5%E4%BD%9C%E5%B9%B3%E5%8F%B0/id1401729613",
+        "https://apps.apple.com/cn/app/%E9%A3%9E%E4%B9%A6-%E5%AD%97%E8%8A%82%E8%B7%B3%E5%8A%A8%E6%97%97%E4%B8%8B-ai-%E5%B7%A5%E4%BD%9C%E5%B9%B3%E5%8F%B0/id1401729613?platform=mac",
+        "https://developer.aliyun.com/note/256265125",
+        "https://help.aliyun.com/zh/tingwu/release-notes",
+        "https://m.app.mi.com/details?id=com.iflyrec.tjapp",
+        "https://meeting.tencent.com/support/topic/2082/index.html",
+        "https://www.feishu.cn/content/article/7578773484596153570",
+        "https://www.feishu.cn/content/article/7600354931119311830",
+        "https://www.feishu.cn/hc/zh-CN/articles/360043073734-%E9%A3%9E%E4%B9%A6%E5%8A%9F%E8%83%BD%E5%8F%98%E5%8C%96%E8%B7%AF%E5%BE%84",
+        "https://www.iflyrec.com/zhuanxie/697c1750.html",
+        "https://www.tingwu.cn",
+    ]
+
     def seed(store, goal_id):
         if store.list_evidence("r-ledger"):
             return
-        for index in range(1, 32):
+        for index in range(1, 31):
             _add_evidence(
                 store,
                 evidence_id=f"ev-{index:03d}",
                 goal_id=goal_id,
                 permalink=f"https://evidence.example/{index:03d}",
             )
+        for index, permalink in enumerate(real_urls, start=31):
+            _add_evidence(
+                store,
+                evidence_id=f"ev-{index:03d}",
+                goal_id=goal_id,
+                permalink=permalink,
+            )
 
     def render(pool, section_task):
         del section_task
         assert len(pool["items"]) == 30
-        assert all(item["evidence_id"] != "ev-031" for item in pool["items"])
+        assert not ({item["permalink"] for item in pool["items"]} & set(real_urls))
         item = pool["items"][0]
         return (
-            f"## 结论\n\n- 错引被裁条目 {item['citation']}\n\n"
-            f"## 信息源\n\n- {item['citation']} [被裁证据](https://evidence.example/031)\n"
+            "## 结论\n\n"
+            + "\n".join(
+                f"- 库内裁剪外链接 {url} {item['citation']}"
+                for url in real_urls
+            )
+            + f"\n\n## 信息源\n\n- {item['citation']} "
+            f"[{item['title']}]({item['permalink']})\n"
         )
 
-    result, _, _, _, _, _ = _run_sectioned(
+    result, store, _, _, _, _ = _run_sectioned(
         tmp_path,
         goal_ids=["goal-1"],
         declared_paths=[],
@@ -548,8 +581,37 @@ def test_被单节裁掉的_URL_出现在正文则节校验失败(tmp_path):
         render=render,
     )
 
-    assert result.succeeded is False
-    assert result.chapter_status == "missing"
+    assert result.succeeded is True
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_claims_permalink_用_research_全量证据池而非本节裁剪子集(tmp_path):
+    from app.orchestrator.sectioning import _section_evidence_pool_result
+
+    visible_url = "https://evidence.example/visible"
+    cropped_url = "https://evidence.example/cropped"
+    section_path = tmp_path / "sec-1.md"
+    section_path.write_text(json.dumps({
+        "markdown": (
+            "## 结论\n\n- 裁剪外证据仍在 research 池内 [S01]。\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        "claims": [{
+            "id": "c-0101",
+            "text": "裁剪外证据仍可联接",
+            "evidence": [{"permalink": cropped_url}],
+        }],
+    }, ensure_ascii=False), encoding="utf-8")
+    pool = {"items": [{
+        "citation": "[S01]",
+        "permalink": visible_url,
+    }]}
+
+    result = _section_evidence_pool_result(
+        section_path, pool, {visible_url, cropped_url},
+    )
+
+    assert result.verdict is validation.Verdict.PASS
 
 
 def test_证据池为空不回退_done_产物_URL_且整章判红(tmp_path):

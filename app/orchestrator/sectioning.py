@@ -482,9 +482,11 @@ def _raw_urls(text: str) -> set[str]:
 
 
 def _section_evidence_pool_result(
-    section_path: Path, pool: Mapping[str, Any],
+    section_path: Path,
+    pool: Mapping[str, Any],
+    allowed_urls: set[str],
 ) -> validation.Result:
-    """校验节正文的角标、来源 URL 与 claims permalink 均来自本节证据池。"""
+    """角标按本节可见子集解析，URL 与 claims 按 research 全量证据池判定。"""
 
     items = list(pool.get("items", []))
     if not items:
@@ -515,7 +517,6 @@ def _section_evidence_pool_result(
             claims = list(payload["claims"])
 
     by_mark = {str(item["citation"]): str(item["permalink"]) for item in items}
-    allowed_urls = set(by_mark.values())
     offenders: list[str] = []
     used_marks = set(validation._CITATION.findall(markdown))
     offenders.extend(sorted(used_marks - set(by_mark)))
@@ -958,6 +959,11 @@ async def run_sectioned_task(
     # source_mcp 可在并发 goal 中直写 evidence，因此证据行也必须与
     # input_rows 同时冻结；合并编号和每节证据池共用这一份快照。
     evidence_rows = store.list_evidence(plan.research_id)
+    all_evidence_urls = {
+        str(row.get("permalink") or "")
+        for row in evidence_rows
+        if str(row.get("permalink") or "")
+    }
     _, citation_numbers = _evidence_index(
         evidence_rows, report_goal_ids,
     )
@@ -987,7 +993,7 @@ async def run_sectioned_task(
             )
             section_path = section_root / section["filename"]
             if _section_evidence_pool_result(
-                section_path, frozen_pool,
+                section_path, frozen_pool, all_evidence_urls,
             ).verdict is not validation.Verdict.PASS:
                 stale_done_ids.append(section["section_id"])
         if stale_done_ids:
@@ -1065,8 +1071,8 @@ async def run_sectioned_task(
             section_path = section_root / section["filename"]
             if evidence_pool["items"]:
                 pool_notice = (
-                    "下方证据池是本节唯一引用源。正文角标与『信息源』清单里的 Sxx "
-                    "必须逐字取自池；清单只列正文实际引用过的池条目。"
+                    "下方证据池是本节角标的唯一来源。正文角标与『信息源』"
+                    "清单里的 Sxx 必须逐字取自池；清单只列正文实际使用的角标。"
                 )
             else:
                 pool_notice = (
@@ -1075,8 +1081,8 @@ async def run_sectioned_task(
                 )
             if omitted_count:
                 pool_notice += (
-                    f" 本节可引用证据已裁剪至 {len(evidence_pool['items'])} 条，"
-                    "未列出的不得引用。"
+                    f" 本节可见角标池已裁剪至 {len(evidence_pool['items'])} 条；"
+                    "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面。"
                 )
             body = (
                 f"{base_task.body}\n\n"
@@ -1210,7 +1216,9 @@ async def run_sectioned_task(
                         )
                     raise
             pool_result = (
-                _section_evidence_pool_result(section_path, evidence_pool)
+                _section_evidence_pool_result(
+                    section_path, evidence_pool, all_evidence_urls,
+                )
                 if persist_goal_evidence is not None and not artifact_empty
                 else None
             )
