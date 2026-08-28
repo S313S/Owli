@@ -517,6 +517,40 @@ def _target_is_findings(target: Mapping[str, Any] | None) -> bool:
     return len(identifiers & _FINDINGS_FIELDS) >= 2
 
 
+SOURCE_HANDBOOK_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "app" / "prompts" / "common" / "sources-v1.md"
+)
+
+
+def render_source_handbook(scale: str = "standard") -> str:
+    """信息源手册：静态通用页 + 按注册表生成的逐源表（§SRC-1）。
+
+    加源只改各源自己的 `SOURCE_SPEC`，逐源表自动更新——不必回来改这里，
+    也不必手工维护一份会漂的清单（M6 接微信/MediaCrawler 时直接受益）。
+    """
+
+    page = SOURCE_HANDBOOK_PATH.read_text(encoding="utf-8").rstrip("\n")
+    limits = load_research_scale_config().profile(scale).source_item_limits
+    rows = ["", "## 5. 当前可用的源", "",
+            "| 工具 | 是什么 | 时间窗 | 本档名额 | 要点 |",
+            "|---|---|---|---|---|"]
+    for spec in planning_catalog():
+        parameter = _SOURCE_LIMIT_PARAMETERS.get(spec.source_id, "limit")
+        limit = limits.get(spec.source_id)
+        quota = f"`{parameter}={limit}`" if limit is not None else "按章任务给定"
+        window = (
+            " / ".join(f"`{item}`" for item in spec.window.examples)
+            if spec.window is not None else "**本源不要这个参数**"
+        )
+        rows.append(
+            f"| `{spec.tool_name}` | {spec.display_name}："
+            f"{spec.capability_description} | {window} | {quota} | "
+            f"{spec.prompt_hint} |"
+        )
+    return page + "\n" + "\n".join(rows) + "\n"
+
+
 def _agent_prompt(
     query: str,
     task: str,
@@ -616,13 +650,17 @@ def _agent_prompt(
                 "conflicts，证据不足写入 gaps；可靠度复核只能在该结构内补字段，"
                 "不得把 findings 改写成逐证据评级数组。"
             )
-    return (
+    body = (
         f"目标：{task}；把可复核结果写入 {output['path']}。\n"
         f"方法要点：{method}{chart_rule}\n"
         f"产物结构：format={output['format']}；校验约束={structure}；{evidence_rule}\n"
         "边界与降级：命中不足时保留实际小数组并写明数量，不放宽时间窗或 points 阈值；"
         "无法满足某条验收时在结构化结论 unmet 逐条列明。"
     )
+    if agent_kind in {"data_collection", "browser_automation"}:
+        # §SRC-1：采集 agent 共用一页信息源手册（参数格式、名额、失败怎么办）。
+        body += f"\n\n---\n\n{render_source_handbook(scale)}"
+    return body
 
 
 def _deliverable(raw: Any, goal_id: str) -> dict[str, str]:
