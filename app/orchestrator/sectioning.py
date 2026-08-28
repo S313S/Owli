@@ -48,6 +48,10 @@ EVIDENCE_POOL_LIMIT = 99
 #: 一节论证的 20 个号。空 goal 不占保底额，保底总量超过 S01-S99 时按比例退化。
 EVIDENCE_POOL_GOAL_FLOOR = 20
 SECTION_EVIDENCE_POOL_LIMIT = 30
+#: 单节 30 个池位里，先留给本节 goal 的下限（§SRC-1 货 6）。
+#: 取 20 与 `EVIDENCE_POOL_GOAL_FLOOR` 同源：一节论证需要的号数；
+#: 剩下 10 个位留给跨 goal 对照证据（货 5 放开的那条用法）。
+SECTION_GOAL_FLOOR = 20
 _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence",
@@ -377,24 +381,23 @@ def _allowed_evidence_goal_ids(
     }
 
 
-def _section_evidence_rows(
+def _round_robin_by_platform(
     rows: list[dict[str, Any]],
     section_goal_id: str | None,
-    *,
-    limit: int = SECTION_EVIDENCE_POOL_LIMIT,
+    limit: int,
 ) -> list[dict[str, Any]]:
-    """goal 相关项在各平台内优先，再按平台名稳定轮转。"""
+    """在给定行集内按平台名稳定轮转，取满 limit 为止。"""
 
+    if limit <= 0:
+        return []
     buckets: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        platform = str(row.get("platform") or "")
-        buckets.setdefault(platform, []).append(row)
+        buckets.setdefault(str(row.get("platform") or ""), []).append(row)
     for platform_rows in buckets.values():
         platform_rows.sort(key=lambda row: (
             0 if str(row.get("goal_id")) == section_goal_id else 1,
             str(row.get("id") or ""),
         ))
-
     selected: list[dict[str, Any]] = []
     offsets = {platform: 0 for platform in buckets}
     platforms = sorted(buckets)
@@ -412,6 +415,37 @@ def _section_evidence_rows(
                 break
         if not advanced:
             break
+    return selected
+
+
+def _section_evidence_rows(
+    rows: list[dict[str, Any]],
+    section_goal_id: str | None,
+    *,
+    limit: int = SECTION_EVIDENCE_POOL_LIMIT,
+) -> list[dict[str, Any]]:
+    """本节 goal 先占位，剩下的名额再按平台轮转。
+
+    §SRC-1 货 6：原实现只按平台轮转，goal 归属仅用于**平台桶内**排序。
+    三个平台就是 10/10/10，与本节写谁无关——D-013 那轮
+    `sec(goal-1)` 30 个池位里只有 14 个是本节能用的，
+    而 `sec(goal-3)` 名下 27 条抖音也只进得去 10 条。
+    现在先给本节 goal 留够 `SECTION_GOAL_FLOOR` 个位（不足则有多少给多少），
+    余额再按老规矩跨平台轮转，跨 goal 对照证据仍进得来（货 5 要用）。
+    """
+
+    if section_goal_id is None:
+        return _round_robin_by_platform(rows, section_goal_id, limit)
+
+    own = [row for row in rows if str(row.get("goal_id")) == section_goal_id]
+    others = [row for row in rows if str(row.get("goal_id")) != section_goal_id]
+    floor = min(limit, SECTION_GOAL_FLOOR)
+    selected = _round_robin_by_platform(own, section_goal_id, floor)
+    taken = {id(row) for row in selected}
+    remainder = [row for row in own if id(row) not in taken] + others
+    selected.extend(
+        _round_robin_by_platform(remainder, section_goal_id, limit - len(selected))
+    )
     return selected
 
 
@@ -1299,7 +1333,14 @@ async def run_sectioned_task(
                 "本次只写一个报告节；禁止生成整份报告。\n"
                 "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
                 "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
-                "本节的结论/信息源只覆盖本节范围，不总结或引用其他报告节。\n"
+                # §SRC-1 货 5：原文是「只覆盖本节范围」，写手照办后把池里
+                # 其他 goal 的证据全部跳过——D-013 那轮 sec-1 可见池里躺着 10 条
+                # 抖音（S73–S82）却一条没引，正文还专门声明「与本 goal 新增的
+                # douyin、x 采集不重叠」。写手没错，是这句话把它挡住了。
+                "本节以『节目标』给出的目标为主线；结论与信息源不得替其他报告节做总结，"
+                "但**可以引用本节证据池里其他目标的证据做对照或佐证**——"
+                "引用时须在句中点明它来自哪个目标（例如「goal-3 的抖音证据显示……」），"
+                "且这类对照不得喧宾夺主，占本节结论的少数。\n"
                 "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
                 f"{section_path}\n"
                 f"节目标={json.dumps(section, ensure_ascii=False)}\n"

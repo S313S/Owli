@@ -167,7 +167,10 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
 
     assert [item[2] for item in calls] == ["sec-2.md"] * SECTION_RETRY_MAX_ATTEMPTS
     assert "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用）" in calls[0][1]
-    assert "本节的结论/信息源只覆盖本节范围" in calls[0][1]
+    # §SRC-1 货 5：这句从「只覆盖本节范围」改成「以本节目标为主线、
+    # 允许引用池内其他目标的证据做对照」，用例跟着改口径。
+    assert "本节以『节目标』给出的目标为主线" in calls[0][1]
+    assert "可以引用本节证据池里其他目标的证据做对照或佐证" in calls[0][1]
     assert "已有节" in text
     assert "此处缺失：goal-2/ch-1/sec-2" in text
     assert "## 缺失清单" in text
