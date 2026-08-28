@@ -856,6 +856,24 @@ def create_app(
         current = required_plan(research_id)
         if isinstance(current, JSONResponse):
             return current
+        if runtime.scheduler_for(research_id) is not None:
+            # 这条研究已经起跑过了（`OWLI_AUTO_CONFIRM=1` 时 prepare_research 自己批准并起跑）。
+            # 重复批准**幂等返回已批准的计划 + 200**，不起第二套执行器（缺陷 D-021）；
+            # 判据用 `scheduler_for()` 而不是 `plan.status`——两条启动路径都会把 status
+            # 写成 approved，靠它分不出「批准过了」和「已经在跑了」。
+            logger.info(
+                "研究已在运行，批准请求幂等返回（未起第二套执行器）：research_id=%s",
+                research_id,
+            )
+            return remember(
+                scope,
+                x_request_id,
+                envelope({
+                    "status": current.status,
+                    "approved_at": current.approved_at,
+                    "plan_rev": current.plan_rev,
+                }),
+            )
         try:
             updated = approve(store, current, at=runtime.now_iso())
         except PlanApprovalRejected as error:

@@ -160,6 +160,7 @@ class RuntimeCoordinator:
         self.scale_config = scale_config or load_research_scale_config()
         self._adapters: dict[str, Any] = {}
         self._schedulers: dict[str, Any] = {}
+        self._starting: set[str] = set()
         self._finalized: set[str] = set()
         self._auto_tasks: set[asyncio.Task[Any]] = set()
         self._drive_watchers: set[asyncio.Task[Any]] = set()
@@ -1183,21 +1184,46 @@ class RuntimeCoordinator:
         )
         return scheduler
 
+    def _claim_execution(self, research_id: str) -> bool:
+        """认领一个研究的起跑权：**一个研究只能有一套执行器**。
+
+        自动批准（`prepare_research`）与显式批准（`POST /plan/approve`）是两条独立的
+        启动路径，谁都不知道对方存在；从前 `_schedulers[rid] = scheduler` 直接覆盖，
+        被挤掉的那套没人注销、继续跑，同一章就被跑两遍（缺陷 D-021）。
+        认领是**同步**完成的，跨 `await` 也抢不走：`_schedulers` 要等 Scheduler
+        造好才登记，中间那段空窗由 `_starting` 顶着。
+        """
+
+        if research_id in self._starting or research_id in self._schedulers:
+            return False
+        self._starting.add(research_id)
+        return True
+
     async def start_research(self, plan: Plan) -> None:
-        state = self.researches[plan.research_id]
-        state["status"] = "running"
-        state["status_label"] = "运行中"
-        state["actions"] = self.running_actions(plan.research_id)
-        state["progress"]["summary"] = "Scheduler 正在按计划推进"
-        await self.events.publish(
-            plan.research_id,
-            {"type": "research_update", "data": state},
-        )
-        scheduler = self._build_scheduler(plan)
-        self._schedulers[plan.research_id] = scheduler
-        await scheduler.start()
-        await self._drain_auto_tasks()
-        await self._finalize_if_terminal(plan.research_id)
+        if not self._claim_execution(plan.research_id):
+            logger.warning(
+                "研究已在运行，忽略重复起跑（不再起第二套执行器）：research_id=%s",
+                plan.research_id,
+            )
+            return
+        try:
+            state = self.researches[plan.research_id]
+            state["status"] = "running"
+            state["status_label"] = "运行中"
+            state["actions"] = self.running_actions(plan.research_id)
+            state["progress"]["summary"] = "Scheduler 正在按计划推进"
+            await self.events.publish(
+                plan.research_id,
+                {"type": "research_update", "data": state},
+            )
+            scheduler = self._build_scheduler(plan)
+            self._schedulers[plan.research_id] = scheduler
+            await scheduler.start()
+            await self._drain_auto_tasks()
+            await self._finalize_if_terminal(plan.research_id)
+        finally:
+            # 起跑成功后由 `_schedulers` 继续挡住重复起跑；中途炸了则把起跑权还回去。
+            self._starting.discard(plan.research_id)
 
     async def rehydrate_running_researches(self) -> list[str]:
         """从报告与章账本重建可 resume 的运行态；启动时绝不驱动 Scheduler。"""
