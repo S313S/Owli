@@ -722,6 +722,71 @@ def test_claims_permalink_用_research_全量证据池而非本节裁剪子集(t
     assert result.verdict is validation.Verdict.PASS
 
 
+def _pool_validation_case(tmp_path: Path, markdown: str, allowed_urls: set[str]):
+    from app.orchestrator.sectioning import _section_evidence_pool_result
+
+    visible_url = "https://evidence.example/visible"
+    section_path = tmp_path / "sec.md"
+    section_path.write_text(markdown, encoding="utf-8")
+    pool = {"items": [{"citation": "[S01]", "permalink": visible_url}]}
+    return _section_evidence_pool_result(section_path, pool, allowed_urls)
+
+
+def test_只有格式违规时不得误报证据池契约(tmp_path):
+    visible_url = "https://evidence.example/visible"
+    result = _pool_validation_case(
+        tmp_path,
+        (
+            "## 结论\n\n- 结论列表项没有角标\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        {visible_url},
+    )
+
+    assert result.verdict is validation.Verdict.FAIL
+    assert "证据池唯一引用源契约" not in result.message
+    assert "节正文违反撰写格式契约，共 2 处" in result.message
+    assert "citation_marks_resolvable" in result.message
+    assert "no_orphan_citation" in result.message
+
+
+def test_只有池外URL时只报证据池契约且计数正确(tmp_path):
+    visible_url = "https://evidence.example/visible"
+    outside_url = "https://outside.example/not-in-pool"
+    result = _pool_validation_case(
+        tmp_path,
+        (
+            f"## 结论\n\n- 可校验结论 [S01]，但夹带 {outside_url}\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        {visible_url},
+    )
+
+    assert result.verdict is validation.Verdict.FAIL
+    assert result.message == "节正文违反证据池唯一引用源契约，共 1 处"
+    assert "撰写格式契约" not in result.message
+
+
+def test_池外URL与格式违规同现时两类文案和计数分开(tmp_path):
+    visible_url = "https://evidence.example/visible"
+    outside_url = "https://outside.example/not-in-pool"
+    result = _pool_validation_case(
+        tmp_path,
+        (
+            "## 结论\n\n"
+            "- 有角标结论 [S01]\n"
+            f"- 无角标结论并夹带 {outside_url}\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        {visible_url},
+    )
+
+    assert result.verdict is validation.Verdict.FAIL
+    assert "节正文违反证据池唯一引用源契约，共 1 处" in result.message
+    assert "节正文违反撰写格式契约，共 1 处" in result.message
+    assert "citation_marks_resolvable" in result.message
+
+
 def test_证据池为空不回退_done_产物_URL_且整章判红(tmp_path):
     fallback = "https://artifact.example/goal-1"
     runs_root = tmp_path / "runs"

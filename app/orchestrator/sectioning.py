@@ -675,10 +675,10 @@ def _section_evidence_pool_result(
             claims = list(payload["claims"])
 
     by_mark = {str(item["citation"]): str(item["permalink"]) for item in items}
-    offenders: list[str] = []
+    pool_offenders: list[str] = []
     used_marks = set(validation._CITATION.findall(markdown))
-    offenders.extend(sorted(used_marks - set(by_mark)))
-    offenders.extend(sorted(_raw_urls(markdown) - allowed_urls))
+    pool_offenders.extend(sorted(used_marks - set(by_mark)))
+    pool_offenders.extend(sorted(_raw_urls(markdown) - allowed_urls))
 
     in_sources = False
     for line in markdown.splitlines():
@@ -695,7 +695,7 @@ def _section_evidence_pool_result(
         line_urls = _raw_urls(line)
         expected = by_mark.get(mark)
         if expected is None or line_urls != {expected}:
-            offenders.append(f"{mark} 未逐字映射到证据池 permalink")
+            pool_offenders.append(f"{mark} 未逐字映射到证据池 permalink")
 
     for claim in claims:
         if not isinstance(claim, Mapping):
@@ -708,7 +708,7 @@ def _section_evidence_pool_result(
                 continue
             permalink = str(link.get("permalink") or "")
             if permalink not in allowed_urls:
-                offenders.append(permalink)
+                pool_offenders.append(permalink)
 
     inner_ctx = validation.Ctx(
         output_path=section_path,
@@ -726,15 +726,32 @@ def _section_evidence_pool_result(
         validation.citation_marks_resolvable(inner_ctx, []),
         validation.no_orphan_citation(inner_ctx, []),
     )
+    format_offenders: list[str] = []
+    format_rules: list[str] = []
     for failure in inner_results:
         if failure.verdict is not validation.Verdict.PASS:
-            offenders.extend(failure.offenders or [failure.message])
-    if offenders:
+            format_rules.append(failure.name)
+            format_offenders.extend(
+                f"{failure.name}: {offender}"
+                for offender in (failure.offenders or [failure.message])
+            )
+    if pool_offenders or format_offenders:
+        messages: list[str] = []
+        if pool_offenders:
+            messages.append(
+                "节正文违反证据池唯一引用源契约，"
+                f"共 {len(pool_offenders)} 处"
+            )
+        if format_offenders:
+            messages.append(
+                f"节正文违反撰写格式契约，共 {len(format_offenders)} 处"
+                f"（规则：{', '.join(format_rules)}）"
+            )
         return validation.Result(
             validation.Verdict.FAIL,
             "evidence_pool_only",
-            f"节正文违反证据池唯一引用源契约，共 {len(offenders)} 处",
-            offenders,
+            "。".join(messages),
+            [*pool_offenders, *format_offenders],
         )
     return validation.Result(
         validation.Verdict.PASS,
