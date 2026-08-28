@@ -185,3 +185,86 @@ export type NormalizedEvent = {
 
 export type ApiError = { code: string; message: string; details?: unknown }
 export type ApiEnvelope<T> = { ok: boolean; data: T; error: ApiError | null }
+
+// ---- §DLV-1 交付面：报告结构化视图与证据清单 ----
+export type ReportSection = {
+  section_id?: string | null
+  goal_id?: string | null
+  title?: string | null
+  markdown: string
+  placeholder: boolean
+  missing_reason?: string | null
+}
+
+export type ReportSource = {
+  citation_no: number
+  mark: string
+  title: string
+  permalink: string
+  raw_line: string
+}
+
+export type ReportMissing = {
+  goal_id?: string | null
+  chapter_id?: string | null
+  reason?: string | null
+  text?: string | null
+}
+
+export type ExportRecord = {
+  kind: string
+  path?: string | null
+  file?: string | null
+  url?: string | null
+  created_at: string
+  desc?: string | null
+}
+
+export type ReportView = {
+  research_id: string
+  status?: string | null
+  format: 'json' | 'markdown'
+  title?: string | null
+  report_path?: string | null
+  summary?: string | null
+  summary_line?: string | null
+  sections: ReportSection[]
+  conclusions: string[]
+  sources: ReportSource[]
+  missing: ReportMissing[]
+  citations: { cited: number[]; listed: number[]; dangling: number[] }
+  notes?: unknown
+  exports: ExportRecord[]
+  feishu: { status?: string | null; doc_token?: string | null; record_id?: string | null; synced_at?: string | null; doc_url?: string | null; message?: string | null }
+}
+
+export type EvidenceItem = {
+  id: string
+  citation_no: number | null
+  permalink: string
+  title?: string | null
+  content_excerpt?: string | null
+  platform: string
+  source_type?: string | null
+  fetch_method?: string | null
+  author_name?: string | null
+  published_at?: string | null
+  fetched_at: string
+  goal_id?: string | null
+  score_authority: number | null
+  score_freshness: number | null
+  score_crossref: number | null
+  score_completeness: number | null
+  score_independence: number | null
+  score_total: number | null
+  grade: string | null
+  rating_notes?: string | null
+  rated_by?: string | null
+  raw_metrics?: Record<string, unknown> | null
+}
+
+export type EvidenceView = {
+  items: EvidenceItem[]
+  counts: { total: number; cited: number; by_platform: Record<string, number>; by_grade: Record<string, number> }
+  score_fields: string[]
+}
