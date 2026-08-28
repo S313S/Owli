@@ -183,8 +183,9 @@ def test_连续断连在剩余预算不足时落timeout并保留重试事件协�
     assert run.rows["ch-1/sec-2"]["attempts"] == 2
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
     assert run.delays == [5.0]
+    # §X-1 货 2：第二次断连被 136s 门槛挡住，多一条 section_retry_skipped。
     assert [e["type"] for e in run.events] == [
-        "section_retry", "section_error",
+        "section_retry", "section_retry_skipped", "section_error",
     ]
     assert run.events[0]["data"] == {
         "goal_id": "goal-3",

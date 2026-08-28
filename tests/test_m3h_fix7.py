@@ -710,6 +710,9 @@ def test_剩余节墙钟不足136秒时不重试且如实落timeout(tmp_path: Pa
     assert run.rows["ch-1/sec-2"]["attempts"] == 1
     assert not [event for event in run.events if event["type"] == "section_retry"]
     assert run.delays == []
+    # §X-1 货 2：闭集仍落 timeout，但事件里标 resume_floor 并留住真实原因。
+    error = [e["data"] for e in run.events if e["type"] == "section_error"][0]
+    assert error["timeout_kind"] == "resume_floor" and error["original_reason"] != "timeout"
 
 
 def test_非断连的引擎超时不重试(tmp_path: Path) -> None:

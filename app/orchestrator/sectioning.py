@@ -181,6 +181,24 @@ def _section_resume_within_deadline(
 ) -> bool:
     """退避照常吃节墙钟；退避后至少还剩一次 resume 的实测成本下限。"""
 
+    remaining = _section_remaining_seconds(
+        deadline, wall_clock_seconds=wall_clock_seconds,
+        wall_clock_started_at=wall_clock_started_at, now=now,
+    )
+    if remaining is None:
+        return True
+    return remaining - retry_delay >= SECTION_RESUME_COST_FLOOR_SECONDS
+
+
+def _section_remaining_seconds(
+    deadline: float | None,
+    *,
+    wall_clock_seconds: float | None,
+    wall_clock_started_at: Any,
+    now: Any,
+) -> float | None:
+    """节墙钟剩余秒数；§X-1 货 2 拆出来给门槛判定与事件共用，口径不变。"""
+
     remaining: float | None = None
     if wall_clock_seconds is not None and wall_clock_started_at is not None and callable(now):
         try:
@@ -191,9 +209,7 @@ def _section_resume_within_deadline(
             remaining = None
     if remaining is None and deadline is not None:
         remaining = deadline - asyncio.get_running_loop().time()
-    if remaining is None:
-        return True
-    return remaining - retry_delay >= SECTION_RESUME_COST_FLOOR_SECONDS
+    return remaining
 
 
 def _chapter_id(agent: Any) -> str:
@@ -906,6 +922,8 @@ async def _finish_section_timeout(
             "reason": "timeout",
             "engine_error": None,
             "conclusion_error": conclusion_error,
+            "timeout_kind": "wall_clock",
+            "original_reason": "timeout",
         },
         "is_error": True,
     })
@@ -1566,6 +1584,9 @@ async def run_sectioned_task(
                 if pool_failed and pool_result is not None:
                     conclusion_error = pool_result.message
                 transport_failure = _is_transport_failure(result, reason)
+                # §X-1 货 2：timeout 分三种——引擎单次超时 / 136s 门槛 / 节墙钟到点。
+                original_reason = reason
+                timeout_kind = "engine_timeout" if reason == "timeout" else None
                 if section_attempt < attempt_budget and transport_failure:
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
@@ -1591,6 +1612,31 @@ async def run_sectioned_task(
                         resume_session_id = next_session_id
                         continue
                     # 退避后的剩余节墙钟不足一次 resume 成本下限：如实 timeout。
+                    # §X-1 货 2：改写前把真实原因留住并发 section_retry_skipped，
+                    # 让「被 136s 门槛挡住」与真墙钟超时在事件里分得开（闭集不动）。
+                    original_reason = reason
+                    timeout_kind = "resume_floor"
+                    remaining_seconds = _section_remaining_seconds(
+                        section_deadline,
+                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                    )
+                    skipped = on_event({
+                        "type": "section_retry_skipped",
+                        "data": {
+                            "goal_id": context.goal_id,
+                            "chapter_id": section["section_id"],
+                            "attempt": section_attempt,
+                            "original_reason": original_reason,
+                            "remaining_seconds": remaining_seconds,
+                            "retry_delay": retry_delay,
+                            "resume_floor_seconds": SECTION_RESUME_COST_FLOOR_SECONDS,
+                        },
+                        "is_error": False,
+                    })
+                    if inspect.isawaitable(skipped):
+                        await skipped
                     reason = "timeout"
                 rejected_path = _preserve_rejected_artifact(section_path)
                 conclusion_error = _conclusion_error_with_rejected_path(
@@ -1620,6 +1666,8 @@ async def run_sectioned_task(
                         "reason": reason,
                         "engine_error": engine_error,
                         "conclusion_error": conclusion_error,
+                        "timeout_kind": timeout_kind,
+                        "original_reason": original_reason,
                     },
                     "is_error": True,
                 })
