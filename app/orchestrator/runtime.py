@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+from collections import Counter
 import re
 from datetime import datetime, timezone
 from enum import Enum
@@ -50,6 +51,7 @@ from app.report.markdown import (
     report_cites_but_lists_nothing,
 )
 from app.reliability.audit import degrade_after_closed_set_retry
+from app.reliability.backfill import backfill_report
 from app.reliability.claims import (
     ClaimsRegistrationError,
     claims_from_documents,
@@ -1719,6 +1721,67 @@ class RuntimeCoordinator:
                     documents.append(document)
         return documents
 
+    async def _backfill_ratings_on_finalize(self, research_id: str) -> None:
+        """§X-1 货 1：收尾无条件跑一次可靠度回填（评级链必跑）。
+
+        不看计划里排没排「可靠度审计」agent；抛错只 warning + 事件，研究不判 failed。
+        必须在 finish_report **之前**调用：backfill 只在报告已 completed 时才会自己
+        finish_report，此时状态仍是 running，收尾状态不会被它覆盖。
+        `OWLI_SKIP_RATING_BACKFILL=1` 跳过（默认跑）。判据落库不落日志。
+        """
+        if os.getenv("OWLI_SKIP_RATING_BACKFILL") == "1":
+            await self.events.publish(research_id, {
+                "type": "reliability_backfill_skipped",
+                "data": {"research_id": research_id, "reason": "env_skip"},
+            })
+            return
+        adapter = self._adapters.get(research_id)
+        if adapter is None:
+            logger.warning("收尾评级回填跳过：适配器不在场 %s", research_id)
+            await self.events.publish(research_id, {
+                "type": "reliability_backfill_skipped",
+                "data": {"research_id": research_id, "reason": "adapter_unavailable"},
+            })
+            return
+        try:
+            result = await backfill_report(
+                self.store, research_id, adapter=adapter, runs_root=self.runs_root,
+            )
+        except Exception as exc:  # noqa: BLE001 —— 收尾不得因补评失败判 failed
+            logger.warning("收尾评级回填失败，研究照常收尾：%s", exc)
+            await self.events.publish(research_id, {
+                "type": "reliability_backfill_failed",
+                "data": {
+                    "research_id": research_id,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                },
+            })
+            return
+        await self._publish_backfill_done(research_id, result)
+
+    async def _publish_backfill_done(self, research_id: str, result: Any) -> None:
+        """回填结果发事件；rated_by 分布与交叉维非空行数直接从库里数。"""
+        rows = self.store.list_evidence(research_id)
+        provenance = Counter(str(row.get("rated_by") or "") for row in rows)
+        await self.events.publish(research_id, {
+            "type": "reliability_backfill_done",
+            "data": {
+                "research_id": research_id,
+                "attempted": result.attempted,
+                "rated": result.rated,
+                "failed": result.failed,
+                "complete_rows": result.complete_rows,
+                "complete_cells": result.complete_cells,
+                "total_cells": result.total_cells,
+                "crossref_rated": sum(
+                    row.get("score_crossref") is not None for row in rows
+                ),
+                "provenance": dict(provenance),
+                "weak_claims": list(result.weak_claims),
+            },
+        })
+
     async def _finalize_if_terminal(self, research_id: str) -> None:
         if research_id in self._finalized:
             return
@@ -1803,6 +1866,8 @@ class RuntimeCoordinator:
                 claims_offenders = exc.offenders
             except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
                 claims_error = f"断言登记失败：{type(exc).__name__}: {exc}"
+        # §X-1 货 1：断言登记之后、finish_report 之前无条件跑评级回填。
+        await self._backfill_ratings_on_finalize(research_id)
         failures = [
             {"validator": item.name, "message": item.message, "offenders": item.offenders}
             for item in validation_report.results

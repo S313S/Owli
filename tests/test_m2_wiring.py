@@ -367,7 +367,9 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
                 (research_id,),
             ).fetchall()
 
-    assert [task.agent_kind for task in engine.tasks] == [
+    # §X-1 货 1：收尾另起 reliability-auditor 回填任务，不属计划序列，剔除后比对。
+    planned = [task for task in engine.tasks if task.agent_id != "reliability-auditor"]
+    assert [task.agent_kind for task in planned] == [
         "planning", "planning", "planning", "planning", "planning", "planning", "planning",
         "data_collection", "reliability_audit",
         "report_writing", "report_writing", "report_writing",
@@ -479,7 +481,8 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
         completed = await wait_for_status(client, research_id, "completed")
 
     assert completed["progress"]["done"] == 3
-    assert [task.agent_kind for task in engine.tasks][-4:] == [
+    planned = [task for task in engine.tasks if task.agent_id != "reliability-auditor"]
+    assert [task.agent_kind for task in planned][-4:] == [
         "reliability_audit", "report_writing", "report_writing", "report_writing"
     ]
 
