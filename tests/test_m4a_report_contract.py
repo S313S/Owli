@@ -412,8 +412,14 @@ class _HangAfterDoneAdapter:
             await asyncio.Event().wait()
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
         task.output_path.write_text(
-            f"## 结论\n\n- 第 {self.calls} 节判断 [S01]\n\n## 信息源\n\n"
-            "- [S01] [来源](https://example.com/a)（fetched_at=t1）\n",
+            json.dumps({
+                "markdown": (
+                    f"## 结论\n\n- 第 {self.calls} 节判断 [S01]\n\n"
+                    "## 信息源\n\n"
+                    "- [S01] [来源](https://example.com/a)（fetched_at=t1）\n"
+                ),
+                "claims": [],
+            }, ensure_ascii=False),
             encoding="utf-8",
         )
         return EngineRunResult(

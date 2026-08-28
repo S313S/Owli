@@ -164,7 +164,10 @@ def _run_sectioned(
                 )
             else:
                 text = render(pool, section_task)
-            section_task.output_path.write_text(text, encoding="utf-8")
+            section_task.output_path.write_text(
+                json.dumps({"markdown": text, "claims": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
             return EngineRunResult(
                 conclusion=OwliResult(
                     "done", str(section_task.output_path), "完成", [], [], [], None,
@@ -726,8 +729,12 @@ def _pool_validation_case(tmp_path: Path, markdown: str, allowed_urls: set[str])
     from app.orchestrator.sectioning import _section_evidence_pool_result
 
     visible_url = "https://evidence.example/visible"
+    tmp_path.mkdir(parents=True, exist_ok=True)
     section_path = tmp_path / "sec.md"
-    section_path.write_text(markdown, encoding="utf-8")
+    section_path.write_text(
+        json.dumps({"markdown": markdown, "claims": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     pool = {"items": [{"citation": "[S01]", "permalink": visible_url}]}
     return _section_evidence_pool_result(section_path, pool, allowed_urls)
 
@@ -785,6 +792,91 @@ def test_池外URL与格式违规同现时两类文案和计数分开(tmp_path):
     assert "节正文违反证据池唯一引用源契约，共 1 处" in result.message
     assert "节正文违反撰写格式契约，共 1 处" in result.message
     assert "citation_marks_resolvable" in result.message
+
+
+def test_撰写提示词含四条口径且证据缺口独立成段不判红(tmp_path):
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store,
+            evidence_id="ev-1",
+            goal_id=goal_id,
+            permalink="https://evidence.example/visible",
+            platform="xhs",
+        )
+
+    result, _, bodies, _, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+        render=lambda pool, task: (
+            "## 结论\n\n- 有证据的判断 [S01]\n\n"
+            "## 证据缺口\n\n本节可见证据不足，未覆盖 X。\n\n"
+            "## 信息源\n\n- [S01] [可见证据]"
+            f"({pool['items'][0]['permalink']})\n"
+        ),
+    )
+
+    assert result.succeeded is True
+    body = bodies["sec-1.md"]
+    assert "缺口/限制性陈述" in body and "独立的『证据缺口』段" in body
+    assert "『结论』列表每一项必须带至少一个 [Sxx]" in body
+    assert "权威来源（官网 / 媒体 / 评测站）：可以直陈，逐条当事实引" in body
+    assert "在国内小红书平台上，大多数……情况是……" in body
+    assert "claims 的 stance / firsthand" in body
+    assert "JSON 信封" in body and "markdown" in body and "claims" in body
+    assert "国内社媒优先" not in body
+
+
+def test_结论每项带角标可过且换措辞的无角标项仍判红(tmp_path):
+    visible_url = "https://evidence.example/visible"
+    valid = _pool_validation_case(
+        tmp_path / "valid",
+        (
+            "## 结论\n\n- 第一项 [S01]\n- 第二项也有角标 [S01]\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        {visible_url},
+    )
+    assert valid.verdict is validation.Verdict.PASS
+
+    for index, wording in enumerate(("仍需观察", "换一种完全不同的表述"), start=1):
+        case_root = tmp_path / f"invalid-{index}"
+        case_root.mkdir()
+        invalid = _pool_validation_case(
+            case_root,
+            (
+                f"## 结论\n\n- 已引用项 [S01]\n- {wording}\n\n"
+                f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+            ),
+            {visible_url},
+        )
+        assert invalid.verdict is validation.Verdict.FAIL
+        assert "citation_marks_resolvable" in invalid.message
+
+
+def test_裸markdown节产物即使引用闭合也判红(tmp_path):
+    from app.orchestrator.sectioning import _section_evidence_pool_result
+
+    visible_url = "https://evidence.example/visible"
+    section_path = tmp_path / "sec.md"
+    section_path.write_text(
+        (
+            "## 结论\n\n- 引用闭合 [S01]\n\n"
+            f"## 信息源\n\n- [S01] [可见证据]({visible_url})\n"
+        ),
+        encoding="utf-8",
+    )
+    result = _section_evidence_pool_result(
+        section_path,
+        {"items": [{"citation": "[S01]", "permalink": visible_url}]},
+        {visible_url},
+    )
+
+    assert result.verdict is validation.Verdict.FAIL
+    assert "JSON 信封" in result.message
 
 
 def test_证据池为空不回退_done_产物_URL_且整章判红(tmp_path):
@@ -988,8 +1080,13 @@ def test_恢复时新证据使旧_S_号失效则复位_done_节重写(tmp_path):
     section_path = runs_root / "r-ledger/goals/goal-1/report/sec-1.md"
     section_path.parent.mkdir(parents=True, exist_ok=True)
     section_path.write_text(
-        "## 结论\n\n- 旧编号 [S01]\n\n"
-        "## 信息源\n\n- [S01] [旧证据](https://evidence.example/z)\n",
+        json.dumps({
+            "markdown": (
+                "## 结论\n\n- 旧编号 [S01]\n\n"
+                "## 信息源\n\n- [S01] [旧证据](https://evidence.example/z)\n"
+            ),
+            "claims": [],
+        }, ensure_ascii=False),
         encoding="utf-8",
     )
     store.ensure_chapters(
@@ -1037,8 +1134,14 @@ def test_恢复时新证据使旧_S_号失效则复位_done_节重写(tmp_path):
             pool = _pool_from_body(section_task.body)
             item = next(row for row in pool["items"] if row["evidence_id"] == "ev-z")
             section_task.output_path.write_text(
-                f"## 结论\n\n- 新编号 {item['citation']}\n\n"
-                f"## 信息源\n\n- {item['citation']} [旧证据]({item['permalink']})\n",
+                json.dumps({
+                    "markdown": (
+                        f"## 结论\n\n- 新编号 {item['citation']}\n\n"
+                        f"## 信息源\n\n- {item['citation']} "
+                        f"[旧证据]({item['permalink']})\n"
+                    ),
+                    "claims": [],
+                }, ensure_ascii=False),
                 encoding="utf-8",
             )
             return EngineRunResult(
@@ -1070,8 +1173,13 @@ def test_恢复态全部节已_done_仍按证据池全局编号拼装(tmp_path):
     section_path = runs_root / "r-ledger/goals/goal-1/report/sec-1.md"
     section_path.parent.mkdir(parents=True, exist_ok=True)
     section_path.write_text(
-        "## 结论\n\n- 使用第三条证据 [S03]\n\n"
-        "## 信息源\n\n- [S03] [第三条](https://evidence.example/3)\n",
+        json.dumps({
+            "markdown": (
+                "## 结论\n\n- 使用第三条证据 [S03]\n\n"
+                "## 信息源\n\n- [S03] [第三条](https://evidence.example/3)\n"
+            ),
+            "claims": [],
+        }, ensure_ascii=False),
         encoding="utf-8",
     )
     store.ensure_chapters(

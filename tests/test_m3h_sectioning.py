@@ -59,8 +59,13 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
     done_section = tmp_path / "runs" / "r-ledger" / "goals" / "goal-2" / "report" / "sec-1.md"
     done_section.parent.mkdir(parents=True)
     done_section.write_text(
-        "## 结论\n\n- 已有节 [S01]。\n\n"
-        "## 信息源\n\n- [S01] [来源 A](https://example.com/goal-1)\n",
+        json.dumps({
+            "markdown": (
+                "## 结论\n\n- 已有节 [S01]。\n\n"
+                "## 信息源\n\n- [S01] [来源 A](https://example.com/goal-1)\n"
+            ),
+            "claims": [],
+        }, ensure_ascii=False),
         encoding="utf-8",
     )
     store.ensure_chapters(
@@ -100,14 +105,17 @@ def test_standard_报告章按节短调用_失败详情进SSE与账本(tmp_path)
                     engine_error="socket closed by peer",
                 )
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            markdown = (
+                f"## 结论\n\n- 正文 [S{int(task.output_path.stem[-1]):02d}]\n\n"
+                f"## 信息源\n\n- [S{int(task.output_path.stem[-1]):02d}] "
+                f"[来源](https://example.com/goal-{task.output_path.stem[-1]})\n"
+            )
             task.output_path.write_text(
                 (
                     "\n"
                     if task.output_path.name in empty_sections
-                    else (
-                        f"## 结论\n\n- 正文 [S{int(task.output_path.stem[-1]):02d}]\n\n"
-                        f"## 信息源\n\n- [S{int(task.output_path.stem[-1]):02d}] "
-                        f"[来源](https://example.com/goal-{task.output_path.stem[-1]})\n"
+                    else json.dumps(
+                        {"markdown": markdown, "claims": []}, ensure_ascii=False,
                     )
                 ),
                 encoding="utf-8",

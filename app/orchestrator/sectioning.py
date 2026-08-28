@@ -663,16 +663,23 @@ def _section_evidence_pool_result(
             f"无法读取节产物：{type(exc).__name__}: {exc}",
             [],
         )
-    markdown = raw_text
-    claims: list[Any] = []
     try:
         payload = json.loads(raw_text)
     except (json.JSONDecodeError, TypeError):
         payload = None
-    if isinstance(payload, Mapping) and isinstance(payload.get("markdown"), str):
-        markdown = payload["markdown"]
-        if isinstance(payload.get("claims"), list):
-            claims = list(payload["claims"])
+    if (
+        not isinstance(payload, Mapping)
+        or not isinstance(payload.get("markdown"), str)
+        or not isinstance(payload.get("claims"), list)
+    ):
+        return validation.Result(
+            validation.Verdict.FAIL,
+            "evidence_pool_only",
+            "节产物必须使用 JSON 信封（markdown 正文 + claims 数组），裸 Markdown 不接受",
+            ["json_envelope"],
+        )
+    markdown = payload["markdown"]
+    claims = list(payload["claims"])
 
     by_mark = {str(item["citation"]): str(item["permalink"]) for item in items}
     pool_offenders: list[str] = []
@@ -927,28 +934,31 @@ def _assemble(
         )
         if section_done:
             text = path.read_text(encoding="utf-8").strip()
-            if output_format == "json" and _declared_shape(agent) != "array":
-                try:
-                    fragment = json.loads(text)
-                except (json.JSONDecodeError, UnicodeError):
-                    if text.lstrip().casefold().startswith(("{", "[", "```json")):
-                        raise SectionAssemblyShapeError(
-                            f"{section['section_id']} 的 JSON 节产物不完整或不可解析"
-                        )
-                    fragment = None
-                if isinstance(fragment, Mapping) and "markdown" in fragment:
-                    markdown = fragment.get("markdown")
-                    claims = fragment.get("claims", [])
-                    if not isinstance(markdown, str) or not markdown.strip():
-                        raise SectionAssemblyShapeError(
-                            f"{section['section_id']} 的 markdown 缺失或为空"
-                        )
-                    if not isinstance(claims, list):
-                        raise SectionAssemblyShapeError(
-                            f"{section['section_id']} 的 claims 必须是数组"
-                        )
-                    text = markdown.strip()
-                    chapter_claims.extend(claims)
+            try:
+                fragment = json.loads(text)
+            except (json.JSONDecodeError, UnicodeError):
+                if (
+                    output_format == "json"
+                    and _declared_shape(agent) != "array"
+                    and text.lstrip().casefold().startswith(("{", "[", "```json"))
+                ):
+                    raise SectionAssemblyShapeError(
+                        f"{section['section_id']} 的 JSON 节产物不完整或不可解析"
+                    )
+                fragment = None
+            if isinstance(fragment, Mapping) and "markdown" in fragment:
+                markdown = fragment.get("markdown")
+                claims = fragment.get("claims")
+                if not isinstance(markdown, str) or not markdown.strip():
+                    raise SectionAssemblyShapeError(
+                        f"{section['section_id']} 的 markdown 缺失或为空"
+                    )
+                if not isinstance(claims, list):
+                    raise SectionAssemblyShapeError(
+                        f"{section['section_id']} 的 claims 必须是数组"
+                    )
+                text = markdown.strip()
+                chapter_claims.extend(claims)
         else:
             reason = str(row["reason"] if row else "empty_result")
             text = _placeholder(section, reason).strip()
@@ -1296,9 +1306,21 @@ async def run_sectioned_task(
                 "本节可引用证据池 JSON（唯一引用源）：\n"
                 f"{json.dumps(evidence_pool, ensure_ascii=False, indent=2)}"
             )
-            if base_task.output_format == "json" and _declared_shape(agent) != "array":
+            if (
+                base_task.agent_kind in {"report", "report_writing"}
+                and _declared_shape(agent) != "array"
+            ):
                 body += (
-                    "\n本章最终产物是 JSON 节化文档信封。本节须显式写 JSON object："
+                    "\n缺口/限制性陈述（『本节可见证据不足』『未覆盖 X』这类）"
+                    "不许进『结论』列表，放独立的『证据缺口』段。"
+                    "『结论』列表每一项必须带至少一个 [Sxx]。\n"
+                    "权威来源（官网 / 媒体 / 评测站）：可以直陈，逐条当事实引。"
+                    "社交媒体这类权重不高的来源：以汇总式、带平台与倾向的句式提及，"
+                    "并挂角标，不逐条当权威引。样例：『在国内小红书平台上，"
+                    "大多数……情况是……』。社媒证据要出现在正文，但以『平台 + 群体倾向』"
+                    "的方式说，不设置社媒排序或配额规则。"
+                    "claims 的 stance / firsthand 对这类汇总句照常登记。\n"
+                    "本节产物必须使用 JSON 信封，须显式写 JSON object；裸 Markdown 不接受："
                     "markdown 为本节 Markdown 正文；claims 为本节结论断言数组。"
                     "每条断言必须含报告内唯一 id（c- 加至少两位数字）、非空 text、"
                     "至少一条 evidence；evidence 用 permalink 联接，可选 stance="

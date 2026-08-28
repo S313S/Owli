@@ -225,8 +225,14 @@ class RecordingEngine:
         elif task.agent_kind != "planning":
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
             task.output_path.write_text(
-                "# 结论\n\n- 飞书在协作集成上有优势 [S01]\n\n"
-                "# 信息源\n\n- [S01] [Hacker News](https://news.ycombinator.com/item?id=1)\n",
+                json.dumps({
+                    "markdown": (
+                        "# 结论\n\n- 飞书在协作集成上有优势 [S01]\n\n"
+                        "# 信息源\n\n- [S01] [Hacker News]"
+                        "(https://news.ycombinator.com/item?id=1)\n"
+                    ),
+                    "claims": [],
+                }, ensure_ascii=False),
                 encoding="utf-8",
             )
         return SimpleNamespace(succeeded=True)
