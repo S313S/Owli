@@ -70,7 +70,7 @@ class LarkCliTransport(FeishuTransport):
             if table.get("name") == name:
                 return str(table["table_id"])
         data = self._run("base", "+table-create", "--base-token", base_token, "--name", name,
-                         "--fields", json.dumps(list(fields), ensure_ascii=False))
+                         "--fields", json.dumps([_cli_field(f) for f in fields], ensure_ascii=False))
         return str(_dig(data, "table_id"))
 
     def upsert(self, base_token: str, table_id: str, anchor_field: str, anchor: str,
@@ -79,7 +79,7 @@ class LarkCliTransport(FeishuTransport):
                           "--filter-json", json.dumps({"conjunction": "and", "conditions": [
                               {"field_name": anchor_field, "operator": "is", "value": [anchor]}]}))
         args = ["base", "+record-upsert", "--base-token", base_token, "--table-id", table_id,
-                "--json", json.dumps(dict(record), ensure_ascii=False)]
+                "--json", json.dumps({k: _cli_value(v) for k, v in record.items()}, ensure_ascii=False)]
         existing = _dig(found, "items") or []
         if existing:
             args += ["--record-id", str(existing[0]["record_id"])]
@@ -89,6 +89,29 @@ class LarkCliTransport(FeishuTransport):
         data = self._run("docs", "+create", "--title", title, "--doc-format", "markdown", "--content", markdown)
         doc_id = str(_dig(data, "document_id") or _dig(data, "doc_token") or "")
         return doc_id, str(_dig(data, "url") or f"https://feishu.cn/docx/{doc_id}")
+
+
+def _cli_field(field: Mapping[str, Any]) -> dict[str, Any]:
+    """OpenAPI 字段规格（数字 type / field_name / property）→ lark-cli 字段 JSON。"""
+    kind = int(field["type"])
+    spec: dict[str, Any] = {"name": field["field_name"]}
+    if kind in (3, 4):
+        spec.update(type="select", multiple=kind == 4,
+                    options=[{"name": o["name"]} for o in (field.get("property") or {}).get("options") or []])
+    elif kind == 2:
+        spec["type"] = "number"
+    elif kind == 15:
+        spec.update(type="text", style={"type": "url"})
+    else:
+        spec["type"] = "text"
+    return spec
+
+
+def _cli_value(value: Any) -> Any:
+    """OpenAPI CellValue → lark-cli 快乐路径：超链接对象降为裸 URL。"""
+    if isinstance(value, Mapping) and "link" in value:
+        return str(value["link"])
+    return value
 
 
 def _dig(node: Any, key: str) -> Any:
