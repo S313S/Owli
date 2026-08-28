@@ -50,6 +50,7 @@ from app.plan.editing import (
 )
 from app.plan.model import Plan
 from app.plan.store import PlanRevisionConflict, load_plan, save_plan
+from app.replay.import_research import ReplayImportError, import_research
 from app.store.dao import Store
 from app.store.recall import RecallRepository, RecallResult, RecallService
 
@@ -83,6 +84,22 @@ class ResetAgentRequest(BaseModel):
 class CardResponseRequest(BaseModel):
     action: str
     payload: Any
+
+
+class ReplayRequest(BaseModel):
+    """§RP-1 阶段重放：以跑过的研究为底，从指定 goal 起跑。
+
+    **重放不作关账证据**——它拿旧证据旧产物、跑当下的代码，两者不同源；
+    用来迭代与诊断，关账仍要一轮从规划起的干净整跑。
+    """
+
+    source_research_id: str
+    from_goal: str | None = None
+    #: 连 done 的章一起复位（这一段整个重做）；默认只复位没做完的章。
+    reset_done: bool = False
+    #: 底料在另一个库里时给绝对路径；不给就用本服务自己的库与 runs 目录。
+    source_database: str | None = None
+    source_runs: str | None = None
 
 
 class TestFixtureRequest(BaseModel):
@@ -686,6 +703,68 @@ def create_app(
         })
         request_cache[(scope, x_request_id)] = (200, copy.deepcopy(response))
         return response
+
+    @application.post("/api/researches/replay")
+    async def replay_research(
+        request: ReplayRequest,
+        x_request_id: str = Header(..., alias="X-Request-ID"),
+    ) -> Any:
+        """以旧研究为底建一个新 research，并从指定 goal 起跑。
+
+        **新 id、不就地改**：源那一行是要对照的基线，且它可能已经在
+        `_schedulers` 里；就地起跑会被 `_claim_execution` 挡下。「旧那套谁来停」
+        的答案是不停也不换——新 id 起新的一套，源 research 一个字不动。
+        起跑仍然只走 `runtime.start_research`（本项目第三条启动路径也走那道闸）。
+        """
+
+        scope = "replay_research"
+        hit = cached(scope, x_request_id)
+        if hit is not None:
+            return hit
+        try:
+            imported = import_research(
+                store=store,
+                source_database=Path(request.source_database or database),
+                source_runs=Path(request.source_runs or runtime.runs_root),
+                source_research_id=request.source_research_id,
+                runs_root=runtime.runs_root,
+                now_iso=runtime.now_iso(),
+                from_goal=request.from_goal,
+                reset_done=request.reset_done,
+            )
+        except ReplayImportError as error:
+            return remember(
+                scope, x_request_id,
+                error_envelope("replay_source_invalid", str(error)),
+                status_code=422,
+            )
+        plan = load_plan(store, imported.research_id)
+        if plan is None:
+            return remember(
+                scope, x_request_id,
+                error_envelope("replay_source_invalid", "底料没有计划快照"),
+                status_code=422,
+            )
+        runtime._adapters[plan.research_id] = runtime.adapter_factory()
+        researches[plan.research_id] = runtime._state_from_plan(plan)
+        researches[plan.research_id]["status"] = "approved"
+        researches[plan.research_id]["status_label"] = "计划已冻结"
+        await events.publish(
+            plan.research_id,
+            {"type": "research_snapshot", "data": researches[plan.research_id]},
+        )
+        track_background(
+            f"owli:scheduler:{plan.research_id}",
+            run_in_background(plan.research_id, runtime.start_research(plan)),
+        )
+        return remember(scope, x_request_id, envelope({
+            "research_id": imported.research_id,
+            "replay_of": imported.source_research_id,
+            "from_goal": imported.from_goal,
+            "evidence_copied": imported.evidence_copied,
+            "chapters_copied": imported.chapters_copied,
+            "chapters_reset": list(imported.chapters_reset),
+        }))
 
     @application.get("/api/researches/{research_id}")
     async def get_research(research_id: str) -> dict:
