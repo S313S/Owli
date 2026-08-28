@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from app.reliability.scoring import SCORE_FIELDS
 from app.report.render import parse_report
@@ -44,6 +46,7 @@ def register_delivery_routes(
     store: Any,
     read_report: Callable[[str, str | None], str | None],
     envelope: Callable[[Any], dict[str, Any]],
+    runs_root: Path,
 ) -> None:
     def require_report(research_id: str) -> dict[str, Any]:
         report = store.get_report(research_id)
@@ -78,3 +81,38 @@ def register_delivery_routes(
     async def get_research_evidence(research_id: str) -> dict[str, Any]:
         require_report(research_id)
         return envelope(evidence_view(store.list_evidence(research_id)))
+
+    def export_dir(research_id: str) -> Path:
+        return (runs_root / research_id / "exports").resolve()
+
+    @application.post("/api/researches/{research_id}/export")
+    async def export_research(research_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+        from app.export.excel import export_excel
+        from app.export.registry import record_export
+
+        report = require_report(research_id)
+        kind = str(payload.get("kind") or "excel")
+        text = read_report(research_id, report.get("report_path"))
+        if text is None:
+            raise HTTPException(status_code=404, detail="报告正文不可用，无法导出")
+        if kind == "excel":
+            path = export_excel(store, research_id, runs_root, text)
+            url = f"/api/researches/{research_id}/exports/{path.name}"
+            record = record_export(store, research_id, kind="excel", path=str(path), url=url,
+                                   desc="Excel 附件（6 sheet，spec §2）")
+            return envelope({"kind": "excel", "path": str(path), "url": url, "record": record})
+        if kind == "feishu":
+            from app.export.feishu import push_to_feishu
+
+            return envelope(push_to_feishu(store, research_id, text))
+        raise HTTPException(status_code=400, detail="kind 只能是 excel 或 feishu")
+
+    @application.get("/api/researches/{research_id}/exports/{file_name}")
+    async def download_export(research_id: str, file_name: str) -> FileResponse:
+        require_report(research_id)
+        target = (export_dir(research_id) / file_name).resolve()
+        if not target.is_relative_to(export_dir(research_id)) or not target.is_file():
+            raise HTTPException(status_code=404, detail="导出产物不存在")
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" \
+            if target.suffix == ".xlsx" else "application/octet-stream"
+        return FileResponse(target, media_type=media, filename=target.name)

@@ -350,6 +350,8 @@ def create_app(
             "usage": store.aggregate_research_usage(research_id),
             "report_path": report_path,
             "report_content": read_historical_report(research_id, report_path),
+            "exports": (report.get("extra") or {}).get("exports") or [],
+            "feishu": {"status": report.get("feishu_sync_status"), **((report.get("extra") or {}).get("feishu") or {})},
             "summary": summary,
             "summary_line": report.get("summary_line"),
             "actions": [],
@@ -1385,6 +1387,7 @@ def create_app(
         store=store,
         read_report=read_historical_report,
         envelope=envelope,
+        runs_root=runtime.runs_root,
     )
 
     application.mount(
