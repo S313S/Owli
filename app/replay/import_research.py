@@ -132,6 +132,65 @@ def import_research(
     if target_dir.exists():
         raise ReplayImportError(f"产物目录已存在，换个 research_id：{target_dir}")
 
+    try:
+        return _write(
+            store=store,
+            report=report,
+            snapshot=snapshot,
+            research_id=research_id,
+            source_research_id=source_research_id,
+            source_database=Path(source_database),
+            source_dir=source_dir,
+            target_dir=target_dir,
+            evidence=source["evidence"],
+            chapters=source["chapters"],
+            replay_goals=replay_goals,
+            from_goal=from_goal,
+            now_iso=now_iso,
+            reset_done=reset_done,
+        )
+    except Exception:
+        # 半份研究比没有更糟：工作板上会多出一个跑不动也删不掉的条目。
+        # reports 一删，evidence / chapter_progress 靠外键 CASCADE 跟着走。
+        _rollback(store, research_id, target_dir)
+        raise
+
+
+def _rollback(store: Any, research_id: str, target_dir: Path) -> None:
+    shutil.rmtree(target_dir, ignore_errors=True)
+    connection = sqlite3.connect(_database_of(store))
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("DELETE FROM reports WHERE id = ?", (research_id,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _database_of(store: Any) -> str:
+    path = getattr(store, "_database_path", None)
+    if path is None:
+        raise ReplayImportError("store 没有 _database_path，无法做重放期的账本复位")
+    return str(path)
+
+
+def _write(
+    *,
+    store: Any,
+    report: dict[str, Any],
+    snapshot: dict[str, Any],
+    research_id: str,
+    source_research_id: str,
+    source_database: Path,
+    source_dir: Path,
+    target_dir: Path,
+    evidence: list[dict[str, Any]],
+    chapters: list[dict[str, Any]],
+    replay_goals: set[str],
+    from_goal: str | None,
+    now_iso: str,
+    reset_done: bool,
+) -> ImportedResearch:
     store.create_report(
         id=research_id,
         title=str(report["title"]),
@@ -153,7 +212,7 @@ def import_research(
     )
     shutil.copytree(source_dir, target_dir)
 
-    if source["evidence"]:
+    if evidence:
         store.add_evidence_batch([
             {
                 "id": f"ev-{uuid.uuid4().hex[:20]}",
@@ -167,12 +226,12 @@ def import_research(
                     for column in _EVIDENCE_COLUMNS
                 },
             }
-            for row in source["evidence"]
+            for row in evidence
         ])
 
     reset = _copy_chapters(
         store,
-        source["chapters"],
+        chapters,
         research_id,
         replay_goals,
         now_iso,
@@ -184,8 +243,8 @@ def import_research(
         research_id=research_id,
         source_research_id=source_research_id,
         from_goal=from_goal,
-        evidence_copied=len(source["evidence"]),
-        chapters_copied=len(source["chapters"]),
+        evidence_copied=len(evidence),
+        chapters_copied=len(chapters),
         chapters_reset=reset,
         runs_dir=target_dir,
     )
@@ -246,7 +305,7 @@ def _copy_chapters(
     )
     paths = _chapter_paths(snapshot)
     reset: list[str] = []
-    connection = sqlite3.connect(store._database_path)
+    connection = sqlite3.connect(_database_of(store))
     try:
         for row in rows:
             key = (row["goal_id"], row["chapter_id"])

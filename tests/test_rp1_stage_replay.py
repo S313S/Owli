@@ -392,3 +392,44 @@ async def test_重放入口走认领闸不产生第二套执行器(tmp_path: Pat
 
         await real_start(load_plan(runtime.store, new_id))
         assert len(built) == 1, "重放起跑绕过了 _claim_execution"
+
+
+def test_导入中途炸了不留半份研究(tmp_path: Path) -> None:
+    """半份研究比没有更糟：工作板上会多出一个跑不动也删不掉的条目。"""
+
+    from app.replay.import_research import import_research
+    from app.store.dao import Store
+
+    database = tmp_path / "owli.db"
+    runs = tmp_path / "runs"
+    _seed(database, runs, statuses={"goal-1": "done"})
+    store = Store(database)
+
+    def boom(_items):
+        raise RuntimeError("证据写到一半炸了")
+
+    store.add_evidence_batch = boom  # type: ignore[method-assign]
+
+    raised = False
+    try:
+        import_research(
+            store=store,
+            source_database=database,
+            source_runs=runs,
+            source_research_id=SOURCE_ID,
+            runs_root=runs,
+            now_iso="2026-08-29T00:00:00+00:00",
+        )
+    except RuntimeError:
+        raised = True
+    assert raised
+
+    connection = sqlite3.connect(database)
+    reports = [row[0] for row in connection.execute("SELECT id FROM reports")]
+    chapters = connection.execute(
+        "SELECT count(*) FROM chapter_progress"
+    ).fetchone()[0]
+    connection.close()
+    assert reports == [SOURCE_ID], f"回滚没干净，库里还剩：{reports}"
+    assert chapters == 3, "外键 CASCADE 没把新研究的章账本带走"
+    assert [d.name for d in runs.iterdir()] == [SOURCE_ID], "新研究的产物目录没删掉"
