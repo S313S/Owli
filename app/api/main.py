@@ -666,6 +666,21 @@ def create_app(
             "error": None,
         }
 
+    @application.get("/api/sources/probe")
+    async def probe_sources_route(sources: str | None = None) -> dict:
+        """§X-1 货 4：起跑前探活。判据是取到数据不是 HTTP 200；不自动挡起跑。"""
+        from app.sources_probe import probe_sources
+
+        wanted = [s.strip() for s in (sources or "").split(",") if s.strip()] or None
+        try:
+            results = await probe_sources(wanted)
+        except KeyError as exc:
+            return JSONResponse(error_envelope("unknown_source", str(exc)), status_code=400)
+        return envelope({
+            "sources": results,
+            "all_ok": all(item["ok"] for item in results.values()) if results else False,
+        })
+
     @application.post("/api/researches")
     async def create_research(
         request: ResearchRequest,
