@@ -571,3 +571,33 @@ def test_M3e修正后的findings字段校验契约通过() -> None:
     assert not any(
         item.startswith("[规则28]") for item in lint(plan)["errors"]
     )
+
+
+# D-024：黑词表误杀「给黑词下机器定义」的验收句，X-1 整跑规划期整份计划被判死。
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "一致性检查章须为六个维度标注证据档位：证据条数≥3 记为「充分」、"
+        "1-2 条记为「部分」、0 条记为「缺口」，并列出来源 output.path 清单",
+        "每个主体的证据覆盖达到充分档位，即 permalink 去重后不少于 5 条",
+        "样本量合理：每个渠道 >= 10 条记录",
+        "尽量覆盖三个主体，其中每个主体不少于 8 条口碑记录",
+    ],
+)
+def test_规则四_黑词同句含量化定义时放行(sentence: str) -> None:
+    plan = make_plan_dict()
+    plan["goals"][0]["acceptance"] = [sentence]
+    assert not [item for item in _messages(plan) if item.startswith("[规则4]")]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    ["证据充分即可", "报告结构良好", "尽量覆盖主要维度", "对争议结论作合理取舍"],
+)
+def test_规则四_黑词不带量化定义仍报错(sentence: str) -> None:
+    plan = make_plan_dict()
+    plan["goals"][0]["acceptance"] = [sentence]
+    assert [
+        item for item in _messages(plan)
+        if item.startswith("[规则4]") and "goal-1.acceptance[0]" in item
+    ]

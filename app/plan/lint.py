@@ -12,6 +12,16 @@ from app.plan.model import Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of
 
 _KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BAD_ACCEPTANCE = ("良好", "充分", "尽量", "合理")
+# D-024：黑词表本身留着，但「给黑词下机器定义」的句子必须放行——X-1 规划期被
+# 「证据条数≥3 记为『充分』、1-2 条记为『部分』」整份计划判死，那句恰恰是最可判定的。
+# 口径（早上用户拍板）：同一条 acceptance 里出现量化定义即视为已判定，不要求量化
+# 紧贴黑词。代价是「尽量覆盖 3 条渠道」这类混合句会漏网，权衡后接受：漏一条提示
+# 远轻于误杀整份计划。
+_QUANTIFIED_ACCEPTANCE = re.compile(
+    r"[≥≤<>]=?\s*\d"          # ≥3 / >= 10 / <5
+    r"|\d+\s*条"              # 3 条 / 不少于 5 条
+    r"|记为\s*[「『\"\']"      # …记为「充分」这类档位映射句式
+)
 _QUESTION_INSTRUCTIONS = ("询问用户", "确认后再继续", "请告诉我")
 _PENDING_ENTITY = re.compile(r"待定实体\d+")
 _FORBIDDEN_FIELDS = {
@@ -235,8 +245,9 @@ def _rule_4(goals: list[dict[str, Any]]) -> list[str]:
             messages.append(f"[规则4] {goal_id}.acceptance 至少需要 1 条可判定标准")
             continue
         for index, item in enumerate(acceptance):
-            hit = next((word for word in _BAD_ACCEPTANCE if word in str(item)), None)
-            if hit:
+            text = str(item)
+            hit = next((word for word in _BAD_ACCEPTANCE if word in text), None)
+            if hit and not _QUANTIFIED_ACCEPTANCE.search(text):
                 messages.append(
                     f"[规则4] {goal_id}.acceptance[{index}] 含不可判定表述“{hit}”：{item}"
                 )
