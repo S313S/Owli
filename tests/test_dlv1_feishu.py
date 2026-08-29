@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -136,3 +137,64 @@ def test_fu1_读侧四列优先_extra_兜底(tmp_path: Path) -> None:
     assert feishu["doc_token"] == "doxNEW" and feishu["status"] == "synced"
     assert feishu["record_id"] == "recNEW" and feishu["synced_at"]
     assert feishu["doc_url"] == "https://feishu.cn/docx/doxNEW"  # 四列放不下的细节仍来自 extra
+
+
+class FakeCli:
+    """按 §FU-1 真机取证的 lark-cli 1.0.83 返回形状回放（base_token / tables[].id /
+    列式 record-list / upsert 不回 record_id），锁住四处解析，防再改回 OpenAPI 形状。"""
+
+    def __init__(self) -> None:
+        self.tables: dict[str, str] = {}
+        self.records: dict[str, dict[str, list[str]]] = {}
+        self.calls: list[str] = []
+
+    def __call__(self, *args: str) -> dict:
+        self.calls.append(args[1])
+        if args[1] == "+base-create":
+            return {"data": {"base": {"base_token": "basFU1", "name": args[3]}}}
+        if args[1] == "+table-list":
+            return {"data": {"tables": [{"id": i, "name": n} for n, i in self.tables.items()]}}
+        if args[1] == "+table-create":
+            name = args[args.index("--name") + 1]
+            self.tables[name] = f"tbl{len(self.tables)}"
+            return {"data": {"table": {"table_id": self.tables[name]}}}
+        if args[1] == "+record-list":
+            table = args[args.index("--table-id") + 1]
+            anchor = json.loads(args[args.index("--filter-json") + 1])["conditions"][0][2]
+            hit = self.records.get(table, {}).get(anchor)
+            return {"data": {"fields": ["anchor"], "data": [[anchor]] if hit else [],
+                             "record_id_list": hit or [], "has_more": False}}
+        if args[1] == "+record-upsert":
+            table = args[args.index("--table-id") + 1]
+            anchor = next(iter(json.loads(args[args.index("--json") + 1]).values()))
+            rid = args[args.index("--record-id") + 1] if "--record-id" in args else f"rec{len(self.records.get(table, {}))}"
+            self.records.setdefault(table, {})[anchor] = [rid]
+            return {"data": {"record": {"update": {}}, "updated": True}}  # 真机不回 record_id
+        raise AssertionError(f"未预期的 lark-cli 调用：{args}")
+
+
+def test_fu1_lark_cli_真机返回形状_解析正确(monkeypatch) -> None:
+    from app.export.feishu import LarkCliTransport
+
+    fake = FakeCli()
+    transport = LarkCliTransport()
+    monkeypatch.setattr(transport, "_run", fake)
+    assert transport.ensure_base("Owli 研究报告") == "basFU1"  # data.base.base_token，不是 app_token
+    table = transport.ensure_table("basFU1", "报告总览", [{"field_name": "report_id", "type": 1}])
+    assert table == "tbl0"
+    assert transport.ensure_table("basFU1", "报告总览", []) == "tbl0"  # 第二次走 tables[].id 命中不重建
+    first = transport.upsert("basFU1", table, "report_id", "r-1", {"report_id": "r-1"})
+    assert first == "rec0" and first != "None"  # upsert 不回 id，靠锚点回查——绝不能是字符串 "None"
+    assert transport.upsert("basFU1", table, "report_id", "r-1", {"report_id": "r-1"}) == "rec0"
+    assert fake.calls.count("+record-upsert") == 2 and len(fake.records[table]) == 1  # 不增行
+
+
+def test_fu1_成功推送清掉上次失败留下的_error(tmp_path: Path) -> None:
+    from app.export.feishu import push_to_feishu
+
+    store, research_id, text = _seeded(tmp_path)
+    assert push_to_feishu(store, research_id, text, transport=BrokenTransport())["status"] == "failed"
+    assert store.get_report(research_id)["extra"]["feishu"]["error"]
+    push_to_feishu(store, research_id, text, transport=FakeTransport())
+    feishu = store.get_report(research_id)["extra"]["feishu"]
+    assert feishu["status"] == "synced" and "error" not in feishu and "推送失败" not in str(feishu)

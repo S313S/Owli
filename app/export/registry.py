@@ -56,6 +56,9 @@ def record_feishu(store: Any, report_id: str, status: str, **fields: Any) -> dic
 
     def mutate(extra: dict[str, Any]) -> dict[str, Any]:
         merged = {**(extra.get("feishu") or {}), **payload}
+        if status != "failed":
+            # 上一次失败留下的 error/message 不能糊在这次成功的记录上（§FU-1 真机撞到）。
+            merged = {k: v for k, v in merged.items() if k not in {"error", "message"} or k in payload}
         extra["feishu"] = merged
         return {"feishu": merged}
 

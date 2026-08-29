@@ -60,30 +60,53 @@ class LarkCliTransport(FeishuTransport):
         return json.loads(proc.stdout or "{}")
 
     def ensure_base(self, name: str) -> str:
+        # §FU-1 真机取证：lark-cli 1.0.83 返回 data.base.base_token，没有 OpenAPI 的 app_token。
         data = self._run("base", "+base-create", "--name", name)
-        return str(data.get("data", data).get("app", data.get("data", data)).get("app_token")
-                   or _dig(data, "app_token"))
+        token = _dig(data, "base_token") or _dig(data, "app_token")
+        if not token:
+            raise RuntimeError(f"建多维表格后拿不到 base_token：{json.dumps(data, ensure_ascii=False)[:200]}")
+        return str(token)
 
     def ensure_table(self, base_token: str, name: str, fields: Sequence[Mapping[str, Any]]) -> str:
-        tables = self._run("base", "+table-list", "--base-token", base_token)
-        for table in _dig(tables, "items") or []:
+        # 真机取证：+table-list 返回 data.tables[]，每项的主键叫 id 不叫 table_id。
+        listed = self._run("base", "+table-list", "--base-token", base_token)
+        for table in _dig(listed, "tables") or _dig(listed, "items") or []:
             if table.get("name") == name:
-                return str(table["table_id"])
+                return str(table.get("table_id") or table["id"])
         data = self._run("base", "+table-create", "--base-token", base_token, "--name", name,
                          "--fields", json.dumps([_cli_field(f) for f in fields], ensure_ascii=False))
-        return str(_dig(data, "table_id"))
+        table_id = _dig(data, "table_id") or _dig(data, "id")
+        if not table_id:
+            raise RuntimeError(f"建表「{name}」后拿不到 table_id：{json.dumps(data, ensure_ascii=False)[:200]}")
+        return str(table_id)
 
     def upsert(self, base_token: str, table_id: str, anchor_field: str, anchor: str,
                record: Mapping[str, Any]) -> str:
-        found = self._run("base", "+record-search", "--base-token", base_token, "--table-id", table_id,
-                          "--filter-json", json.dumps({"conjunction": "and", "conditions": [
-                              {"field_name": anchor_field, "operator": "is", "value": [anchor]}]}))
+        existing = self._find(base_token, table_id, anchor_field, anchor)
         args = ["base", "+record-upsert", "--base-token", base_token, "--table-id", table_id,
                 "--json", json.dumps({k: _cli_value(v) for k, v in record.items()}, ensure_ascii=False)]
-        existing = _dig(found, "items") or []
         if existing:
-            args += ["--record-id", str(existing[0]["record_id"])]
-        return str(_dig(self._run(*args), "record_id"))
+            args += ["--record-id", existing]
+        # 真机取证：+record-upsert 的响应里没有 record_id（只有 record.update / updated），
+        # 新建行的 id 只能按锚点回查——直接 str(_dig(...)) 会把 None 写成字符串 "None"。
+        record_id = _dig(self._run(*args), "record_id") or existing \
+            or self._find(base_token, table_id, anchor_field, anchor)
+        if not record_id:
+            raise RuntimeError(f"写入「{anchor}」后按锚点回查不到 record_id")
+        return str(record_id)
+
+    def _find(self, base_token: str, table_id: str, anchor_field: str, anchor: str) -> str | None:
+        """按锚点查 record_id。lark-cli 的 filter 是 tuple 协议（{logic, conditions:[[字段,操作符,值]]}），
+        不是 OpenAPI 的 {conjunction, conditions:[{field_name,operator,value}]}；命中行是列式的
+        data.data[]，record_id 另在 data.record_id_list[]。"""
+        found = self._run("base", "+record-list", "--base-token", base_token, "--table-id", table_id,
+                          "--filter-json", json.dumps(
+                              {"logic": "and", "conditions": [[anchor_field, "==", anchor]]},
+                              ensure_ascii=False))
+        ids = _dig(found, "record_id_list") or [
+            item.get("record_id") for item in (_dig(found, "items") or []) if isinstance(item, Mapping)
+        ]
+        return str(ids[0]) if ids else None
 
     def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
         data = self._run("docs", "+create", "--title", title, "--doc-format", "markdown", "--content", markdown)
