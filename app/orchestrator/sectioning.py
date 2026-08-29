@@ -56,6 +56,25 @@ _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence",
 )
+#: §RATE-1 货 4：等级高的先进池；**空等级 = 还没评到**，排在评过的后面但仍可用，
+#: 否则评级章还没跑完的节一个字都写不出来。D 级不进池（真正的低质来源）。
+_EVIDENCE_GRADE_RANK = {"A": 0, "B": 1, "C": 2, "": 3, "D": 4}
+_EVIDENCE_RATING_FIELDS = ("score_total", "grade", "rated_by")
+
+
+def _evidence_grade(row: Mapping[str, Any]) -> str:
+    return str(row.get("grade") or "").strip().upper()
+
+
+def _rating_sort_key(row: Mapping[str, Any]) -> tuple[int, int, str]:
+    """同 goal 内按真实等级排：总分降序 → 等级降序 → id 稳定兜底。"""
+    total = row.get("score_total")
+    scored = isinstance(total, int) and not isinstance(total, bool)
+    return (
+        -int(total) if scored else 1,
+        _EVIDENCE_GRADE_RANK.get(_evidence_grade(row), 3),
+        str(row.get("id") or ""),
+    )
 _HTTP_URL = re.compile(
     r"https?://[^\s<>\"'()（）\[\]{}，。；：！？]+",
     re.IGNORECASE,
@@ -412,7 +431,7 @@ def _round_robin_by_platform(
     for platform_rows in buckets.values():
         platform_rows.sort(key=lambda row: (
             0 if str(row.get("goal_id")) == section_goal_id else 1,
-            str(row.get("id") or ""),
+            *_rating_sort_key(row),
         ))
     selected: list[dict[str, Any]] = []
     offsets = {platform: 0 for platform in buckets}
@@ -577,7 +596,7 @@ def _numbered_evidence_rows(
         selected.extend(_section_evidence_rows(unassigned, None, limit=unfilled))
     selected.sort(key=lambda row: (
         str(row.get("goal_id") or ""),
-        str(row["id"]),
+        *_rating_sort_key(row),
     ))
     return selected, quotas, actual, floor_degraded
 
@@ -590,15 +609,13 @@ def _evidence_index(
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """先按全报告稳定编号，再生成不超过 30 条的本节可见子集。"""
 
+    identified = [row for row in rows if str(row.get("id") or "").strip()]
+    # §RATE-1 货 4：D 级不进池——评级要真的决定「引不引」，就必须在这里生效。
+    # 全是 D 时不把写手饿死：回退全池，让它照常写、由 rating_notes 自己说明。
+    keepable = [row for row in identified if _evidence_grade(row) != "D"]
     ordered = sorted(
-        (
-            row for row in rows
-            if str(row.get("id") or "").strip()
-        ),
-        key=lambda row: (
-            str(row.get("goal_id") or ""),
-            str(row["id"]),
-        ),
+        keepable or identified,
+        key=lambda row: (str(row.get("goal_id") or ""), *_rating_sort_key(row)),
     )
     numbered, goal_quotas, goal_selected_counts, goal_floor_degraded = (
         _numbered_evidence_rows(ordered)
@@ -646,7 +663,7 @@ def _evidence_index(
             "goal_id": row.get("goal_id"),
             "fetched_at": row.get("fetched_at"),
         }
-        for field in _EVIDENCE_SCORE_FIELDS:
+        for field in (*_EVIDENCE_SCORE_FIELDS, *_EVIDENCE_RATING_FIELDS):
             if row.get(field) is not None:
                 item[field] = row[field]
         if row.get("rating_notes") not in (None, ""):
@@ -1394,6 +1411,10 @@ async def run_sectioned_task(
                     "\n缺口/限制性陈述（『本节可见证据不足』『未覆盖 X』这类）"
                     "不许进『结论』列表，放独立的『证据缺口』段。"
                     "『结论』列表每一项必须带至少一个 [Sxx]。\n"
+                    "**先按证据池里的 grade 分层**（A/B 已通过可靠度审计、C 存疑、"
+                    "空 = 本节写作时还没评到；D 级已被系统挡在池外）：A/B 可以直陈、"
+                    "逐条当事实引；C 与空等级只作旁证，必须带上限定语（『有用户反馈…』"
+                    "『尚待其他来源印证』），不得单独支撑结论。同层内再按来源类型区分——"
                     "权威来源（官网 / 媒体 / 评测站）：可以直陈，逐条当事实引。"
                     "社交媒体这类权重不高的来源：以汇总式、带平台与倾向的句式提及，"
                     "并挂角标，不逐条当权威引。样例：『在国内小红书平台上，"
