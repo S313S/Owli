@@ -13,7 +13,9 @@ from app.plan.store import load_plan
 from app.orchestrator.runtime import _replace_reused_subjects
 from app.store.dao import Store
 from app.store.recall import RecallCandidate, RecallMatch, RecallResult
-from tests.plan_factory import make_agent, make_plan_dict
+from tests.plan_factory import (
+    attach_rating_agents, make_agent, make_plan_dict,
+)
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "app" / "store" / "schema.sql"
@@ -63,6 +65,7 @@ def _source_plan(source_id: str) -> dict:
             agent["chapter"]["chapter_type"] = "collection"
             agent["chapter"]["closing"]["entities"] = [agent["entity"]]
             agent["chapter"]["closing"]["notes"] = {"legacy": "旧题目的章节哨兵"}
+    attach_rating_agents(plan)  # §RATE-1 货 2：采集章必须配评级章（规则 30）
     return plan
 
 
@@ -322,6 +325,10 @@ def test_复用分支落成历史计划模板_新建分支才启动规划(tmp_pa
                     assert all("旧题目的第二实体哨兵" not in value for value in method_fields)
                     assert goal.status == "pending"
                     for agent in goal.agents:
+                        if agent.agent_id.startswith("reliability-audit"):
+                            # §RATE-1 货 2：评级章的任务由系统写死（指向采集章产物路径），
+                            # 本来就不含实体名，不参与「实体占位符替换」这条契约。
+                            continue
                         assert "比较两个编码 Agent" not in agent.task
                         assert "待定实体1" in agent.task
                         assert "待定实体2" in agent.task

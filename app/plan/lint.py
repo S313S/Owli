@@ -7,7 +7,9 @@ from collections import Counter, deque
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
 
-from app.plan.model import Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of
+from app.plan.model import (
+    Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of, rated_collector_id,
+)
 
 
 _KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -158,6 +160,19 @@ def _graph_errors(
     if found:
         messages.append(f"[规则2] {location} 依赖成环，环上的 id：{found}")
     return messages
+
+
+def _rated_chapter(goal: Mapping[str, Any], agent: Mapping[str, Any]) -> str:
+    """§RATE-1 货 2：这一章是不是「只评一个采集章的评级章」，是则返回那章 agent_id。"""
+    return rated_collector_id(
+        output=agent.get("output", {}),
+        depends_on=agent.get("depends_on", []),
+        deliverable_path=str(goal.get("deliverable", {}).get("path", "")),
+        collector_ids=[
+            str(item.get("agent_id", "")) for item in goal.get("agents", [])
+            if item.get("capability", {}).get("profile") == "web-collector"
+        ],
+    )
 
 
 def _rule_1(goals: list[dict[str, Any]]) -> list[str]:
@@ -620,6 +635,15 @@ def _rule_19(goals: list[dict[str, Any]]) -> list[str]:
             normalized = str(PurePosixPath(deliverable_path.replace("\\", "/")))
             owners.setdefault(normalized, []).append((goal_id, "deliverable"))
         agents = list(goal.get("agents", []))
+        # §RATE-1 货 2：评级章可能排在交付物章后面，「最终 agent」按**最后一个
+        # 非评级章**算，否则交付物归属会被判成路径冲突。
+        final_index = max(
+            (
+                index for index, agent in enumerate(agents)
+                if not _rated_chapter(goal, agent)
+            ),
+            default=len(agents) - 1,
+        )
         for index, agent in enumerate(agents):
             path = str(agent.get("output", {}).get("path", "")).strip()
             if not path:
@@ -627,7 +651,7 @@ def _rule_19(goals: list[dict[str, Any]]) -> list[str]:
             normalized = str(PurePosixPath(path.replace("\\", "/")))
             role = (
                 "final-agent"
-                if index == len(agents) - 1
+                if index == final_index
                 else f"agent:{agent.get('agent_id')}"
             )
             owners.setdefault(normalized, []).append((goal_id, role))
@@ -956,7 +980,12 @@ def _rule_24(
         return []
     messages: list[str] = []
     for goal in goals:
-        count = len(goal.get("agents", []))
+        # §RATE-1 货 2：评级章由生成器按采集章自动排出，不占模型的章数预算
+        # （否则 fast 档 4 章的 goal 一排评级章就必红）。
+        count = sum(
+            1 for agent in goal.get("agents", [])
+            if not _rated_chapter(goal, agent)
+        )
         if count > max_chapters_per_goal:
             messages.append(
                 f"[规则24] {goal.get('goal_id')} 章数上限为 "
@@ -973,6 +1002,39 @@ _ARRAY_VALIDATORS = frozenset({
     "field_domain_whitelist", "no_item_missing_rating",
     "rating_notes_matches_regex", "rating_notes_scores_match_columns",
 })
+
+
+def _rule_30(goals: list[dict[str, Any]]) -> list[str]:
+    """§RATE-1 货 2：有采集章就必须有评级章，且只连它那一章（采集即评级）。
+
+    评级要真的决定「引不引」，就必须在写作**之前**跑完；生成器自动排出，这条
+    规则只负责在它没排到时把红报出来（不自动修）。
+    """
+    messages: list[str] = []
+    for goal in goals:
+        agents = list(goal.get("agents", []))
+        collectors = [
+            str(agent.get("agent_id", "")) for agent in agents
+            if agent.get("capability", {}).get("profile") == "web-collector"
+        ]
+        rated = {
+            _rated_chapter(goal, agent): agent
+            for agent in agents if _rated_chapter(goal, agent)
+        }
+        for agent_id in collectors:
+            rating = rated.get(agent_id)
+            if rating is None:
+                messages.append(
+                    f"[规则30] {goal.get('goal_id')}/{agent_id} 是采集章，"
+                    "但没有对应的评级章：写作前拿不到真实等级"
+                )
+            elif list(rating.get("depends_on", [])) != [agent_id]:
+                messages.append(
+                    f"[规则30] {goal.get('goal_id')}/{rating.get('agent_id')} "
+                    f"只能依赖它评的那一章 {agent_id}，实际为 "
+                    f"{list(rating.get('depends_on', []))}"
+                )
+    return messages
 
 
 def _rule_27(goals: list[dict[str, Any]]) -> list[str]:
@@ -1038,6 +1100,8 @@ def _rule_28(goals: list[dict[str, Any]]) -> list[str]:
 
     messages: list[str] = []
     for goal, agent in _agents(goals):
+        if _rated_chapter(goal, agent):
+            continue
         deliverable = goal.get("deliverable", {})
         expected = _identifier_signals([
             deliverable.get("description", ""),
@@ -1173,4 +1237,5 @@ def lint(
     errors.extend(_rule_26(goals))
     errors.extend(_rule_27(goals))
     errors.extend(_rule_28(goals))
+    errors.extend(_rule_30(goals))
     return {"errors": errors, "warnings": _warnings(goals)}

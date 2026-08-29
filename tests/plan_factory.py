@@ -118,3 +118,72 @@ def make_plan_dict() -> dict:
         "created_at": "2026-08-19T00:00:00Z",
         "updated_at": "2026-08-19T01:00:00Z",
     }
+
+
+def chapter_slots(raw_agents: list) -> list:
+    """章号 → 模型写的那个 agent（`ch-N` 对应 `chapter_slots(...)[N-1]`）。
+
+    §RATE-1 货 2：生成器在每个采集 agent 后自动插一个评级章，章号随之后移；
+    评级章的章规格由系统确定性生成、不走引擎，所以这里只占位（None）不产出。
+    """
+    from app.plan.generate import _classify
+
+    slots: list = []
+    for item in raw_agents:
+        slots.append(item)
+        name = str(item.get("display_name") or item.get("name") or "")
+        if _classify(name, "")[1] == "web-collector":
+            slots.append(None)
+    return slots
+
+
+def attach_rating_agents(plan: dict) -> dict:
+    """§RATE-1 货 2：给手写计划夹具补上「每个采集章配一个评级章」（规则 30）。
+
+    形状与生成器排出来的一致：只依赖它评的那一章、走评级五件验证器、不产 deliverable。
+    """
+    serial = 0
+    for goal in plan.get("goals", []):
+        goal_id = str(goal["goal_id"])
+        collectors = [
+            agent for agent in goal["agents"]
+            if agent.get("capability", {}).get("profile") == "web-collector"
+        ]
+        for collector in collectors:
+            serial += 1  # agent_id 全计划唯一（与生成器的 counters 同口径）
+            suffix = "" if serial == 1 else f"-{serial}"
+            agent_id = f"reliability-audit{suffix}"
+            rating = make_agent(agent_id, goal_id)
+            rating["display_name"] = "可靠度审计"
+            rating["task"] = (
+                f"逐条评级 {collector['output']['path']} 里的每一条证据，"
+                "并原样回带 permalink。"
+            )
+            rating["depends_on"] = [collector["agent_id"]]
+            rating["output"] = {
+                "format": "json", "shape": "array",
+                "path": f"goals/{goal_id}/{agent_id}.json",
+                "validators": [
+                    "file_exists", "no_item_missing_rating",
+                    "field_domain_whitelist:reliability_closed_set",
+                    "rating_notes_matches_regex",
+                    "rating_notes_scores_match_columns",
+                ],
+            }
+            chapter_id = f"ch-{len(goal['agents']) + 1}"
+            rating["chapter"] = {
+                "chapter_id": chapter_id,
+                "chapter_type": "audit",
+                "plan_path": f"goals/{goal_id}/{chapter_id}.md",
+                "opening": {
+                    "inputs": [{"path": collector["output"]["path"]}],
+                    "task": rating["task"],
+                    "acceptance": ["逐条评级并回带原 permalink"],
+                },
+                "closing": {
+                    "output": {"path": rating["output"]["path"]},
+                    "entities": [], "expected_count": None, "notes": {},
+                },
+            }
+            goal["agents"].append(rating)
+    return plan

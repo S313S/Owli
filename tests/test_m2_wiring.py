@@ -17,6 +17,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from app.store.evidence_artifacts import load_evidence_payloads
+from tests.plan_factory import chapter_slots
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,9 +132,9 @@ class RecordingEngine:
             else:
                 goal_text, chapter_text = task.output_path.stem.split("-ch-", 1)
                 goal_number = int(goal_text.removeprefix("goal-"))
-                raw_agent = self.skeleton["goals"][goal_number - 1]["agents"][
-                    int(chapter_text) - 1
-                ]
+                raw_agent = chapter_slots(
+                    self.skeleton["goals"][goal_number - 1]["agents"]
+                )[int(chapter_text) - 1]
                 name = str(raw_agent["name"])
                 chapter_type = (
                     "collection" if "数据抓取" in name
@@ -270,12 +271,15 @@ async def api_client(
 async def wait_for_status(
     client: httpx.AsyncClient, research_id: str, expected: str
 ) -> dict[str, Any]:
-    for _ in range(100):
+    # §RATE-1 货 2：每个采集章多带一个评级章，同一 event loop 里要多让出几次。
+    for _ in range(400):
         response = await client.get(f"/api/researches/{research_id}")
         if response.status_code == 200 and response.json()["data"]["status"] == expected:
             return response.json()["data"]
         await asyncio.sleep(0)
-    raise AssertionError(f"research 未进入 {expected}")
+    raise AssertionError(
+        f"research 未进入 {expected}；实际={response.json()['data']['status']}"
+    )
 
 
 async def wait_for_goal_status(
@@ -371,7 +375,8 @@ async def test_自动确认仍经审核批准干预状态并由_DAG_生成_C1_�
     planned = [task for task in engine.tasks if task.agent_id != "reliability-auditor"]
     assert [task.agent_kind for task in planned] == [
         "planning", "planning", "planning", "planning", "planning", "planning", "planning",
-        "data_collection", "reliability_audit",
+        # §RATE-1 货 2：采集章后自动跟一个评级章（写作前评级），再是 goal-2 的审计章
+        "data_collection", "reliability_audit", "reliability_audit",
         "report_writing", "report_writing", "report_writing",
     ]
     assert chapters_response.status_code == 200
@@ -482,8 +487,9 @@ async def test_pause_让在跑_agent_完成但新_agent_等_resume(tmp_path: Pat
 
     assert completed["progress"]["done"] == 3
     planned = [task for task in engine.tasks if task.agent_id != "reliability-auditor"]
-    assert [task.agent_kind for task in planned][-4:] == [
-        "reliability_audit", "report_writing", "report_writing", "report_writing"
+    assert [task.agent_kind for task in planned][-5:] == [
+        "reliability_audit", "reliability_audit",
+        "report_writing", "report_writing", "report_writing",
     ]
 
 
@@ -735,7 +741,11 @@ async def test_调整后继续_停在干预点_编辑下游后再由继续卡推
         still_waiting = await wait_for_goal_status(
             client, research_id, "goal-1", "awaiting_intervention"
         )
-        assert not any(task.agent_kind == "reliability_audit" for task in engine.tasks)
+        # §RATE-1 货 2：goal-1 自己的评级章跟采集章一起跑完了；这里看的是 goal-2 的审计章
+        assert not any(
+            task.agent_kind == "reliability_audit" and task.goal_id == "goal-2"
+            for task in engine.tasks
+        )
 
         plan_response = await client.get(f"/api/researches/{research_id}/plan")
         plan = plan_response.json()["data"]
@@ -756,7 +766,8 @@ async def test_调整后继续_停在干预点_编辑下游后再由继续卡推
         assert continued.status_code == 200, continued.text
         await wait_for_goal_status(client, research_id, "goal-2", "awaiting_intervention")
         audit_task = next(
-            task for task in engine.tasks if task.agent_kind == "reliability_audit"
+            task for task in engine.tasks
+            if task.agent_kind == "reliability_audit" and task.goal_id == "goal-2"
         )
 
     assert still_waiting["status"] == "running"

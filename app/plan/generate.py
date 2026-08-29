@@ -450,6 +450,8 @@ def _output(
         agent_kind in {"cross_validation", "reliability_audit"}
         and _target_is_findings(target)
     ):
+        # §RATE-1 货 2：自动排出的评级章一律 target=None，走不到这条改判；
+        # 模型自己写的「末级可靠度审计」承接 findings 交付物的老契约原样保留。
         result = {
             "format": "json", "shape": shape, "path": f"{base}.json",
             "validators": [
@@ -821,6 +823,10 @@ def _build_plan(
                     agent["depends_on"] = [item["agent_id"] for item in agents]
                 agents.append(agent)
                 previous_agent_id = agent["agent_id"]
+            agents = _insert_rating_agents(
+                agents, goal_id=goal_id, upstream=list(depends_on), query=query,
+                counters=counters, scale=scale, scale_profile=profile,
+            )
             source_ids = {
                 str(source)
                 for agent in agents
@@ -976,6 +982,100 @@ def _build_agent(
                 source_id=source_id if profile == "web-collector" else None,
                 source_item_limit=profile_config.source_item_limits.get(source_id),
                 scale=scale,
+            ),
+            "assumptions_policy": "assume_and_declare",
+        },
+        "output": output,
+        "extra_quota_credits": None,
+        "origin": _origin(),
+        "status": "queued",
+    }
+
+
+def _insert_rating_agents(
+    agents: list[dict[str, Any]],
+    *,
+    goal_id: str,
+    upstream: list[str],
+    query: str,
+    counters: Counter[str],
+    scale: str,
+    scale_profile: ResearchScaleProfile,
+) -> list[dict[str, Any]]:
+    """§RATE-1 货 2：每个采集章后面挂一个只评它的评级章（采集即评级）。
+
+    评级章 `depends_on` 只连它那一个采集章——调度器一轮把所有 ready 的 agent
+    全起（`scheduler._agent_ready`），所以某个采集章一 done 它的评级章立刻起跑，
+    其余采集章照常在跑，评级墙钟基本被采集期吃掉。
+    首个汇总章改为等齐**全部评级章**：评级是写作的前置条件，不是事后贴的标签。
+    """
+    collector_ids = [
+        str(agent["agent_id"]) for agent in agents
+        if agent["capability"]["profile"] == "web-collector"
+    ]
+    if not collector_ids:
+        return agents
+    result: list[dict[str, Any]] = []
+    rating_ids: list[str] = []
+    for agent in agents:
+        result.append(agent)
+        if agent["capability"]["profile"] != "web-collector":
+            continue
+        rating = _rating_agent(
+            agent, goal_id=goal_id, upstream=upstream, query=query,
+            counters=counters, scale=scale, scale_profile=scale_profile,
+        )
+        rating_ids.append(str(rating["agent_id"]))
+        result.append(rating)
+    for agent in result:
+        if str(agent["agent_id"]) in rating_ids:
+            continue
+        if set(agent["depends_on"]) == set(collector_ids):
+            agent["depends_on"] = list(rating_ids)
+    return result
+
+
+RATING_AGENT_KIND = "reliability_audit"
+
+
+def _rating_agent(
+    collector: Mapping[str, Any],
+    *,
+    goal_id: str,
+    upstream: list[str],
+    query: str,
+    counters: Counter[str],
+    scale: str,
+    scale_profile: ResearchScaleProfile,
+) -> dict[str, Any]:
+    """§RATE-1 货 2：给一个采集章配一个只评它的评级章。
+
+    产物路径/验证器沿用 `_output` 的 reliability_audit 五件，不新增校验器名。
+    """
+    counters[RATING_AGENT_KIND] += 1
+    count = counters[RATING_AGENT_KIND]
+    agent_id = "reliability-audit" + ("" if count == 1 else f"-{count}")
+    output = _output(RATING_AGENT_KIND, goal_id, agent_id, "array", None)
+    source_path = str(collector["output"]["path"])
+    task = (
+        f"逐条评级 {source_path} 里的每一条证据："
+        "读该采集章产物，对每条记录给出五维评分与 rating_notes，"
+        "并原样回带它的 permalink（条数一一对应，不新增不丢条）。"
+    )
+    return {
+        "agent_id": agent_id,
+        "display_name": "可靠度审计",
+        "entity": None,
+        "task": task[:200],
+        "depends_on": [str(collector["agent_id"])],
+        "inputs": [],
+        "engine": pick_engine(RATING_AGENT_KIND, None).engine,
+        "model": None,
+        "capability": _capability("readonly-analyst", goal_id, upstream),
+        "prompt": {
+            "preamble_ref": "common/v1",
+            "body": _agent_prompt(
+                query, task, output, RATING_AGENT_KIND, scale=scale,
             ),
             "assumptions_policy": "assume_and_declare",
         },

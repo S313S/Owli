@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.plan_factory import chapter_slots
+
 
 NOW = "2026-08-19T03:00:00+00:00"
 RESEARCH_ID = "r-01JXPLAN0000000000000000"
@@ -135,7 +137,9 @@ class FakeEngine:
             goal_text, chapter_text = task.output_path.stem.split("-ch-", 1)
             goal_number = int(goal_text.removeprefix("goal-"))
             chapter_number = int(chapter_text)
-            raw_agent = self._current["goals"][goal_number - 1]["agents"][chapter_number - 1]
+            raw_agent = chapter_slots(
+                self._current["goals"][goal_number - 1]["agents"]
+            )[chapter_number - 1]
             name = str(raw_agent["name"]).casefold()
             if any(token in name for token in ("数据抓取", "mediacrawler", "浏览器自动化")):
                 chapter_type = "collection"
@@ -341,16 +345,25 @@ def test_交叉验证保留节化契约且末级可靠度审计沿用findings契
     generated = plan.goals[1].agents
 
     assert lint(plan)["errors"] == []
-    assert generated[1].output["validators"] == [
+    # §RATE-1 货 2：采集章后自动插了一个评级章，模型写的章整体后移一位。
+    kinds = [agent.agent_id.rstrip("-0123456789") for agent in generated]
+    assert kinds == [
+        "data-collection", "reliability-audit",
+        "cross-validation", "reliability-audit",
+    ]
+    assert generated[1].depends_on == [generated[0].agent_id]
+    assert generated[2].output["validators"] == [
         "file_exists", "sectioned_document_valid",
     ]
-    validators = generated[2].output["validators"]
+    validators = generated[3].output["validators"]
     assert "json_array_min_items:1" in validators
     assert "each_item_has:competitor,pros,cons,conflicts,gaps" in validators
     assert "no_item_missing_rating" not in validators
-    assert "七个字段" not in generated[2].prompt["body"]
-    assert "statement" in generated[2].prompt["body"]
-    assert "is_singleton" in generated[2].prompt["body"]
+    assert "七个字段" not in generated[3].prompt["body"]
+    assert "statement" in generated[3].prompt["body"]
+    assert "is_singleton" in generated[3].prompt["body"]
+    # 自动评级章不受 findings 改判影响：它 target=None，走的是评级五件。
+    assert "no_item_missing_rating" in generated[1].output["validators"]
 
 
 def test_纯证据评级goal仍使用ratings契约(tmp_path) -> None:
@@ -388,10 +401,31 @@ def test_每个_goal_最终_agent_产出_deliverable_且下游_inputs_逐字引�
     plan, _, _ = _generate(tmp_path, [_valid_skeleton()])
 
     for goal in plan.goals:
-        assert goal.agents[-1].output["path"] == goal.deliverable["path"]
-        assert goal.agents[-1].output["format"] == goal.deliverable["format"]
-        for index, agent in enumerate(goal.agents):
-            expected = [] if index == 0 else [goal.agents[index - 1].agent_id]
+        # §RATE-1 货 2：评级章由系统排出，不参与「最终 agent 产 deliverable」与
+        # 链式依赖这两条契约；把它摘掉后原契约逐字不变。
+        rated = {
+            agent.agent_id: agent.depends_on[0]
+            for agent in goal.agents
+            if agent.agent_id.startswith("reliability-audit")
+            and agent.output["path"] != goal.deliverable["path"]
+        }
+        authored = [
+            agent for agent in goal.agents if agent.agent_id not in rated
+        ]
+        ratings = {collector: rating for rating, collector in rated.items()}
+        assert authored[-1].output["path"] == goal.deliverable["path"]
+        assert authored[-1].output["format"] == goal.deliverable["format"]
+        collectors: list[str] = []
+        for index, agent in enumerate(authored):
+            if agent.capability["profile"] == "web-collector":
+                assert agent.depends_on == []
+                collectors.append(agent.agent_id)
+                continue
+            if collectors and index == len(collectors):
+                # 首个汇总章等齐全部**评级章**（此前是等齐全部采集章）
+                expected = [ratings[item] for item in collectors]
+            else:
+                expected = [] if index == 0 else [authored[index - 1].agent_id]
             assert agent.depends_on == expected
     for goal in plan.goals[1:]:
         direct_inputs = [
@@ -852,10 +886,17 @@ def test_同_goal_竞品采集章并行且首个汇总章等待全部采集() ->
         source, query="豆包竞品", research_id=RESEARCH_ID, timestamp=NOW,
         scale="fast",
     )
+    # §RATE-1 货 2：每个采集章后面跟着它自己的评级章，汇总章改等全部评级章。
     agents = plan.goals[0].agents
-    assert agents[0].depends_on == []
-    assert agents[1].depends_on == []
-    assert agents[2].depends_on == [agents[0].agent_id, agents[1].agent_id]
+    assert [agent.agent_id for agent in agents] == [
+        "data-collection", "reliability-audit",
+        "data-collection-2", "reliability-audit-2",
+        "data-cleaning",
+    ]
+    assert agents[0].depends_on == [] and agents[2].depends_on == []
+    assert agents[1].depends_on == ["data-collection"]
+    assert agents[3].depends_on == ["data-collection-2"]
+    assert agents[4].depends_on == ["reliability-audit", "reliability-audit-2"]
 
 
 def test_build_plan保留模型填写的owner_shape供规则17判冲突() -> None:

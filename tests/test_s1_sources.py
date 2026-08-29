@@ -14,7 +14,7 @@ class ImmediateGate:
 
 
 def _cn_collection_plan(source_id: str) -> dict:
-    from tests.plan_factory import make_agent, make_plan_dict
+    from tests.plan_factory import attach_rating_agents, make_agent, make_plan_dict
 
     plan = make_plan_dict()
     plan["market_profile"] = "cn_product"
@@ -54,6 +54,7 @@ def _cn_collection_plan(source_id: str) -> dict:
         },
     }
     plan["goals"][0]["agents"] = [agent]
+    attach_rating_agents(plan)
     return plan
 
 

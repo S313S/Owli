@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.plan_factory import make_plan_dict
+from tests.plan_factory import attach_rating_agents, make_plan_dict
 
 
 def _collector(agent: dict, goal_id: str, agent_id: str, entity: str) -> dict:
@@ -87,6 +87,7 @@ def _cross_goal_plan():
     source["goals"][2]["agents"] = [
         _analyst(source["goals"][2]["agents"][0], "goal-3", "cross-validation")
     ]
+    attach_rating_agents(source)  # §RATE-1 货 2：采集章必须配评级章（规则 30）
     return Plan.from_dict(source)
 
 

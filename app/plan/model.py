@@ -60,6 +60,30 @@ def agent_kind_of(agent_id: str, profile: Any = None) -> str:
     return _PROFILE_FALLBACK_KINDS.get(str(profile or ""), "audit")
 
 
+def rated_collector_id(
+    *,
+    output: Mapping[str, Any],
+    depends_on: Any,
+    deliverable_path: str,
+    collector_ids: Any,
+) -> str:
+    """§RATE-1 货 2：这一章是不是「只评一个采集章的评级章」，是则返回那章 agent_id。
+
+    不另立字段、只按计划结构判：产物走逐条评级验证器、只依赖一个同 goal 的采集章、
+    且不是本 goal 的交付物章。评级章的产物契约由系统定死，与 goal 验收文本无关，
+    也不占模型的章数预算——lint 的 19/24/28 三条都要按这个口径把它摘出去。
+    """
+    if str(output.get("path", "")) == str(deliverable_path or ""):
+        return ""
+    validators = [str(item) for item in output.get("validators", [])]
+    if "no_item_missing_rating" not in validators:
+        return ""
+    upstream = [str(item) for item in (depends_on or [])]
+    if len(upstream) != 1:
+        return ""
+    return upstream[0] if upstream[0] in set(collector_ids or ()) else ""
+
+
 def _strict_fields(data: Mapping[str, Any], allowed: set[str], location: str) -> None:
     unknown = set(data) - allowed
     if unknown:

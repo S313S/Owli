@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.config import ChapterEngineConfig
-from app.plan.model import Agent, Plan
+from app.plan.model import Agent, Plan, rated_collector_id
 
 
 CHAPTER_TYPES = frozenset({
@@ -332,6 +332,50 @@ def _model_inputs_for_merge(value: Mapping[str, Any]) -> list[dict[str, str]]:
     return list(value["opening"]["inputs"])
 
 
+def rating_chapter_value(agent: Agent, goal: Any) -> dict[str, Any] | None:
+    """§RATE-1 货 2：自动排出的评级章，章规格确定性生成，不走引擎。
+
+    按计划结构认出（只依赖一个同 goal 采集章、产物走逐条评级验证器、不是交付物章），
+    输入就是那一章的产物路径。任务与验收完全由系统决定，让模型再写一遍只会引入
+    漂移，还多花一次章扩写调用。
+    """
+    rates = rated_collector_id(
+        output=agent.output or {},
+        depends_on=agent.depends_on,
+        deliverable_path=str((goal.deliverable or {}).get("path", "")),
+        collector_ids=[
+            item.agent_id for item in goal.agents
+            if (item.capability or {}).get("profile") == "web-collector"
+        ],
+    )
+    if not rates:
+        return None
+    source = next(
+        (item for item in goal.agents if item.agent_id == rates), None,
+    )
+    if source is None:
+        return None
+    source_path = str(source.output["path"])
+    return {
+        "chapter_type": "audit",
+        "opening": {
+            "inputs": [{"path": source_path}],
+            "task": agent.task,
+            "acceptance": [
+                f"产物按声明路径落盘，且条数与 {source_path} 一一对应，"
+                "不新增不丢条",
+                "每条带齐五维评分、rating_notes、rated_by，并原样回带原 permalink",
+            ],
+        },
+        "closing": {
+            "output": {"path": str(agent.output["path"])},
+            "entities": [],
+            "expected_count": None,
+            "notes": {"rates_chapter": rates, "rates_output": source_path},
+        },
+    }
+
+
 async def _generate_selected_chapter_specs(
     plan: Plan,
     workspace: Any,
@@ -405,10 +449,13 @@ async def _generate_selected_chapter_specs(
                     if inspect.isawaitable(callback_result):
                         await callback_result
                 continue
+            value = rating_chapter_value(agent, goal)
+            if value is not None:
+                # 评级章：不占章扩写引擎调用，直接落盘。
+                value = validate_chapter_value(value, agent)
             workspace.reset_attempts(segment_name)
             semantic_errors = list(lint_errors or [])
-            value = None
-            for _ in range(workspace.config.plan_segment_retries):
+            for _ in range(0 if value is not None else workspace.config.plan_segment_retries):
                 raw = await workspace.generate(
                     segment_name,
                     _prompt(agent, history, semantic_errors),

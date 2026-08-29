@@ -138,7 +138,11 @@ def test_多源计划生成由注册表补齐能力与产物契约(tmp_path: Pat
 
     plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
-    collectors = plan.goals[0].agents
+    # §RATE-1 货 2：每个采集章后面跟着自动排出的评级章，这里只看采集章。
+    collectors = [
+        agent for agent in plan.goals[0].agents
+        if agent.capability["profile"] == "web-collector"
+    ]
     expected = ["hacker_news", "web_search", "product_hunt", "x"]
     assert [agent.capability["sources"][0] for agent in collectors] == expected
     for agent, source_id in zip(collectors, expected):
