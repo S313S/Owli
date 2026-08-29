@@ -95,6 +95,7 @@ def _events_of(events, kind):
 
 
 def test_收尾无条件回填_交叉维出真值且rated_by带回填标记(tmp_path, monkeypatch):
+    monkeypatch.setenv("OWLI_SKIP_RATING_BACKFILL", "0")  # §RATE-1 货 0：默认已翻转为跳过
     auditor = LabelAuditor()
     store, events, finish_calls = _finalize(tmp_path, monkeypatch, adapter=auditor)
 
@@ -118,6 +119,7 @@ def test_收尾无条件回填_交叉维出真值且rated_by带回填标记(tmp_
 
 
 def test_回填抛错只发事件_研究仍completed(tmp_path, monkeypatch):
+    monkeypatch.setenv("OWLI_SKIP_RATING_BACKFILL", "0")  # §RATE-1 货 0：默认已翻转为跳过
     store, events, finish_calls = _finalize(tmp_path, monkeypatch, adapter=ExplodingAuditor())
 
     failed = _events_of(events, "reliability_backfill_done") + _events_of(events, "reliability_backfill_failed")
@@ -129,13 +131,33 @@ def test_回填抛错只发事件_研究仍completed(tmp_path, monkeypatch):
     assert rows["ev-b"]["score_crossref"] is None
 
 
-def test_环境开关可跳过且默认跑(tmp_path, monkeypatch):
+def test_rate1货0_未设环境变量时默认跳过回填(tmp_path, monkeypatch):
+    """§RATE-1 货 0：评级挪到写作前，收尾回填默认不跑；reason 与显式 1 分得开。"""
+    monkeypatch.delenv("OWLI_SKIP_RATING_BACKFILL", raising=False)
+    auditor = LabelAuditor()
+    store, events, _ = _finalize(tmp_path, monkeypatch, adapter=auditor)
+    assert auditor.calls == 0, "默认不得起引擎"
+    assert _events_of(events, "reliability_backfill_skipped")[0]["reason"] == "default_off"
+    assert not _events_of(events, "reliability_backfill_done")
+    assert store.get_report("r-ledger")["status"] == "completed"
+
+
+def test_rate1货0_显式1仍是env_skip(tmp_path, monkeypatch):
     monkeypatch.setenv("OWLI_SKIP_RATING_BACKFILL", "1")
     auditor = LabelAuditor()
     store, events, _ = _finalize(tmp_path, monkeypatch, adapter=auditor)
     assert auditor.calls == 0
     assert _events_of(events, "reliability_backfill_skipped")[0]["reason"] == "env_skip"
     assert store.get_report("r-ledger")["status"] == "completed"
+
+
+def test_rate1货0_显式0才跑回填(tmp_path, monkeypatch):
+    monkeypatch.setenv("OWLI_SKIP_RATING_BACKFILL", "0")
+    auditor = LabelAuditor()
+    _, events, _ = _finalize(tmp_path, monkeypatch, adapter=auditor)
+    assert auditor.calls >= 1
+    assert not _events_of(events, "reliability_backfill_skipped")
+    assert len(_events_of(events, "reliability_backfill_done")) == 1
 
 
 def _backfill_store(tmp_path: Path, *, pending: int, reusable: int):
