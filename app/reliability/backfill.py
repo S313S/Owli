@@ -838,6 +838,20 @@ def _scored_payloads(
     return payloads
 
 
+def _already_agent_rated(item: Mapping[str, Any]) -> bool:
+    """§RATE-1 货 5：写作前的评级章已经逐条评过、五维齐全的行，收尾不再重评。
+
+    收尾回填从此只是**兜底**：补写作前没评到的那部分。此前入选条件完全不看
+    `rated_by`——claims 为空时「crossref 缺」几乎把全表圈进来，X-1 那轮 623 条
+    重评了 103 分钟。交叉维缺失本身由 `_backfill_claim_clusters` 在上面的本地
+    路径已经算过一遍，不需要再过一次引擎。
+    """
+    return (
+        str(item.get("rated_by") or "").startswith("agent:")
+        and all(item.get(field) is not None for field in SCORE_FIELDS)
+    )
+
+
 async def backfill_report(
     store: Any,
     report_id: str,
@@ -868,12 +882,16 @@ async def backfill_report(
     normalized = _normalize_report(rows, computed_at) if rows else {}
     targets = [
         item for item in rows
-        if force
-        or str(item.get("id")) in clustered_ids
-        or any(item.get(field) is None for field in SCORE_FIELDS)
-        or _crossref_verdict(
-            item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
-        ) is None
+        if force or (
+            not _already_agent_rated(item)
+            and (
+                str(item.get("id")) in clustered_ids
+                or any(item.get(field) is None for field in SCORE_FIELDS)
+                or _crossref_verdict(
+                    item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
+                ) is None
+            )
+        )
     ]
     rated = 0
     failed = 0

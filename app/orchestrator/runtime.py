@@ -1929,18 +1929,14 @@ class RuntimeCoordinator:
         不看计划里排没排「可靠度审计」agent；抛错只 warning + 事件，研究不判 failed。
         必须在 finish_report **之前**调用：backfill 只在报告已 completed 时才会自己
         finish_report，此时状态仍是 running，收尾状态不会被它覆盖。
-        §RATE-1 货 0：默认**不跑**（评级已挪到写作前，收尾只作兜底）。
-        `OWLI_SKIP_RATING_BACKFILL=0` 才跑；未设 → skipped/`default_off`；
-        显式 `1` → skipped/`env_skip`。判据落库不落日志。
+        §RATE-1 货 5：默认**跑**回填，但它此时只是兜底——写作前评级章已经逐条
+        评过的行不再入选（`backfill._already_agent_rated`），量比 X-1 那轮小得多。
+        `OWLI_SKIP_RATING_BACKFILL=1` 跳过。判据落库不落日志。
         """
-        skip_flag = os.getenv("OWLI_SKIP_RATING_BACKFILL")
-        if skip_flag != "0":
+        if os.getenv("OWLI_SKIP_RATING_BACKFILL") == "1":
             await self.events.publish(research_id, {
                 "type": "reliability_backfill_skipped",
-                "data": {
-                    "research_id": research_id,
-                    "reason": "env_skip" if skip_flag == "1" else "default_off",
-                },
+                "data": {"research_id": research_id, "reason": "env_skip"},
             })
             return
         adapter = self._adapters.get(research_id)
