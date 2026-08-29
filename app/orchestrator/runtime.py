@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from app.adapters import validation
 from app.adapters.capability import Capability
@@ -42,6 +42,7 @@ from app.plan.model import (
     Goal,
     Plan,
     agent_kind_of,
+    rated_collector_id,
 )
 from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
@@ -58,6 +59,7 @@ from app.reliability.claims import (
     register_claims,
 )
 from app.store import evidence_artifacts
+from app.store.dao import normalize_permalink
 from app.store.evidence_artifacts import load_evidence_payloads
 
 
@@ -900,6 +902,10 @@ class RuntimeCoordinator:
                             pass
                     # 只修复产物腿；缺 owli-result 结构化结论时仍保留原失败。
                     return result
+        if kind == "reliability_audit" and bool(getattr(result, "succeeded", False)):
+            # §RATE-1 货 3：评级章一 done 就入库，不等整个 goal 完成——
+            # 写手在同一个 goal 里紧接着组池，等 goal 完成就晚了。
+            await self._persist_rating_chapter(plan, context.goal_id, agent)
         conclusion = getattr(result, "conclusion", None)
         reason = getattr(conclusion, "reason", None) if conclusion is not None else None
         causes = {
@@ -1284,6 +1290,100 @@ class RuntimeCoordinator:
             restored.append(plan.research_id)
         return restored
 
+    _RATING_COLUMNS = (
+        "score_authority", "score_freshness", "score_crossref",
+        "score_completeness", "score_independence", "rating_notes",
+    )
+    _RATING_EXTRA_KEYS = ("authority_kind", "content_kind", "interest_relation")
+
+    def _rating_payloads(
+        self, path: Path, *, existing: Mapping[str, Mapping[str, Any]],
+        agent_id: str,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """§RATE-1 货 3：评级章产物按 permalink 贴回已入库那一行，只动评分列。
+
+        评级章不重抄正文——`upsert_evidence_batch` 只认 `(report_id, permalink)`
+        与平台原生 ID，抄错一个字段就是插一条新行（D-015 一轮报废的教训）。所以这里
+        拿库里那一行做底，只把五维 + rating_notes + 三个闭集标签盖上去；库里没有的
+        permalink **不插新行**，只记 unmatched 让它可见。
+        """
+        try:
+            items = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return [], []
+        if not isinstance(items, list):
+            return [], []
+        payloads: list[dict[str, Any]] = []
+        unmatched: list[str] = []
+        for raw in items:
+            if not isinstance(raw, Mapping):
+                continue
+            permalink = str(raw.get("permalink") or "").strip()
+            stored = existing.get(normalize_permalink(permalink)) if permalink else None
+            if stored is None:
+                unmatched.append(permalink or "(缺 permalink)")
+                continue
+            payload = dict(stored)
+            for column in self._RATING_COLUMNS:
+                if raw.get(column) is not None:
+                    payload[column] = raw[column]
+            extra = dict(payload.get("extra") or {})
+            raw_extra = raw.get("extra") if isinstance(raw.get("extra"), Mapping) else {}
+            for key in self._RATING_EXTRA_KEYS:
+                value = raw_extra.get(key) if raw_extra else raw.get(key)
+                if value:
+                    extra[key] = value
+            payload["extra"] = extra
+            payload["rated_by"] = f"agent:{agent_id}"
+            payloads.append(payload)
+        return payloads, unmatched
+
+    async def _persist_rating_chapter(
+        self, plan: Plan, goal_id: str, agent: Any,
+    ) -> None:
+        """评级章 done 即入库：按 permalink 把评分贴回已入库的行（§RATE-1 货 3）。
+
+        走这条而不是 `_persist_goal_evidence`，是因为后者按章账本状态挑章——
+        此刻本章还没落终态，等它落完已经是 goal 收尾了。
+        """
+        goal = next(
+            (item for item in plan.goals if item.goal_id == goal_id), None,
+        )
+        if goal is None:
+            return
+        collector_ids = [
+            item.agent_id for item in goal.agents
+            if (getattr(item, "capability", None) or {}).get("profile")
+            == "web-collector"
+        ]
+        if not rated_collector_id(
+            output=getattr(agent, "output", None) or {},
+            depends_on=getattr(agent, "depends_on", []),
+            deliverable_path=str(
+                (getattr(goal, "deliverable", None) or {}).get("path", "")
+            ),
+            collector_ids=collector_ids,
+        ):
+            return
+        existing = {
+            str(item["permalink"]): item
+            for item in self.store.list_evidence(plan.research_id)
+        }
+        path = self.runs_root / plan.research_id / str(agent.output["path"])
+        payloads, unmatched = self._rating_payloads(
+            path, existing=existing, agent_id=agent.agent_id,
+        )
+        if payloads:
+            self.store.upsert_evidence_batch(payloads)
+        await self.events.publish(plan.research_id, {
+            "type": "rating_chapter_persisted",
+            "data": {
+                "goal_id": goal_id, "agent_id": agent.agent_id,
+                "rated": len(payloads), "unmatched": len(unmatched),
+                "samples": unmatched[:5],
+            },
+        })
+
     async def _persist_goal_evidence(self, plan: Plan, goal: Goal) -> None:
         """兼容/恢复投影：幂等写产物，四个内容字段不覆盖适配器真值。
 
@@ -1298,7 +1398,17 @@ class RuntimeCoordinator:
             for row in self.store.list_chapters(plan.research_id)
             if row["goal_id"] == goal.goal_id
         }
+        existing = {
+            str(item["permalink"]): item
+            for item in self.store.list_evidence(plan.research_id)
+        }
+        collector_ids = [
+            item.agent_id for item in goal.agents
+            if (getattr(item, "capability", None) or {}).get("profile")
+            == "web-collector"
+        ]
         salvaged: list[dict[str, str]] = []
+        rating_agents: list[Any] = []
         for agent in goal.agents:
             chapter = agent.chapter if isinstance(
                 getattr(agent, "chapter", None), dict,
@@ -1310,9 +1420,22 @@ class RuntimeCoordinator:
             status = str(row["status"]) if row is not None else ""
             if status not in _EVIDENCE_PROJECTABLE_STATUSES:
                 continue
+            path = self.runs_root / plan.research_id / str(agent.output["path"])
+            if rated_collector_id(
+                output=agent.output or {},
+                depends_on=getattr(agent, "depends_on", []),
+                deliverable_path=str(
+                    (getattr(goal, "deliverable", None) or {}).get("path", "")
+                ),
+                collector_ids=collector_ids,
+            ):
+                # §RATE-1 货 3：评级章只贴评分列，不走 load_evidence_payloads
+                # （它按 platform/fetched_at/正文 判合法，评级产物本来就没有这些）；
+                # 且必须**等本轮采集产物先入库**，否则贴不上（m2 端到端实证）。
+                rating_agents.append(agent)
+                continue
             sources = list(agent.capability.get("sources", []))
             platform_hint = str(sources[0]) if len(sources) == 1 else None
-            path = self.runs_root / plan.research_id / str(agent.output["path"])
             items = load_evidence_payloads(
                 path,
                 report_id=plan.research_id,
@@ -1344,12 +1467,8 @@ class RuntimeCoordinator:
                     "count": str(len(items)),
                 })
             payloads.extend(items)
-        if not payloads:
+        if not payloads and not rating_agents:
             return
-        existing = {
-            str(item["permalink"]): item
-            for item in self.store.list_evidence(plan.research_id)
-        }
         content_fields = (
             "title", "content_excerpt", "author_name", "raw_metrics",
         )
@@ -1361,7 +1480,10 @@ class RuntimeCoordinator:
                 value = stored.get(field)
                 if value not in (None, "", {}):
                     payload[field] = value
-        self.store.upsert_evidence_batch(payloads)
+        if payloads:
+            self.store.upsert_evidence_batch(payloads)
+        for agent in rating_agents:
+            await self._persist_rating_chapter(plan, goal.goal_id, agent)
         if salvaged:
             total = sum(int(item["count"]) for item in salvaged)
             logger.warning(

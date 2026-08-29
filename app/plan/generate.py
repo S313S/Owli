@@ -626,7 +626,11 @@ def _agent_prompt(
             )
         elif "no_item_missing_rating" in output["validators"]:
             evidence_rule += (
-                "本文件顶层必须是 JSON 数组；每个元素为一条评级条目，必须逐条带齐 "
+                "本文件顶层必须是 JSON 数组；每个元素为一条评级条目，"
+                "**必须原样回带被评那条证据的 permalink**（逐字复制，不改写、"
+                "不补全、不去参数），条数与输入证据一一对应：不新增、不合并、"
+                "不丢条；系统按 permalink 把评分贴回已入库的那一行，"
+                "permalink 对不上就等于这条评级作废。每条还必须带齐 "
                 "score_authority、score_freshness、score_crossref、score_completeness、"
                 "score_independence、rating_notes、rated_by 七个字段（评分为整数，"
                 "rating_notes 说明依据，rated_by 填 agent_id）；"
