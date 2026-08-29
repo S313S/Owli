@@ -555,6 +555,29 @@ class Store:
                     (citation_no, report_id, permalink),
                 )
 
+    def set_feishu_sync(
+        self, report_id: str, *, status: str,
+        doc_token: str | None = None, record_id: str | None = None,
+        synced_at: str | None = None,
+    ) -> None:
+        """把飞书同步状态回填进 reports 四列；None 入参保留列上旧值（失败不擦锚点）。"""
+        if status not in {"pending", "synced", "failed", "skipped"}:
+            raise ValueError(f"feishu_sync_status 不在闭集：{status!r}")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE reports SET
+                  feishu_sync_status = ?,
+                  feishu_doc_token = COALESCE(?, feishu_doc_token),
+                  feishu_record_id = COALESCE(?, feishu_record_id),
+                  feishu_synced_at = COALESCE(?, feishu_synced_at)
+                WHERE id = ?
+                """,
+                (status, doc_token, record_id, synced_at, report_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"报告不存在：{report_id}")
+
     def set_report_claims(
         self,
         report_id: str,

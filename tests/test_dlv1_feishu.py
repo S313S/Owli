@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.store.dao import Store
 from tests.test_dlv1_delivery import URL_A, _seed_evidence, _seed_history, _write_json_report
 
 
@@ -63,7 +64,9 @@ def test_假传输_两表字段映射与_upsert_锚点(tmp_path: Path) -> None:
     assert f"1. [小红书笔记]({URL_A})" in markdown and "## 缺失清单" in markdown
     feishu = store.get_report(research_id)["extra"]["feishu"]
     assert feishu["status"] == "synced" and feishu["doc_token"] == "doxFAKE" and feishu["record_id"] == f"rec_{research_id}"
-    assert store.get_report(research_id)["feishu_sync_status"] == "pending"  # 四列未解禁，挂账
+    row = store.get_report(research_id)  # §FU-1 起四列由 set_feishu_sync 回填（DLV-1 挂账①已关）
+    assert row["feishu_sync_status"] == "synced" and row["feishu_doc_token"] == "doxFAKE"
+    assert row["feishu_record_id"] == f"rec_{research_id}" and row["feishu_synced_at"]
 
     push_to_feishu(store, research_id, text, transport=fake)
     assert len(fake.records[f"tbl_{SOURCES_TABLE}"]) == 2  # 二次推送按锚点覆盖不增行
@@ -79,3 +82,57 @@ def test_未配置飞书时_skipped(tmp_path: Path, monkeypatch) -> None:
     result = push_to_feishu(store, research_id, text)
     assert result["status"] == "skipped" and "未配置飞书" in result["message"]
     assert store.get_report(research_id)["extra"]["feishu"]["status"] == "skipped"
+
+
+class BrokenTransport(FakeTransport):
+    def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
+        raise RuntimeError("云文档导入被拒：no permission")
+
+
+def test_fu1_推送失败_四列记_failed_且不擦上次锚点(tmp_path: Path) -> None:
+    """§FU-1 货 2：失败落 failed + extra.feishu.error；doc_token/record_id 保上次成功值。"""
+    from app.export.feishu import push_to_feishu
+
+    store, research_id, text = _seeded(tmp_path)
+    push_to_feishu(store, research_id, text, transport=FakeTransport())
+    result = push_to_feishu(store, research_id, text, transport=BrokenTransport())
+    assert result["status"] == "failed"
+    row = store.get_report(research_id)
+    assert row["feishu_sync_status"] == "failed"
+    assert row["feishu_doc_token"] == "doxFAKE"  # COALESCE 保住上次成功的锚点
+    assert row["feishu_record_id"] == f"rec_{research_id}"
+    assert "no permission" in row["extra"]["feishu"]["error"]
+
+
+def test_fu1_非法_status_抛错不落库(tmp_path: Path) -> None:
+    import pytest
+
+    store, research_id, _ = _seeded(tmp_path)
+    with pytest.raises(ValueError):
+        store.set_feishu_sync(research_id, status="done")
+    assert store.get_report(research_id)["feishu_sync_status"] == "pending"
+    with pytest.raises(KeyError):
+        store.set_feishu_sync("r-不存在", status="synced")
+
+
+def test_fu1_读侧四列优先_extra_兜底(tmp_path: Path) -> None:
+    """打真 /report：四列压过 extra 的旧账，四列放不下的细节仍由 extra 兜底。"""
+    from app.export.registry import record_feishu
+    from tests.test_dlv1_delivery import _app, _get, _seed_history, _write_json_report
+
+    database, research_id, report_path = _seed_history(tmp_path)
+    _write_json_report(report_path)
+    _seed_evidence(database, research_id)
+    store = Store(database)
+    record_feishu(store, research_id, "synced", doc_token="doxNEW", record_id="recNEW",
+                  transport="fake", doc_url="https://feishu.cn/docx/doxNEW")
+    # 只改 extra 不动四列，模拟 §FU-1 之前留下的旧账：读侧必须以四列为准。
+    with store._connect() as connection:  # noqa: SLF001
+        connection.execute(
+            "UPDATE reports SET extra = json_set(extra, '$.feishu.doc_token', 'doxOLD',"
+            " '$.feishu.status', 'pending') WHERE id = ?", (research_id,))
+
+    feishu = _get(_app(tmp_path, database), f"/api/researches/{research_id}/report").json()["data"]["feishu"]
+    assert feishu["doc_token"] == "doxNEW" and feishu["status"] == "synced"
+    assert feishu["record_id"] == "recNEW" and feishu["synced_at"]
+    assert feishu["doc_url"] == "https://feishu.cn/docx/doxNEW"  # 四列放不下的细节仍来自 extra

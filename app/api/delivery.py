@@ -68,12 +68,17 @@ def register_delivery_routes(
         view["summary"] = report.get("summary")
         view["summary_line"] = report.get("summary_line")
         view["exports"] = (report.get("extra") or {}).get("exports") or []
-        view["feishu"] = {
+        # §FU-1 起四列优先、extra.feishu 兜底：四列是 set_feishu_sync 写的正式字段，
+        # extra 只补四列放不下的细节（transport/doc_url/message/error）与老库回填前的旧账。
+        columns = {
             "status": report.get("feishu_sync_status"),
             "doc_token": report.get("feishu_doc_token"),
             "record_id": report.get("feishu_record_id"),
             "synced_at": report.get("feishu_synced_at"),
+        }
+        view["feishu"] = {
             **((report.get("extra") or {}).get("feishu") or {}),
+            **{key: value for key, value in columns.items() if value is not None},
         }
         return envelope(view)
 

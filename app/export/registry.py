@@ -2,7 +2,9 @@
 
 `finish_report` 不收 `attachments`，dao 也没有写 `feishu_*` 四列的具名方法
 （禁区，奏折已递）；本包一律走 `reports.extra.exports[] / extra.feishu`，
-经 dao 既有 `_register_extra` 登记扩展键。四列写入待 dao 加 `set_feishu_sync`。
+经 dao 既有 `_register_extra` 登记扩展键。§FU-1 起飞书状态**同时**回填
+`reports.feishu_*` 四列（dao 新增的唯一具名方法 `set_feishu_sync`），
+extra 仍写以保留 transport/message/doc_url 等四列放不下的细节。
 """
 
 from __future__ import annotations
@@ -57,4 +59,11 @@ def record_feishu(store: Any, report_id: str, status: str, **fields: Any) -> dic
         extra["feishu"] = merged
         return {"feishu": merged}
 
-    return _update_extra(store, report_id, mutate)["feishu"]
+    merged = _update_extra(store, report_id, mutate)["feishu"]
+    # 四列是正式字段、extra 是细节账；失败时不传 token/record_id，靠 COALESCE 保住上次锚点。
+    store.set_feishu_sync(
+        report_id, status=status,
+        doc_token=fields.get("doc_token"), record_id=fields.get("record_id"),
+        synced_at=payload["synced_at"],
+    )
+    return merged

@@ -335,7 +335,8 @@ def push_to_feishu(store: Any, research_id: str, report_text: str, *,
         for item in cited:
             chosen.upsert(base, sources, "evidence_id", str(item["id"]), source_record(item))
     except Exception as error:  # noqa: BLE001 — 失败要落状态，不能让接口 500
-        record_feishu(store, research_id, "failed", transport=chosen.name, message=str(error)[:300])
+        record_feishu(store, research_id, "failed", transport=chosen.name,
+                      error=str(error)[:300], message=f"推送失败：{str(error)[:200]}")
         return {"kind": "feishu", "status": "failed", "message": f"推送失败：{str(error)[:200]}"}
     state = record_feishu(store, research_id, "synced", transport=chosen.name, base_token=base, doc_token=doc_id,
                           doc_url=doc_url, record_id=record_id, sources_pushed=len(cited))

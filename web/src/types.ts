@@ -235,7 +235,7 @@ export type ReportView = {
   citations: { cited: number[]; listed: number[]; dangling: number[] }
   notes?: unknown
   exports: ExportRecord[]
-  feishu: { status?: string | null; doc_token?: string | null; record_id?: string | null; synced_at?: string | null; doc_url?: string | null; message?: string | null }
+  feishu: { status?: string | null; doc_token?: string | null; record_id?: string | null; synced_at?: string | null; doc_url?: string | null; message?: string | null; error?: string | null }
 }
 
 export type EvidenceItem = {
