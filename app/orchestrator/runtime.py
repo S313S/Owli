@@ -994,6 +994,7 @@ class RuntimeCoordinator:
             assemble_sections(
                 plan=plan,
                 agent=agent,
+                goal_id=task.goal_id,
                 output_path=task.output_path,
                 output_format=task.output_format,
                 section_root=task.output_path.parent / Path(task.output_path.stem),

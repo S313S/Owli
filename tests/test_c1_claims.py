@@ -284,7 +284,8 @@ def test_JSON_节显式_claims_聚合进父章信封(tmp_path: Path) -> None:
         output={"shape": "object"},
     )
     _assemble(
-        plan=SimpleNamespace(title="夹具"), agent=agent, output_path=output,
+        plan=SimpleNamespace(title="夹具"), agent=agent, goal_id="goal-1",
+        output_path=output,
         output_format="json", section_root=section_root,
         sections=[{
             "section_id": "ch-1/sec-1", "filename": "sec-1.md",
@@ -321,13 +322,15 @@ def test_timeout半截JSON整节作废且已完成节的claims保留(tmp_path: P
         {"section_id": "ch-1/sec-1", "filename": "sec-1.md", "title": "范围一", "goal_id": "goal-1"},
         {"section_id": "ch-1/sec-2", "filename": "sec-2.md", "title": "范围二", "goal_id": "goal-2"},
     ]
+    # 两行都记在撰写章自己的 goal-1 名下（节 owner goal 写在 sections 里，不在账本行上）。
     rows = [
         {"chapter_id": "ch-1/sec-1", "goal_id": "goal-1", "status": "done", "reason": None},
-        {"chapter_id": "ch-1/sec-2", "goal_id": "goal-2", "status": "missing", "reason": "timeout"},
+        {"chapter_id": "ch-1/sec-2", "goal_id": "goal-1", "status": "missing", "reason": "timeout"},
     ]
 
     _assemble(
-        plan=SimpleNamespace(title="夹具"), agent=agent, output_path=output,
+        plan=SimpleNamespace(title="夹具"), agent=agent, goal_id="goal-1",
+        output_path=output,
         output_format="json", section_root=section_root, sections=sections, rows=rows,
     )
 

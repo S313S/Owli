@@ -972,6 +972,7 @@ def _assemble(
     *,
     plan: Any,
     agent: Any,
+    goal_id: str,
     output_path: Path,
     output_format: str,
     section_root: Path,
@@ -983,13 +984,22 @@ def _assemble(
 
     以前无论声明什么格式都写 Markdown，声明 json 的报告章因此得到一份「假 json」
     （后缀是 .json、内容是 Markdown），下游按 json 解析必然失败。
+
+    D-026：`rows` 是**全 research** 的章账本行，多个 goal 的报告章同名（都叫
+    `ch-4/sec-1`）。只按 `chapter_id` 找行会先命中别的 goal 那一行——本 goal 明明
+    `done`，却被判未完成，写占位文、丢掉整节 claims（交叉验证维度恒空的直接原因）。
+    行查找必须 `(goal_id, chapter_id)` 两项都比。
     """
     section_items: list[dict[str, Any]] = []
     chapter_claims: list[Any] = []
     for section in sections:
         path = section_root / section["filename"]
         row = next(
-            (item for item in rows if item["chapter_id"] == section["section_id"]),
+            (
+                item for item in rows
+                if item["chapter_id"] == section["section_id"]
+                and item["goal_id"] == goal_id
+            ),
             None,
         )
         section_done = bool(
@@ -1687,6 +1697,7 @@ async def run_sectioned_task(
         _assemble(
             plan=plan,
             agent=agent,
+            goal_id=context.goal_id,
             output_path=base_task.output_path,
             output_format=base_task.output_format,
             section_root=section_root,

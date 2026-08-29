@@ -212,9 +212,11 @@ def test_节化拼装按声明格式落盘_json报告章不得再写markdown(tmp
     section_root.mkdir()
     (section_root / "sec-1.md").write_text("## 结论\n\n- 一节正文 [S01]\n", encoding="utf-8")
 
+    # 节账本行按**撰写章自己的 goal** 记（D-026：三个 goal 各有一份同名 ch-1/sec-N）。
     _assemble(
         plan=plan,
         agent=agent,
+        goal_id="goal-3",
         output_path=output_path,
         output_format="json",
         section_root=section_root,
@@ -226,7 +228,7 @@ def test_节化拼装按声明格式落盘_json报告章不得再写markdown(tmp
             "title": "阶段 2 证据产物", "goal_id": "goal-2",
         }],
         rows=[{
-            "goal_id": "goal-2", "chapter_id": "ch-1/sec-2", "status": "missing",
+            "goal_id": "goal-3", "chapter_id": "ch-1/sec-2", "status": "missing",
             "reason": "retry_exhausted",
         }],
     )
@@ -237,8 +239,8 @@ def test_节化拼装按声明格式落盘_json报告章不得再写markdown(tmp
     ]
     assert "一节正文" in document["sections"][0]["markdown"]
     assert document["缺失清单"] == [{
-        "goal_id": "goal-2", "chapter_id": "ch-1/sec-2", "reason": "retry_exhausted",
-        "text": "此处缺失：goal-2/ch-1/sec-2；原因：retry_exhausted",
+        "goal_id": "goal-3", "chapter_id": "ch-1/sec-2", "reason": "retry_exhausted",
+        "text": "此处缺失：goal-3/ch-1/sec-2；原因：retry_exhausted",
     }]
 
 
@@ -255,6 +257,7 @@ def test_markdown报告章拼装仍是markdown(tmp_path):
     _assemble(
         plan=plan,
         agent=agent,
+        goal_id="goal-3",
         output_path=output_path,
         output_format="markdown",
         section_root=section_root,
