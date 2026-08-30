@@ -675,6 +675,8 @@ def _evidence_index(
         "goal_quotas": goal_quotas,
         "goal_selected_counts": goal_selected_counts,
         "goal_floor_degraded": goal_floor_degraded,
+        # §OBS-1 货 1：被 D 闸拦掉的条数；全 D 回退全池时闸没生效，计 0。
+        "d_gate_filtered": (len(identified) - len(keepable)) if keepable else 0,
     }, citations
 
 
@@ -1369,6 +1371,8 @@ async def run_sectioned_task(
                 if row["goal_id"] == context.goal_id
             }
     truncation_event_emitted = False
+    # §OBS-1 货 1：每节只发一条组池组成事件；重试重组池不重复发。
+    pool_composed_section_ids: set[str] = set()
     for section_number, section in enumerate(sections, start=1):
         row = existing.get(section["section_id"])
         if row and row["status"] in {"done", "missing"}:
@@ -1413,6 +1417,40 @@ async def run_sectioned_task(
                 allowed_goal_ids,
                 section_goal_id=str(section["goal_id"]),
             )
+            # §OBS-1 货 1：组池出口发组成事件（只加事件，零语义改动）。
+            if section["section_id"] not in pool_composed_section_ids:
+                pool_items = evidence_pool["items"]
+                own_count = sum(
+                    1 for item in pool_items
+                    if str(item.get("goal_id")) == str(section["goal_id"])
+                )
+                platform_counts: dict[str, int] = {}
+                grade_counts: dict[str, int] = {}
+                for item in pool_items:
+                    platform_key = str(item.get("platform") or "")
+                    platform_counts[platform_key] = (
+                        platform_counts.get(platform_key, 0) + 1
+                    )
+                    grade_key = str(item.get("grade") or "unrated")
+                    grade_counts[grade_key] = grade_counts.get(grade_key, 0) + 1
+                pool_event = on_event({
+                    "type": "section_pool_composed",
+                    "data": {
+                        "research_id": plan.research_id,
+                        "section_id": section["section_id"],
+                        "goal_id": str(section["goal_id"]),
+                        "pool_size": len(pool_items),
+                        "own_goal_count": own_count,
+                        "cross_goal_count": len(pool_items) - own_count,
+                        "platform_distribution": platform_counts,
+                        "grade_distribution": grade_counts,
+                        "d_gate_filtered": int(evidence_pool["d_gate_filtered"]),
+                    },
+                    "is_error": False,
+                })
+                if inspect.isawaitable(pool_event):
+                    await pool_event
+                pool_composed_section_ids.add(section["section_id"])
             omitted_count = int(evidence_pool["omitted_count"])
             if omitted_count and not truncation_event_emitted:
                 event_result = on_event({

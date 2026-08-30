@@ -393,7 +393,8 @@ def test_单节到点只取消当前节并保住同章已完成节(tmp_path: Pat
     assert "已完成正文" in report and "原因：timeout" in report
     assert "半截原文" not in report
     assert result.succeeded is True and result.actual_count == 1
-    assert [event["data"]["reason"] for event in events] == ["timeout"]
+    assert [event["data"]["reason"] for event in events
+            if event["type"] != "section_pool_composed"] == ["timeout"]
 
 
 def test_墙钟在首次派活前误触发会按剩余预算重挂(tmp_path: Path) -> None:
@@ -569,7 +570,8 @@ def test_shape为array的json章组装成数组且缺失清单另置(tmp_path: P
     assert [row["status"] for row in run.rows.values() if "/sec-" in row["chapter_id"]] == [
         "done", "done",
     ]
-    assert [e["type"] for e in run.events] == []
+    assert [e["type"] for e in run.events
+            if e["type"] != "section_pool_composed"] == []
 
 
 def test_shape为array但节产物形状不一致时conclusion_invalid且不进第二轮(tmp_path: Path) -> None:
@@ -582,7 +584,8 @@ def test_shape为array但节产物形状不一致时conclusion_invalid且不进�
     assert run.result.succeeded is False
     assert run.result.chapter_status == "missing"
     assert run.result.reason == "conclusion_invalid"
-    assert [e["type"] for e in run.events] == ["section_assembly_error"]
+    assert [e["type"] for e in run.events
+            if e["type"] != "section_pool_composed"] == ["section_assembly_error"]
     # 确定性失败不复位已写成的节
     assert run.rows["ch-3/sec-1"]["status"] == "done"
 

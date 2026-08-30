@@ -160,9 +160,10 @@ def test_节级传输断连退避重试后成功_不落missing也不换引擎(tm
     assert run.rows["ch-1/sec-2"]["attempts"] == 2
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
     # 中途断连只发可观测的 section_retry，不发 section_error
-    assert [e["type"] for e in run.events] == ["section_retry"]
-    assert run.events[0]["data"]["resume"] is False
-    assert run.events[0]["data"]["session_id"] is None
+    visible = [e for e in run.events if e["type"] != "section_pool_composed"]
+    assert [e["type"] for e in visible] == ["section_retry"]
+    assert visible[0]["data"]["resume"] is False
+    assert visible[0]["data"]["session_id"] is None
     # 退避沿用章级口径：fast = 5s
     assert run.delays == [5.0]
     assert run.result.succeeded is True
@@ -184,10 +185,11 @@ def test_连续断连在剩余预算不足时落timeout并保留重试事件协�
     assert run.rows["ch-1/sec-2"]["engine"] == "claude"
     assert run.delays == [5.0]
     # §X-1 货 2：第二次断连被 136s 门槛挡住，多一条 section_retry_skipped。
-    assert [e["type"] for e in run.events] == [
+    visible = [e for e in run.events if e["type"] != "section_pool_composed"]
+    assert [e["type"] for e in visible] == [
         "section_retry", "section_retry_skipped", "section_error",
     ]
-    assert run.events[0]["data"] == {
+    assert visible[0]["data"] == {
         "goal_id": "goal-3",
         "chapter_id": "ch-1/sec-2",
         "attempt": 2,
