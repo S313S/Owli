@@ -2691,7 +2691,9 @@ class RuntimeCoordinator:
         # 硬约束 4：报告能生成就 completed，failed 只留给「报告根本没生成」。
         # 校验没过是报告质量告警（已随 report_validation 事件发出），不是研究失败。
         report_missing = report_declared and not report_ready
-        report_status = "failed" if report_missing else "completed"
+        # §AUTO-EXP 货 5：无原因取消是唯一例外——报告文件在不在都判 failed（08-30 拍板）。
+        cancelled_no_reason = bool(getattr(scheduler, "cancelled_without_reason", False))
+        report_status = "failed" if report_missing or cancelled_no_reason else "completed"
         unfinished_goals = [
             goal_id for goal_id, status in scheduler.goal_statuses.items()
             if status in {"failed", "skipped"}
@@ -2716,9 +2718,14 @@ class RuntimeCoordinator:
         finish_payload = {
             "status": report_status,
             "completed_at": self.now_iso(),
-            "summary": "计划执行完成，报告已生成" if not report_missing else "报告未生成",
+            "summary": (
+                "报告未生成" if report_missing
+                else "派活被无原因取消，研究按失败收尾" if cancelled_no_reason
+                else "计划执行完成，报告已生成"
+            ),
             "summary_line": (
                 "报告未生成" if report_missing
+                else "无原因取消：agent_run_cancelled" if cancelled_no_reason
                 else "部分 goal 失败" if unfinished_goals
                 else "全部 goal 已完成"
             ),
@@ -2749,10 +2756,12 @@ class RuntimeCoordinator:
             )
         state = self.researches[research_id]
         state["status"] = report_status
-        state["status_label"] = "执行失败" if report_missing else "已完成"
+        state["status_label"] = "执行失败" if report_status == "failed" else "已完成"
         state["actions"] = []
         if report_missing:
             summary = "报告未生成，请查看章节账本缺失项"
+        elif cancelled_no_reason:
+            summary = "派活被无原因取消（agent_run_cancelled），研究判失败"
         elif validation_failed:
             summary = "报告已生成，收尾校验有告警"
         elif unfinished_goals:
@@ -2775,7 +2784,7 @@ class RuntimeCoordinator:
         )
         # §AUTO-EXP 货 3：报告已对读者可见（finish_report 落了 report_path）才自动导出；
         # 失败只发事件，completed 已落库不回退。
-        if not report_missing:
+        if report_status == "completed":
             await self._auto_export_on_finalize(research_id, report_path)
 
     def _auto_export_modes(self) -> set[str]:

@@ -198,6 +198,9 @@ class Scheduler:
             agent.agent_id: "queued" for goal in plan.goals for agent in goal.agents
         }
         self.status = "ready"
+        # §AUTO-EXP 货 5：无原因取消（D-023 只留了事件）现在还要把研究判 failed；
+        # 收尾在 _finalize_if_terminal 读这个标记改 report_status。
+        self.cancelled_without_reason: bool = False
         self.emitted_events: list[Any] = []
         self._paused = False
         self._started = False
@@ -881,9 +884,8 @@ class Scheduler:
                     )
                     await self._abort_agent_on_stop(goal, agent, None)
                 else:
-                    # D-023：既不是墙钟也不是 stop 的取消——多半是 await 到了
-                    # 别人的取消尸体（共享退避任务被牵连 cancel）。以前这里一声
-                    # 不吭直接 return，研究就永远 running；现在只加事件不改语义。
+                    # D-023 加了事件；§AUTO-EXP 货 5（08-30 拍板）：无原因取消不再
+                    # 只留痕——goal 判 failed、级联传播后走正常收尾，研究置 failed。
                     await self._emit({
                         "type": "agent_run_cancelled",
                         "data": {
@@ -892,10 +894,14 @@ class Scheduler:
                             "chapter_id": self._chapter_id(agent),
                             "cancel_reason": cancel_reason,
                             "scheduler_status": self.status,
-                            "note": "run 被取消但没有取消原因；派活无声结束",
+                            "note": "run 被取消但没有取消原因；goal 判 failed，不自动重试",
                         },
                         "is_error": True,
                     })
+                    self.cancelled_without_reason = True
+                    await self._fail_goal(goal.goal_id, "agent_run_cancelled")
+                    self._set_completed_if_terminal()
+                    self._spawn_drive()
                 return
             self._cancel_reasons.pop(agent.agent_id, None)
             try:

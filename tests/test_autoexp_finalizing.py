@@ -64,3 +64,40 @@ def test_收尾中运行态_completed只在报告落盘后(tmp_path: Path, monke
     assert coordinator.researches["r-ledger"]["status"] == "completed"
     updates = [e["data"]["status"] for e in events if e.get("type") == "research_update"]
     assert updates == ["finalizing", "completed"]  # 事件序：先收尾中、后完成
+
+
+def test_无原因取消_研究判failed_且不自动导出(tmp_path: Path, monkeypatch) -> None:
+    """§AUTO-EXP 货 5（判据 6）：cancelled_without_reason=True 时报告在不在都判 failed，
+    summary_line 带原因；failed 研究不触发自动导出。"""
+    from app.orchestrator import runtime as runtime_module
+    from app.orchestrator.runtime import RuntimeCoordinator
+
+    plan = _plan(report_format="markdown")
+    _write(tmp_path / "runs" / "r-ledger" / "goals" / "goal-3" / "report.md",
+           "# 结论\n\n- 取消前已成稿。\n\n# 信息源\n\n- 无。\n")
+    store = _store(tmp_path)
+    events: list[dict] = []
+
+    async def publish(research_id, payload):
+        events.append(payload)
+
+    monkeypatch.setattr(runtime_module, "load_plan", lambda store_, rid: plan)
+    coordinator = RuntimeCoordinator(
+        store=store, event_buffer=SimpleNamespace(publish=publish), researches={}, cards={},
+        runs_root=tmp_path / "runs", auto_confirm=True,
+        routing_utc_clock=lambda: datetime(2026, 8, 31, tzinfo=timezone.utc),
+    )
+    coordinator.researches["r-ledger"] = coordinator._state_from_plan(plan)
+    coordinator._schedulers["r-ledger"] = SimpleNamespace(
+        status="completed", cancelled_without_reason=True,
+        goal_statuses={"goal-1": "failed", "goal-2": "done", "goal-3": "done"},
+    )
+    asyncio.run(coordinator._finalize_if_terminal("r-ledger"))
+
+    row = store.get_report("r-ledger")
+    assert row["status"] == "failed"
+    assert "agent_run_cancelled" in row["summary_line"]
+    assert coordinator.researches["r-ledger"]["status"] == "failed"
+    assert coordinator.researches["r-ledger"]["status_label"] == "执行失败"
+    types = [e.get("type") for e in events]
+    assert "export_done" not in types and "feishu_sync_started" not in types

@@ -191,12 +191,18 @@ def test_scheduler_无原因取消不再无声结束_至少发一条事件():
         try:
             await asyncio.wait_for(scheduler.start(), timeout=1)
         except asyncio.TimeoutError:
-            pass  # 语义未改：派活无声结束后调度仍挂着，本包只求它可见
+            pass  # §AUTO-EXP 货 5 前调度会挂着；现在 goal 判 failed 后正常走完
+        # 货 5（08-30 拍板）：无原因取消不再无声结束——goal 失败、不自动重试。
+        assert scheduler.cancelled_without_reason is True
+        assert scheduler.goal_statuses["goal-1"] == "failed"
+        assert scheduler.status == "completed"
 
     asyncio.run(scenario())
     cancelled = [e for e in events if e.get("type") == "agent_run_cancelled"]
-    assert calls == [1]
+    assert calls == [1]  # 不自动重试：attempts 不增
     assert len(cancelled) == 1
     assert cancelled[0]["data"]["cancel_reason"] is None
     assert cancelled[0]["data"]["goal_id"] == "goal-1"
     assert cancelled[0]["is_error"] is True
+    gates = [e for e in events if e.get("type") == "goal_gate"]
+    assert gates and gates[0]["data"]["reason"] == "agent_run_cancelled"
