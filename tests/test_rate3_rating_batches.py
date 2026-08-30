@@ -58,11 +58,15 @@ def _fixture(tmp_path: Path, rows: int, collector_id: str = "data-collection-2")
         routing_utc_clock=lambda: datetime(2026, 8, 31, tzinfo=timezone.utc),
     )
     collector, rating = _collector(collector_id), _rating(collector_id)
+    # `_task` 要用到的最小字段：goal.objective / agent.prompt / model / chapter。
+    rating.prompt = {"body": "逐条评级"}
+    rating.model = None
+    rating.chapter = None
     goal = SimpleNamespace(
-        goal_id="goal-1", agents=[collector, rating],
-        deliverable={"path": "goals/goal-1/result.md"},
+        goal_id="goal-1", agents=[collector, rating], objective="口碑调研",
+        acceptance=[], deliverable={"path": "goals/goal-1/result.md"},
     )
-    plan = SimpleNamespace(research_id="r-rate3", goals=[goal])
+    plan = SimpleNamespace(research_id="r-rate3", goals=[goal], scale="fast")
     artifact = tmp_path / "runs" / "r-rate3" / "goals" / "goal-1"
     return coordinator, plan, rating, events, artifact
 
@@ -117,3 +121,186 @@ def test_批大小可由环境变量下调_非法值回默认(monkeypatch) -> No
     assert RuntimeCoordinator._rating_batch_rows() == 50
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "0")
     assert RuntimeCoordinator._rating_batch_rows() == 50
+
+
+# ---------------------------------------------------------------- 货 2：按片跑
+
+
+class _BatchAdapter:
+    """假引擎：每次会话只读它被指到的那一片，逐条回评写到片产物路径。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.fail_batches: set[int] = set()
+
+    async def run(self, task, ctx, on_event=None):
+        piece_in = next(
+            line for line in task.body.splitlines() if "【本批】" in line
+        )
+        index = int(piece_in.split("这是第 ")[1].split("/")[0])
+        src = task.output_path.parent / (
+            task.output_path.name.split(".part.")[0].replace(
+                "reliability-audit", "data-collection-2"
+            )
+        )
+        rows = json.loads(
+            (src.with_name(f"data-collection-2.rows.{index}.json")).read_text("utf-8")
+        )
+        self.calls.append({
+            "index": index, "output": task.output_path.name, "rows": len(rows),
+            "validators": list(task.validators),
+        })
+        if index in self.fail_batches:
+            return SimpleNamespace(
+                succeeded=False, conclusion=None, events=[],
+                engine_error="socket hang up", conclusion_error=None,
+                validation=SimpleNamespace(results=[]),
+            )
+        notes = ("权威2:平台原帖 · 时效2:时间窗内 · 交叉1:弱交叉 · "
+                 "完整2:字段齐全 · 无关2:无利益关系")
+        task.output_path.write_text(json.dumps([
+            {"permalink": row["permalink"], "score_authority": 2,
+             "score_freshness": 2, "score_crossref": 1, "score_completeness": 2,
+             "score_independence": 2, "rating_notes": notes,
+             "rated_by": "reliability-audit"}
+            for row in rows
+        ], ensure_ascii=False), encoding="utf-8")
+        return SimpleNamespace(
+            succeeded=True, events=[], engine_error=None, conclusion_error=None,
+            conclusion=SimpleNamespace(
+                reason=None, status="done", unmet=[], output_path=str(task.output_path),
+            ),
+            validation=SimpleNamespace(results=[]),
+        )
+
+
+def _run_chapter(coordinator, plan, rating, adapter, *, attempt=1, wall=330.0):
+    coordinator._adapters[plan.research_id] = adapter
+
+    async def sink(event):
+        return None
+
+    return asyncio.run(coordinator._run_task(
+        plan, rating,
+        SimpleNamespace(goal_id="goal-1", attempt=attempt, engine="claude",
+                        failure_feedback=None, on_event=sink,
+                        section_deadline_seconds=wall, deadline_at=None),
+    ))
+
+
+def test_评级章按片跑_3片3次会话_合并后条数135_全部入库(tmp_path: Path) -> None:
+    coordinator, plan, rating, events, artifact = _fixture(tmp_path, 135)
+    adapter = _BatchAdapter()
+
+    result = _run_chapter(coordinator, plan, rating, adapter)
+
+    assert result.succeeded is True and result.actual_count == 135
+    assert [c["index"] for c in adapter.calls] == [1, 2, 3]
+    assert [c["rows"] for c in adapter.calls] == [50, 50, 35]
+    assert [c["output"] for c in adapter.calls] == [
+        f"reliability-audit.part.{n}.json" for n in (1, 2, 3)
+    ]
+    # 每片走的是本章原封不动的那套验证器（D-028 闸在入库时逐条走，见下）。
+    assert adapter.calls[0]["validators"] == rating.output["validators"]
+    merged = json.loads((artifact / "reliability-audit.json").read_text("utf-8"))
+    whole = json.loads((artifact / "data-collection-2.rows.json").read_text("utf-8"))
+    assert [item["permalink"] for item in merged] == [
+        row["permalink"] for row in whole
+    ], "按片序合并、按 permalink 原样回带、不去重不改写——顺序就是物化文件的顺序"
+    assert len(set(item["permalink"] for item in merged)) == 135
+    rated = [
+        row for row in coordinator.store.list_evidence("r-rate3")
+        if row["rated_by"] == "agent:reliability-audit"
+    ]
+    assert len(rated) == 135
+    started = [e["data"] for e in events if e["type"] == "rating_batch_started"]
+    assert [s["wall_clock_seconds"] for s in started] == [330.0] * 3, "每片一份自己的墙钟"
+    finished = [e["data"] for e in events if e["type"] == "rating_batch_finished"]
+    assert [f["succeeded"] for f in finished] == [True, True, True]
+    merged_event = next(e["data"] for e in events if e["type"] == "rating_batches_merged")
+    assert merged_event == {
+        "goal_id": "goal-1", "agent_id": "reliability-audit",
+        "batches": 3, "done": [1, 2, 3], "items": 135, "failed": None,
+    }
+
+
+def test_单片章_25行只跑1次会话_行为与分片前一致(tmp_path: Path) -> None:
+    coordinator, plan, rating, _, artifact = _fixture(tmp_path, 25)
+    adapter = _BatchAdapter()
+
+    result = _run_chapter(coordinator, plan, rating, adapter)
+
+    assert result.succeeded is True and result.actual_count == 25
+    assert [c["index"] for c in adapter.calls] == [1]
+    assert (artifact / "reliability-audit.json").is_file()
+
+
+def test_调度器按片给墙钟_每片330s_章预算330x片数_口径同节化章() -> None:
+    """§FIX「墙钟按节计」的同一口径：section_deadline_seconds = 章墙钟，
+    章预算 = 章墙钟 × 片数；片数由 runtime 在派活前回答（物化那一刻才知道行数）。"""
+    from datetime import timedelta
+
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+    from tests.plan_factory import make_plan_dict
+
+    raw = make_plan_dict()
+    raw["goals"] = raw["goals"][:1]
+    raw["goals"][0]["agents"][0]["agent_id"] = "reliability-audit"
+    raw["goals"][0]["retry_policy"]["chapter_deadline_seconds"] = 330
+    plan = Plan.from_dict(raw)
+    seen: list = []
+    asked: list = []
+    now = datetime(2026, 8, 31, tzinfo=timezone.utc)
+
+    async def run_task(agent, context):
+        seen.append(context)
+        return TaskRunResult(True, engine="claude")
+
+    async def batch_count(agent):
+        asked.append(agent.agent_id)
+        return 3
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: None, lambda: now,
+        lambda delay, callback: None, batch_count=batch_count,
+    )
+    goal = plan.goals[0]
+    scheduler.goal_statuses[goal.goal_id] = "running"
+    asyncio.run(scheduler._execute_agent(goal, goal.agents[0]))
+
+    assert asked == ["reliability-audit"]
+    context = seen[0]
+    assert context.section_deadline_seconds == 330
+    assert context.deadline_at == now + timedelta(seconds=330 * 3)
+
+
+def test_调度器_非评级章或零片时墙钟原样不变() -> None:
+    from datetime import timedelta
+
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+    from app.plan.model import Plan
+    from tests.plan_factory import make_plan_dict
+
+    raw = make_plan_dict()
+    raw["goals"] = raw["goals"][:1]
+    raw["goals"][0]["agents"][0]["agent_id"] = "reliability-audit"
+    raw["goals"][0]["retry_policy"]["chapter_deadline_seconds"] = 330
+    plan = Plan.from_dict(raw)
+    seen: list = []
+    now = datetime(2026, 8, 31, tzinfo=timezone.utc)
+
+    async def run_task(agent, context):
+        seen.append(context)
+        return TaskRunResult(True, engine="claude")
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: None, lambda: now,
+        lambda delay, callback: None, batch_count=lambda agent: 0,
+    )
+    goal = plan.goals[0]
+    scheduler.goal_statuses[goal.goal_id] = "running"
+    asyncio.run(scheduler._execute_agent(goal, goal.agents[0]))
+
+    assert seen[0].section_deadline_seconds is None
+    assert seen[0].deadline_at == now + timedelta(seconds=330)

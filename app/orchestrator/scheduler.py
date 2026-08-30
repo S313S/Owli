@@ -174,9 +174,13 @@ class Scheduler:
         timer: Timer,
         chapter_ledger: Any | None = None,
         before_goal_complete: BeforeGoalComplete | None = None,
+        batch_count: Callable[[Agent], Any] | None = None,
     ) -> None:
         self.plan = plan
         self._run_task = run_task
+        #: §RATE-3：评级章分几片跑（0 = 不分）；片数由运行期库行数决定，
+        #: 由 runtime 回答。只用来按片给墙钟，口径同节化章的 section_deadline_seconds。
+        self._batch_count = batch_count
         self._emit_callback = emit
         self._clock = clock
         self._timer = timer
@@ -780,6 +784,15 @@ class Scheduler:
             if should_section(kind, output_format):
                 section_deadline_seconds = deadline_seconds
                 deadline_seconds *= len(_section_specs(self.plan, agent))
+            elif kind == "reliability_audit" and self._batch_count is not None:
+                # §RATE-3：评级章一章内分片，每片一份自己的墙钟、章预算 = 片数 ×
+                # 章墙钟——与节化章「墙钟按节计」同一口径，不新造概念。
+                batches = self._batch_count(agent)
+                if inspect.isawaitable(batches):
+                    batches = await batches
+                if int(batches or 0) > 0:
+                    section_deadline_seconds = deadline_seconds
+                    deadline_seconds *= int(batches)
         self._agent_started_at.setdefault(agent.agent_id, self._clock())
         if self._chapter_ledger is not None and deadline_seconds is not None:
             self._arm_chapter_deadline(agent, deadline_seconds)

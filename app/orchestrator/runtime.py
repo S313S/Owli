@@ -17,14 +17,23 @@ from typing import Any, Callable, Mapping
 
 from app.adapters import validation
 from app.adapters.capability import Capability
-from app.adapters.contracts import EngineTask
+from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.background import guard_task
-from app.orchestrator.scheduler import Scheduler, TaskRunResult
+from app.orchestrator.scheduler import (
+    CHAPTER_RETRY_INTERVAL_SECONDS, Scheduler, TaskRunResult,
+)
+from app.orchestrator.chapter_failure import chapter_failure_reason
 from app.orchestrator.sectioning import (
+    SECTION_RESUME_COST_FLOOR_SECONDS,
+    SectionWallClockExpired,
     _assemble as assemble_sections,
+    _is_transport_failure as is_transport_failure,
+    _run_before_section_deadline as run_before_batch_deadline,
+    _section_attempt_budget as batch_attempt_budget,
     _section_specs as section_specs,
+    _wait_before_section_retry as wait_before_batch_retry,
     run_sectioned_task,
     should_section,
 )
@@ -681,10 +690,13 @@ class RuntimeCoordinator:
             runs_root=self.runs_root,
         )
 
-    def _task(self, plan: Plan, agent: Any, context: Any) -> EngineTask:
+    def _task(
+        self, plan: Plan, agent: Any, context: Any, *, output_path: Path | None = None,
+    ) -> EngineTask:
         kind = self._agent_kind(agent)
         goal = next(item for item in plan.goals if item.goal_id == context.goal_id)
-        output_path = self.runs_root / plan.research_id / str(agent.output["path"])
+        if output_path is None:
+            output_path = self.runs_root / plan.research_id / str(agent.output["path"])
         sources = list(agent.capability.get("sources", []))
         source_item_limit = (
             self.scale_config.profile(plan.scale).source_item_limits.get(sources[0])
@@ -794,10 +806,11 @@ class RuntimeCoordinator:
         observed_causes: set[str] = set()
         chapter = agent.chapter if isinstance(agent.chapter, dict) else {}
         chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
+        rating_rows = 0
         if kind == "reliability_audit":
             # §RATE-2 货 1：评级章起跑前把它那一章的库行物化成文件——章规格的
             # inputs 指的就是这个文件（重试也重物化，取最新库行）。
-            await self._materialize_rating_rows(plan, context.goal_id, agent)
+            rating_rows = await self._materialize_rating_rows(plan, context.goal_id, agent)
 
         async def on_event(event: Any) -> None:
             if isinstance(event, dict):
@@ -884,22 +897,59 @@ class RuntimeCoordinator:
                 self._salvage_partial_sections(plan, agent, task)
                 raise
 
-        result = await adapter.run(task, self._ctx(task), on_event=on_event)
+        if kind == "reliability_audit" and rating_rows > 0:
+            # §RATE-3 货 2：评级章一章内分片跑——每片一次引擎会话、一份自己的墙钟，
+            # 片产物按片序合并成声明路径那一个文件，下面的闸门与入库照旧读它。
+            result = await self._run_rating_batches(
+                plan, agent, context, task, adapter, on_event, rows=rating_rows,
+            )
+        else:
+            result = await adapter.run(task, self._ctx(task), on_event=on_event)
+        engine_error = getattr(result, "engine_error", None)
+        conclusion_error = getattr(result, "conclusion_error", None)
+        if kind == "reliability_audit":
+            result = self._closed_set_gate(task, result, context.attempt, context.engine)
+            if isinstance(result, TaskRunResult):
+                return result
+        if kind == "reliability_audit" and bool(getattr(result, "succeeded", False)):
+            # §RATE-1 货 3：评级章一 done 就入库，不等整个 goal 完成——
+            # 写手在同一个 goal 里紧接着组池，等 goal 完成就晚了。
+            await self._persist_rating_chapter(plan, context.goal_id, agent)
+        conclusion = getattr(result, "conclusion", None)
+        reason = getattr(conclusion, "reason", None) if conclusion is not None else None
+        causes = {
+            getattr(event, "cause", None)
+            for event in (getattr(result, "events", None) or [])
+            # D-027 第 2 处：适配器**回传**的事件表里同样躺着那条告警级限流。
+            # 只补了 on_event 那一处，重放里仍有一章（reliability-audit-5，
+            # 25 行、活儿都干完了）被判 deferred/quota_exhausted。
+            if not self._warning_only_rate_limit(event, getattr(event, "cause", None))
+        }
+        causes.update(observed_causes)
+        return self._finish_task_result(
+            plan, agent, task, result, context, reason=reason, causes=causes,
+            engine_error=engine_error, conclusion_error=conclusion_error,
+        )
+
+    def _closed_set_gate(
+        self, task: EngineTask, result: Any, attempt: int, engine: str | None,
+    ) -> Any:
+        """闭集校验没过：attempt<3 回灌重做；≥3 降级改写产物后复验。返回
+        TaskRunResult 表示要立刻以它收尾，否则返回（可能已修复的）result。"""
         engine_error = getattr(result, "engine_error", None)
         conclusion_error = getattr(result, "conclusion_error", None)
         if (
-            kind == "reliability_audit"
-            and not bool(getattr(result, "succeeded", False))
+            not bool(getattr(result, "succeeded", False))
             and task.output_path.is_file()
         ):
             closed_set_report = validation.validate(
                 self._ctx(task), ["field_domain_whitelist:reliability_closed_set"]
             )
             closed_set_failed = closed_set_report.verdict is validation.Verdict.FAIL
-            if closed_set_failed and context.attempt < 3:
+            if closed_set_failed and attempt < 3:
                 return TaskRunResult(
                     False,
-                    engine=context.engine,
+                    engine=engine,
                     failure_feedback=(
                         "authority_kind / interest_relation 越出 source-reliability "
                         "§1.1/§1.5 闭集；必须逐条改为闭集字面值"
@@ -907,7 +957,7 @@ class RuntimeCoordinator:
                     engine_error=engine_error,
                     conclusion_error=conclusion_error,
                 )
-            if closed_set_failed and context.attempt >= 3:
+            if closed_set_failed and attempt >= 3:
                 try:
                     items = json.loads(task.output_path.read_text(encoding="utf-8"))
                     if not isinstance(items, list):
@@ -931,21 +981,14 @@ class RuntimeCoordinator:
                             pass
                     # 只修复产物腿；缺 owli-result 结构化结论时仍保留原失败。
                     return result
-        if kind == "reliability_audit" and bool(getattr(result, "succeeded", False)):
-            # §RATE-1 货 3：评级章一 done 就入库，不等整个 goal 完成——
-            # 写手在同一个 goal 里紧接着组池，等 goal 完成就晚了。
-            await self._persist_rating_chapter(plan, context.goal_id, agent)
+        return result
+
+    def _finish_task_result(
+        self, plan: Plan, agent: Any, task: EngineTask, result: Any, context: Any, *,
+        reason: Any, causes: set[Any], engine_error: Any, conclusion_error: Any,
+    ) -> Any:
+        """章终态判定（从 _run_task 尾部原样搬出，口径一字不改）。"""
         conclusion = getattr(result, "conclusion", None)
-        reason = getattr(conclusion, "reason", None) if conclusion is not None else None
-        causes = {
-            getattr(event, "cause", None)
-            for event in (getattr(result, "events", None) or [])
-            # D-027 第 2 处：适配器**回传**的事件表里同样躺着那条告警级限流。
-            # 只补了 on_event 那一处，重放里仍有一章（reliability-audit-5，
-            # 25 行、活儿都干完了）被判 deferred/quota_exhausted。
-            if not self._warning_only_rate_limit(event, getattr(event, "cause", None))
-        }
-        causes.update(observed_causes)
         actual_path = str(task.output_path) if task.output_path.is_file() else None
         actual_count = None
         if task.output_path.is_file() and task.output_format == "json":
@@ -1000,6 +1043,207 @@ class RuntimeCoordinator:
                 engine_error=engine_error, conclusion_error=conclusion_error,
             )
         return result
+
+    async def _rating_batch_count(self, plan: Plan, agent: Any) -> int:
+        """§RATE-3：调度器派活前问「这章分几片」——先物化（行数此刻才知道）再切。
+        非评级章 / 零行一律 0（不分片、墙钟按原样给）。"""
+        goal_id = next(
+            (goal.goal_id for goal in plan.goals
+             if any(item.agent_id == agent.agent_id for item in goal.agents)),
+            None,
+        )
+        if goal_id is None or self._rated_collector(plan, goal_id, agent) is None:
+            return 0
+        rows = await self._materialize_rating_rows(plan, goal_id, agent)
+        return len(rating_batches(rows, self._rating_batch_rows()))
+
+    async def _run_rating_batches(
+        self, plan: Plan, agent: Any, context: Any, task: EngineTask,
+        adapter: Any, on_event: Any, *, rows: int,
+    ) -> Any:
+        """§RATE-3 货 2/3：一章内串行跑 K 片，每片一次引擎会话、一份自己的墙钟。
+
+        片级语义（货 3，本包拍）：已成功的片（盘上产物过验证器）不重评；一片失败
+        不作废整章——继续跑后面的片，收尾把成功片合并入库，再以失败片的结果让本次
+        章尝试失败，调度器按章级 attempts 重试时只会重跑失败片。片内只对传输断连
+        在**本片墙钟内**退避重试（口径同节化章），超时/闭集/结论不合法不片内重试。
+        """
+        source = self._rated_collector(plan, context.goal_id, agent)
+        rows_relative = rating_rows_path(str(source.output["path"]))
+        sizes = rating_batches(rows, self._rating_batch_rows())
+        wall = getattr(context, "section_deadline_seconds", None)
+        wall = float(wall) if wall is not None else None
+        done: list[int] = []
+        failed: Any = None
+        last: Any = None
+        try:
+            for index, size in enumerate(sizes, start=1):
+                batch = self._rating_batch_task(
+                    plan, agent, context, index=index, total=len(sizes),
+                    rows_relative=rows_relative, rows=size,
+                )
+                if self._rating_batch_done(batch):
+                    done.append(index)
+                    await self._emit_batch(plan, context, agent, "rating_batch_skipped", {
+                        "batch": index, "batches": len(sizes), "rows": size,
+                    })
+                    continue
+                result = await self._run_rating_batch_once(
+                    plan, agent, context, batch, adapter, on_event,
+                    index=index, total=len(sizes), rows=size, wall=wall,
+                )
+                last = result
+                if bool(getattr(result, "succeeded", False)):
+                    done.append(index)
+                elif failed is None:
+                    failed = result
+        except asyncio.CancelledError:
+            # 章墙钟 / stop 掐在片执行中：把已成功的片合并入库，不白丢。
+            if done:
+                self._merge_rating_batches(plan, agent, task, done)
+                await self._persist_rating_chapter(plan, context.goal_id, agent)
+            raise
+        merged = self._merge_rating_batches(plan, agent, task, done)
+        await self._emit_batch(plan, context, agent, "rating_batches_merged", {
+            "batches": len(sizes), "done": done, "items": merged,
+            "failed": None if failed is None else len(sizes) - len(done),
+        })
+        if failed is not None:
+            if merged:
+                await self._persist_rating_chapter(plan, context.goal_id, agent)
+            return failed
+        return self._merged_batch_result(task, last)
+
+    async def _run_rating_batch_once(
+        self, plan: Plan, agent: Any, context: Any, batch: EngineTask,
+        adapter: Any, on_event: Any, *, index: int, total: int, rows: int,
+        wall: float | None,
+    ) -> Any:
+        """一片：自己的绝对墙钟（起跑 + wall），片内只对传输断连退避重试。"""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wall if wall is not None else None
+        retry_delay = float(CHAPTER_RETRY_INTERVAL_SECONDS.get(
+            getattr(plan, "scale", ""), 0.0,
+        ))
+        attempt = 0
+        while True:
+            attempt += 1
+            started = loop.time()
+            await self._emit_batch(plan, context, agent, "rating_batch_started", {
+                "batch": index, "batches": total, "rows": rows, "attempt": attempt,
+                "wall_clock_seconds": wall,
+            })
+            try:
+                result = await run_before_batch_deadline(
+                    adapter, batch, self._ctx(batch), on_event, deadline,
+                )
+            except SectionWallClockExpired:
+                result = EngineRunResult(
+                    conclusion=None, conclusion_error=None,
+                    validation=validation.validate(self._ctx(batch), batch.validators),
+                    events=[], permission_denials=[],
+                    engine_error=f"timeout: 评级第 {index}/{total} 批超出批墙钟 {wall} s",
+                )
+            ok = bool(getattr(result, "succeeded", False))
+            reason = None if ok else chapter_failure_reason(
+                result, batch.output_path, fallback="retry_exhausted",
+            )
+            await self._emit_batch(plan, context, agent, "rating_batch_finished", {
+                "batch": index, "batches": total, "rows": rows, "attempt": attempt,
+                "succeeded": ok, "reason": reason,
+                "elapsed_seconds": round(loop.time() - started, 1),
+                "engine_error": getattr(result, "engine_error", None),
+                "conclusion_error": getattr(result, "conclusion_error", None),
+            })
+            if ok:
+                return result
+            remaining = (deadline - loop.time()) if deadline is not None else None
+            if (
+                attempt < batch_attempt_budget()
+                and is_transport_failure(result, reason)
+                and (remaining is None
+                     or remaining - retry_delay >= SECTION_RESUME_COST_FLOOR_SECONDS)
+            ):
+                await wait_before_batch_retry(self.timer, retry_delay)
+                continue
+            return result
+
+    async def _emit_batch(
+        self, plan: Plan, context: Any, agent: Any, kind: str, data: dict[str, Any],
+    ) -> None:
+        await self.events.publish(plan.research_id, {
+            "type": kind,
+            "data": {"goal_id": context.goal_id, "agent_id": agent.agent_id, **data},
+        })
+
+    def _merged_batch_result(self, task: EngineTask, last: Any) -> Any:
+        """全部片都成功：以合并后的整章产物复验，结论沿用最后一片的；
+        全部片都是上一轮留下的（本轮一片没跑）时合成一份 done 结论。"""
+        from dataclasses import replace
+
+        report = validation.validate(self._ctx(task), task.validators)
+        if last is not None:
+            try:
+                return replace(last, validation=report)
+            except TypeError:
+                return last
+        return EngineRunResult(
+            conclusion=OwliResult(
+                status="done", output_path=str(task.output_path),
+                summary="各批评级产物已在上一轮完成，本轮由系统合并", assumptions=[],
+                unmet=[], capability_denials=[],
+            ),
+            conclusion_error=None, validation=report, events=[], permission_denials=[],
+        )
+
+    def _rating_batch_task(
+        self, plan: Plan, agent: Any, context: Any, *, index: int, total: int,
+        rows_relative: str, rows: int,
+    ) -> EngineTask:
+        """第 index 片的引擎任务：只读这一片、产物写到片路径，其余照章任务。"""
+        from dataclasses import replace
+
+        root = self.runs_root / plan.research_id
+        piece_in = root / rating_batch_path(rows_relative, index)
+        piece_out = root / rating_batch_output_path(str(agent.output["path"]), index)
+        task = self._task(plan, agent, context, output_path=piece_out)
+        note = (
+            f"\n\n【本批】本章分 {total} 批评级，这是第 {index}/{total} 批：只读 {piece_in}"
+            f"（本批 {rows} 行）逐条评级，产物写到 {piece_out}"
+            "（写文件与 owli-result.output_path 都逐字用它）；条数与本批文件一一对应，"
+            "不新增不丢条；其它批由系统另行派发，不要读、不要评、不要写整章产物。"
+        )
+        return replace(task, body=task.body + note)
+
+    def _rating_batch_done(self, task: EngineTask) -> bool:
+        """片产物已在盘上且过得了本章全部验证器 → 这一片不重评。"""
+        if not task.output_path.is_file():
+            return False
+        try:
+            report = validation.validate(self._ctx(task), task.validators)
+        except Exception:
+            return False
+        return report.verdict is validation.Verdict.PASS
+
+    def _merge_rating_batches(
+        self, plan: Plan, agent: Any, task: EngineTask, done: list[int],
+    ) -> int:
+        """按片序把已成功的片拼成声明路径那一个数组文件：不去重、不改写。"""
+        merged: list[Any] = []
+        root = self.runs_root / plan.research_id
+        for index in done:
+            piece = root / rating_batch_output_path(str(agent.output["path"]), index)
+            try:
+                items = json.loads(piece.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if isinstance(items, list):
+                merged.extend(items)
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+        return len(merged)
 
     def _salvage_partial_sections(self, plan: Plan, agent: Any, task: Any) -> None:
         """被取消的节化章只要有 done 节，就把父章产物组装落盘（D-009）。
@@ -1229,6 +1473,10 @@ class RuntimeCoordinator:
             self.now,
             self.timer,
             chapter_ledger=self.store,
+        )
+        # §RATE-3：评级章片数由 runtime 回答（物化那一刻才知道行数）。
+        scheduler._batch_count = (
+            lambda agent: self._rating_batch_count(scheduler.plan, agent)
         )
         scheduler._before_goal_complete = (
             lambda goal: self._persist_goal_evidence(scheduler.plan, goal)
