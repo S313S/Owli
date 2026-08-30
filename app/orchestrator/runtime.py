@@ -54,8 +54,10 @@ from app.plan.model import (
     rated_collector_id,
     rating_batch_output_path,
     rating_batch_path,
+    rating_batch_sizes,
     rating_batches,
     rating_rows_path,
+    RATING_BATCH_BYTES,
     RATING_BATCH_ROWS,
 )
 from app.plan.store import load_plan, save_plan
@@ -186,6 +188,8 @@ class RuntimeCoordinator:
         self.unattended = os.getenv("OWLI_UNATTENDED") == "1"
         self.scale_config = scale_config or load_research_scale_config()
         self._adapters: dict[str, Any] = {}
+        #: §RATE-3：每个评级章物化时定下的片行数表 (research_id, agent_id) → [行数...]
+        self._rating_batch_plan: dict[tuple[str, str], list[int]] = {}
         self._schedulers: dict[str, Any] = {}
         self._starting: set[str] = set()
         self._finalized: set[str] = set()
@@ -1054,8 +1058,8 @@ class RuntimeCoordinator:
         )
         if goal_id is None or self._rated_collector(plan, goal_id, agent) is None:
             return 0
-        rows = await self._materialize_rating_rows(plan, goal_id, agent, quiet=True)
-        return len(rating_batches(rows, self._rating_batch_rows()))
+        await self._materialize_rating_rows(plan, goal_id, agent, quiet=True)
+        return len(self._rating_batch_plan.get((plan.research_id, agent.agent_id), []))
 
     async def _run_rating_batches(
         self, plan: Plan, agent: Any, context: Any, task: EngineTask,
@@ -1070,7 +1074,9 @@ class RuntimeCoordinator:
         """
         source = self._rated_collector(plan, context.goal_id, agent)
         rows_relative = rating_rows_path(str(source.output["path"]))
-        sizes = rating_batches(rows, self._rating_batch_rows())
+        sizes = self._rating_batch_plan.get(
+            (plan.research_id, agent.agent_id),
+        ) or rating_batches(rows, self._rating_batch_rows())
         wall = getattr(context, "section_deadline_seconds", None)
         wall = float(wall) if wall is not None else None
         done: list[int] = []
@@ -1223,7 +1229,8 @@ class RuntimeCoordinator:
             f"\n\n【本批】本章分 {total} 批评级，这是第 {index}/{total} 批：只读 {piece_in}"
             f"（本批 {rows} 行）逐条评级，产物写到 {piece_out}"
             "（写文件与 owli-result.output_path 都逐字用它）；条数与本批文件一一对应，"
-            "不新增不丢条；其它批由系统另行派发，不要读、不要评、不要写整章产物。"
+            "不新增不丢条；其它批由系统另行派发，不要读、不要评、不要写整章产物；"
+            "评分依据只来自本批文件与提示词里的判据，不要去翻代码仓、校验器或评分实现。"
         )
         return replace(task, body=task.body + note)
 
@@ -1817,7 +1824,10 @@ class RuntimeCoordinator:
         # 每片 ≤ RATING_BATCH_ROWS 行写成 `x.rows.<n>.json`；多出来的旧片删掉，
         # 免得上一次尝试（行数不同）留下的片被当成本次的。
         batch_rows = self._rating_batch_rows()
-        sizes = rating_batches(len(rows), batch_rows)
+        sizes = rating_batch_sizes(
+            rows, batch_rows=batch_rows, batch_bytes=self._rating_batch_bytes(),
+        )
+        self._rating_batch_plan[(plan.research_id, agent.agent_id)] = list(sizes)
         offset = 0
         for index, size in enumerate(sizes, start=1):
             piece = self.runs_root / plan.research_id / rating_batch_path(relative, index)
@@ -1837,7 +1847,7 @@ class RuntimeCoordinator:
                 "goal_id": goal_id, "agent_id": agent.agent_id,
                 "rates_chapter": source.agent_id, "rows": len(rows),
                 "path": relative, "batches": len(sizes), "batch_rows": sizes,
-                "batch_size": batch_rows,
+                "batch_size": batch_rows, "batch_bytes": self._rating_batch_bytes(),
             },
         })
         return len(rows)
@@ -1852,6 +1862,16 @@ class RuntimeCoordinator:
         except (TypeError, ValueError):
             return RATING_BATCH_ROWS
         return value if value >= 1 else RATING_BATCH_ROWS
+
+    @staticmethod
+    def _rating_batch_bytes() -> int:
+        """片的字节预算：默认 RATING_BATCH_BYTES；OWLI_RATING_BATCH_BYTES 可调。"""
+        raw = os.environ.get("OWLI_RATING_BATCH_BYTES", "")
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return RATING_BATCH_BYTES
+        return value if value >= 1 else RATING_BATCH_BYTES
 
     def _drop_stale_batches(
         self, plan: Plan, agent: Any, rows_relative: str, batches: int,

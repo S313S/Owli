@@ -22,10 +22,10 @@ def test_按批大小切片_135行切成50_50_35() -> None:
 
     assert rating_batches(135, 50) == [50, 50, 35]
     assert rating_batches(50, 50) == [50]
-    assert rating_batches(25) == [25]
+    assert rating_batches(25, 30) == [25]
     assert rating_batches(0) == []
-    # 默认批大小 30（第 1 轮重放实测 50 行的 web_search 片在 305 s 被掐）。
-    assert rating_batches(135) == [30, 30, 30, 30, 15]
+    # 默认批大小 20（第 1 轮 50 行 / 第 2 轮 30 行的 web_search 片都在 300 s 被掐）。
+    assert rating_batches(135) == [20, 20, 20, 20, 20, 20, 15]
     assert rating_batches(130, 30) == [30, 30, 30, 30, 10]
     assert rating_batch_path("goals/goal-1/data-collection.rows.json", 2) == (
         "goals/goal-1/data-collection.rows.2.json"
@@ -121,9 +121,13 @@ def test_批大小可由环境变量下调_非法值回默认(monkeypatch) -> No
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "30")
     assert RuntimeCoordinator._rating_batch_rows() == 30
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "abc")
-    assert RuntimeCoordinator._rating_batch_rows() == 30
+    assert RuntimeCoordinator._rating_batch_rows() == 20
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "0")
-    assert RuntimeCoordinator._rating_batch_rows() == 30
+    assert RuntimeCoordinator._rating_batch_rows() == 20
+    monkeypatch.setenv("OWLI_RATING_BATCH_BYTES", "9000")
+    assert RuntimeCoordinator._rating_batch_bytes() == 9000
+    monkeypatch.setenv("OWLI_RATING_BATCH_BYTES", "-1")
+    assert RuntimeCoordinator._rating_batch_bytes() == 32_000
 
 
 # ---------------------------------------------------------------- 货 2：按片跑
@@ -432,3 +436,34 @@ def test_章规格_任务文案_提示词三处一起按批改口(tmp_path) -> N
     assert "这一批" in body and "本批输入证据一一对应" in body
     assert "其它批不要读" in body
     assert "条数与输入证据一一对应" not in body, "旧口径（整份）必须退场"
+
+
+def test_按字节预算切片_重行少切几行_轻行按行数封顶() -> None:
+    """第 2 轮实测：web_search 行 3.3 KB、小红书行 0.57 KB，同样 30 行/片前者 ≥300 s
+    被引擎超时掐掉、后者 107 s；片要同时按行数与字节数封顶。"""
+    from app.plan.model import rating_batch_sizes
+
+    heavy = [{"permalink": f"https://h/{i}", "content_excerpt": "字" * 1200} for i in range(10)]
+    light = [{"permalink": f"https://l/{i}", "content_excerpt": "短"} for i in range(50)]
+    heavy_row = len(json.dumps(heavy[0], ensure_ascii=False).encode("utf-8"))
+    assert rating_batch_sizes(heavy, batch_rows=20, batch_bytes=heavy_row * 3 + 10) == [3, 3, 3, 1]
+    assert rating_batch_sizes(light, batch_rows=20, batch_bytes=32_000) == [20, 20, 10]
+    # 单行超预算自成一片，不丢行。
+    assert rating_batch_sizes(heavy[:2], batch_rows=20, batch_bytes=100) == [1, 1]
+    assert rating_batch_sizes([], batch_rows=20, batch_bytes=100) == []
+
+
+def test_物化按字节预算切片_片数进调度器问数(tmp_path: Path, monkeypatch) -> None:
+    coordinator, plan, rating, events, artifact = _fixture(tmp_path, 12)
+    for row in coordinator.store.list_evidence("r-rate3"):
+        row = dict(row); row["content_excerpt"] = "字" * 1200
+        coordinator.store.upsert_evidence_batch([row])
+    monkeypatch.setenv("OWLI_RATING_BATCH_BYTES", "8000")  # ≈ 2 行/片
+
+    written = asyncio.run(coordinator._materialize_rating_rows(plan, "goal-1", rating))
+    count = asyncio.run(coordinator._rating_batch_count(plan, rating))
+
+    assert written == 12
+    data = next(e["data"] for e in events if e["type"] == "rating_rows_materialized")
+    assert data["batches"] == count == len(data["batch_rows"]) >= 4
+    assert sum(data["batch_rows"]) == 12 and data["batch_bytes"] == 8000

@@ -102,7 +102,37 @@ def rating_rows_path(collector_output_path: str) -> str:
 #: 50 行 ≈ 3.7 min；RATE-3 第 1 轮重放实测 goal-1（web_search 行，正文长）50 行的片
 #: 三章全在 305 s 被本机代理掐流（goal-2 小红书行 50 行只要 127 s）——按提货单坑 2
 #: 「被掐就降到 30」落成默认值；`OWLI_RATING_BATCH_ROWS` 仍可按环境调。
-RATING_BATCH_ROWS = 30
+RATING_BATCH_ROWS = 20
+
+#: §RATE-3 第 2 轮实测：行的「重量」按源差 6 倍——web_search 行带 1200 字正文
+#: ≈ 3.3 KB/行，小红书行 ≈ 0.57 KB/行；同样 30 行/片，前者 ≥300 s 被引擎超时掐掉、
+#: 后者 107 s 跑完。所以片不能只按行数切，还要按序列化字节数封顶。
+RATING_BATCH_BYTES = 32_000
+
+
+def rating_batch_sizes(
+    rows: list[Any], *, batch_rows: int = RATING_BATCH_ROWS,
+    batch_bytes: int = RATING_BATCH_BYTES,
+) -> list[int]:
+    """§RATE-3 货 1：顺序切片——行数到 batch_rows 或字节数到 batch_bytes 就封一片。
+
+    单行超过字节预算时自成一片（不丢行）。返回每片行数表，与 `rating_batches` 同形。
+    """
+    max_rows = max(1, int(batch_rows))
+    max_bytes = max(1, int(batch_bytes))
+    sizes: list[int] = []
+    count = 0
+    used = 0
+    for row in rows:
+        weight = len(json.dumps(row, ensure_ascii=False).encode("utf-8"))
+        if count and (count >= max_rows or used + weight > max_bytes):
+            sizes.append(count)
+            count, used = 0, 0
+        count += 1
+        used += weight
+    if count:
+        sizes.append(count)
+    return sizes
 
 
 def rating_batch_path(rows_path: str, index: int) -> str:
