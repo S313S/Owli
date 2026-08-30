@@ -118,6 +118,11 @@ def test_评级章的章规格确定性生成_不吃一次章扩写引擎调用(
     collector = plan.goals[0].agents[0]
     chapter = ratings[0].chapter
     assert chapter["chapter_type"] == "audit"
-    assert chapter["opening"]["inputs"] == [{"path": collector.output["path"]}]
+    # §RATE-2 货 1 起，评级章的输入改指**物化行文件**（采集产物只有模型顺手写下的
+    # 一小撮，库里那一章的行才是全量）；这里跟着改口径，别把绿的验成红的。
+    assert chapter["opening"]["inputs"] == [
+        {"path": "goals/goal-1/data-collection.rows.json"}
+    ]
+    assert chapter["closing"]["notes"]["rates_output"] == collector.output["path"]
     assert chapter["closing"]["output"] == {"path": ratings[0].output["path"]}
     assert chapter["closing"]["notes"]["rates_chapter"] == collector.agent_id

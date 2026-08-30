@@ -43,6 +43,7 @@ from app.plan.model import (
     Plan,
     agent_kind_of,
     rated_collector_id,
+    rating_rows_path,
 )
 from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
@@ -769,6 +770,10 @@ class RuntimeCoordinator:
         observed_causes: set[str] = set()
         chapter = agent.chapter if isinstance(agent.chapter, dict) else {}
         chapter_id = str(chapter.get("chapter_id") or agent.agent_id)
+        if kind == "reliability_audit":
+            # §RATE-2 货 1：评级章起跑前把它那一章的库行物化成文件——章规格的
+            # inputs 指的就是这个文件（重试也重物化，取最新库行）。
+            await self._materialize_rating_rows(plan, context.goal_id, agent)
 
         async def on_event(event: Any) -> None:
             if isinstance(event, dict):
@@ -1338,6 +1343,72 @@ class RuntimeCoordinator:
             payloads.append(payload)
         return payloads, unmatched
 
+    _ROW_FIELDS = (
+        "permalink", "title", "content_excerpt", "author_name",
+        "platform", "published_at", "fetched_at",
+    )
+
+    def _rated_collector(self, plan: Plan, goal_id: str, agent: Any) -> Any:
+        """这是不是自动排出的评级章？是则返回它评的那个采集章 agent，否则 None。"""
+
+        goal = next(
+            (item for item in plan.goals if item.goal_id == goal_id), None,
+        )
+        if goal is None:
+            return None
+        rates = rated_collector_id(
+            output=getattr(agent, "output", None) or {},
+            depends_on=getattr(agent, "depends_on", []),
+            deliverable_path=str(
+                (getattr(goal, "deliverable", None) or {}).get("path", "")
+            ),
+            collector_ids=[
+                item.agent_id for item in goal.agents
+                if (getattr(item, "capability", None) or {}).get("profile")
+                == "web-collector"
+            ],
+        )
+        if not rates:
+            return None
+        return next(
+            (item for item in goal.agents if item.agent_id == rates), None,
+        )
+
+    async def _materialize_rating_rows(
+        self, plan: Plan, goal_id: str, agent: Any,
+    ) -> int:
+        """§RATE-2 货 1：把「这一章采到的库行」物化成文件给评级章读。
+
+        源适配器直落库，采集产物只是模型顺手写下的一小撮（RATE-1 整跑：盘上 10 条
+        / 库里同章 50 行 → 评级只覆盖 15%）。这里按 `(goal_id, agent_name)` 取库行、
+        只留评级要用的字段，写到 `rating_rows_path` 指的文件。该文件不是任何 agent
+        的声明产物，通用投影按声明路径读文件，不会把它再当证据产物投影一遍。
+        """
+        source = self._rated_collector(plan, goal_id, agent)
+        if source is None:
+            return 0
+        rows = [
+            {field: row.get(field) for field in self._ROW_FIELDS}
+            for row in self.store.list_evidence(plan.research_id)
+            if str(row.get("goal_id") or "") == goal_id
+            and str(row.get("agent_name") or "") == source.agent_id
+        ]
+        relative = rating_rows_path(str(source.output["path"]))
+        path = self.runs_root / plan.research_id / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+        await self.events.publish(plan.research_id, {
+            "type": "rating_rows_materialized",
+            "data": {
+                "goal_id": goal_id, "agent_id": agent.agent_id,
+                "rates_chapter": source.agent_id, "rows": len(rows),
+                "path": relative,
+            },
+        })
+        return len(rows)
+
     async def _persist_rating_chapter(
         self, plan: Plan, goal_id: str, agent: Any,
     ) -> None:
@@ -1346,24 +1417,7 @@ class RuntimeCoordinator:
         走这条而不是 `_persist_goal_evidence`，是因为后者按章账本状态挑章——
         此刻本章还没落终态，等它落完已经是 goal 收尾了。
         """
-        goal = next(
-            (item for item in plan.goals if item.goal_id == goal_id), None,
-        )
-        if goal is None:
-            return
-        collector_ids = [
-            item.agent_id for item in goal.agents
-            if (getattr(item, "capability", None) or {}).get("profile")
-            == "web-collector"
-        ]
-        if not rated_collector_id(
-            output=getattr(agent, "output", None) or {},
-            depends_on=getattr(agent, "depends_on", []),
-            deliverable_path=str(
-                (getattr(goal, "deliverable", None) or {}).get("path", "")
-            ),
-            collector_ids=collector_ids,
-        ):
+        if self._rated_collector(plan, goal_id, agent) is None:
             return
         existing = {
             str(item["permalink"]): item

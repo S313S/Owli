@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.config import ChapterEngineConfig
-from app.plan.model import Agent, Plan, rated_collector_id
+from app.plan.model import Agent, Plan, rated_collector_id, rating_rows_path
 
 
 CHAPTER_TYPES = frozenset({
@@ -356,13 +356,17 @@ def rating_chapter_value(agent: Agent, goal: Any) -> dict[str, Any] | None:
     if source is None:
         return None
     source_path = str(source.output["path"])
+    # §RATE-2 货 1：输入改指**物化行文件**——源适配器直落库，采集产物只是模型顺手
+    # 写下的一小撮（RATE-1 整跑：盘上 10 条 / 库里同章 50 行），评级章读产物就只
+    # 评得到 15%。物化文件由 runtime 在本章起跑前按库行写出。
+    rows_path = rating_rows_path(source_path)
     return {
         "chapter_type": "audit",
         "opening": {
-            "inputs": [{"path": source_path}],
+            "inputs": [{"path": rows_path}],
             "task": agent.task,
             "acceptance": [
-                f"产物按声明路径落盘，且条数与 {source_path} 一一对应，"
+                f"产物按声明路径落盘，且条数与 {rows_path} 一一对应，"
                 "不新增不丢条",
                 "每条带齐五维评分、rating_notes、rated_by，并原样回带原 permalink",
             ],
@@ -371,7 +375,11 @@ def rating_chapter_value(agent: Agent, goal: Any) -> dict[str, Any] | None:
             "output": {"path": str(agent.output["path"])},
             "entities": [],
             "expected_count": None,
-            "notes": {"rates_chapter": rates, "rates_output": source_path},
+            "notes": {
+                "rates_chapter": rates,
+                "rates_output": source_path,
+                "rates_rows": rows_path,
+            },
         },
     }
 
@@ -450,6 +458,7 @@ async def _generate_selected_chapter_specs(
                         await callback_result
                 continue
             value = rating_chapter_value(agent, goal)
+            rating_chapter = value is not None
             if value is not None:
                 # 评级章：不占章扩写引擎调用，直接落盘。
                 value = validate_chapter_value(value, agent)
@@ -472,15 +481,18 @@ async def _generate_selected_chapter_specs(
                     f"章节 {segment_name} 连续语义校验失败："
                     + "；".join(semantic_errors)
                 )
-            value["opening"]["inputs"] = _merge_inputs(
-                _model_inputs_for_merge(value),
-                _derived_input_paths(
-                    goal.agents,
-                    agent,
-                    value["chapter_type"],
-                    inventory,
-                ),
-            )
+            if not rating_chapter:
+                # 评级章的 inputs 由系统定死，只指物化行文件；派生输入会把采集
+                # 产物路径（10 条那份）加回来，正是 §RATE-2 要绕开的东西。
+                value["opening"]["inputs"] = _merge_inputs(
+                    _model_inputs_for_merge(value),
+                    _derived_input_paths(
+                        goal.agents,
+                        agent,
+                        value["chapter_type"],
+                        inventory,
+                    ),
+                )
             chapter = {
                 "chapter_id": f"ch-{index}",
                 "chapter_type": value["chapter_type"],

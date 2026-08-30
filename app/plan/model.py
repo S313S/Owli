@@ -84,6 +84,20 @@ def rated_collector_id(
     return upstream[0] if upstream[0] in set(collector_ids or ()) else ""
 
 
+def rating_rows_path(collector_output_path: str) -> str:
+    """§RATE-2 货 1：评级章要读的「这一章采到的库行」物化文件路径。
+
+    从采集章产物路径派生（`x.json` → `x.rows.json`）：与采集产物同目录、文件名可
+    区分。它不是任何 agent 的声明产物，通用投影 `load_evidence_payloads` 按声明
+    产物路径读文件，因此不会把物化行再当证据产物投影一遍。
+    """
+    raw = str(collector_output_path or "").strip()
+    if not raw:
+        return ""
+    base = raw[: -len(".json")] if raw.endswith(".json") else raw
+    return f"{base}.rows.json"
+
+
 def _strict_fields(data: Mapping[str, Any], allowed: set[str], location: str) -> None:
     unknown = set(data) - allowed
     if unknown:

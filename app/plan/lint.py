@@ -816,6 +816,11 @@ def _rule_22(goals: list[dict[str, Any]]) -> list[str]:
             if not isinstance(chapter, dict):
                 continue
             chapter_type = chapter.get("chapter_type")
+            if _rated_chapter(goal, agent):
+                # §RATE-2 货 1：评级章的 inputs 由系统定死指向**物化行文件**
+                # （采集产物只有模型顺手写下的一小撮），不受「覆盖上游产物」约束；
+                # 规则 19/24/28/30 已按同一口径把评级章摘出去。
+                continue
             expected = []
             for dependency in agent.get("depends_on", []):
                 path = agent_outputs.get(str(dependency))
