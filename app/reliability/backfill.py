@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -861,6 +863,7 @@ async def backfill_report(
     batch_size: int = 25,
     force: bool = False,
     engine_preference: str = "claude",
+    on_event: Any = None,
 ) -> BackfillResult:
     """对单报告做可重复补评；引擎失败的批次保持原 NULL，不写平台基线。"""
 
@@ -916,9 +919,11 @@ async def backfill_report(
             payloads = _scored_payloads(reusable, engine_preference)
             store.upsert_evidence_batch(payloads)
             rated += len(payloads)
+        batch_total = (len(pending) + batch_size - 1) // batch_size
         for batch_number, start in enumerate(range(0, len(pending), batch_size), 1):
             batch = pending[start:start + batch_size]
             output_path = _batch_output_path(root, report_id, goal_id, batch_number)
+            batch_started = time.monotonic()
             engine_labels = await _classify_batch(
                 batch, adapter=adapter, output_path=output_path,
                 report_id=report_id, goal_id=goal_id,
@@ -926,13 +931,30 @@ async def backfill_report(
             )
             if engine_labels is None:
                 failed += len(batch)
-                continue
-            payloads = _scored_payloads(
-                [(item, label, True) for item, label in zip(batch, engine_labels)],
-                engine_preference,
-            )
-            store.upsert_evidence_batch(payloads)
-            rated += len(payloads)
+            else:
+                payloads = _scored_payloads(
+                    [(item, label, True) for item, label in zip(batch, engine_labels)],
+                    engine_preference,
+                )
+                store.upsert_evidence_batch(payloads)
+                rated += len(payloads)
+            # §OBS-1 货 2：每批完成发进度事件（成功失败都发；只加事件不改语义）。
+            if on_event is not None:
+                progress_event = on_event({
+                    "type": "reliability_backfill_progress",
+                    "data": {
+                        "report_id": report_id,
+                        "goal_id": goal_id,
+                        "batch_number": batch_number,
+                        "batch_total": batch_total,
+                        "batch_rows": len(batch),
+                        "rated_total": rated,
+                        "failed_total": failed,
+                        "batch_seconds": round(time.monotonic() - batch_started, 3),
+                    },
+                })
+                if inspect.isawaitable(progress_event):
+                    await progress_event
 
     refreshed_report = store.get_report(report_id) or report
     report_path = _resolve_report_path(refreshed_report, root)

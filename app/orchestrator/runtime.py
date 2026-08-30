@@ -2505,6 +2505,8 @@ class RuntimeCoordinator:
         try:
             result = await backfill_report(
                 self.store, research_id, adapter=adapter, runs_root=self.runs_root,
+                # §OBS-1 货 2：回填批次进度直通事件流，X-1「回填期间零事件」挂账收口。
+                on_event=lambda payload: self.events.publish(research_id, payload),
             )
         except Exception as exc:  # noqa: BLE001 —— 收尾不得因补评失败判 failed
             logger.warning("收尾评级回填失败，研究照常收尾：%s", exc)
