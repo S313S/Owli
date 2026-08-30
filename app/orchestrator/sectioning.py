@@ -706,6 +706,60 @@ def _raw_urls(text: str) -> set[str]:
     return urls
 
 
+def _envelope_payload(text):
+    """整文本解析为节级信封；形状不合返回 None。"""
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if (
+        isinstance(payload, Mapping)
+        and isinstance(payload.get("markdown"), str)
+        and isinstance(payload.get("claims"), list)
+    ):
+        return payload
+    return None
+
+
+def _coerce_section_envelope(section_path: Path) -> str | None:
+    """把可救的非信封节产物在盘上规范成信封，返回兜底方式；救不了返回 None。
+
+    只救三种形状：``` 围栏包信封 / 信封前后带说明文字 / 合格裸 Markdown 正文。
+    JSON 语法坏（以 { 起头却解析不了）不救，由池校验带错误位置退回（D-025）。
+    """
+    try:
+        raw = section_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    if _envelope_payload(raw) is not None:
+        return None
+    stripped = raw.strip()
+    candidates: list[tuple[str, str]] = []
+    if stripped.startswith("```") and stripped.endswith("```"):
+        first_nl = stripped.find("\n")
+        if first_nl != -1:
+            candidates.append(("fence_stripped", stripped[first_nl + 1 : -3]))
+    start, end = raw.find("{"), raw.rfind("}")
+    if 0 <= start < end:
+        candidates.append(("braces_extracted", raw[start : end + 1]))
+    payload = note = None
+    for name, text in candidates:
+        payload = _envelope_payload(text)
+        if payload is not None:
+            note = name
+            break
+    if payload is None:
+        if stripped.startswith("{"):
+            return None
+        if "## 结论" not in raw and "## 信息源" not in raw:
+            return None
+        payload, note = {"markdown": raw, "claims": []}, "bare_markdown_wrapped"
+    section_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8",
+    )
+    return note
+
+
 def _section_evidence_pool_result(
     section_path: Path,
     pool: Mapping[str, Any],
@@ -730,19 +784,30 @@ def _section_evidence_pool_result(
             f"无法读取节产物：{type(exc).__name__}: {exc}",
             [],
         )
+    parse_error = None
     try:
         payload = json.loads(raw_text)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError as exc:
+        payload = None
+        if raw_text.lstrip().startswith(("{", "[")):
+            parse_error = (
+                f"JSON 解析失败：{exc.msg}"
+                f"（line {exc.lineno} column {exc.colno} char {exc.pos}）"
+            )
+    except TypeError:
         payload = None
     if (
         not isinstance(payload, Mapping)
         or not isinstance(payload.get("markdown"), str)
         or not isinstance(payload.get("claims"), list)
     ):
+        message = "节产物必须使用 JSON 信封（markdown 正文 + claims 数组），裸 Markdown 不接受"
+        if parse_error:
+            message += f"；{parse_error}"
         return validation.Result(
             validation.Verdict.FAIL,
             "evidence_pool_only",
-            "节产物必须使用 JSON 信封（markdown 正文 + claims 数组），裸 Markdown 不接受",
+            message,
             ["json_envelope"],
         )
     markdown = payload["markdown"]
@@ -1271,6 +1336,19 @@ async def run_sectioned_task(
                 section_goal_id=str(section["goal_id"]),
             )
             section_path = section_root / section["filename"]
+            reentry_note = _coerce_section_envelope(section_path)
+            if reentry_note:
+                reentry_event = on_event({
+                    "type": "section_envelope_coerced",
+                    "data": {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "kind": reentry_note,
+                    },
+                    "is_error": False,
+                })
+                if inspect.isawaitable(reentry_event):
+                    await reentry_event
             if _section_evidence_pool_result(
                 section_path, frozen_pool, all_evidence_urls,
             ).verdict is not validation.Verdict.PASS:
@@ -1583,13 +1661,24 @@ async def run_sectioned_task(
                             now_iso=now_iso, on_event=on_event,
                         )
                     raise
-            pool_result = (
-                _section_evidence_pool_result(
+            pool_result = None
+            if persist_goal_evidence is not None and not artifact_empty:
+                coerce_note = _coerce_section_envelope(section_path)
+                if coerce_note:
+                    coerced_event = on_event({
+                        "type": "section_envelope_coerced",
+                        "data": {
+                            "goal_id": context.goal_id,
+                            "chapter_id": section["section_id"],
+                            "kind": coerce_note,
+                        },
+                        "is_error": False,
+                    })
+                    if inspect.isawaitable(coerced_event):
+                        await coerced_event
+                pool_result = _section_evidence_pool_result(
                     section_path, evidence_pool, all_evidence_urls,
                 )
-                if persist_goal_evidence is not None and not artifact_empty
-                else None
-            )
             pool_failed = bool(
                 pool_result is not None
                 and pool_result.verdict is not validation.Verdict.PASS

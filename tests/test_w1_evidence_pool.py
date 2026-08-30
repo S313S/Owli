@@ -1293,3 +1293,57 @@ def test_交叉验证与汇总章同样下发JSON信封指令且信封产物可�
         assert "输出骨架示例" in body, kind
         assert "第一个字符必须是" in body and "代码围栏" in body, kind
         assert result.succeeded is True, kind
+
+
+def _coerce_case(tmp_path, name, content):
+    from app.orchestrator.sectioning import (
+        _coerce_section_envelope, _section_evidence_pool_result,
+    )
+    visible_url = "https://evidence.example/visible"
+    section_path = tmp_path / f"{name}.md"
+    section_path.write_text(content, encoding="utf-8")
+    note = _coerce_section_envelope(section_path)
+    result = _section_evidence_pool_result(
+        section_path,
+        {"items": [{"citation": "[S01]", "permalink": visible_url}]},
+        {visible_url},
+    )
+    return note, result
+
+
+_ENVELOPE_BODY = (
+    "## 结论\n\n- 引用闭合 [S01]\n\n"
+    "## 信息源\n\n- [S01] [可见证据](https://evidence.example/visible)\n"
+)
+
+
+def test_信封兜底_围栏与裸markdown救回_语法坏不救且带错误位置(tmp_path) -> None:
+    """D-025 货 3：_coerce_section_envelope 四形状各一条。"""
+    import json as _json
+
+    envelope = _json.dumps(
+        {"markdown": _ENVELOPE_BODY, "claims": []}, ensure_ascii=False,
+    )
+    # 1) 合法信封：不兜底、直接过
+    note, result = _coerce_case(tmp_path, "valid", envelope)
+    assert note is None
+    assert result.verdict is validation.Verdict.PASS
+    # 2) ```json 围栏包信封：剥围栏救回
+    note, result = _coerce_case(
+        tmp_path, "fenced", f"```json\n{envelope}\n```",
+    )
+    assert note == "fence_stripped"
+    assert result.verdict is validation.Verdict.PASS
+    # 3) 裸 Markdown：包成 claims 空数组的信封
+    note, result = _coerce_case(tmp_path, "bare", f"# 标题\n\n{_ENVELOPE_BODY}")
+    assert note == "bare_markdown_wrapped"
+    assert result.verdict is validation.Verdict.PASS
+    payload = _json.loads((tmp_path / "bare.md").read_text(encoding="utf-8"))
+    assert payload["claims"] == [] and payload["markdown"].startswith("# 标题")
+    # 4) JSON 语法坏（F 类）：不救，仍 FAIL 且 conclusion_error 带错误位置
+    broken = '{"markdown": "## 结论\\n\\n- x [S01]", "claims": [}'
+    note, result = _coerce_case(tmp_path, "broken", broken)
+    assert note is None
+    assert result.verdict is validation.Verdict.FAIL
+    assert result.message.startswith("节产物必须使用 JSON 信封")
+    assert "JSON 解析失败" in result.message and "char" in result.message
