@@ -131,7 +131,10 @@ class _BatchAdapter:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
-        self.fail_batches: set[int] = set()
+        self.fail_batches: set[int] = set()   # 每次都传输断连
+        self.fail_once: set[int] = set()      # 第一次传输断连、第二次正常
+        self.hang: set[int] = set()           # 睡过片墙钟
+        self.cancel_on: set[int] = set()      # 模拟章墙钟 / stop 取消
 
     async def run(self, task, ctx, on_event=None):
         piece_in = next(
@@ -150,7 +153,13 @@ class _BatchAdapter:
             "index": index, "output": task.output_path.name, "rows": len(rows),
             "validators": list(task.validators),
         })
-        if index in self.fail_batches:
+        if index in self.cancel_on:
+            raise asyncio.CancelledError
+        if index in self.hang:
+            await asyncio.sleep(0.5)
+        transport_fail = index in self.fail_batches or index in self.fail_once
+        self.fail_once.discard(index)
+        if transport_fail:
             return SimpleNamespace(
                 succeeded=False, conclusion=None, events=[],
                 engine_error="socket hang up", conclusion_error=None,
@@ -304,3 +313,78 @@ def test_调度器_非评级章或零片时墙钟原样不变() -> None:
 
     assert seen[0].section_deadline_seconds is None
     assert seen[0].deadline_at == now + timedelta(seconds=330)
+
+
+# ------------------------------------------------- 货 3：片级失败与重试语义（本包拍）
+
+
+def test_片内传输断连在本片墙钟内重试一次即成功_整章仍done(tmp_path: Path) -> None:
+    coordinator, plan, rating, events, _ = _fixture(tmp_path, 135)
+    plan.scale = "unit"  # 退避间隔表里没有 → 0 s，夹具不用真等
+    adapter = _BatchAdapter()
+    adapter.fail_once = {2}
+
+    result = _run_chapter(coordinator, plan, rating, adapter)
+
+    assert result.succeeded is True and result.actual_count == 135
+    assert [c["index"] for c in adapter.calls] == [1, 2, 2, 3], "只重跑断连那一片"
+    started = [e["data"] for e in events if e["type"] == "rating_batch_started"]
+    assert [(s["batch"], s["attempt"]) for s in started] == [(1, 1), (2, 1), (2, 2), (3, 1)]
+
+
+def test_一片超出本片墙钟_其余片照跑并入库_本次章尝试失败(tmp_path: Path) -> None:
+    coordinator, plan, rating, events, artifact = _fixture(tmp_path, 135)
+    adapter = _BatchAdapter()
+    adapter.hang = {2}
+
+    result = _run_chapter(coordinator, plan, rating, adapter, wall=0.05)
+
+    assert result.succeeded is False
+    assert str(result.engine_error).startswith("timeout: 评级第 2/3 批超出批墙钟")
+    assert [c["index"] for c in adapter.calls] == [1, 2, 3], "一片失败不作废整章，后面的片照跑"
+    merged = json.loads((artifact / "reliability-audit.json").read_text("utf-8"))
+    assert len(merged) == 85, "成功的两片先合并"
+    rated = [r for r in coordinator.store.list_evidence("r-rate3")
+             if r["rated_by"] == "agent:reliability-audit"]
+    assert len(rated) == 85, "成功的片先入库，不等整章"
+    finished = [e["data"] for e in events if e["type"] == "rating_batch_finished"]
+    assert [(f["batch"], f["succeeded"], f["reason"]) for f in finished] == [
+        (1, True, None), (2, False, "timeout"), (3, True, None),
+    ]
+    merged_event = next(e["data"] for e in events if e["type"] == "rating_batches_merged")
+    assert merged_event["done"] == [1, 3] and merged_event["failed"] == 1
+
+
+def test_章级重试只重跑失败片_已成功的片不重评(tmp_path: Path) -> None:
+    coordinator, plan, rating, events, artifact = _fixture(tmp_path, 135)
+    first = _BatchAdapter()
+    first.hang = {2}
+    assert _run_chapter(coordinator, plan, rating, first, wall=0.05).succeeded is False
+
+    second = _BatchAdapter()
+    result = _run_chapter(coordinator, plan, rating, second, attempt=2)
+
+    assert result.succeeded is True and result.actual_count == 135
+    assert [c["index"] for c in second.calls] == [2], "第 2 轮只跑第 2 片"
+    skipped = [e["data"]["batch"] for e in events if e["type"] == "rating_batch_skipped"]
+    assert skipped == [1, 3]
+    rated = [r for r in coordinator.store.list_evidence("r-rate3")
+             if r["rated_by"] == "agent:reliability-audit"]
+    assert len(rated) == 135
+
+
+def test_章墙钟取消掐在片中_已成功的片合并入库不白丢(tmp_path: Path) -> None:
+    import pytest
+
+    coordinator, plan, rating, _, artifact = _fixture(tmp_path, 135)
+    adapter = _BatchAdapter()
+    adapter.cancel_on = {2}
+
+    with pytest.raises(asyncio.CancelledError):
+        _run_chapter(coordinator, plan, rating, adapter)
+
+    merged = json.loads((artifact / "reliability-audit.json").read_text("utf-8"))
+    assert len(merged) == 50
+    rated = [r for r in coordinator.store.list_evidence("r-rate3")
+             if r["rated_by"] == "agent:reliability-audit"]
+    assert len(rated) == 50
