@@ -1374,6 +1374,98 @@ class RuntimeCoordinator:
             (item for item in goal.agents if item.agent_id == rates), None,
         )
 
+    def _orphan_attribution(
+        self, plan: Plan, goal_id: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """§RATE-2 货 2：给「没有章归属」的库行推断出它属于本 goal 的哪一采集章。
+
+        源适配器里 xhs 一族是自己直落库的，载荷不带 `agent_name`（RATE-1 整跑 209 行
+        就是这么来的），没有哪一章认领它们 → 物化时看不见 → 评级章评不到。
+        按序判，判不出就**留空不猜**：
+        1. 同 goal 里 platform 对得上的采集章只有一个 → 归它；
+        2. 同一次源调用（同 `fetched_at` 批次）里已有归属行 → 跟随它——一次调用的
+           整批必属同一章（RATE-1 底料上批次与章一一对应）；
+        3. 按章的 `entity` 匹配这一行的 `source_keyword`（这条证据是用什么词搜出来
+           的），唯一命中才归。
+        逐条把用了哪条规则记进 `extra.agent_name_inferred`，让推断可审计。
+        """
+        goal = next(
+            (item for item in plan.goals if item.goal_id == goal_id), None,
+        )
+        if goal is None:
+            return [], {}
+        collectors = [
+            item for item in goal.agents
+            if (getattr(item, "capability", None) or {}).get("profile")
+            == "web-collector"
+        ]
+        rows = [
+            row for row in self.store.list_evidence(plan.research_id)
+            if str(row.get("goal_id") or "") == goal_id
+        ]
+        batch_owner: dict[str, set[str]] = {}
+        for row in rows:
+            name = str(row.get("agent_name") or "")
+            if name:
+                batch_owner.setdefault(
+                    str(row.get("fetched_at") or ""), set()
+                ).add(name)
+        payloads: list[dict[str, Any]] = []
+        counts: dict[str, int] = {}
+        pending = [row for row in rows if not str(row.get("agent_name") or "")]
+        progress = True
+        while progress:
+            # 定到不动点为止：规则 2 用的批次归属会被本轮的推断结果喂大，
+            # 跑一遍和跑三遍必须同结果（否则重试一次就多补一批，读数不可信）。
+            progress = False
+            for row in list(pending):
+                picked_rule = self._infer_chapter(row, collectors, batch_owner)
+                if picked_rule is None:
+                    continue
+                picked, rule = picked_rule
+                batch_owner.setdefault(
+                    str(row.get("fetched_at") or ""), set()
+                ).add(picked.agent_id)
+                pending.remove(row)
+                progress = True
+                payload = dict(row)
+                payload["agent_name"] = picked.agent_id
+                extra = dict(payload.get("extra") or {})
+                extra["agent_name_inferred"] = rule
+                payload["extra"] = extra
+                payloads.append(payload)
+                counts[rule] = counts.get(rule, 0) + 1
+        return payloads, counts
+
+    @staticmethod
+    def _infer_chapter(
+        row: Mapping[str, Any], collectors: list[Any],
+        batch_owner: Mapping[str, set[str]],
+    ) -> tuple[Any, str] | None:
+        """按 sole_collector → same_batch → entity_keyword 三条规则判一行的归属。"""
+
+        platform = str(row.get("platform") or "")
+        candidates = [
+            item for item in collectors
+            if platform in set(
+                (getattr(item, "capability", None) or {}).get("sources", [])
+            )
+        ]
+        if len(candidates) == 1:
+            return candidates[0], "sole_collector"
+        owners = batch_owner.get(str(row.get("fetched_at") or "")) or set()
+        named = [item for item in candidates if item.agent_id in owners]
+        if len(named) == 1:
+            return named[0], "same_batch"
+        keyword = str(row.get("source_keyword") or "")
+        matched = [
+            item for item in candidates
+            if getattr(item, "entity", None) and str(item.entity) in keyword
+        ]
+        if len(matched) == 1:
+            return matched[0], "entity_keyword"
+        return None
+
     async def _materialize_rating_rows(
         self, plan: Plan, goal_id: str, agent: Any,
     ) -> int:
@@ -1387,6 +1479,15 @@ class RuntimeCoordinator:
         source = self._rated_collector(plan, goal_id, agent)
         if source is None:
             return 0
+        inferred, rules = self._orphan_attribution(plan, goal_id)
+        if inferred:
+            self.store.upsert_evidence_batch(inferred)
+            await self.events.publish(plan.research_id, {
+                "type": "evidence_chapter_inferred",
+                "data": {
+                    "goal_id": goal_id, "inferred": len(inferred), "rules": rules,
+                },
+            })
         rows = [
             {field: row.get(field) for field in self._ROW_FIELDS}
             for row in self.store.list_evidence(plan.research_id)
