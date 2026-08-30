@@ -91,6 +91,7 @@ def _run_sectioned(
     render=None,
     mutate_during_run=None,
     agent_kind="report_writing",
+    raw_render=None,
 ):
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
@@ -165,10 +166,18 @@ def _run_sectioned(
                 )
             else:
                 text = render(pool, section_task)
-            section_task.output_path.write_text(
-                json.dumps({"markdown": text, "claims": []}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            if raw_render is not None:
+                # D-025 货 4：raw_render 原样落盘，不再由助手包信封。
+                section_task.output_path.write_text(
+                    raw_render(pool, section_task), encoding="utf-8",
+                )
+            else:
+                section_task.output_path.write_text(
+                    json.dumps(
+                        {"markdown": text, "claims": []}, ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
             return EngineRunResult(
                 conclusion=OwliResult(
                     "done", str(section_task.output_path), "完成", [], [], [], None,
@@ -1347,3 +1356,78 @@ def test_信封兜底_围栏与裸markdown救回_语法坏不救且带错误位�
     assert result.verdict is validation.Verdict.FAIL
     assert result.message.startswith("节产物必须使用 JSON 信封")
     assert "JSON 解析失败" in result.message and "char" in result.message
+
+
+_BROKEN_ENVELOPE = '{"markdown": "## 结论\\n\\n- x [S01]", "claims": [}'
+
+
+def _envelope_retry_case(tmp_path, raw_render, seed):
+    result, store, _, events, _, _ = _run_sectioned(
+        tmp_path,
+        goal_ids=["goal-1"],
+        declared_paths=[],
+        seed=seed,
+        raw_render=raw_render,
+    )
+    retries = [e for e in events if e["type"] == "section_envelope_retry"]
+    rows = [
+        row for row in store.list_chapters("r-ledger")
+        if "/sec-" in row["chapter_id"]
+    ]
+    return result, retries, rows
+
+
+def test_信封失败定向重试一次_补包成功则done(tmp_path) -> None:
+    """D-025 货 4：offenders 仅 json_envelope 时给一次「只包信封」重试。"""
+
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store, evidence_id="ev-1", goal_id=goal_id,
+            permalink="https://evidence.example/visible", platform="xhs",
+        )
+
+    seen: set[str] = set()
+
+    def raw_render(pool, task):
+        name = task.output_path.name
+        if name not in seen:
+            seen.add(name)
+            return _BROKEN_ENVELOPE
+        return json.dumps({
+            "markdown": (
+                "## 结论\n\n- 有证据的判断 [S01]\n\n"
+                "## 信息源\n\n- [S01] [可见证据]"
+                f"({pool['items'][0]['permalink']})\n"
+            ),
+            "claims": [],
+        }, ensure_ascii=False)
+
+    result, retries, rows = _envelope_retry_case(tmp_path, raw_render, seed)
+    assert result.succeeded is True
+    assert rows and all(row["status"] == "done" for row in rows)
+    assert len(retries) == len(rows)  # 每节恰好一次定向重试
+
+
+def test_信封重试仍失败则missing且不给第二次(tmp_path) -> None:
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store, evidence_id="ev-1", goal_id=goal_id,
+            permalink="https://evidence.example/visible", platform="xhs",
+        )
+
+    result, retries, rows = _envelope_retry_case(
+        tmp_path, lambda pool, task: _BROKEN_ENVELOPE, seed,
+    )
+    assert result.succeeded is False
+    assert rows and all(row["status"] == "missing" for row in rows)
+    assert all(row["reason"] == "conclusion_invalid" for row in rows)
+    assert all(
+        str(row["conclusion_error"]).startswith("节产物必须使用 JSON 信封")
+        and "JSON 解析失败" in str(row["conclusion_error"])
+        for row in rows
+    )
+    assert len(retries) == len(rows)  # 一节只给一次，不给第二次

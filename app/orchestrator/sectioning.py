@@ -1381,6 +1381,7 @@ async def run_sectioned_task(
         )
         section_wall_clock_started_at = now() if callable(now) else None
         resume_session_id: str | None = None
+        envelope_retry_source: str | None = None
 
         while True:
             started = store.start_chapter(
@@ -1515,6 +1516,16 @@ async def run_sectioned_task(
                     '"evidence": [{"permalink": "https://…"}]}]}\n'
                     "整份节产物的第一个字符必须是 `{`；不得使用 ``` 代码围栏，"
                     "不得在 JSON 之外附加任何说明文字。"
+                )
+            if envelope_retry_source is not None:
+                # D-025 货 4：定向重试只要求补包信封，不重写正文。
+                body += (
+                    "\n上一次尝试的节产物因缺 JSON 信封被退。"
+                    "下面是被退原文：只需把它原样包进 JSON 信封"
+                    "（markdown 字段放正文、claims 数组按上述规则补），"
+                    "不要重写正文；若原文本身是语法损坏的 JSON，"
+                    "修正语法后输出完整信封。\n"
+                    f"被退原文：\n{envelope_retry_source}"
                 )
             section_task = replace(
                 base_task,
@@ -1765,6 +1776,46 @@ async def run_sectioned_task(
                     if inspect.isawaitable(skipped):
                         await skipped
                     reason = "timeout"
+                if (
+                    pool_failed
+                    and pool_result is not None
+                    and list(pool_result.offenders) == ["json_envelope"]
+                    and section_attempt < attempt_budget
+                    and envelope_retry_source is None
+                ):
+                    # D-025 货 4：信封失败给一次定向重试（正文多半合格，
+                    # 只要求补包信封）；不加时间，剩余节墙钟不足一次
+                    # 会话成本下限就不给，直接如实落终态。
+                    envelope_remaining = _section_remaining_seconds(
+                        section_deadline,
+                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                    )
+                    if (
+                        envelope_remaining is None
+                        or envelope_remaining
+                        >= SECTION_RESUME_COST_FLOOR_SECONDS
+                    ):
+                        try:
+                            envelope_retry_source = section_path.read_text(
+                                encoding="utf-8",
+                            )
+                        except (OSError, UnicodeError):
+                            envelope_retry_source = ""
+                        retry_event = on_event({
+                            "type": "section_envelope_retry",
+                            "data": {
+                                "goal_id": context.goal_id,
+                                "chapter_id": section["section_id"],
+                                "attempt": section_attempt + 1,
+                                "remaining_seconds": envelope_remaining,
+                            },
+                            "is_error": False,
+                        })
+                        if inspect.isawaitable(retry_event):
+                            await retry_event
+                        continue
                 rejected_path = _preserve_rejected_artifact(section_path)
                 conclusion_error = _conclusion_error_with_rejected_path(
                     conclusion_error, rejected_path,
