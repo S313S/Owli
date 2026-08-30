@@ -257,3 +257,42 @@ def test_autoexp_lark_cli_update_doc_走overwrite(monkeypatch) -> None:
     monkeypatch.setattr(transport, "_run", fake)
     assert transport.update_doc("doxT", "题", "# 题\n正文") == ("doxT", "https://feishu.cn/docx/doxT")
     assert fake.calls.count("+update") == 1
+
+
+def test_autoexp_默认身份user_且_run带as_user(monkeypatch) -> None:
+    """§AUTO-EXP 货 2：默认 user 身份（bot 无 base scope，FU-1 两次实证 99991672）。"""
+    from app.export import feishu
+
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return type("P", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+
+    monkeypatch.setattr(feishu.subprocess, "run", fake_run)
+    transport = feishu.LarkCliTransport(binary="lark-cli")
+    transport._run("docs", "+create")
+    assert transport.identity == "user"
+    assert captured["argv"][captured["argv"].index("--as") + 1] == "user"
+
+
+def test_autoexp_select_transport_cli优先_身份可被env覆盖(monkeypatch) -> None:
+    """货 2：cli 提到 OpenApi 之前（OpenApi 恒为 bot）；FEISHU_CLI_IDENTITY 可覆盖默认。"""
+    from app.export import feishu
+
+    monkeypatch.delenv("OWLI_FEISHU_DISABLE_CLI", raising=False)
+    monkeypatch.setattr(feishu.shutil, "which", lambda _: "/usr/local/bin/lark-cli")
+    chosen = feishu.select_transport({"FEISHU_APP_ID": "a", "FEISHU_APP_SECRET": "b"})
+    assert isinstance(chosen, feishu.LarkCliTransport) and chosen.identity == "user"
+    assert feishu.select_transport({"FEISHU_CLI_IDENTITY": "bot"}).identity == "bot"
+
+
+def test_autoexp_cli失败_授权类错误给人话提示(monkeypatch) -> None:
+    import pytest
+
+    from app.export import feishu
+
+    broken = type("P", (), {"returncode": 1, "stdout": "", "stderr": "99991672 app_scope_not_applied"})()
+    monkeypatch.setattr(feishu.subprocess, "run", lambda argv, **k: broken)
+    with pytest.raises(RuntimeError, match="lark-cli auth login"):
+        feishu.LarkCliTransport(binary="lark-cli")._run("base", "+base-create")

@@ -50,7 +50,8 @@ class LarkCliTransport(FeishuTransport):
 
     name = "lark-cli"
 
-    def __init__(self, binary: str | None = None, identity: str = "bot") -> None:
+    # §AUTO-EXP 货 2：默认 user——FU-1/DLV-1 两次实证 bot 身份无 base scope（99991672）。
+    def __init__(self, binary: str | None = None, identity: str = "user") -> None:
         self.binary = binary or shutil.which("lark-cli") or "lark-cli"
         self.identity = identity
 
@@ -60,7 +61,11 @@ class LarkCliTransport(FeishuTransport):
             capture_output=True, text=True, timeout=120, check=False,
         )
         if proc.returncode != 0:
-            raise RuntimeError(f"lark-cli {' '.join(args[:2])} 失败：{(proc.stderr or proc.stdout).strip()[:300]}")
+            detail = (proc.stderr or proc.stdout).strip()[:300]
+            hint = ""
+            if any(k in detail.lower() for k in ("auth", "token", "unauthorized", "99991672", "expired", "refresh")):
+                hint = "（user 身份令牌可能过期：请在终端运行 lark-cli auth login 重新授权）"
+            raise RuntimeError(f"lark-cli {' '.join(args[:2])} 失败：{detail}{hint}")
         return json.loads(proc.stdout or "{}")
 
     def ensure_base(self, name: str) -> str:
@@ -348,13 +353,15 @@ def _read_env(path: Path | None = None) -> dict[str, str]:
 
 
 def select_transport(env: Mapping[str, str] | None = None) -> FeishuTransport | None:
-    """env 齐 → OpenApi；否则 lark-cli 在 PATH → cli；否则 None（skipped）。"""
+    """cli 在 PATH → cli（默认 user；FEISHU_CLI_IDENTITY 可覆盖）；否则 env 凭证齐 → OpenApi；
+    否则 None（skipped）。§AUTO-EXP 货 2 把 cli 提到 OpenApi 之前：OpenApi 走 tenant token
+    恒为 bot 身份，会撞 FU-1 实证的同一堵 base scope 墙（99991672）。"""
     values = _read_env() if env is None else dict(env)
+    if os.environ.get("OWLI_FEISHU_DISABLE_CLI") != "1" and shutil.which("lark-cli"):
+        return LarkCliTransport(identity=values.get("FEISHU_CLI_IDENTITY") or "user")
     if values.get("FEISHU_APP_ID") and values.get("FEISHU_APP_SECRET"):
         return OpenApiTransport(values["FEISHU_APP_ID"], values["FEISHU_APP_SECRET"],
                                 values.get("FEISHU_BITABLE_APP_TOKEN") or None)
-    if os.environ.get("OWLI_FEISHU_DISABLE_CLI") != "1" and shutil.which("lark-cli"):
-        return LarkCliTransport()
     return None
 
 
