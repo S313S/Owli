@@ -2773,6 +2773,73 @@ class RuntimeCoordinator:
                 },
             },
         )
+        # §AUTO-EXP 货 3：报告已对读者可见（finish_report 落了 report_path）才自动导出；
+        # 失败只发事件，completed 已落库不回退。
+        if not report_missing:
+            await self._auto_export_on_finalize(research_id, report_path)
+
+    def _auto_export_modes(self) -> set[str]:
+        from app.export.feishu import _read_env
+
+        raw = os.environ.get("OWLI_AUTO_EXPORT") or _read_env().get("OWLI_AUTO_EXPORT") or "excel"
+        return {mode.strip() for mode in raw.split(",") if mode.strip()}
+
+    async def _auto_export_on_finalize(self, research_id: str, report_path: Path) -> None:
+        """§AUTO-EXP 货 3：completed 自动出 Excel（纯 openpyxl，同步毫秒级）＋推飞书
+        （lark-cli 是同步 subprocess，一步一个子进程，必须扔线程池——勘察风险 1）。"""
+        modes = self._auto_export_modes()
+        try:
+            report_text = report_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            await self.events.publish(research_id, {
+                "type": "export_failed", "is_error": True,
+                "data": {"research_id": research_id, "kind": "auto", "message": f"读不到成稿：{exc}"},
+            })
+            return
+        if "excel" in modes:
+            try:
+                from app.export.excel import export_excel
+                from app.export.registry import record_export
+
+                path = export_excel(self.store, research_id, self.runs_root, report_text)
+                url = f"/api/researches/{research_id}/exports/{path.name}"
+                record_export(self.store, research_id, kind="excel", path=str(path), url=url,
+                              desc="Excel 附件（收尾自动导出）")
+                await self.events.publish(research_id, {
+                    "type": "export_done",
+                    "data": {"research_id": research_id, "kind": "excel", "path": str(path), "url": url},
+                })
+            except Exception as exc:  # noqa: BLE001 — 导出失败不准掀掉已 completed 的收尾
+                logger.warning("收尾自动 Excel 导出失败：%s", exc)
+                await self.events.publish(research_id, {
+                    "type": "export_failed", "is_error": True,
+                    "data": {"research_id": research_id, "kind": "excel", "message": str(exc)[:300]},
+                })
+        if "feishu" in modes:
+            await self.events.publish(research_id, {
+                "type": "feishu_sync_started", "data": {"research_id": research_id},
+            })
+            task = asyncio.create_task(
+                self._push_feishu_in_thread(research_id, report_text),
+                name=f"owli:auto-feishu:{research_id}",
+            )
+            self._drive_watchers.add(task)
+            task.add_done_callback(self._drive_watchers.discard)
+            guard_task(task, logger=logger, context="收尾自动推飞书")
+
+    async def _push_feishu_in_thread(self, research_id: str, report_text: str) -> None:
+        from app.export.feishu import push_to_feishu
+
+        try:
+            result = await asyncio.to_thread(push_to_feishu, self.store, research_id, report_text)
+        except Exception as exc:  # noqa: BLE001 — push_to_feishu 自兜异常，这里防线程层意外
+            logger.warning("收尾自动推飞书异常：%s", exc)
+            result = {"kind": "feishu", "status": "failed", "message": str(exc)[:300]}
+        await self.events.publish(research_id, {
+            "type": "feishu_sync_finished", "is_error": result.get("status") == "failed",
+            "data": {"research_id": research_id, "status": result.get("status"),
+                     "message": result.get("message")},
+        })
 
 
 __all__ = ["RuntimeCoordinator"]
