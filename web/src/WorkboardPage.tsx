@@ -7,7 +7,7 @@ import { useResearchStream } from './useResearchStream'
 
 const statusColor: Record<string, string> = {
   done: 'success', running: 'processing', retrying: 'warning', failed: 'error',
-  paused: 'warning', queued: 'default', stopped: 'error',
+  paused: 'warning', queued: 'default', stopped: 'error', finalizing: 'processing',
 }
 
 const agentPriority: Record<string, number> = {

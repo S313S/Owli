@@ -98,6 +98,9 @@ SCHEDULER_STATUS_LABELS = {
     "paused": "已暂停",
     "stopped": "已终止",
     "completed": "已完成",
+    # §AUTO-EXP 货 4：收尾期（证据补投影/断言登记/评级回填/成稿落库）的运行态；
+    # 只活在内存 state 里，库中 reports.status 仍是 running，重启后回落库态。
+    "finalizing": "收尾中",
 }
 #: 收尾已经落定的状态，不再被调度器状态覆盖。
 REPORT_TERMINAL_STATUSES = frozenset({"completed", "failed"})
@@ -346,7 +349,10 @@ class RuntimeCoordinator:
         if state is None:
             return None
         scheduler = self.scheduler_for(research_id)
-        if scheduler is None or state.get("status") in REPORT_TERMINAL_STATUSES:
+        # §AUTO-EXP 货 4：「收尾中」由收尾流程亲自把持——调度器此刻已是 completed，
+        # 不准把它抄回去，否则看板又会在报告落盘前谎报完成（X-1 挂账 8）。
+        if (scheduler is None or state.get("status") in REPORT_TERMINAL_STATUSES
+                or state.get("status") == "finalizing"):
             state["usage"] = self._research_usage(research_id)
             return state
         status = str(getattr(scheduler, "status", "") or "")
@@ -2545,6 +2551,17 @@ class RuntimeCoordinator:
         plan = load_plan(self.store, research_id)
         if plan is None:
             raise RuntimeError("终态计划不存在")
+        # §AUTO-EXP 货 4：收尾是分钟级长活，期间对外是「收尾中」；completed 等 finish_report。
+        finalizing_state = self.researches.get(research_id)
+        if finalizing_state is not None:
+            finalizing_state["status"] = "finalizing"
+            finalizing_state["status_label"] = SCHEDULER_STATUS_LABELS["finalizing"]
+            finalizing_state["actions"] = []
+            await self.events.publish(research_id, {
+                "type": "research_update",
+                "data": {"status": "finalizing", "status_label": "收尾中",
+                         "actions": [], "goals": finalizing_state.get("goals") or []},
+            })
         # 兼容升级前已经越过 goal 闸门、但原始采集项尚未投影入库的运行。
         # upsert 使用稳定身份键，因此终态补扫与逐 goal 写入可以安全并存。
         for goal in plan.goals:
