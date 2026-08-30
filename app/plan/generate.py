@@ -22,7 +22,9 @@ from app.config import (
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
-from app.plan.model import DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS
+from app.plan.model import (
+    DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS, rating_rows_path,
+)
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
 from app.sources.registry import planning_catalog
@@ -632,7 +634,9 @@ def _agent_prompt(
                 "不丢条；系统按 permalink 把评分贴回已入库的那一行，"
                 "permalink 对不上就等于这条评级作废。每条还必须带齐 "
                 "score_authority、score_freshness、score_crossref、score_completeness、"
-                "score_independence、rating_notes、rated_by 七个字段（评分为整数，"
+                "score_independence、rating_notes、rated_by 七个字段"
+                "（**五维评分只能是 0、1、2 三个整数之一**——不是 0–5、不是百分制、"
+                "不是小数；越界的条目会被整条丢弃，等于白评。"
                 "rating_notes 说明依据，rated_by 填 agent_id）；"
                 "extra.authority_kind 只能取 first_party_official、verified_principal、"
                 "institutional_primary、named_secondary、community_high_signal、"
@@ -1061,10 +1065,13 @@ def _rating_agent(
     agent_id = "reliability-audit" + ("" if count == 1 else f"-{count}")
     output = _output(RATING_AGENT_KIND, goal_id, agent_id, "array", None)
     source_path = str(collector["output"]["path"])
+    # §RATE-2 货 1：读的是**物化行文件**（该采集章真正入库的全部证据），
+    # 不是采集产物（那里只有模型顺手写下的一小撮）。
+    rows_path = rating_rows_path(source_path)
     task = (
-        f"逐条评级 {source_path} 里的每一条证据："
-        "读该采集章产物，对每条记录给出五维评分与 rating_notes，"
-        "并原样回带它的 permalink（条数一一对应，不新增不丢条）。"
+        f"逐条评级 {rows_path} 里的每一条证据："
+        "该文件是这一采集章真正入库的全部证据行，对每条给出五维评分与 "
+        "rating_notes，并原样回带它的 permalink（条数一一对应，不新增不丢条）。"
     )
     return {
         "agent_id": agent_id,

@@ -763,6 +763,26 @@ class RuntimeCoordinator:
             return self._plain(vars(value))
         return repr(value)
 
+    @staticmethod
+    def _warning_only_rate_limit(event: Any, cause: Any) -> bool:
+        """告警级限流：只让**新任务**让路，不掐正在跑的这一章（D-027）。
+
+        路由决策自己写着 `scope="new_tasks"` + `allow_current_task_to_finish=True`
+        （`allowed_warning`，例如「seven_day 已用 79%」），但此前只要事件里带
+        `rate_limit` 这个 cause，本章就被判 quota_exhausted 退避——重放实测六个
+        评级章第一轮全被 79% 的告警掐掉，重试又撞满墙钟，全部 missing。
+        真 429 / rejected 不带这两个标志，照旧退避。
+        """
+        if str(getattr(cause, "value", cause)) != "rate_limit":
+            return False
+        if isinstance(event, Mapping):
+            allow = bool(event.get("allow_current_task_to_finish"))
+            scope = str(event.get("scope") or "")
+        else:
+            allow = bool(getattr(event, "allow_current_task_to_finish", False))
+            scope = str(getattr(event, "scope", "") or "")
+        return allow and scope == "new_tasks"
+
     async def _run_task(self, plan: Plan, agent: Any, context: Any) -> Any:
         kind = self._agent_kind(agent)
         task = self._task(plan, agent, context)
@@ -803,7 +823,7 @@ class RuntimeCoordinator:
                         context.goal_id,
                         chapter_id,
                     )
-            if cause is not None:
+            if cause is not None and not self._warning_only_rate_limit(event, cause):
                 observed_causes.add(str(getattr(cause, "value", cause)))
             if isinstance(raw, dict) and raw.get("http_status", raw.get("status_code")) == 429:
                 observed_causes.add("rate_limit")
@@ -1320,8 +1340,17 @@ class RuntimeCoordinator:
             return [], []
         payloads: list[dict[str, Any]] = []
         unmatched: list[str] = []
+        invalid: list[str] = []
         for raw in items:
             if not isinstance(raw, Mapping):
+                continue
+            if not self._rating_scores_ok(raw):
+                # §RATE-2：五维闭集是 0–2，模型偶尔按 0–5 打分（重放实测：
+                # 超时前写下 authority=5）。这种条目 upsert 会抛 ValueError，
+                # 而这条投影跑在别的章的 goal 收尾里——一条脏数据能把整条后台
+                # 编排掀掉（重放实测 goal-1/ch-7 连炸三次 retry_exhausted）。
+                # 逐条丢弃并留痕，绝不让它掀桌。
+                invalid.append(str(raw.get("permalink") or "(缺 permalink)"))
                 continue
             permalink = str(raw.get("permalink") or "").strip()
             stored = existing.get(normalize_permalink(permalink)) if permalink else None
@@ -1341,7 +1370,23 @@ class RuntimeCoordinator:
             payload["extra"] = extra
             payload["rated_by"] = f"agent:{agent_id}"
             payloads.append(payload)
-        return payloads, unmatched
+        return payloads, unmatched, invalid
+
+    @classmethod
+    def _rating_scores_ok(cls, raw: Mapping[str, Any]) -> bool:
+        """五维分必须是 0–2 整数或缺省——与 `dao._prepare_evidence` 同一口径。"""
+
+        for column in cls._RATING_COLUMNS:
+            if not column.startswith("score_"):
+                continue
+            value = raw.get(column)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                return False
+            if not 0 <= value <= 2:
+                return False
+        return True
 
     _ROW_FIELDS = (
         "permalink", "title", "content_excerpt", "author_name",
@@ -1525,17 +1570,25 @@ class RuntimeCoordinator:
             for item in self.store.list_evidence(plan.research_id)
         }
         path = self.runs_root / plan.research_id / str(agent.output["path"])
-        payloads, unmatched = self._rating_payloads(
+        payloads, unmatched, invalid = self._rating_payloads(
             path, existing=existing, agent_id=agent.agent_id,
         )
+        failed = ""
         if payloads:
-            self.store.upsert_evidence_batch(payloads)
+            try:
+                self.store.upsert_evidence_batch(payloads)
+            except (ValueError, TypeError) as error:
+                # 兜第二层：逐条筛过还是被库拒，也只让这一章的评级作废，
+                # 不把调它的那条收尾路径一起带走。
+                failed = f"{type(error).__name__}: {error}"
+                payloads = []
         await self.events.publish(plan.research_id, {
             "type": "rating_chapter_persisted",
             "data": {
                 "goal_id": goal_id, "agent_id": agent.agent_id,
                 "rated": len(payloads), "unmatched": len(unmatched),
-                "samples": unmatched[:5],
+                "invalid": len(invalid), "samples": unmatched[:5],
+                "invalid_samples": invalid[:5], "failed": failed,
             },
         })
 

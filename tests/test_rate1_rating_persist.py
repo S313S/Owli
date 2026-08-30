@@ -105,7 +105,8 @@ def test_评级章产物按permalink贴回_行数不变且五维落库(tmp_path:
     persisted = [e["data"] for e in events if e["type"] == "rating_chapter_persisted"]
     assert persisted == [{
         "goal_id": "goal-1", "agent_id": "reliability-audit",
-        "rated": 3, "unmatched": 0, "samples": [],
+        "rated": 3, "unmatched": 0, "invalid": 0, "samples": [],
+        "invalid_samples": [], "failed": "",
     }]
 
 

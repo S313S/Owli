@@ -164,3 +164,55 @@ def test_物化文件不是任何agent的声明产物_通用投影读不到它(t
         platform_hint="web_search",
     )
     assert len(items) == 5
+
+
+def test_D028_越出闭集的评级条目逐条丢弃_不掀翻收尾(tmp_path: Path) -> None:
+    """重放实测：超时前模型按 0–5 打分写下 authority=5，upsert 抛
+    `ValueError: 五维分必须是 NULL 或 0–2 整数`；这条投影跑在别的章的 goal 收尾里，
+    一条脏数据把整条后台编排掀掉（goal-1/ch-7 连炸三次 retry_exhausted）。"""
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from tests.test_c1_claims import add_evidence
+
+    store = make_store(tmp_path, "r-rate2")
+    urls = [f"https://example.com/{index}" for index in range(2)]
+    for index, url in enumerate(urls):
+        add_evidence(store, "r-rate2", f"ev-{index}", platform="web_search",
+                     permalink=url, author=f"作者{index}")
+    notes = ("权威2:平台原帖 · 时效2:时间窗内 · 交叉1:弱交叉 · "
+             "完整2:字段齐全 · 无关2:无利益关系")
+    artifact = tmp_path / "runs" / "r-rate2" / "goals" / "goal-1"
+    artifact.mkdir(parents=True, exist_ok=True)
+    (artifact / "reliability-audit.json").write_text(json.dumps([
+        {"permalink": urls[0], "score_authority": 5, "score_freshness": 5,
+         "score_crossref": 4, "score_completeness": 4, "score_independence": 2,
+         "rating_notes": "authority=5, freshness=5"},
+        {"permalink": urls[1], "score_authority": 2, "score_freshness": 2,
+         "score_crossref": 1, "score_completeness": 2, "score_independence": 2,
+         "rating_notes": notes},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    events: list[dict] = []
+
+    async def publish(research_id, payload):
+        events.append(payload)
+
+    coordinator = RuntimeCoordinator(
+        store=store, event_buffer=SimpleNamespace(publish=publish), researches={},
+        cards={}, runs_root=tmp_path / "runs",
+        routing_utc_clock=lambda: datetime(2026, 8, 30, tzinfo=timezone.utc),
+    )
+    collector = _collector()
+    rating = _rating()
+    rating.output["path"] = "goals/goal-1/reliability-audit.json"
+    goal = SimpleNamespace(goal_id="goal-1", agents=[collector, rating],
+                           deliverable={"path": "goals/goal-1/result.md"})
+    plan = SimpleNamespace(research_id="r-rate2", goals=[goal])
+
+    asyncio.run(coordinator._persist_rating_chapter(plan, "goal-1", rating))
+
+    rows = {row["permalink"]: row for row in store.list_evidence("r-rate2")}
+    assert rows[urls[1]]["score_authority"] == 2, "合法那条照常落库"
+    assert rows[urls[0]]["score_authority"] is None, "越界那条整条丢弃"
+    data = next(e["data"] for e in events if e["type"] == "rating_chapter_persisted")
+    assert data["rated"] == 1 and data["invalid"] == 1
+    assert data["invalid_samples"] == [urls[0]] and data["failed"] == ""
