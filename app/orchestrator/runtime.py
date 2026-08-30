@@ -936,6 +936,10 @@ class RuntimeCoordinator:
         causes = {
             getattr(event, "cause", None)
             for event in (getattr(result, "events", None) or [])
+            # D-027 第 2 处：适配器**回传**的事件表里同样躺着那条告警级限流。
+            # 只补了 on_event 那一处，重放里仍有一章（reliability-audit-5，
+            # 25 行、活儿都干完了）被判 deferred/quota_exhausted。
+            if not self._warning_only_rate_limit(event, getattr(event, "cause", None))
         }
         causes.update(observed_causes)
         actual_path = str(task.output_path) if task.output_path.is_file() else None

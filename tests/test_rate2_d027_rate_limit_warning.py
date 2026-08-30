@@ -99,3 +99,51 @@ def test_真限流_没有让路标志时照旧退避(tmp_path: Path) -> None:
 
     assert result.chapter_status == "deferred"
     assert result.reason == "quota_exhausted"
+
+
+def test_告警级限流出现在适配器回传的事件表里也不判退避(tmp_path: Path) -> None:
+    """D-027 第 2 处：`_run_task` 还从 `result.events` 收一遍 cause。
+    重放 r-7222d1cd9bc7 实测：reliability-audit-5 把 25 行全评完了，
+    仍被判 deferred/quota_exhausted，就是从这一处漏进去的。"""
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from app.plan.model import Plan
+
+    warning = _event(scope="new_tasks", allow_current_task_to_finish=True)
+
+    source = make_plan_dict()
+    source["research_id"] = "r-d027b"
+    source["goals"] = source["goals"][:1]
+    source["baseline"] = None
+    plan = Plan.from_dict(source)
+
+    class Store:
+        def list_chapters(self, research_id):
+            return []
+
+    class Events:
+        async def publish(self, research_id, payload):
+            return None
+
+    class Adapter:
+        async def run(self, task, ctx, on_event=None):
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            task.output_path.write_text("[]", encoding="utf-8")
+            return SimpleNamespace(
+                succeeded=True,
+                conclusion=SimpleNamespace(reason=None, output_path=None),
+                events=[warning],  # 只在回传表里，不经 on_event
+                engine_error=None, conclusion_error=None,
+                validation=SimpleNamespace(results=[]),
+            )
+
+    coordinator = RuntimeCoordinator(
+        store=Store(), event_buffer=Events(), researches={}, cards={},
+        adapter_factory=lambda: Adapter(), runs_root=tmp_path / "runs",
+        routing_utc_clock=lambda: datetime(2026, 8, 31, tzinfo=timezone.utc),
+    )
+    coordinator._adapters[plan.research_id] = Adapter()
+
+    result = _run(coordinator, plan, plan.goals[0].agents[0])
+
+    assert getattr(result, "reason", None) != "quota_exhausted"
+    assert getattr(result, "chapter_status", None) != "deferred"
