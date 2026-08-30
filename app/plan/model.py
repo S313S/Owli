@@ -98,6 +98,43 @@ def rating_rows_path(collector_output_path: str) -> str:
     return f"{base}.rows.json"
 
 
+#: §RATE-3：评级章一章内分批的批大小上限（行/批）。50 行按 RATE-1 实测 4.4 s/条
+#: ≈ 3.7 min，贴着本机代理 5 min 掐流的上限；真跑还被掐就降到 30。
+RATING_BATCH_ROWS = 50
+
+
+def rating_batch_path(rows_path: str, index: int) -> str:
+    """§RATE-3 货 1：物化行文件的第 index 片（`x.rows.json` → `x.rows.<index>.json`）。"""
+    raw = str(rows_path or "").strip()
+    if not raw or index < 1:
+        return ""
+    base = raw[: -len(".json")] if raw.endswith(".json") else raw
+    return f"{base}.{int(index)}.json"
+
+
+def rating_batch_output_path(output_path: str, index: int) -> str:
+    """§RATE-3 货 2：评级章第 index 片的产物（`y.json` → `y.part.<index>.json`）。
+
+    片产物不是任何 agent 的声明产物；系统按片序合并成声明路径那一个数组文件，
+    投影层只读声明路径，不会把片产物再投影一遍。
+    """
+    raw = str(output_path or "").strip()
+    if not raw or index < 1:
+        return ""
+    base = raw[: -len(".json")] if raw.endswith(".json") else raw
+    return f"{base}.part.{int(index)}.json"
+
+
+def rating_batches(row_count: int, batch_rows: int = RATING_BATCH_ROWS) -> list[int]:
+    """§RATE-3 货 1：按批大小把 row_count 行切成每片行数表（135 → [50, 50, 35]）。"""
+    size = max(1, int(batch_rows))
+    total = max(0, int(row_count))
+    sizes = [size] * (total // size)
+    if total % size:
+        sizes.append(total % size)
+    return sizes
+
+
 def _strict_fields(data: Mapping[str, Any], allowed: set[str], location: str) -> None:
     unknown = set(data) - allowed
     if unknown:

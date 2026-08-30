@@ -43,7 +43,11 @@ from app.plan.model import (
     Plan,
     agent_kind_of,
     rated_collector_id,
+    rating_batch_output_path,
+    rating_batch_path,
+    rating_batches,
     rating_rows_path,
+    RATING_BATCH_ROWS,
 )
 from app.plan.store import load_plan, save_plan
 from app.report.markdown import (
@@ -1549,15 +1553,56 @@ class RuntimeCoordinator:
         path.write_text(
             json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8",
         )
+        # §RATE-3 货 1：切片发生在物化这一刻——库行已知，片数由行数决定。
+        # 每片 ≤ RATING_BATCH_ROWS 行写成 `x.rows.<n>.json`；多出来的旧片删掉，
+        # 免得上一次尝试（行数不同）留下的片被当成本次的。
+        batch_rows = self._rating_batch_rows()
+        sizes = rating_batches(len(rows), batch_rows)
+        offset = 0
+        for index, size in enumerate(sizes, start=1):
+            piece = self.runs_root / plan.research_id / rating_batch_path(relative, index)
+            piece.write_text(
+                json.dumps(rows[offset:offset + size], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            offset += size
+        self._drop_stale_batches(plan, agent, relative, len(sizes))
         await self.events.publish(plan.research_id, {
             "type": "rating_rows_materialized",
             "data": {
                 "goal_id": goal_id, "agent_id": agent.agent_id,
                 "rates_chapter": source.agent_id, "rows": len(rows),
-                "path": relative,
+                "path": relative, "batches": len(sizes), "batch_rows": sizes,
+                "batch_size": batch_rows,
             },
         })
         return len(rows)
+
+    @staticmethod
+    def _rating_batch_rows() -> int:
+        """批大小：默认 RATING_BATCH_ROWS；环境变量 OWLI_RATING_BATCH_ROWS 可下调
+        （被本机代理掐流时降到 30，不改代码）。非法值一律回默认。"""
+        raw = os.environ.get("OWLI_RATING_BATCH_ROWS", "")
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return RATING_BATCH_ROWS
+        return value if value >= 1 else RATING_BATCH_ROWS
+
+    def _drop_stale_batches(
+        self, plan: Plan, agent: Any, rows_relative: str, batches: int,
+    ) -> None:
+        """删掉编号 > 本次片数的旧片（输入片与产物片都删）。"""
+        root = self.runs_root / plan.research_id
+        for index in range(batches + 1, batches + 64):
+            stale = [
+                root / rating_batch_path(rows_relative, index),
+                root / rating_batch_output_path(str(agent.output["path"]), index),
+            ]
+            if not any(item.is_file() for item in stale):
+                break
+            for item in stale:
+                item.unlink(missing_ok=True)
 
     async def _persist_rating_chapter(
         self, plan: Plan, goal_id: str, agent: Any,
