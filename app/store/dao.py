@@ -1009,7 +1009,10 @@ class Store:
             )
             new_cost = normalized["cost_usd"]
             accumulated["cost_usd"] = (
-                known_cost + float(new_cost)
+                # 「上一次有 cost、这一次没有」这一组合下 float(None) 会抛
+                # TypeError（§RATE-2 重放实测 6 次）；未知这次的花费按 0 累加，
+                # 「有几次真报了花费」仍由 costed_calls 单记，口径不糊。
+                known_cost + float(new_cost or 0.0)
                 if new_cost is not None or previous_cost is not None
                 else None
             )

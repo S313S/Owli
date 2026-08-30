@@ -288,3 +288,26 @@ def test_工作板源码展示research级LLM实测用量() -> None:
     assert "LLM 实测用量" in history
     assert "snapshot.usage" in history
     assert "data.usage ?? current?.usage ?? EMPTY_LLM_USAGE" in stream
+
+
+def test_同章先有cost后无cost不再崩且costed_calls只数报过的那次(tmp_path: Path) -> None:
+    """§RATE-2 重放实测 6 次：`dao.py` 的 `float(new_cost)` 在「上一次有 cost、
+    这一次没有」这一组合下抛 TypeError（被 `except` 接住，只丢这一次计量）。
+    未知这次的花费按 0 累加，「有几次真报了花费」仍由 `costed_calls` 单记。"""
+    store = _store(tmp_path)
+    store.ensure_chapters(
+        "r-usage", [{"goal_id": "goal-1", "chapter_id": "ch-1"}],
+        updated_at="2026-08-31T00:00:01Z",
+    )
+    base = {
+        "input_tokens": 10, "cached_input_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_write_input_tokens": 0,
+        "output_tokens": 5, "reasoning_output_tokens": 0,
+    }
+
+    store.record_chapter_usage("r-usage", "goal-1", "ch-1", {**base, "cost_usd": 0.5})
+    store.record_chapter_usage("r-usage", "goal-1", "ch-1", {**base, "cost_usd": None})
+
+    usage = store.list_chapters("r-usage")[0]["extra"]["usage"]
+    assert usage["cost_usd"] == 0.5
+    assert usage["calls"] == 2 and usage["costed_calls"] == 1
