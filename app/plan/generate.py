@@ -24,6 +24,7 @@ from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
 from app.plan.model import (
     DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS, rating_rows_path,
+    rating_task_text,
 )
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
@@ -630,8 +631,10 @@ def _agent_prompt(
             evidence_rule += (
                 "本文件顶层必须是 JSON 数组；每个元素为一条评级条目，"
                 "**必须原样回带被评那条证据的 permalink**（逐字复制，不改写、"
-                "不补全、不去参数），条数与输入证据一一对应：不新增、不合并、"
-                "不丢条；系统按 permalink 把评分贴回已入库的那一行，"
+                "不补全、不去参数）。本章由系统按批喂入（物化文件切成 .rows.<n>.json，"
+                "每次会话只评任务里指到的**这一批**、产物写到指定的批产物路径），"
+                "条数与本批输入证据一一对应：不新增、不合并、不丢条，"
+                "其它批不要读也不要评；系统按 permalink 把评分贴回已入库的那一行，"
                 "permalink 对不上就等于这条评级作废。每条还必须带齐 "
                 "score_authority、score_freshness、score_crossref、score_completeness、"
                 "score_independence、rating_notes、rated_by 七个字段"
@@ -1068,11 +1071,8 @@ def _rating_agent(
     # §RATE-2 货 1：读的是**物化行文件**（该采集章真正入库的全部证据），
     # 不是采集产物（那里只有模型顺手写下的一小撮）。
     rows_path = rating_rows_path(source_path)
-    task = (
-        f"逐条评级 {rows_path} 里的每一条证据："
-        "该文件是这一采集章真正入库的全部证据行，对每条给出五维评分与 "
-        "rating_notes，并原样回带它的 permalink（条数一一对应，不新增不丢条）。"
-    )
+    # §RATE-3 货 4：文案只此一处（model.rating_task_text），章规格 / 重放脚本共用。
+    task = rating_task_text(rows_path)
     return {
         "agent_id": agent_id,
         "display_name": "可靠度审计",

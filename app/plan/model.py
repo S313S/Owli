@@ -125,6 +125,21 @@ def rating_batch_output_path(output_path: str, index: int) -> str:
     return f"{base}.part.{int(index)}.json"
 
 
+def rating_task_text(rows_path: str) -> str:
+    """§RATE-3 货 4：评级章的任务文案（章规格 task 与 agent.task 共用这一句）。
+
+    RATE-2 踩过：章规格改了、任务文案没改，模型照文案走就还是去读那 10 条。
+    所以文案只此一处；「按批」也在这句里说清——系统把物化文件按 ≤50 行切片，
+    每次会话只喂一批，条数与**本批**一一对应。
+    """
+    return (
+        f"逐条评级 {rows_path} 里的每一条证据：该文件是这一采集章真正入库的全部"
+        f"证据行，系统按 ≤{RATING_BATCH_ROWS} 行切成 .rows.<n>.json 分批喂入、"
+        "每次会话只评这一批；对每条给出五维评分与 rating_notes，并原样回带它的 "
+        "permalink（条数与本批一一对应，不新增不丢条）。"
+    )
+
+
 def rating_batches(row_count: int, batch_rows: int = RATING_BATCH_ROWS) -> list[int]:
     """§RATE-3 货 1：按批大小把 row_count 行切成每片行数表（135 → [50, 50, 35]）。"""
     size = max(1, int(batch_rows))

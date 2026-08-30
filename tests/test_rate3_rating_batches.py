@@ -388,3 +388,44 @@ def test_章墙钟取消掐在片中_已成功的片合并入库不白丢(tmp_pa
     rated = [r for r in coordinator.store.list_evidence("r-rate3")
              if r["rated_by"] == "agent:reliability-audit"]
     assert len(rated) == 50
+
+
+# ------------------------------------ 货 4：章规格、任务文案、提示词三处一起改口
+
+
+def test_章规格_任务文案_提示词三处一起按批改口(tmp_path) -> None:
+    """RATE-2 踩过：章规格改了、任务文案没改（a7b7620 才补）。这里把三处钉在一起。"""
+    from app.plan.model import rating_task_text
+    from tests.test_plan_generate import _generate
+    from tests.test_rate1_rating_chapters import _agent, _valid_skeleton
+
+    skeleton = _valid_skeleton()
+    skeleton["goals"][0]["agents"] = [
+        _agent("HN 数据抓取·飞书", "通过 API 抓取 Hacker News 证据"),
+    ]
+    plan, _, _ = _generate(tmp_path, [skeleton])
+    rating = next(
+        agent for goal in plan.goals for agent in goal.agents
+        if (agent.chapter or {}).get("closing", {}).get("notes", {}).get("rates_chapter")
+    )
+    from app.plan.model import rating_rows_path
+
+    rows_path = rating_rows_path(plan.goals[0].agents[0].output["path"])
+    batch_pattern = rows_path[: -len(".json")] + ".<n>.json"
+    # 1) 任务文案只此一处（model.rating_task_text），且说清「按批喂入、只评这一批」。
+    assert rating.task == rating_task_text(rows_path)
+    assert ".rows.<n>.json" in rating.task and "本批" in rating.task
+    assert len(rating.task) <= 200, "task 会被截到 200 字，文案不能超"
+    # 2) 章规格：inputs 仍指整份物化文件，验收按「本批」说，closing 记片路径模式。
+    chapter = rating.chapter
+    assert chapter["opening"]["inputs"] == [{"path": rows_path}]
+    assert chapter["opening"]["task"] == rating.task
+    acceptance = " ".join(chapter["opening"]["acceptance"])
+    assert batch_pattern in acceptance and "本批" in acceptance
+    assert "按批合并" in acceptance
+    assert chapter["closing"]["notes"]["rates_batches"] == batch_pattern
+    # 3) 提示词正文：条数与**本批**一一对应，其它批不要读。
+    body = rating.prompt["body"]
+    assert "这一批" in body and "本批输入证据一一对应" in body
+    assert "其它批不要读" in body
+    assert "条数与输入证据一一对应" not in body, "旧口径（整份）必须退场"

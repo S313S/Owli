@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.config import ChapterEngineConfig
-from app.plan.model import Agent, Plan, rated_collector_id, rating_rows_path
+from app.plan.model import (
+    Agent, Plan, RATING_BATCH_ROWS, rated_collector_id, rating_batch_path,
+    rating_rows_path,
+)
 
 
 CHAPTER_TYPES = frozenset({
@@ -360,14 +363,19 @@ def rating_chapter_value(agent: Agent, goal: Any) -> dict[str, Any] | None:
     # 写下的一小撮（RATE-1 整跑：盘上 10 条 / 库里同章 50 行），评级章读产物就只
     # 评得到 15%。物化文件由 runtime 在本章起跑前按库行写出。
     rows_path = rating_rows_path(source_path)
+    # §RATE-3 货 4：系统把物化文件按 ≤RATING_BATCH_ROWS 行切片、一章内分批喂入，
+    # 每次会话只评一批——inputs 仍指整份物化文件（片数运行期才知道），
+    # 但验收按「本批」说：条数与这一批的 .rows.<n>.json 一一对应，系统按批合并。
+    batch_path = rating_batch_path(rows_path, 1).replace(".1.json", ".<n>.json")
     return {
         "chapter_type": "audit",
         "opening": {
             "inputs": [{"path": rows_path}],
             "task": agent.task,
             "acceptance": [
-                f"产物按声明路径落盘，且条数与 {rows_path} 一一对应，"
-                "不新增不丢条",
+                f"系统把 {rows_path} 按 ≤{RATING_BATCH_ROWS} 行切成 {batch_path} "
+                "分批喂入，每次会话只评这一批：本批产物按系统指定的批产物路径落盘，"
+                "条数与本批文件一一对应，不新增不丢条；整章产物由系统按批合并",
                 "每条带齐五维评分、rating_notes、rated_by，并原样回带原 permalink",
             ],
         },
@@ -379,6 +387,7 @@ def rating_chapter_value(agent: Agent, goal: Any) -> dict[str, Any] | None:
                 "rates_chapter": rates,
                 "rates_output": source_path,
                 "rates_rows": rows_path,
+                "rates_batches": batch_path,
             },
         },
     }
