@@ -17,6 +17,7 @@ class FakeTransport:
         self.tables: dict[str, list[dict[str, Any]]] = {}
         self.records: dict[str, dict[str, dict[str, Any]]] = {}
         self.docs: list[tuple[str, str]] = []
+        self.updates: list[tuple[str, str, str]] = []
 
     def ensure_base(self, name: str) -> str:
         return "bascFAKE"
@@ -33,6 +34,10 @@ class FakeTransport:
     def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
         self.docs.append((title, markdown))
         return "doxFAKE", "https://feishu.cn/docx/doxFAKE"
+
+    def update_doc(self, doc_token: str, title: str, markdown: str) -> tuple[str, str]:
+        self.updates.append((doc_token, title, markdown))
+        return doc_token, f"https://feishu.cn/docx/{doc_token}"
 
 
 def _seeded(tmp_path: Path):
@@ -88,6 +93,9 @@ def test_未配置飞书时_skipped(tmp_path: Path, monkeypatch) -> None:
 class BrokenTransport(FakeTransport):
     def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
         raise RuntimeError("云文档导入被拒：no permission")
+
+    def update_doc(self, doc_token: str, title: str, markdown: str) -> tuple[str, str]:
+        raise RuntimeError("云文档更新被拒：no permission")
 
 
 def test_fu1_推送失败_四列记_failed_且不擦上次锚点(tmp_path: Path) -> None:
@@ -164,6 +172,10 @@ class FakeCli:
             hit = self.records.get(table, {}).get(anchor)
             return {"data": {"fields": ["anchor"], "data": [[anchor]] if hit else [],
                              "record_id_list": hit or [], "has_more": False}}
+        if args[1] == "+update":
+            assert args[args.index("--command") + 1] == "overwrite"
+            assert args[args.index("--doc-format") + 1] == "markdown"
+            return {"data": {"document_revision_id": 2}}
         if args[1] == "+record-upsert":
             table = args[args.index("--table-id") + 1]
             anchor = next(iter(json.loads(args[args.index("--json") + 1]).values()))
@@ -198,3 +210,50 @@ def test_fu1_成功推送清掉上次失败留下的_error(tmp_path: Path) -> No
     push_to_feishu(store, research_id, text, transport=FakeTransport())
     feishu = store.get_report(research_id)["extra"]["feishu"]
     assert feishu["status"] == "synced" and "error" not in feishu and "推送失败" not in str(feishu)
+
+
+def test_autoexp_再推走update_不新建云文档(tmp_path: Path) -> None:
+    """§AUTO-EXP 货 1：四列已有 doc_token 时第二次推送走 update_doc，create_doc 只调一次。"""
+    from app.export.feishu import push_to_feishu
+
+    store, research_id, text = _seeded(tmp_path)
+    fake = FakeTransport()
+    push_to_feishu(store, research_id, text, transport=fake)
+    result = push_to_feishu(store, research_id, text, transport=fake)
+    assert result["status"] == "synced"
+    assert len(fake.docs) == 1  # create_doc 恰 1 次
+    assert [u[0] for u in fake.updates] == ["doxFAKE"]
+    assert store.get_report(research_id)["feishu_doc_token"] == "doxFAKE"
+
+
+def test_autoexp_建文档后失败_token仍落列_下次走update(tmp_path: Path) -> None:
+    """货 1：create_doc 成功但其后补链接 upsert 失败——token 必须落四列，防孤儿文档。"""
+    from app.export.feishu import push_to_feishu
+
+    class DocThenFail(FakeTransport):
+        def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
+            out = super().create_doc(title, markdown)
+            self.doc_created = True
+            return out
+
+        def upsert(self, base_token: str, table_id: str, anchor_field: str, anchor: str, record: Any) -> str:
+            if getattr(self, "doc_created", False):
+                raise RuntimeError("补链接 upsert 被拒")
+            return super().upsert(base_token, table_id, anchor_field, anchor, record)
+
+    store, research_id, text = _seeded(tmp_path)
+    assert push_to_feishu(store, research_id, text, transport=DocThenFail())["status"] == "failed"
+    assert store.get_report(research_id)["feishu_doc_token"] == "doxFAKE"
+    fake = FakeTransport()
+    push_to_feishu(store, research_id, text, transport=fake)
+    assert fake.docs == [] and len(fake.updates) == 1  # 不再新建
+
+
+def test_autoexp_lark_cli_update_doc_走overwrite(monkeypatch) -> None:
+    from app.export.feishu import LarkCliTransport
+
+    fake = FakeCli()
+    transport = LarkCliTransport()
+    monkeypatch.setattr(transport, "_run", fake)
+    assert transport.update_doc("doxT", "题", "# 题\n正文") == ("doxT", "https://feishu.cn/docx/doxT")
+    assert fake.calls.count("+update") == 1

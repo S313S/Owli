@@ -40,6 +40,10 @@ class FeishuTransport(ABC):
     def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
         """返回 (document_id, url)。"""
 
+    @abstractmethod
+    def update_doc(self, doc_token: str, title: str, markdown: str) -> tuple[str, str]:
+        """就地覆写已有云文档正文（§AUTO-EXP 货 1：有 token 不新建）；返回 (document_id, url)。"""
+
 
 class LarkCliTransport(FeishuTransport):
     """PATH 上有 `lark-cli` 时可用（本机烟测用）；每步一条 +shortcut 子进程。"""
@@ -112,6 +116,12 @@ class LarkCliTransport(FeishuTransport):
         data = self._run("docs", "+create", "--title", title, "--doc-format", "markdown", "--content", markdown)
         doc_id = str(_dig(data, "document_id") or _dig(data, "doc_token") or "")
         return doc_id, str(_dig(data, "url") or f"https://feishu.cn/docx/{doc_id}")
+
+    def update_doc(self, doc_token: str, title: str, markdown: str) -> tuple[str, str]:
+        # overwrite 清空后全文重写；正文首行自带「# 标题」，cli 不另改文档题名。
+        self._run("docs", "+update", "--doc", doc_token, "--command", "overwrite",
+                  "--doc-format", "markdown", "--content", markdown)
+        return doc_token, f"https://feishu.cn/docx/{doc_token}"
 
 
 def _cli_field(field: Mapping[str, Any]) -> dict[str, Any]:
@@ -217,12 +227,26 @@ class OpenApiTransport(FeishuTransport):
     def create_doc(self, title: str, markdown: str) -> tuple[str, str]:
         data = self._call("POST", "/docx/v1/documents", {"title": title})
         doc_id = str(data["document"]["document_id"])
+        self._append_markdown(doc_id, markdown)
+        return doc_id, f"https://feishu.cn/docx/{doc_id}"
+
+    def update_doc(self, doc_token: str, title: str, markdown: str) -> tuple[str, str]:
+        # §AUTO-EXP 货 1：OpenAPI 无 overwrite——先批量删根 block 的 children 再追加。
+        # 真机未验（本机无 FEISHU_APP_ID/SECRET，见 worklog 挂账）。
+        listed = self._call("GET", f"/docx/v1/documents/{doc_token}/blocks/{doc_token}/children?page_size=500")
+        count = len(listed.get("items") or [])
+        if count:
+            self._call("DELETE", f"/docx/v1/documents/{doc_token}/blocks/{doc_token}/children/batch_delete",
+                       {"start_index": 0, "end_index": count})
+        self._append_markdown(doc_token, markdown)
+        return doc_token, f"https://feishu.cn/docx/{doc_token}"
+
+    def _append_markdown(self, doc_id: str, markdown: str) -> None:
         blocks = [{"block_type": 2, "text": {"elements": [{"text_run": {"content": line}}]}}
                   for line in markdown.splitlines() if line.strip()]
         for start in range(0, len(blocks), 50):
             self._call("POST", f"/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
                        {"children": blocks[start:start + 50]})
-        return doc_id, f"https://feishu.cn/docx/{doc_id}"
 
 
 def _text(name: str) -> dict[str, Any]:
@@ -348,17 +372,31 @@ def push_to_feishu(store: Any, research_id: str, report_text: str, *,
     evidence = store.list_evidence(research_id)
     cited = sorted((e for e in evidence if e.get("citation_no") is not None), key=lambda e: int(e["citation_no"]))
     view = parse_report(report_text)
+    # §AUTO-EXP 货 1：有 doc_token 就 update 不新建；create_doc 挪到两次 upsert 成功之后
+    # （08-30 拍板：失败推送各留一篇孤儿文档的根因是它排在 ensure_table/upsert 前）。
+    doc_id = str(report.get("feishu_doc_token") or "") or None
+    doc_url = (((report.get("extra") or {}).get("feishu") or {}).get("doc_url")
+               if doc_id else None)
     try:
         base = base_token or _read_env().get("FEISHU_BITABLE_APP_TOKEN") or chosen.ensure_base("Owli 研究报告")
-        doc_id, doc_url = chosen.create_doc(str(view.get("title") or report["title"]), doc_markdown(view, cited))
         overview = chosen.ensure_table(base, OVERVIEW_TABLE, OVERVIEW_FIELDS)
         sources = chosen.ensure_table(base, SOURCES_TABLE, SOURCE_FIELDS)
         tags = store.read_validation_path("report_tags", research_id)
-        record_id = chosen.upsert(base, overview, "report_id", research_id, overview_record(report, evidence, tags, doc_url))
+        record_id = chosen.upsert(base, overview, "report_id", research_id,
+                                  overview_record(report, evidence, tags, doc_url))
         for item in cited:
             chosen.upsert(base, sources, "evidence_id", str(item["id"]), source_record(item))
+        title = str(view.get("title") or report["title"])
+        if doc_id:
+            doc_id, doc_url = chosen.update_doc(doc_id, title, doc_markdown(view, cited))
+        else:
+            doc_id, doc_url = chosen.create_doc(title, doc_markdown(view, cited))
+        # 云文档落定后按同锚点再写一次总览，把「报告云文档」链接补上（幂等覆盖）。
+        chosen.upsert(base, overview, "report_id", research_id,
+                      overview_record(report, evidence, tags, doc_url))
     except Exception as error:  # noqa: BLE001 — 失败要落状态，不能让接口 500
-        record_feishu(store, research_id, "failed", transport=chosen.name,
+        # 文档若已建成，把 token 落进四列：下次重推走 update，不再新建孤儿文档。
+        record_feishu(store, research_id, "failed", transport=chosen.name, doc_token=doc_id,
                       error=str(error)[:300], message=f"推送失败：{str(error)[:200]}")
         return {"kind": "feishu", "status": "failed", "message": f"推送失败：{str(error)[:200]}"}
     state = record_feishu(store, research_id, "synced", transport=chosen.name, base_token=base, doc_token=doc_id,
