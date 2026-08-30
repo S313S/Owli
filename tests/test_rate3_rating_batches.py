@@ -20,10 +20,12 @@ from tests.test_rate2_materialize_rows import _collector, _rating
 def test_按批大小切片_135行切成50_50_35() -> None:
     from app.plan.model import rating_batch_output_path, rating_batch_path, rating_batches
 
-    assert rating_batches(135) == [50, 50, 35]
-    assert rating_batches(50) == [50]
+    assert rating_batches(135, 50) == [50, 50, 35]
+    assert rating_batches(50, 50) == [50]
     assert rating_batches(25) == [25]
     assert rating_batches(0) == []
+    # 默认批大小 30（第 1 轮重放实测 50 行的 web_search 片在 305 s 被掐）。
+    assert rating_batches(135) == [30, 30, 30, 30, 15]
     assert rating_batches(130, 30) == [30, 30, 30, 30, 10]
     assert rating_batch_path("goals/goal-1/data-collection.rows.json", 2) == (
         "goals/goal-1/data-collection.rows.2.json"
@@ -57,6 +59,7 @@ def _fixture(tmp_path: Path, rows: int, collector_id: str = "data-collection-2")
         cards={}, runs_root=tmp_path / "runs",
         routing_utc_clock=lambda: datetime(2026, 8, 31, tzinfo=timezone.utc),
     )
+    coordinator._rating_batch_rows = lambda: 50  # 夹具按 50 行/片说事：135 → 3 片
     collector, rating = _collector(collector_id), _rating(collector_id)
     # `_task` 要用到的最小字段：goal.objective / agent.prompt / model / chapter。
     rating.prompt = {"body": "逐条评级"}
@@ -94,7 +97,7 @@ def test_物化时切片_135行写成3片_事件带片数与每片行数(tmp_pat
     assert pieces == whole
     data = next(e["data"] for e in events if e["type"] == "rating_rows_materialized")
     assert data["batches"] == 3 and data["batch_rows"] == [50, 50, 35]
-    assert data["batch_size"] == 50 and data["rows"] == 135
+    assert data["batch_size"] == 50 and data["rows"] == 135  # 夹具把批大小钉在 50
 
 
 def test_重物化时行数变少_多出来的旧片要删掉(tmp_path: Path) -> None:
@@ -118,9 +121,9 @@ def test_批大小可由环境变量下调_非法值回默认(monkeypatch) -> No
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "30")
     assert RuntimeCoordinator._rating_batch_rows() == 30
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "abc")
-    assert RuntimeCoordinator._rating_batch_rows() == 50
+    assert RuntimeCoordinator._rating_batch_rows() == 30
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "0")
-    assert RuntimeCoordinator._rating_batch_rows() == 50
+    assert RuntimeCoordinator._rating_batch_rows() == 30
 
 
 # ---------------------------------------------------------------- 货 2：按片跑

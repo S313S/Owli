@@ -1148,12 +1148,24 @@ class RuntimeCoordinator:
             reason = None if ok else chapter_failure_reason(
                 result, batch.output_path, fallback="retry_exhausted",
             )
+            # 第 1 轮重放：一片「失败但 engine_error / conclusion_error 都空」看不出
+            # 是哪道验证器拒的——把没过的验证器名与结论自报状态带进事件。
+            conclusion = getattr(result, "conclusion", None)
+            failed_checks = [
+                str(getattr(item, "name", ""))
+                for item in getattr(getattr(result, "validation", None), "results", ()) or ()
+                if str(getattr(getattr(item, "verdict", ""), "value",
+                               getattr(item, "verdict", ""))).lower() not in {"pass", ""}
+            ]
             await self._emit_batch(plan, context, agent, "rating_batch_finished", {
                 "batch": index, "batches": total, "rows": rows, "attempt": attempt,
                 "succeeded": ok, "reason": reason,
                 "elapsed_seconds": round(loop.time() - started, 1),
                 "engine_error": getattr(result, "engine_error", None),
                 "conclusion_error": getattr(result, "conclusion_error", None),
+                "failed_validators": failed_checks,
+                "conclusion_status": getattr(conclusion, "status", None),
+                "unmet": list(getattr(conclusion, "unmet", None) or []),
             })
             if ok:
                 return result

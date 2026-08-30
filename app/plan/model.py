@@ -98,9 +98,11 @@ def rating_rows_path(collector_output_path: str) -> str:
     return f"{base}.rows.json"
 
 
-#: §RATE-3：评级章一章内分批的批大小上限（行/批）。50 行按 RATE-1 实测 4.4 s/条
-#: ≈ 3.7 min，贴着本机代理 5 min 掐流的上限；真跑还被掐就降到 30。
-RATING_BATCH_ROWS = 50
+#: §RATE-3：评级章一章内分批的批大小上限（行/批）。提货单按 RATE-1 实测 4.4 s/条估的
+#: 50 行 ≈ 3.7 min；RATE-3 第 1 轮重放实测 goal-1（web_search 行，正文长）50 行的片
+#: 三章全在 305 s 被本机代理掐流（goal-2 小红书行 50 行只要 127 s）——按提货单坑 2
+#: 「被掐就降到 30」落成默认值；`OWLI_RATING_BATCH_ROWS` 仍可按环境调。
+RATING_BATCH_ROWS = 30
 
 
 def rating_batch_path(rows_path: str, index: int) -> str:
