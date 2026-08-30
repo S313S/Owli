@@ -193,3 +193,20 @@ def test_goal收尾时先入库采集产物再贴评级(tmp_path: Path) -> None:
      }], ensure_ascii=False), encoding="utf-8")
     asyncio.run(coordinator._persist_goal_evidence(plan, goal))
     assert ordering == ["upsert:collection", "upsert:rating"]
+
+
+def test_D029_评级产物读不到或非list_早退也返回三元组(tmp_path: Path) -> None:
+    """D-029：早退分支返回二元组会让 `_persist_rating_chapter` 解包崩死。"""
+    from app.orchestrator.runtime import RuntimeCoordinator
+
+    shim = SimpleNamespace()
+    missing = RuntimeCoordinator._rating_payloads(
+        shim, tmp_path / "no-such-file.json", existing={}, agent_id="ra",
+    )
+    assert missing == ([], [], [])
+    not_list = tmp_path / "not-list.json"
+    not_list.write_text('{"markdown": "x"}', encoding="utf-8")
+    result = RuntimeCoordinator._rating_payloads(
+        shim, not_list, existing={}, agent_id="ra",
+    )
+    assert result == ([], [], [])

@@ -1618,9 +1618,9 @@ class RuntimeCoordinator:
         try:
             items = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
-            return [], []
+            return [], [], []
         if not isinstance(items, list):
-            return [], []
+            return [], [], []
         payloads: list[dict[str, Any]] = []
         unmatched: list[str] = []
         invalid: list[str] = []
