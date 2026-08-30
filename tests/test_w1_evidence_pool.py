@@ -90,6 +90,7 @@ def _run_sectioned(
     seed=None,
     render=None,
     mutate_during_run=None,
+    agent_kind="report_writing",
 ):
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
@@ -131,7 +132,7 @@ def _run_sectioned(
         research_id="r-ledger",
         goal_id=goal_ids[0],
         agent_id="report-writing",
-        agent_kind="report_writing",
+        agent_kind=agent_kind,
         validators=[
             "file_exists",
             "sections_exist:结论,信息源",
@@ -1252,3 +1253,43 @@ def test_恢复态全部节已_done_仍按证据池全局编号拼装(tmp_path):
     report = output.read_text(encoding="utf-8")
     assert "使用第三条证据 [S03]" in report
     assert "- [S03] [第三条](https://evidence.example/3)" in report
+
+
+def test_交叉验证与汇总章同样下发JSON信封指令且信封产物可过(tmp_path) -> None:
+    """D-025 货 2：信封指令扩到 SECTIONED_KINDS 全部节化章，不再只发 report 类。"""
+
+    def seed(store, goal_id):
+        if store.list_evidence("r-ledger"):
+            return
+        _add_evidence(
+            store,
+            evidence_id="ev-1",
+            goal_id=goal_id,
+            permalink="https://evidence.example/visible",
+            platform="xhs",
+        )
+
+    def render(pool, task):
+        # 助手 Adapter 会把返回值包进 JSON 信封，这里只回裸 markdown 正文。
+        return (
+            "## 结论\n\n- 有证据的判断 [S01]\n\n"
+            "## 信息源\n\n- [S01] [可见证据]"
+            f"({pool['items'][0]['permalink']})\n"
+        )
+
+    for kind in ("cross_validation", "summary"):
+        case_root = tmp_path / kind
+        case_root.mkdir()
+        result, _, bodies, _, _, _ = _run_sectioned(
+            case_root,
+            goal_ids=["goal-1"],
+            declared_paths=[],
+            seed=seed,
+            render=render,
+            agent_kind=kind,
+        )
+        body = bodies["sec-1.md"]
+        assert "JSON 信封" in body and "claims" in body, kind
+        assert "输出骨架示例" in body, kind
+        assert "第一个字符必须是" in body and "代码围栏" in body, kind
+        assert result.succeeded is True, kind

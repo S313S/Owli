@@ -1404,7 +1404,7 @@ async def run_sectioned_task(
                 f"{json.dumps(evidence_pool, ensure_ascii=False, indent=2)}"
             )
             if (
-                base_task.agent_kind in {"report", "report_writing"}
+                base_task.agent_kind in SECTIONED_KINDS
                 and _declared_shape(agent) != "array"
             ):
                 body += (
@@ -1429,7 +1429,14 @@ async def run_sectioned_task(
                     "不得从正文事后抽取断言。"
                     f"本节断言 id 固定使用 c-{section_number:02d}01、"
                     f"c-{section_number:02d}02…的区间，避免跨节重号。"
-                    "若本节确无可证否结论，claims 写空数组。"
+                    "若本节确无可证否结论，claims 写空数组。\n"
+                    "输出骨架示例（照此形状写，只换内容）：\n"
+                    '{"markdown": "# 节标题\\n\\n## 结论\\n\\n- 结论一 [S01]\\n\\n'
+                    '## 信息源\\n\\n- [S01] [标题](permalink)", '
+                    '"claims": [{"id": "c-0101", "text": "断言原文", '
+                    '"evidence": [{"permalink": "https://…"}]}]}\n'
+                    "整份节产物的第一个字符必须是 `{`；不得使用 ``` 代码围栏，"
+                    "不得在 JSON 之外附加任何说明文字。"
                 )
             section_task = replace(
                 base_task,
