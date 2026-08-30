@@ -433,6 +433,11 @@ class SourceToolAdapter:
             call_kwargs["report_id"] = research_id
         if accepts("goal_id"):
             call_kwargs["goal_id"] = goal_id
+        if "agent_name" in parameters:
+            # §RATE-2 货 2 候选 A：直落库的源要能写下「是哪一章调的我」。
+            # 这里**只认显式声明了 agent_name 形参的源**（不走 accepts 的
+            # **kwargs 放行）：同族五个源还没补这一列，塞给它们就是 TypeError。
+            call_kwargs["agent_name"] = agent_id
         if accepts_events:
             call_kwargs["on_event"] = capture
         try:
