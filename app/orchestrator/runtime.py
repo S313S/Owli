@@ -23,6 +23,7 @@ from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.background import guard_task
 from app.orchestrator.scheduler import (
     CHAPTER_RETRY_INTERVAL_SECONDS, Scheduler, TaskRunResult,
+    _failure_feedback as batch_failure_feedback,
 )
 from app.orchestrator.chapter_failure import chapter_failure_reason
 from app.orchestrator.sectioning import (
@@ -1082,11 +1083,12 @@ class RuntimeCoordinator:
         done: list[int] = []
         failed: Any = None
         last: Any = None
+        carry: str | None = None
         try:
             for index, size in enumerate(sizes, start=1):
                 batch = self._rating_batch_task(
                     plan, agent, context, index=index, total=len(sizes),
-                    rows_relative=rows_relative, rows=size,
+                    rows_relative=rows_relative, rows=size, carry=carry,
                 )
                 if self._rating_batch_done(batch):
                     done.append(index)
@@ -1101,8 +1103,12 @@ class RuntimeCoordinator:
                 last = result
                 if bool(getattr(result, "succeeded", False)):
                     done.append(index)
-                elif failed is None:
+                    continue
+                if failed is None:
                     failed = result
+                # 第 2 轮重放：片一多半是被验证器拒（五段式格式），而章级回灌要等
+                # 章级重试才到——同一轮里把上一失败片的契约层原因直接带给后面的片。
+                carry = batch_failure_feedback(result) or carry
         except asyncio.CancelledError:
             # 章墙钟 / stop 掐在片执行中：把已成功的片合并入库，不白丢。
             if done:
@@ -1216,7 +1222,7 @@ class RuntimeCoordinator:
 
     def _rating_batch_task(
         self, plan: Plan, agent: Any, context: Any, *, index: int, total: int,
-        rows_relative: str, rows: int,
+        rows_relative: str, rows: int, carry: str | None = None,
     ) -> EngineTask:
         """第 index 片的引擎任务：只读这一片、产物写到片路径，其余照章任务。"""
         from dataclasses import replace
@@ -1232,6 +1238,8 @@ class RuntimeCoordinator:
             "不新增不丢条；其它批由系统另行派发，不要读、不要评、不要写整章产物；"
             "评分依据只来自本批文件与提示词里的判据，不要去翻代码仓、校验器或评分实现。"
         )
+        if carry:
+            note += f"\n本章上一批判定失败原因（本批逐条避免，不要重复）：\n{carry}"
         return replace(task, body=task.body + note)
 
     def _rating_batch_done(self, task: EngineTask) -> bool:

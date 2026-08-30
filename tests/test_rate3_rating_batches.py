@@ -142,6 +142,8 @@ class _BatchAdapter:
         self.fail_once: set[int] = set()      # 第一次传输断连、第二次正常
         self.hang: set[int] = set()           # 睡过片墙钟
         self.cancel_on: set[int] = set()      # 模拟章墙钟 / stop 取消
+        self.validator_fail: set[int] = set() # 产物被验证器拒（非传输）
+        self.bodies: dict[int, str] = {}
 
     async def run(self, task, ctx, on_event=None):
         piece_in = next(
@@ -160,8 +162,19 @@ class _BatchAdapter:
             "index": index, "output": task.output_path.name, "rows": len(rows),
             "validators": list(task.validators),
         })
+        self.bodies[index] = task.body
         if index in self.cancel_on:
             raise asyncio.CancelledError
+        if index in self.validator_fail:
+            self.validator_fail.discard(index)
+            return SimpleNamespace(
+                succeeded=False, conclusion=None, events=[], engine_error=None,
+                conclusion_error=None,
+                validation=SimpleNamespace(results=[SimpleNamespace(
+                    verdict="fail", name="rating_notes_matches_regex",
+                    message="30 条 rating_notes 不符合五段式格式",
+                )]),
+            )
         if index in self.hang:
             await asyncio.sleep(0.5)
         transport_fail = index in self.fail_batches or index in self.fail_once
@@ -434,6 +447,8 @@ def test_章规格_任务文案_提示词三处一起按批改口(tmp_path) -> N
     # 3) 提示词正文：条数与**本批**一一对应，其它批不要读。
     body = rating.prompt["body"]
     assert "这一批" in body and "本批输入证据一一对应" in body
+    # 第 2 轮重放：验证器按五段式拒 rating_notes，提示词却从没写过格式。
+    assert "权威N:依据 · 时效N:依据 · 交叉N:依据 · 完整N:依据 · 无关N:依据" in body
     assert "其它批不要读" in body
     assert "条数与输入证据一一对应" not in body, "旧口径（整份）必须退场"
 
@@ -467,3 +482,17 @@ def test_物化按字节预算切片_片数进调度器问数(tmp_path: Path, mo
     data = next(e["data"] for e in events if e["type"] == "rating_rows_materialized")
     assert data["batches"] == count == len(data["batch_rows"]) >= 4
     assert sum(data["batch_rows"]) == 12 and data["batch_bytes"] == 8000
+
+
+def test_片被验证器拒_失败原因带给同轮后面的片(tmp_path: Path) -> None:
+    coordinator, plan, rating, _, _ = _fixture(tmp_path, 135)
+    adapter = _BatchAdapter()
+    adapter.validator_fail = {1}
+
+    result = _run_chapter(coordinator, plan, rating, adapter)
+
+    assert result.succeeded is False, "第 1 片失败，本次章尝试失败"
+    assert "本章上一批判定失败原因" not in adapter.bodies[1]
+    assert "本章上一批判定失败原因" in adapter.bodies[2]
+    assert "rating_notes_matches_regex" in adapter.bodies[2]
+    assert "不符合五段式格式" in adapter.bodies[3]
