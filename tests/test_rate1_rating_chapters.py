@@ -126,3 +126,7 @@ def test_评级章的章规格确定性生成_不吃一次章扩写引擎调用(
     assert chapter["closing"]["notes"]["rates_output"] == collector.output["path"]
     assert chapter["closing"]["output"] == {"path": ratings[0].output["path"]}
     assert chapter["closing"]["notes"]["rates_chapter"] == collector.agent_id
+    # §RATE-2：章规格与 **task 文案**必须一起改口——货 1 只改了章规格、
+    # 文案仍写着「逐条评级 <采集产物>」，模型照文案走就还是只读那 10 条。
+    assert "data-collection.rows.json" in ratings[0].task
+    assert collector.output["path"] not in ratings[0].task
