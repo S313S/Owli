@@ -1054,7 +1054,7 @@ class RuntimeCoordinator:
         )
         if goal_id is None or self._rated_collector(plan, goal_id, agent) is None:
             return 0
-        rows = await self._materialize_rating_rows(plan, goal_id, agent)
+        rows = await self._materialize_rating_rows(plan, goal_id, agent, quiet=True)
         return len(rating_batches(rows, self._rating_batch_rows()))
 
     async def _run_rating_batches(
@@ -1780,7 +1780,7 @@ class RuntimeCoordinator:
         return None
 
     async def _materialize_rating_rows(
-        self, plan: Plan, goal_id: str, agent: Any,
+        self, plan: Plan, goal_id: str, agent: Any, *, quiet: bool = False,
     ) -> int:
         """§RATE-2 货 1：把「这一章采到的库行」物化成文件给评级章读。
 
@@ -1827,6 +1827,10 @@ class RuntimeCoordinator:
             )
             offset += size
         self._drop_stale_batches(plan, agent, relative, len(sizes))
+        if quiet:
+            # 调度器派活前问片数那一次：文件照写、事件不发（第 1 轮重放里每章
+            # 都冒出两条 rating_rows_materialized，读数尺子要去重才看得清）。
+            return len(rows)
         await self.events.publish(plan.research_id, {
             "type": "rating_rows_materialized",
             "data": {
