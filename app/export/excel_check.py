@@ -30,9 +30,9 @@ def _grade(total: int) -> str:
 
 
 def _conclusion_rows(ws) -> list[str]:
-    """`01` 从第 3 行起、A 列连续非空的行 = 结论行。"""
+    """`01` 从第 4 行起（第 3 行是图例，§AUTO-EXP 货 6）、A 列连续非空的行 = 结论行。"""
     rows: list[str] = []
-    for r in range(3, ws.max_row + 1):
+    for r in range(4, ws.max_row + 1):
         value = ws.cell(row=r, column=1).value
         if value is None or str(value).strip() == "":
             break
@@ -54,6 +54,9 @@ def check_workbook(path: str | Path) -> list[str]:
         errors.append("1 90_图表数据 未隐藏")
     if len(wb["02_图表"]._charts) < 1:
         errors.append("2 02_图表 无内嵌图表")
+    legend = str(wb["01_结论摘要"]["A3"].value or "")
+    if "图例" not in legend or "? / ?" not in legend:
+        errors.append(f"3 01 第 3 行缺图例（? / ? 记法说明）: {legend[:30]!r}")
     conclusions = _conclusion_rows(wb["01_结论摘要"])
     for text in conclusions:
         if not re.search(r"\[S\d{2}\]\s*$", text):

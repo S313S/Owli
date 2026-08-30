@@ -36,7 +36,8 @@ def test_导出六_sheet_且八项校验全过(tmp_path: Path) -> None:
     assert sources.cell(row=4, column=1).value is None  # 只列 citation_no 非空的行
     assert [sources.cell(row=2, column=c).value for c in range(6, 12)] == ["? / ?", 1, 2, None, 1, 1]
     assert sources["D2"].hyperlink.target == "https://www.xiaohongshu.com/explore/a1"
-    assert wb["01_结论摘要"]["A3"].value == "1. 结论一 [S01][S02]"
+    assert "图例" in str(wb["01_结论摘要"]["A3"].value) and "? / ?" in str(wb["01_结论摘要"]["A3"].value)
+    assert wb["01_结论摘要"]["A4"].value == "1. 结论一 [S01][S02]"
     assert wb["03_明细数据"].max_row == 5 and wb["03_明细数据"]["J3"].value == 3  # 原始:digg_count
     assert [wb["05_标签"].cell(row=r, column=1).value for r in (2, 3, 4)] == ["会议助手", "口碑", "竞品"]
     charts = [n for n in zipfile.ZipFile(path).namelist() if n.startswith("xl/charts/chart")]
@@ -56,7 +57,7 @@ def test_校验器能抓出故意做坏的产物(tmp_path: Path) -> None:
     wb["04_信息源"]["D2"].hyperlink = None
     wb["04_信息源"]["G3"] = 5
     wb["04_信息源"]["F2"] = "3 / D"
-    wb["01_结论摘要"]["A4"] = "2. 结论没角标"
+    wb["01_结论摘要"]["A5"] = "2. 结论没角标"
     wb["90_图表数据"].sheet_state = "visible"
     wb.save(tmp_path / "cells.xlsx")
     codes = sorted({e.split(" ", 1)[0] for e in check_workbook(tmp_path / "cells.xlsx")})

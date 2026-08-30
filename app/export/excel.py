@@ -97,16 +97,19 @@ def _sheet_sources(ws: Worksheet, cited: Sequence[Mapping[str, Any]]) -> None:
 
 
 def _sheet_summary(ws: Worksheet, question: str, conclusions: Sequence[str], title: str) -> None:
-    """`01_结论摘要`：A1 调研问题、A2 计数行、A3 起每条结论（末尾须带角标，spec §5.2）。"""
+    """`01_结论摘要`：A1 调研问题、A2 计数行、A3 图例行（§AUTO-EXP 货 6）、A4 起每条结论
+    （末尾须带角标，spec §5.2）。"""
     ws["A1"] = f"调研问题：{question}"
     ws["A1"].font = F_TITLE
     ws["A2"] = f"报告：{title} · 结论 {len(conclusions)} 条（从成稿「结论」段确定性摘取）"
     ws["A2"].font = F_SUB
+    ws["A3"] = "图例：04_信息源 G–K 某格留空 = 该维不可评（不重算）；此时 F 列总分记「? / ?」"
+    ws["A3"].font = F_SUB
     for i, text in enumerate(conclusions):
         body = text.strip()
         marks = "".join(_MARK.findall(body))
         stripped = _MARK.sub("", body).strip()
-        cell = ws.cell(row=3 + i, column=1, value=f"{i + 1}. {stripped} {marks}".rstrip())
+        cell = ws.cell(row=4 + i, column=1, value=f"{i + 1}. {stripped} {marks}".rstrip())
         cell.font = F_TLDR
         cell.alignment = Alignment(wrap_text=True, vertical="top")
     ws.column_dimensions["A"].width = 110
