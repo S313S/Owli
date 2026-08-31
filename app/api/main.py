@@ -33,6 +33,7 @@ from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.background import guard_task
 from app.orchestrator.runtime import RuntimeCoordinator
 from app.plan.generate import PlanGenerationError
+from app.sources_probe import SourceProbeBlocked
 from app.plan.cards import (
     Card,
     CardActionType,
@@ -419,14 +420,23 @@ def create_app(
         except Exception as exc:
             state = researches[research_id]
             raw = {"exception": type(exc).__name__, "message": str(exc)}
+            # §M6-b 货 5：探活门禁 block 档抛的不是 PlanGenerationError，此前
+            # 落到 else 分支被标成 unavailable/「引擎不可用」——真因是某个源探
+            # 不通，引擎好得很。不新增状态枚举，只把它归到既有的 failed。
+            probe_blocked = isinstance(exc, SourceProbeBlocked)
             planning_failed = isinstance(exc, PlanGenerationError)
+            failure_label = (
+                "起跑前探活未通过" if probe_blocked
+                else "规划失败" if planning_failed
+                else "引擎不可用"
+            )
             try:
                 if store.get_report(research_id) is not None:
                     store.finish_report(
                         research_id,
                         status="failed",
                         completed_at=runtime.now_iso(),
-                        summary="规划失败",
+                        summary=failure_label,
                         summary_line=str(exc),
                     )
             except Exception as storage_exc:
@@ -437,8 +447,10 @@ def create_app(
                         "message": str(storage_exc),
                     },
                 }
-            state["status"] = "failed" if planning_failed else "unavailable"
-            state["status_label"] = "规划失败" if planning_failed else "引擎不可用"
+            state["status"] = (
+                "failed" if (planning_failed or probe_blocked) else "unavailable"
+            )
+            state["status_label"] = failure_label
             state["actions"] = []
             state["progress"]["summary"] = (
                 f"后台编排异常：{type(exc).__name__}: {exc}"
