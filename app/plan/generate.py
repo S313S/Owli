@@ -28,21 +28,18 @@ from app.plan.model import (
 )
 from app.plan.question import make_questions
 from app.plan.segments import PlanSegmentError, PlanSegmentWorkspace
-from app.sources.registry import planning_catalog
+from app.sources.registry import planning_catalog, source_limit_parameters
+
+
+def _limit_parameter(source_id: str) -> str:
+    """采集条数参数名一律问注册表（§M6-a 货 1 四表合一，不再手抄）。"""
+
+    return source_limit_parameters().get(source_id, "limit")
 
 
 _FORMATS = {"table", "markdown", "excel", "json"}
 _SHAPES = {"object", "array"}
 _MARKET_SOURCES = _SOURCE_MARKET_PROFILES
-_SOURCE_LIMIT_PARAMETERS = {
-    "douyin": "limit",
-    "hacker_news": "hitsPerPage",
-    "product_hunt": "limit",
-    "reddit": "limit",
-    "web_search": "max_results",
-    "x": "max_results",
-    "xhs": "limit",
-}
 _LINT_GOAL_HEADER = re.compile(
     r"^\[(?:规则\d+|结构)\]\s+goal-([1-9][0-9]*)(?=[./\s：:]|$)"
 )
@@ -266,7 +263,7 @@ def _goal_prompt(
     )
     if scale == "fast":
         source_limits = "、".join(
-            f"{source_id} {_SOURCE_LIMIT_PARAMETERS.get(source_id, 'limit')}={limit}"
+            f"{source_id} {_limit_parameter(source_id)}={limit}"
             for source_id, limit in sorted(profile.source_item_limits.items())
         )
         scale_rule = (
@@ -537,11 +534,12 @@ def render_source_handbook(scale: str = "standard") -> str:
 
     page = SOURCE_HANDBOOK_PATH.read_text(encoding="utf-8").rstrip("\n")
     limits = load_research_scale_config().profile(scale).source_item_limits
+    parameters = source_limit_parameters()
     rows = ["", "## 5. 当前可用的源", "",
             "| 工具 | 是什么 | 时间窗 | 本档名额 | 要点 |",
             "|---|---|---|---|---|"]
     for spec in planning_catalog():
-        parameter = _SOURCE_LIMIT_PARAMETERS.get(spec.source_id, "limit")
+        parameter = parameters.get(spec.source_id, "limit")
         limit = limits.get(spec.source_id)
         quota = f"`{parameter}={limit}`" if limit is not None else "按章任务给定"
         window = (
@@ -604,7 +602,7 @@ def _agent_prompt(
         else:
             method = f"查询式={query}；按 capability 声明的信息源执行采集。"
         if scale == "fast" and source_id and source_item_limit is not None:
-            parameter = _SOURCE_LIMIT_PARAMETERS.get(source_id, "limit")
+            parameter = _limit_parameter(source_id)
             method += f"快速档以 {parameter}={source_item_limit} 覆盖默认采集条数。"
         evidence_rule = (
             "所有事实保留 permalink 与 fetched_at。"

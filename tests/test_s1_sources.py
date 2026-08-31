@@ -91,10 +91,11 @@ def test_海外产品规划候选集也包含小红书与抖音() -> None:
 
 
 def test_三源提示词采集条数使用真实_limit_参数() -> None:
-    from app.plan.generate import _SOURCE_LIMIT_PARAMETERS
+    # §M6-a 货 1：参数名从手抄表挪进各源 SOURCE_SPEC，判定意图不变。
+    from app.plan.generate import _limit_parameter
 
     assert {
-        source_id: _SOURCE_LIMIT_PARAMETERS[source_id]
+        source_id: _limit_parameter(source_id)
         for source_id in ("xhs", "douyin", "reddit")
     } == {"xhs": "limit", "douyin": "limit", "reddit": "limit"}
 

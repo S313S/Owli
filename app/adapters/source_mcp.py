@@ -415,15 +415,12 @@ class SourceToolAdapter:
         if item_limit is not None:
             if not isinstance(item_limit, int) or isinstance(item_limit, bool) or item_limit < 1:
                 raise ValueError("item_limit 必须是正整数")
-            parameter = {
-                "hacker_news": "limit",
-                "product_hunt": "limit",
-                "web_search": "max_results",
-                "x": "max_results",
-                "xhs": "limit",
-                "douyin": "limit",
-                "reddit": "limit",
-            }.get(source_id)
+            # §M6-a 货 1 四表合一：参数名不再在这里手抄一份，问各源自己的
+            # SOURCE_SPEC.limit_parameter。未注册的源（测试桩）取不到 →
+            # 与今天同语义：不下发 item_limit。
+            from app.sources.registry import source_limit_parameters
+
+            parameter = source_limit_parameters().get(source_id)
             if parameter is not None:
                 call_kwargs[parameter] = item_limit
         store_passed = self._store is not None and accepts("store")

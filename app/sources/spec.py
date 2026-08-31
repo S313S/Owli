@@ -88,6 +88,11 @@ class SourceSpec:
     prompt_hint: str = ""
     #: `None` = 本源不向模型索取 window（工具 schema 里不出现该参数）。
     window: WindowParam | None = field(default_factory=WindowParam)
+    #: 「一次采多少条」在本源入口签名里叫什么形参。规划提示词、信息源手册、
+    #: 适配器下发 item_limit、起跑前探活四处一律读这里（§M6-a 货 1 四表合一）——
+    #: 此前它们各手抄一份，hacker_news 已漂成一边 hitsPerPage 一边 limit，
+    #: 探活那份更把 x 写成 limit（x 只有 max_results）、每次探活必 TypeError。
+    limit_parameter: str = "limit"
 
     def __post_init__(self) -> None:
         if not _SOURCE_ID_PATTERN.fullmatch(self.source_id):
@@ -99,6 +104,8 @@ class SourceSpec:
             raise TypeError("entrypoint 必须可调用")
         if self.collector_name and not self.collector_name.endswith("数据抓取"):
             raise ValueError("collector_name 必须以‘数据抓取’结尾")
+        if not self.limit_parameter.isidentifier():
+            raise ValueError("limit_parameter 必须是合法形参名")
 
 
 __all__ = ["SourceSpec", "WindowParam"]

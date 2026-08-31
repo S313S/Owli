@@ -71,4 +71,16 @@ def planning_catalog() -> tuple[SourceSpec, ...]:
     return tuple(sorted(specs, key=lambda item: item.source_id))
 
 
-__all__ = ["discover_sources", "get_source", "get_tool", "planning_catalog"]
+def source_limit_parameters() -> dict[str, str]:
+    """各源「采集条数」参数名——四表合一后的单一事实源（§M6-a 货 1）。"""
+
+    return {
+        spec.source_id: spec.limit_parameter
+        for spec in discover_sources().values()
+    }
+
+
+__all__ = [
+    "discover_sources", "get_source", "get_tool", "planning_catalog",
+    "source_limit_parameters",
+]

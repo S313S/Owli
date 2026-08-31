@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from app.sources.registry import discover_sources
+from app.sources.registry import discover_sources, source_limit_parameters
 
 DEFAULT_ENV_PATH = Path("~/.owli/.env").expanduser()
 DEFAULT_QUERY = "AI 助手"
@@ -30,15 +30,13 @@ CREDENTIAL_KEYS: dict[str, tuple[str, ...]] = {
     "hacker_news": (),
 }
 
-#: 最小搜索参数：limit 1–2；抖音 comment_video_limit 下限是 1，1 视频搜索 + 1 次评论 = 2 次请求。
-PROBE_KWARGS: dict[str, dict[str, Any]] = {
-    "douyin": {"limit": 1, "comment_video_limit": 1},
-    "xhs": {"limit": 2},
-    "web_search": {"max_results": 2},
-    "reddit": {"limit": 2},
-    "x": {"limit": 2},
-    "product_hunt": {"limit": 2},
-    "hacker_news": {"limit": 2},
+#: 最小搜索条数；抖音 comment_video_limit 下限是 1，1 视频搜索 + 1 次评论 = 2 次请求。
+PROBE_ITEM_LIMITS: dict[str, int] = {"douyin": 1}
+DEFAULT_PROBE_ITEM_LIMIT = 2
+
+#: 条数以外的源特有探活参数。
+PROBE_EXTRA_KWARGS: dict[str, dict[str, Any]] = {
+    "douyin": {"comment_video_limit": 1},
 }
 
 
@@ -78,8 +76,21 @@ def missing_credentials(source: str, *, env_path: Path = DEFAULT_ENV_PATH) -> bo
     return bool(required) and not any(key in _env_keys(env_path) for key in required)
 
 
+def probe_kwargs(source: str) -> dict[str, Any]:
+    """探活入参：条数参数名问注册表，不再手抄（§M6-a 货 1 第五张表）。
+
+    此前这里把 x 的条数写成 `limit`，而 x.search 只有 `max_results` ——
+    每次探活 x 都是 TypeError，被当成「源不可用」记进 failure。
+    """
+    parameter = source_limit_parameters().get(source, "limit")
+    return {
+        parameter: PROBE_ITEM_LIMITS.get(source, DEFAULT_PROBE_ITEM_LIMIT),
+        **PROBE_EXTRA_KWARGS.get(source, {}),
+    }
+
+
 def _call(source: str, entrypoint: Callable[..., Any], has_window: bool, query: str) -> Any:
-    kwargs = dict(PROBE_KWARGS.get(source, {"limit": 2}))
+    kwargs = probe_kwargs(source)
     if has_window:
         return entrypoint(query, DEFAULT_WINDOW, **kwargs)
     return entrypoint(query, **kwargs)

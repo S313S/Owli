@@ -687,4 +687,5 @@ SOURCE_SPEC = SourceSpec(
     collector_name="X 数据抓取",
     capability_description="近7天公开短帖与互动指标，受读取预算软护栏约束",
     prompt_hint="recent search，排除转推/回复，互动阈值取回后本地过滤",
+    limit_parameter="max_results",
 )
