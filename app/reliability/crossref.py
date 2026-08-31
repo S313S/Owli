@@ -145,7 +145,11 @@ def independence_checks(
     lineage = origin_key(left, claim_id) != origin_key(right, claim_id)
     left_author = _author_key(left.get("author_name"), author_aliases)
     right_author = _author_key(right.get("author_name"), author_aliases)
-    authors = bool(left_author and right_author and left_author != right_author)
+    # §XSEM-1 条 4：§3.2 第 2 项的原文是「author_name 规范化后**不等**」。两条都不知道
+    # 作者，不构成「相等」的证据；旧写法把空作者名并成同一主体，一票否决独立性，
+    # 与 §2.1「跨域名的搜索结果天然分属不同簇」直接冲突（底料 web_search 173/260 无作者名）。
+    # 任一边缺作者名 → 本项不表态按通过计，独立与否交由引用血缘/机构主体/转载批次三项裁决。
+    authors = not (left_author and right_author) or left_author != right_author
     institutions = _institutions_differ(left, right)
 
     left_time, right_time = _parse_time(left.get("published_at")), _parse_time(right.get("published_at"))
