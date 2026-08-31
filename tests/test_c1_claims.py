@@ -397,11 +397,15 @@ def test_backfill_接通_PASS_X禁推_HN线程上限与次断言(tmp_path: Path)
     assert (stored["c-01"]["k"], stored["c-01"]["verdict"]) == (2, "PASS")
     assert stored["c-02"]["k"] == 2  # extra.story_id 被提升后触发 HN 上限。
     assert (stored["c-03"]["k"], stored["c-03"]["verdict"]) == (1, "SINGLE")
-    assert (stored["c-04"]["k"], stored["c-04"]["verdict"]) == (2, "PASS")
+    # §XSEM-1 条 3（C-1）改动的读数：c-04 由 PASS 降为 WEAK。佐证簇 ev-x1 的四维实值
+    # 是 0+2+1+2=5（权威未达 P75、X 讨论串取不全 → 完整 1），加 X 的基线交叉分 0 = 5 = C；
+    # 而 X 的整套平台基线是 6 = B。改前拿基线冒充 B 才够得上 §3.3 的「其他簇 ≥B」。
+    # 用真值后它就是 C，判 WEAK 是更诚实的读数——条 3 既能上探也能下探。
+    assert (stored["c-04"]["k"], stored["c-04"]["verdict"]) == (2, "WEAK")
     rows = {row["id"]: row for row in store.list_evidence("r-c1")}
     assert rows["ev-h1"]["score_crossref"] == 2
     assert rows["ev-h1"]["grade"] is not None
-    assert rows["ev-h1"]["extra"]["crossref_secondary"]["c-04"]["verdict"] == "PASS"
+    assert rows["ev-h1"]["extra"]["crossref_secondary"]["c-04"]["verdict"] == "WEAK"
     assert result.weak_claims == []
 
 

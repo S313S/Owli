@@ -15,6 +15,11 @@ from .scoring import PLATFORM_BASELINES, grade_for_total
 
 GRADE_ORDER = {"D": 0, "C": 1, "B": 2, "A": 3}
 
+# §XSEM-1 条 3：四维先验等级用的字段——它们都不依赖 crossref，故不构成 D-013 的回路。
+NON_CROSSREF_SCORE_FIELDS = (
+    "score_authority", "score_freshness", "score_completeness", "score_independence",
+)
+
 
 def normalize_origin_url(value: str) -> str:
     """去 scheme/www/追踪查询串/锚点；保留 HN 等身份参数 id。"""
@@ -213,6 +218,13 @@ def _grade(evidence: Mapping[str, Any]) -> str:
     if all(isinstance(value, int) and not isinstance(value, bool) for value in scores):
         return grade_for_total(sum(scores))
     baseline = PLATFORM_BASELINES.get(str(evidence.get("platform")), PLATFORM_BASELINES["web_search"])
+    # §XSEM-1 条 3（C-1）：第③级回退从「整套平台基线」换成「四维实值 + 基线交叉分」。
+    # D-013 剪断的是 verdict→grade→verdict 这条边，只涉及 score_crossref 与两个生成列；
+    # 权威/时效/完整/无关四维由 §3.5 第③步写定、不依赖 crossref，用它们不接回回路。
+    # 四维不全（采集后尚未评级）时仍回落整套平台基线，与改前逐字段相同。
+    prior = [evidence.get(field) for field in NON_CROSSREF_SCORE_FIELDS]
+    if all(isinstance(value, int) and not isinstance(value, bool) for value in prior):
+        return grade_for_total(sum(prior) + baseline["score_crossref"])
     return grade_for_total(sum(baseline.values()))
 
 

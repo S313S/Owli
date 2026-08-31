@@ -76,9 +76,11 @@ def _claim_crossref_item(
     """组装审计前的簇计算输入，并提升库存线程/血缘键。"""
 
     item = dict(row)
-    # 簇判定先于本轮五维实值回写。上一轮补评的生成列与
-    # 五维分不得成为下一轮 _grade() 的输入，否则会从平台基线漂移。
-    for key in (*SCORE_FIELDS, "score_total", "grade"):
+    # 簇判定先于本轮交叉维回写。D-013：上一轮的 score_crossref 与两个生成列
+    # 不得成为下一轮 _grade() 的输入，否则 verdict↔grade 成环、补评两遍读数漂移。
+    # §XSEM-1 条 3（C-1）：权威/时效/完整/无关四维不在这条环上（§3.5 第③步先写
+    # 四维实值、后算 crossref），保留它们让 _grade() 能算四维先验等级。
+    for key in ("score_crossref", "score_total", "grade"):
         item.pop(key, None)
     extra_value = item.get("extra")
     extra = dict(extra_value) if isinstance(extra_value, Mapping) else {}
@@ -955,6 +957,31 @@ async def backfill_report(
                 })
                 if inspect.isawaitable(progress_event):
                     await progress_event
+
+    # §XSEM-1 条 3：本轮刚写上的四维实值会让簇的先验等级变一次。同一次调用里再收敛
+    # 一轮——重算簇、按新 verdict 重打交叉维——否则「补评两遍逐字段 0 差异」（D-013
+    # 判据）会在「第一遍才评上分」这条路径上先红一次。四维自身此后不再变，故一轮即定；
+    # 收敛轮只用库存标签本地重算，不再过引擎。§3.5 要求的「先四维、后 crossref」
+    # 由此才真正成立——此前簇计算跑在同一次调用的评分之前。
+    if rated and clustered_ids:
+        report = store.get_report(report_id) or report
+        rows, clustered_ids = _backfill_claim_clusters(
+            store, report, store.list_evidence(report_id)
+        )
+        settled = _normalize_report(rows, computed_at) if rows else {}
+        resettle = [
+            settled[str(item["id"])] for item in rows
+            if str(item["id"]) in clustered_ids and str(item["id"]) in settled
+        ]
+        settled_labels = _stored_labels(resettle) if resettle else None
+        if settled_labels is not None:
+            store.upsert_evidence_batch(_scored_payloads(
+                [
+                    (item, label, False)
+                    for item, label in zip(resettle, settled_labels)
+                ],
+                engine_preference,
+            ))
 
     refreshed_report = store.get_report(report_id) or report
     report_path = _resolve_report_path(refreshed_report, root)
