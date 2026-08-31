@@ -102,6 +102,12 @@ PRIMARY_METRICS = {
     "bilibili": "view",
     "xhs": "liked_count",
     "douyin": "digg_count",
+    # §M6-b 货 3 登记：微博池内行带 liked_count，本可归一化，但这张表在
+    # `app/store/dao.py:28` 有一份**手抄镜像**（第九张表，禁区文件），两边不一致
+    # 时 dao 的 norm_context 校验会当场拒收整批证据。加 weibo 要两处一起加，
+    # 已呈拍；在拍板前微博一律不归一化（normalized_score=NULL），不是漏了。
+    # 另注：本表 `.get()` 取不到键与「登记了但没指标」同样返回 None——
+    # 加源忘了这里不会报错，只会静默不归一化，是第八张手抄表。
     "reddit": None,
     "web_search": None,
 }

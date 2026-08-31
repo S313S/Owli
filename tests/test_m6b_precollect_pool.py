@@ -38,13 +38,13 @@ def _write_batch(
     return directory
 
 
-def _row(note_id: str, *, content: str = "茶叶好喝", create_time: int = 1756684800):
+def _row(note_id: str, *, content: str = "茶叶好喝", create_time: int = 1788228000):
     return {
         "note_id": note_id, "content": content,
         "create_time": create_time,
         "create_date_time": "2026-09-01 10:00:00",
         "liked_count": "12", "comments_count": "3", "shared_count": "1",
-        "last_modify_ts": 1756688400000,
+        "last_modify_ts": 1788231600000,
         "note_url": f"https://m.weibo.cn/detail/{note_id}",
         "ip_location": "浙江", "user_id": "u-1", "nickname": "茶友",
         "gender": "", "profile_url": "https://m.weibo.cn/u/1",

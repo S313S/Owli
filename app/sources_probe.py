@@ -35,7 +35,16 @@ CREDENTIAL_KEYS: dict[str, tuple[str, ...]] = {
     "x": ("X_BEARER_TOKEN",),
     "product_hunt": ("PRODUCT_HUNT_TOKEN",),
     "hacker_news": (),
+    # §M6-b：微博走预采集池，没有凭证——「配没配」这件事对它等价于「池里有没有
+    # 货」，由探活本身量（缺键时 `.get(source, ())` 也是这个语义，这里写明是为了
+    # 让加源的人看得见这张表还在，见 m6-a worklog 挂账 6）。
+    "weibo": (),
 }
+
+#: 源特有的探活检索词；缺省用 DEFAULT_QUERY。
+#: 池型源（微博）用 `*` ——池里有什么词是预采集时定的，拿固定关键词探它必然
+#: 空手而归，那量的是「这批池没采过 AI 助手」，不是「源坏了」。
+PROBE_QUERIES: dict[str, str] = {"weibo": "*"}
 
 #: 最小搜索条数；抖音 comment_video_limit 下限是 1，1 视频搜索 + 1 次评论 = 2 次请求。
 PROBE_ITEM_LIMITS: dict[str, int] = {"douyin": 1}
@@ -140,6 +149,7 @@ def probe_kwargs(source: str) -> dict[str, Any]:
 
 def _call(source: str, entrypoint: Callable[..., Any], has_window: bool, query: str) -> Any:
     kwargs = probe_kwargs(source)
+    query = PROBE_QUERIES.get(source, query)
     if has_window:
         return entrypoint(query, DEFAULT_WINDOW, **kwargs)
     return entrypoint(query, **kwargs)
