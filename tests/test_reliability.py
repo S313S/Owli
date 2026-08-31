@@ -518,7 +518,7 @@ def test_同线程只取等级最高两簇而非输入前两条() -> None:
     assert result["evidence_extra"]["ev-external"]["crossref_verdict"] == "PASS"
 
 
-def test_多断言不覆盖主断言且反证不进入_claim_ids() -> None:
+def test_多断言不覆盖主断言且反证按对称簇登记() -> None:
     from app.reliability.crossref import build_claim_clusters
 
     primary = _evidence(
@@ -542,8 +542,12 @@ def test_多断言不覆盖主断言且反证不进入_claim_ids() -> None:
     )
     result = build_claim_clusters([primary, support], "c-03")
     primary_patch = result["evidence_extra"]["ev-primary"]
-    assert "c-03" not in primary_patch.get("claim_ids", ["c-06"])
-    assert primary_patch.get("crossref_verdict", "SINGLE") == "SINGLE"
+    # §XSEM-1 条 2（B-1）：反证行改按 ¬c 的支撑面结算，所以它要登记 c-03——
+    # 改前它在这里直接早退、永远拿不到 crossref_verdict。主断言仍是 c-06，
+    # 因此 c-03 的结论落在 crossref_secondary，主键位的 SINGLE 一个字不动。
+    assert primary_patch["claim_ids"] == ["c-06", "c-03"]
+    assert primary_patch["crossref_verdict"] == "SINGLE"
+    assert primary_patch["crossref_secondary"]["c-03"]["verdict"] == "CONFLICT"
 
     secondary = _evidence(
         id="ev-secondary", grade="B", permalink="https://secondary.example/a",

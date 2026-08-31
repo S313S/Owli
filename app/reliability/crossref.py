@@ -277,57 +277,98 @@ def build_claim_clusters(
     def representative(group: list[int]) -> int:
         return max(group, key=lambda index: (GRADE_ORDER[_grade(items[index])], -index))
 
+    def stance_of(index: int) -> str:
+        return (items[index].get("stance_by_claim") or {}).get(claim_id, "supports")
+
     support_groups = [
         group for group in ordered_groups
-        if any((items[index].get("stance_by_claim") or {}).get(claim_id, "supports") != "contradicts" for index in group)
+        if any(stance_of(index) != "contradicts" for index in group)
     ]
     conflict_groups = [
         group for group in ordered_groups
-        if all((items[index].get("stance_by_claim") or {}).get(claim_id, "supports") == "contradicts" for index in group)
+        if all(stance_of(index) == "contradicts" for index in group)
     ]
+    # §XSEM-1 条 2（B-1）：反证证据支撑的不是 c 而是 ¬c，所以它自己那一面也要成簇。
+    # 混簇（同簇里既有支撑又有反证）在 ¬c 面上只由其反证成员代表。
+    conflict_member_groups = [
+        [index for index in group if stance_of(index) == "contradicts"]
+        for group in ordered_groups
+    ]
+    conflict_member_groups = [group for group in conflict_member_groups if group]
 
-    ranked_supports = sorted(
-        support_groups,
-        key=lambda group: (-GRADE_ORDER[_grade(items[representative(group)])], min(group)),
-    )
-    selected_supports: list[list[int]] = []
-    thread_counts: dict[str, int] = defaultdict(int)
-    x_selected = False
-    for group in ranked_supports:
-        rep = representative(group)
-        if items[rep].get("platform") == "x":
-            if x_selected:
+    def selected(groups: list[list[int]]) -> list[list[int]]:
+        """§3.2 三条特别约束（X 禁推、单线程上限 2）的选簇，两面共用同一套规则。"""
+
+        ranked = sorted(
+            groups,
+            key=lambda group: (
+                -GRADE_ORDER[_grade(items[representative(group)])], min(group),
+            ),
+        )
+        picked: list[list[int]] = []
+        thread_counts: dict[str, int] = defaultdict(int)
+        x_selected = False
+        for group in ranked:
+            rep = representative(group)
+            if items[rep].get("platform") == "x":
+                if x_selected:
+                    continue
+                x_selected = True
+            thread = _thread_key(items[rep])
+            if thread and thread_counts[thread] >= 2:
                 continue
-            x_selected = True
-        thread = _thread_key(items[rep])
-        if thread and thread_counts[thread] >= 2:
-            continue
-        if thread:
-            thread_counts[thread] += 1
-        selected_supports.append(group)
-    selected_supports.sort(key=lambda group: min(group))
+            if thread:
+                thread_counts[thread] += 1
+            picked.append(group)
+        picked.sort(key=lambda group: min(group))
+        return picked
+
+    selected_supports = selected(support_groups)
+    selected_conflicts = selected(conflict_member_groups)
 
     k = len(selected_supports)
+    k_conflict = len(selected_conflicts)
     selected_reps = [representative(group) for group in selected_supports]
+    selected_conflict_reps = [representative(group) for group in selected_conflicts]
+    # 反证面对外呈现的「矛盾簇」沿用改前口径：全部反证簇的代表，不受选簇上限裁剪。
     conflict_reps = [representative(group) for group in conflict_groups]
+    support_reps = [representative(group) for group in support_groups]
     strong_conflict = any(GRADE_ORDER[_grade(items[index])] >= GRADE_ORDER["B"] for index in conflict_reps)
-    def verdict_for(index: int) -> str:
-        if strong_conflict and not conflict_explained:
+    # ¬c 面看到的「等级 ≥B 的独立矛盾簇」就是 c 的支撑面——§3.3 的判据对称。
+    strong_support = any(GRADE_ORDER[_grade(items[index])] >= GRADE_ORDER["B"] for index in support_reps)
+    def verdict_on(
+        index: int, *, reps: list[int], opposing_strong: bool, cluster_total: int,
+    ) -> str:
+        """§3.3 的四态判定；支撑面与反证面走同一套规则，只换「自己这面」的入参。"""
+
+        if opposing_strong and not conflict_explained:
             return "CONFLICT"
-        if strong_conflict and conflict_explained:
+        if opposing_strong and conflict_explained:
             return "WEAK"
-        if k <= 1:
+        if cluster_total <= 1:
             return "SINGLE"
         own_cluster = cluster_ids[index]
         best_other = max(
             (
                 GRADE_ORDER[_grade(items[rep])]
-                for rep in selected_reps
+                for rep in reps
                 if cluster_ids[rep] != own_cluster
             ),
             default=-1,
         )
         return "PASS" if best_other >= GRADE_ORDER["B"] else "WEAK"
+
+    def verdict_for(index: int) -> str:
+        return verdict_on(
+            index, reps=selected_reps,
+            opposing_strong=strong_conflict, cluster_total=k,
+        )
+
+    def verdict_against(index: int) -> str:
+        return verdict_on(
+            index, reps=selected_conflict_reps,
+            opposing_strong=strong_support, cluster_total=k_conflict,
+        )
 
     primary_index = selected_reps[0] if selected_reps else 0
     verdict = verdict_for(primary_index)
@@ -342,20 +383,23 @@ def build_claim_clusters(
         existing_primary = {
             key: existing_extra[key] for key in primary_keys if key in existing_extra
         }
-        stance = (item.get("stance_by_claim") or {}).get(claim_id, "supports")
-        if stance == "contradicts":
-            extras[identifiers[index]] = existing_primary
-            continue
-        peers = [identifiers[rep] for rep in selected_reps if cluster_ids[rep] != cluster_ids[index]]
+        # §XSEM-1 条 2（B-1）：反证行按 ¬c 的支撑面结算——同一套簇规则、同一个闭集，
+        # 只是「自己这面」换成反证簇、「矛盾面」换成支撑簇。改前它在这里直接早退，
+        # 永远没有 crossref_verdict，连带 score_crossref / grade 恒 NULL，
+        # 进不了 §1.6 的评估面。
+        against = stance_of(index) == "contradicts"
+        own_reps = selected_conflict_reps if against else selected_reps
+        peers = [identifiers[rep] for rep in own_reps if cluster_ids[rep] != cluster_ids[index]]
+        opposing_reps = support_reps if against else conflict_reps
         existing_claims = list(existing_extra.get("claim_ids", []))
         claim_ids = existing_claims if claim_id in existing_claims else [*existing_claims, claim_id]
-        item_verdict = verdict_for(index)
+        item_verdict = verdict_against(index) if against else verdict_for(index)
         claim_result = {
             "origin_key": origin_key(item, claim_id),
             "cluster": cluster_ids[index],
-            "n_clusters": k,
+            "n_clusters": k_conflict if against else k,
             "peers": peers,
-            "conflicts": [identifiers[rep] for rep in conflict_reps],
+            "conflicts": [identifiers[rep] for rep in opposing_reps],
             "verdict": item_verdict,
         }
         if claim_ids[0] == claim_id:
