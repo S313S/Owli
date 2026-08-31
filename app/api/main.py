@@ -49,7 +49,7 @@ from app.plan.editing import (
     reset,
 )
 from app.plan.model import Plan
-from app.sources_probe import probe_gate_mode, probe_sources
+from app.sources_probe import probe_gate_mode
 from app.plan.store import PlanRevisionConflict, load_plan, save_plan
 from app.replay.import_research import ReplayImportError, import_research
 from app.store.dao import Store
@@ -182,6 +182,12 @@ def create_app(
             },
         )
 
+    async def _probe_all_sources() -> dict:
+        """门禁用的探活器；按模块属性取，用例打桩才拦得住（§M6-a 货 4）。"""
+        from app import sources_probe
+
+        return await sources_probe.probe_sources()
+
     store.on_plan_event = publish_plan_event
     product_scale_config = scale_config or load_research_scale_config()
     runtime = RuntimeCoordinator(
@@ -196,8 +202,7 @@ def create_app(
         scale_config=product_scale_config,
         # §M6-a 货 4：门禁开着才注入探活器；off（默认）连探活都不发起。
         source_probe=(
-            None if probe_gate_mode() == "off"
-            else lambda: probe_sources()
+            None if probe_gate_mode() == "off" else _probe_all_sources
         ),
     )
 
@@ -678,6 +683,8 @@ def create_app(
 
         §M6-a 货 4：本路由只报数，挡不挡起跑由 OWLI_SOURCE_PROBE_GATE 决定。
         """
+        from app.sources_probe import probe_sources
+
         wanted = [s.strip() for s in (sources or "").split(",") if s.strip()] or None
         try:
             results = await probe_sources(wanted)
