@@ -27,6 +27,14 @@ PLATFORM_BASELINES: dict[str, dict[str, int]] = {
     "xhs": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
     "douyin": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
     "bilibili": dict(zip(SCORE_FIELDS, (1, 1, 0, 2, 1))),
+    # §M6-a 货 6（M6-0 拍板，source-reliability.md §2 普通平台族三行）：
+    # 缺键时 scoring:240 / audit:98 / validation:957 一律回落 web_search
+    # （1/1/1/1/1 = 5 C）——文档写「微博/公众号交叉 0」，代码实际给的是 1。
+    # TODO(M6-b)：本表是 source-reliability.md §2 的手抄镜像（第七张表），
+    # 但平台可以没有源模块（bilibili/weibo/wechat_mp），收编不进 SOURCE_SPEC。
+    "weibo": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
+    "zhihu": dict(zip(SCORE_FIELDS, (1, 1, 1, 1, 1))),
+    "wechat_mp": dict(zip(SCORE_FIELDS, (1, 1, 0, 1, 1))),
 }
 
 AUTHORITY_SCORES = {
