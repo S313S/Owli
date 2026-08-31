@@ -22,12 +22,20 @@ MediaCrawler 把 `SAVE_DATA_PATH` 指到批次目录即可，产物落在
 **不建新表、不动 schema**：读出来的行就是 `store.upsert_evidence_batch` 吃的证据
 字典，`platform` 取自池目录名；去重沿用 evidence 既有唯一键
 （report_id + platform + platform_item_id），不另造 key（[[upsert-covers-one-key-only]]）。
+
+**批次保留/清理策略（§M6-c 货 5，已拍口径：定容）**：每平台成功批
+（`ok`/`partial`，partial 的行照样能用）保留最近 **5** 批、失败批保留最近 **1** 批
+（留 1 是给登录卡当判据输入，全删了「最新批次为何失败」就说不出口）；
+清理在**导入时顺手做**（`python -m app.precollect_import`，`--no-prune` 可关），
+只删池目录、**不碰库**——已导入的 evidence 行不因批次目录消失而回退。
+研究期读池路径（薄源）只读不清，清理永远不落在章墙钟里。
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,8 +45,12 @@ __all__ = [
     "LOGIN_REQUIRED_REASON", "MANIFEST_NAME", "PLATFORM_PROFILES", "POOL_ROOT",
     "PlatformProfile", "PoolContractError", "PoolReadResult", "PrecollectBatch",
     "iter_batches", "latest_login_failure", "load_evidence", "pool_root",
-    "profile_for", "to_evidence",
+    "profile_for", "prune_batches", "to_evidence",
 ]
+
+#: §M6-c 货 5 定容值（已拍）：成功批留最近 5、失败批留最近 1。
+KEEP_OK_BATCHES = 5
+KEEP_FAILED_BATCHES = 1
 
 MANIFEST_NAME = "manifest.json"
 POOL_ROOT = Path.home() / ".owli" / "precollect"
@@ -388,6 +400,35 @@ def load_evidence(
             else None
         ),
     )
+
+
+def prune_batches(
+    platform: str, *, root: Path | str | None = None,
+    keep_ok: int = KEEP_OK_BATCHES, keep_failed: int = KEEP_FAILED_BATCHES,
+) -> list[str]:
+    """定容清理（§M6-c 货 5）：成功批留最近 `keep_ok`、失败批留最近 `keep_failed`。
+
+    只删池目录、不碰库；返回删掉的 batch_id（新旧序照 `iter_batches` 倒序）。
+    单个目录删不动（权限/占用）就跳过继续，不让清理失败拖垮导入。
+    """
+
+    removed: list[str] = []
+    ok_seen = failed_seen = 0
+    for batch in iter_batches(platform, root=root):
+        if batch.status == "failed":
+            failed_seen += 1
+            keep = failed_seen <= keep_failed
+        else:
+            ok_seen += 1
+            keep = ok_seen <= keep_ok
+        if keep:
+            continue
+        try:
+            shutil.rmtree(batch.directory)
+        except OSError:
+            continue
+        removed.append(batch.batch_id)
+    return removed
 
 
 def latest_login_failure(

@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database", default=str(DEFAULT_DATABASE_PATH))
     parser.add_argument("--dry-run", action="store_true",
                         help="只读池、只打读数，不落库")
+    parser.add_argument("--no-prune", action="store_true",
+                        help="跳过导入后的池定容清理（成功批留 5、失败批留 1）")
     return parser
 
 
@@ -86,6 +88,12 @@ def run(argv: Sequence[str] | None = None) -> int:
     ])
     readout["written"] = len(normalized)
     readout["database"] = str(args.database)
+    if not args.no_prune:
+        # §M6-c 货 5：清理在导入时顺手做——只删池目录不碰库，失败批留 1
+        # 是给登录卡当判据输入。dry-run 与「没导成」两条路都不清（见 return 2）。
+        from app.precollect import prune_batches
+
+        readout["pruned_batches"] = prune_batches(args.platform, root=args.pool_root)
     print(json.dumps(readout, ensure_ascii=False, indent=2))
     return 0
 
