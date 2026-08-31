@@ -76,9 +76,11 @@ def _claim_crossref_item(
     """组装审计前的簇计算输入，并提升库存线程/血缘键。"""
 
     item = dict(row)
-    # 簇判定先于本轮五维实值回写。上一轮补评的生成列与
-    # 五维分不得成为下一轮 _grade() 的输入，否则会从平台基线漂移。
-    for key in (*SCORE_FIELDS, "score_total", "grade"):
+    # 簇判定先于本轮交叉维回写。D-013：上一轮的 score_crossref 与两个生成列
+    # 不得成为下一轮 _grade() 的输入，否则 verdict↔grade 成环、补评两遍读数漂移。
+    # §XSEM-1 条 3（C-1）：权威/时效/完整/无关四维不在这条环上（§3.5 第③步先写
+    # 四维实值、后算 crossref），保留它们让 _grade() 能算四维先验等级。
+    for key in ("score_crossref", "score_total", "grade"):
         item.pop(key, None)
     extra_value = item.get("extra")
     extra = dict(extra_value) if isinstance(extra_value, Mapping) else {}
@@ -107,6 +109,61 @@ def _claim_crossref_item(
             claim_id: origins[evidence_id]
         }
     return item
+
+
+def _report_claims(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    extra = report.get("extra")
+    value = extra.get("claims") if isinstance(extra, Mapping) else None
+    if not isinstance(value, list):
+        return []
+    return [dict(claim) for claim in value if isinstance(claim, Mapping)]
+
+
+def _firsthand_settled(claim: Mapping[str, Any]) -> bool:
+    """已审计且逐条留痕的断言不再重烧引擎——防 D-013 那类重复回写。"""
+
+    if claim.get("firsthand_source") != "audited":
+        return False
+    audit = claim.get("firsthand_audit")
+    evidence_ids = claim.get("evidence_ids")
+    if not isinstance(audit, Mapping) or not isinstance(evidence_ids, list):
+        return False
+    return all(str(evidence_id) in audit for evidence_id in evidence_ids)
+
+
+def _firsthand_pairs(
+    claims: Sequence[Mapping[str, Any]], rows_by_id: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """展开成 (断言, 证据) 对——§3.2 明说同两条证据在断言 A/B 上可以不同。"""
+
+    pairs: list[dict[str, Any]] = []
+    for claim in claims:
+        claim_id = claim.get("id")
+        evidence_ids = claim.get("evidence_ids")
+        if not isinstance(claim_id, str) or not isinstance(evidence_ids, list):
+            continue
+        declared = claim.get("firsthand")
+        declared_ids = set(declared) if isinstance(declared, list) else set()
+        for evidence_id in evidence_ids:
+            row = rows_by_id.get(str(evidence_id))
+            if row is None:
+                continue
+            excerpt = str(row.get("content_excerpt") or "")
+            pairs.append({
+                "claim_id": claim_id,
+                "evidence_id": str(evidence_id),
+                "claim_text": str(claim.get("text") or ""),
+                "goal_id": str(row.get("goal_id") or "goal-1"),
+                "platform": row.get("platform"),
+                "source_type": row.get("source_type"),
+                "permalink": row.get("permalink"),
+                "title": row.get("title"),
+                "published_at": row.get("published_at"),
+                "author_present": bool(row.get("author_name")),
+                "content_excerpt": excerpt[:600],
+                "declared_by_writer": str(evidence_id) in declared_ids,
+            })
+    return pairs
 
 
 def _backfill_claim_clusters(
@@ -179,6 +236,56 @@ def _backfill_claim_clusters(
         store.upsert_evidence_batch(payloads)
     store.set_report_claims(str(report["id"]), claims)
     return store.list_evidence(str(report["id"])), referenced_ids
+
+
+def _firsthand_prompt(
+    pairs: Sequence[Mapping[str, Any]], *, output_path: Path
+) -> str:
+    return (
+        "目标：按 §3.2 第 5 项「一手性」，逐 (断言, 证据) 对判定该条证据对该条断言是否"
+        "提供了**独立获取的一手信息**（自测数据、自述经历、自有统计、当事方一手披露），"
+        "而不只是复述别人的结论。判定只依据输入，不补造正文、作者或时间。\n"
+        "判否的典型：转述官方公告、综述他人评测、聚合站汇编、纯标题片段。\n"
+        "判是的典型：作者写自己实测的数字、亲历使用体验、自有样本统计、"
+        "被讨论主体自己首次披露的事实。\n"
+        "同两条证据在断言 A 上可以判是、在断言 B 上判否——请对着这一条断言的原文判，"
+        "不要对着证据本身泛泛判。\n"
+        "输入里的 declared_by_writer 是撰写方的自述，**只作参考，不得直接照抄**；"
+        "判断与它不一致是正常的。\n"
+        "每项输出 claim_id、evidence_id、firsthand（布尔）、reason（1–20 字依据）。"
+        "不接受「可能」「疑似」这类不表态的写法；reason 必填且不得为空。\n"
+        "输出顶层数组，条数与顺序必须与输入完全一致，不要输出 Markdown。\n"
+        f"必须把结果写到此精确路径：{output_path}。不得改用其他文件名。\n"
+        "输入 (断言, 证据) 对：" + json.dumps(
+            list(pairs), ensure_ascii=False, separators=(",", ":")
+        )
+    )
+
+
+def _firsthand_errors(
+    value: Any, inputs: Sequence[Mapping[str, Any]]
+) -> list[str]:
+    if not isinstance(value, list):
+        return ["一手性审计产物顶层必须是数组"]
+    if len(value) != len(inputs):
+        return [f"审计条数应为 {len(inputs)}，实际 {len(value)}"]
+    errors: list[str] = []
+    for index, (item, expected) in enumerate(zip(value, inputs)):
+        location = f"[{index}]"
+        if not isinstance(item, Mapping):
+            errors.append(f"{location} 不是 object")
+            continue
+        for key in ("claim_id", "evidence_id"):
+            if str(item.get(key) or "") != str(expected[key]):
+                errors.append(f"{location}.{key} 与输入不一致，顺序不得改动")
+        if not isinstance(item.get("firsthand"), bool):
+            errors.append(f"{location}.firsthand 必须是 true/false，不接受不表态")
+        reason = item.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"{location}.reason 缺失或为空")
+        elif len(reason.strip()) > 20:
+            errors.append(f"{location}.reason 超过 20 字")
+    return errors
 
 
 def _prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> str:
@@ -340,6 +447,142 @@ def _engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _firsthand_batch(
+    pairs: Sequence[Mapping[str, Any]], *, adapter: Any, output_path: Path,
+    report_id: str, goal_id: str, engine_preference: str | None,
+) -> list[dict[str, Any]] | None:
+    """§3.2 第 5 项的 auditor 判定；结构与 _classify_batch 同源，只换提示词与校验。"""
+
+    errors: list[str] = []
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    conclusion_path = _conclusion_path(output_path)
+    for _attempt in range(1, MAX_ATTEMPTS + 1):
+        output_path.unlink(missing_ok=True)
+        conclusion_path.unlink(missing_ok=True)
+        body = _firsthand_prompt(pairs, output_path=output_path)
+        if errors:
+            body += "\n上一轮错误：" + "；".join(errors)
+        task = EngineTask(
+            body=body,
+            output_path=output_path,
+            output_format="json",
+            research_id=report_id,
+            goal_id=goal_id,
+            agent_id=AGENT_ID,
+            agent_kind="reliability_audit",
+            validators=["file_exists"],
+            user_override=engine_preference,
+            runs_root=output_path.parents[4],
+            capability=Capability(
+                profile="readonly-analyst",
+                tools=("fs.write",),
+                fs=FileSystemScope(write=(f"goals/{goal_id}/**",)),
+            ),
+        )
+        result = await adapter.run(
+            task, _ctx(output_path, report_id, goal_id), on_event=None
+        )
+        if not bool(getattr(result, "succeeded", False)) and not _recover_transport_completion(
+            result, output_path, conclusion_path
+        ):
+            errors = ["适配器双腿判定未通过"]
+            continue
+        try:
+            value = json.loads(output_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            errors = [f"一手性审计产物无法解析：{type(exc).__name__}"]
+            continue
+        errors = _firsthand_errors(value, pairs)
+        if not errors:
+            return [dict(item) for item in value]
+    return None
+
+
+async def _audit_firsthand(
+    store: Any, report: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], *,
+    adapter: Any, runs_root: Path, batch_size: int, engine_preference: str,
+    force: bool, on_event: Any,
+) -> dict[str, int]:
+    """§XSEM-1 条 1：逐 (证据, 断言) 对把 §3.2 第 5 项的闸门交回 auditor。
+
+    一手性是交叉维唯一闸门，改前由撰写方自己声明。引擎整批失败时**保留撰写方
+    声明、不升级 firsthand_source**，也不回落成「全否」——全否会把交叉维直接
+    打到零分，那是拿失败当结论。
+    """
+
+    report_id = str(report["id"])
+    claims = _report_claims(report)
+    pending = [claim for claim in claims if force or not _firsthand_settled(claim)]
+    rows_by_id = {str(row["id"]): row for row in rows}
+    pairs = _firsthand_pairs(pending, rows_by_id) if pending else []
+    stats = {"pairs": len(pairs), "audited": 0, "failed": 0, "claims": 0}
+    if not pairs:
+        return stats
+
+    verdicts: dict[tuple[str, str], dict[str, Any]] = {}
+    for goal_id in sorted({str(pair["goal_id"]) for pair in pairs}):
+        goal_pairs = [pair for pair in pairs if str(pair["goal_id"]) == goal_id]
+        batch_total = (len(goal_pairs) + batch_size - 1) // batch_size
+        for batch_number, start in enumerate(
+            range(0, len(goal_pairs), batch_size), 1
+        ):
+            batch = goal_pairs[start:start + batch_size]
+            batch_started = time.monotonic()
+            audited = await _firsthand_batch(
+                batch, adapter=adapter,
+                output_path=_batch_output_path(
+                    runs_root, report_id, goal_id, batch_number,
+                    folder="firsthand-audit",
+                ),
+                report_id=report_id, goal_id=goal_id,
+                engine_preference=engine_preference,
+            )
+            if audited is None:
+                stats["failed"] += len(batch)
+            else:
+                stats["audited"] += len(audited)
+                for item in audited:
+                    verdicts[(str(item["claim_id"]), str(item["evidence_id"]))] = {
+                        "firsthand": bool(item["firsthand"]),
+                        "reason": str(item["reason"]).strip(),
+                    }
+            if on_event is not None:
+                event = on_event({
+                    "type": "firsthand_audit_progress",
+                    "data": {
+                        "report_id": report_id, "goal_id": goal_id,
+                        "batch_number": batch_number, "batch_total": batch_total,
+                        "batch_pairs": len(batch),
+                        "audited_total": stats["audited"],
+                        "failed_total": stats["failed"],
+                        "batch_seconds": round(time.monotonic() - batch_started, 3),
+                    },
+                })
+                if inspect.isawaitable(event):
+                    await event
+
+    for claim in pending:
+        claim_id = str(claim.get("id"))
+        evidence_ids = [
+            str(value) for value in (claim.get("evidence_ids") or [])
+            if str(value) in rows_by_id
+        ]
+        keys = [(claim_id, evidence_id) for evidence_id in evidence_ids]
+        if not keys or any(key not in verdicts for key in keys):
+            continue          # 缺一对就整条不改口，撰写方声明原样留着。
+        audit = {key[1]: verdicts[key] for key in keys}
+        claim["firsthand_audit"] = audit
+        claim["firsthand"] = [
+            evidence_id for evidence_id in evidence_ids
+            if audit[evidence_id]["firsthand"]
+        ]
+        claim["firsthand_source"] = "audited"
+        stats["claims"] += 1
+    if stats["claims"]:
+        store.set_report_claims(report_id, claims)
+    return stats
+
+
 async def _classify_batch(
     items: Sequence[Mapping[str, Any]], *, adapter: Any, output_path: Path,
     report_id: str, goal_id: str, engine_preference: str | None,
@@ -458,15 +701,17 @@ def _safe_component(value: str, field: str) -> str:
 
 
 def _batch_output_path(
-    runs_root: Path, report_id: str, goal_id: str, batch_number: int
+    runs_root: Path, report_id: str, goal_id: str, batch_number: int,
+    *, folder: str = "reliability-backfill",
 ) -> Path:
     safe_report = _safe_component(report_id, "report_id")
     safe_goal = _safe_component(goal_id, "goal_id")
+    safe_folder = _safe_component(folder, "folder")
     root = runs_root.resolve(strict=False)
     research_root = (root / safe_report).resolve(strict=False)
     goal_root = (research_root / "goals" / safe_goal).resolve(strict=False)
     output_path = (
-        goal_root / "reliability-backfill" / f"batch-{batch_number:03d}.json"
+        goal_root / safe_folder / f"batch-{batch_number:03d}.json"
     ).resolve(strict=False)
     if (
         not research_root.is_relative_to(root)
@@ -877,6 +1122,16 @@ async def backfill_report(
         raise KeyError(f"报告不存在：{report_id}")
     rows = store.list_evidence(report_id)
     before_rows = len(rows)
+    # §XSEM-1 条 1：一手性审计必须排在簇计算之前——它是 §3.2 五项里唯一的闸门，
+    # 而 §3.2 又明说同两条证据在不同断言上结论可以不同，所以只能逐 (证据, 断言)
+    # 对判，也就只能等断言登记之后（评级章跑在断言产生之前，放不下这一步）。
+    firsthand_audit = await _audit_firsthand(
+        store, report, rows, adapter=adapter, runs_root=Path(runs_root),
+        batch_size=batch_size, engine_preference=engine_preference,
+        force=force, on_event=on_event,
+    )
+    if firsthand_audit["claims"]:
+        report = store.get_report(report_id) or report
     rows, clustered_ids = _backfill_claim_clusters(store, report, rows)
     report = store.get_report(report_id) or report
     computed_at = str(report.get("completed_at") or max(
@@ -955,6 +1210,31 @@ async def backfill_report(
                 })
                 if inspect.isawaitable(progress_event):
                     await progress_event
+
+    # §XSEM-1 条 3：本轮刚写上的四维实值会让簇的先验等级变一次。同一次调用里再收敛
+    # 一轮——重算簇、按新 verdict 重打交叉维——否则「补评两遍逐字段 0 差异」（D-013
+    # 判据）会在「第一遍才评上分」这条路径上先红一次。四维自身此后不再变，故一轮即定；
+    # 收敛轮只用库存标签本地重算，不再过引擎。§3.5 要求的「先四维、后 crossref」
+    # 由此才真正成立——此前簇计算跑在同一次调用的评分之前。
+    if rated and clustered_ids:
+        report = store.get_report(report_id) or report
+        rows, clustered_ids = _backfill_claim_clusters(
+            store, report, store.list_evidence(report_id)
+        )
+        settled = _normalize_report(rows, computed_at) if rows else {}
+        resettle = [
+            settled[str(item["id"])] for item in rows
+            if str(item["id"]) in clustered_ids and str(item["id"]) in settled
+        ]
+        settled_labels = _stored_labels(resettle) if resettle else None
+        if settled_labels is not None:
+            store.upsert_evidence_batch(_scored_payloads(
+                [
+                    (item, label, False)
+                    for item, label in zip(resettle, settled_labels)
+                ],
+                engine_preference,
+            ))
 
     refreshed_report = store.get_report(report_id) or report
     report_path = _resolve_report_path(refreshed_report, root)

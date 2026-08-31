@@ -22,8 +22,39 @@ from app.store.dao import Store
 ROOT = Path(__file__).resolve().parents[1]
 
 
+FIRSTHAND_MARKER = "输入 (断言, 证据) 对："
+
+
+def answer_firsthand(task, *, firsthand=None):
+    """§XSEM-1 条 1 的一手性审计桩。
+
+    默认**照抄撰写方声明**：这些既有用例验的不是审计本身，照抄让它们的读数
+    与加这一步之前逐字段相同。审计真的改变判定的场景由
+    tests/test_xsem1_crossref_semantics.py 单独验。
+    返回 None 表示这不是审计任务，调用方继续走自己的分支。
+    """
+
+    body = getattr(task, "body", "")
+    if FIRSTHAND_MARKER not in body:
+        return None
+    pairs, _ = json.JSONDecoder().raw_decode(body.split(FIRSTHAND_MARKER, 1)[1])
+    task.output_path.parent.mkdir(parents=True, exist_ok=True)
+    task.output_path.write_text(json.dumps([{
+        "claim_id": pair["claim_id"],
+        "evidence_id": pair["evidence_id"],
+        "firsthand": (
+            bool(pair["declared_by_writer"]) if firsthand is None else firsthand
+        ),
+        "reason": "桩：照抄撰写方声明",
+    } for pair in pairs], ensure_ascii=False), encoding="utf-8")
+    return SimpleNamespace(succeeded=True)
+
+
 class NeverAdapter:
-    async def run(self, *args, **kwargs):
+    async def run(self, task=None, *args, **kwargs):
+        answered = answer_firsthand(task) if task is not None else None
+        if answered is not None:
+            return answered
         raise AssertionError("已有闭集标签时不应调用引擎")
 
 
@@ -128,8 +159,10 @@ def test_firsthand_声明来源区分撰写与存量回填(tmp_path: Path) -> No
     register_claims(store, "r-c1", claims, source="backfill")
     backfill = store.get_report("r-c1")["extra"]["claims"][0]
 
+    # §XSEM-1 条 1：闭集加 audited——§3.2 第 5 项真的由 reliability-auditor 判过、
+    # 且逐 (证据, 断言) 对留了一句依据时才用它。两条声明值的语义原样不动。
     assert FIRSTHAND_SOURCES == {
-        "declared_by_writer", "declared_by_backfill",
+        "declared_by_writer", "declared_by_backfill", "audited",
     }
     assert writer["firsthand_source"] in FIRSTHAND_SOURCES
     assert backfill["firsthand_source"] in FIRSTHAND_SOURCES
@@ -397,11 +430,15 @@ def test_backfill_接通_PASS_X禁推_HN线程上限与次断言(tmp_path: Path)
     assert (stored["c-01"]["k"], stored["c-01"]["verdict"]) == (2, "PASS")
     assert stored["c-02"]["k"] == 2  # extra.story_id 被提升后触发 HN 上限。
     assert (stored["c-03"]["k"], stored["c-03"]["verdict"]) == (1, "SINGLE")
-    assert (stored["c-04"]["k"], stored["c-04"]["verdict"]) == (2, "PASS")
+    # §XSEM-1 条 3（C-1）改动的读数：c-04 由 PASS 降为 WEAK。佐证簇 ev-x1 的四维实值
+    # 是 0+2+1+2=5（权威未达 P75、X 讨论串取不全 → 完整 1），加 X 的基线交叉分 0 = 5 = C；
+    # 而 X 的整套平台基线是 6 = B。改前拿基线冒充 B 才够得上 §3.3 的「其他簇 ≥B」。
+    # 用真值后它就是 C，判 WEAK 是更诚实的读数——条 3 既能上探也能下探。
+    assert (stored["c-04"]["k"], stored["c-04"]["verdict"]) == (2, "WEAK")
     rows = {row["id"]: row for row in store.list_evidence("r-c1")}
     assert rows["ev-h1"]["score_crossref"] == 2
     assert rows["ev-h1"]["grade"] is not None
-    assert rows["ev-h1"]["extra"]["crossref_secondary"]["c-04"]["verdict"] == "PASS"
+    assert rows["ev-h1"]["extra"]["crossref_secondary"]["c-04"]["verdict"] == "WEAK"
     assert result.weak_claims == []
 
 

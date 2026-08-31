@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.test_c1_claims import add_evidence, make_store, raw_claim, ref
+from tests.test_c1_claims import (
+    add_evidence, answer_firsthand, make_store, raw_claim, ref,
+)
 from tests.test_m3h_finalize import _plan, _write
 
 
@@ -20,6 +22,11 @@ class LabelAuditor:
 
     async def run(self, task, ctx, on_event=None):
         del ctx, on_event
+        # §XSEM-1 条 1 的一手性审计走另一条提示词；本类的 calls 只计评级调用，
+        # 免得「只有源基线的行必须走引擎」这条断言被审计调用顶成假绿。
+        answered = answer_firsthand(task)
+        if answered is not None:
+            return answered
         self.calls += 1
         inputs, _ = json.JSONDecoder().raw_decode(task.body.split("输入证据：", 1)[1])
         task.output_path.parent.mkdir(parents=True, exist_ok=True)

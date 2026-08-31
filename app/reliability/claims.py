@@ -15,7 +15,9 @@ CLAIM_EVIDENCE_FIELDS = frozenset({
     "permalink", "stance", "firsthand", "origin_url",
 })
 FIRSTHAND_SOURCES = frozenset({
-    "declared_by_writer", "declared_by_backfill",
+    # §XSEM-1 条 1：C-1 只做到「撰写方声明可分辨」，闸门没守住。audited = §3.2 第 5 项
+    # 真正由 reliability-auditor 逐 (证据, 断言) 对判过、且留了一句依据。
+    "declared_by_writer", "declared_by_backfill", "audited",
 })
 _FIRSTHAND_SOURCE_BY_CLAIMS_SOURCE = {
     "chapter": "declared_by_writer",
