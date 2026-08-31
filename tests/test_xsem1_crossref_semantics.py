@@ -118,7 +118,7 @@ from pathlib import Path  # noqa: E402
 from app.reliability.backfill import backfill_report  # noqa: E402
 from app.reliability.claims import register_claims  # noqa: E402
 from tests.test_c1_claims import (  # noqa: E402
-    NeverAdapter, add_evidence, make_store, raw_claim, ref,
+    NeverAdapter, add_evidence, answer_firsthand, make_store, raw_claim, ref,
 )
 
 
@@ -308,3 +308,212 @@ def test_条2_反证行经补评拿到五维与grade(tmp_path: Path) -> None:
         assert row["score_total"] is not None
         assert row["grade"] is not None          # 改前这三列对反证行恒 NULL
         assert row["extra"]["crossref_n_clusters"] == 2
+
+
+# --- 条 1：一手性审计确认（§3.2 第 5 项交回 reliability-auditor） -------------------
+
+import json as _json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+class _FirsthandAuditor:
+    """按 (断言, 证据) 对给定判定的审计桩；非审计任务一律拒绝。"""
+
+    def __init__(self, verdicts: dict[str, bool], reason: str = "自测数据",
+                 *, also_label: bool = False) -> None:
+        self.verdicts = verdicts
+        self.reason = reason
+        self.also_label = also_label
+        self.audit_calls = 0
+        self.label_calls = 0
+
+    async def run(self, task, ctx=None, on_event=None):
+        del ctx, on_event
+        marker = "输入 (断言, 证据) 对："
+        if marker not in task.body:
+            if not self.also_label:
+                raise AssertionError("本夹具只应触发一手性审计")
+            self.label_calls += 1
+            items, _ = _json.JSONDecoder().raw_decode(
+                task.body.split("输入证据：", 1)[1]
+            )
+            task.output_path.parent.mkdir(parents=True, exist_ok=True)
+            task.output_path.write_text(_json.dumps([{
+                "id": item["id"], "authority_kind": "named_secondary",
+                "content_kind": "industry_view",
+                "interest_relation": "arms_length", "missing_dimensions": {},
+            } for item in items], ensure_ascii=False), encoding="utf-8")
+            return SimpleNamespace(succeeded=True)
+        self.audit_calls += 1
+        pairs, _ = _json.JSONDecoder().raw_decode(task.body.split(marker, 1)[1])
+        task.output_path.parent.mkdir(parents=True, exist_ok=True)
+        task.output_path.write_text(_json.dumps([{
+            "claim_id": pair["claim_id"], "evidence_id": pair["evidence_id"],
+            "firsthand": self.verdicts[pair["evidence_id"]],
+            "reason": self.reason,
+        } for pair in pairs], ensure_ascii=False), encoding="utf-8")
+        return SimpleNamespace(succeeded=True)
+
+
+def _三源一断言(tmp_path: Path):
+    store = make_store(tmp_path)
+    urls = {
+        "a": "https://news.ycombinator.com/item?id=601",
+        "b": "https://openai-notes.com/one",
+        "c": "https://labs-review.org/two",
+    }
+    for key, platform, author, published in (
+        ("a", "hacker_news", "甲", "2026-08-01T00:00:00+00:00"),
+        ("b", "web_search", "乙", "2026-08-06T00:00:00+00:00"),
+        ("c", "web_search", "丙", "2026-08-12T00:00:00+00:00"),
+    ):
+        add_evidence(
+            store, "r-c1", f"ev-{key}", platform=platform, permalink=urls[key],
+            author=author, published_at=published,
+        )
+    # 撰写方三条全声明一手——改前这就是终局，没人核。
+    register_claims(store, "r-c1", [raw_claim("c-01", [
+        ref(url, firsthand=True) for url in urls.values()
+    ])], source="chapter")
+    return store, urls
+
+
+def test_条1_审计判否会把闸门关上_k与verdict跟着降(tmp_path: Path) -> None:
+    """一手性是 §3.2 五项里唯一的闸门：审计一收紧，k 就掉下来。"""
+
+    store, _ = _三源一断言(tmp_path)
+    auditor = _FirsthandAuditor(
+        {"ev-a": True, "ev-b": False, "ev-c": False}, reason="仅复述官方公告",
+    )
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+
+    claim = store.get_report("r-c1")["extra"]["claims"][0]
+    assert auditor.audit_calls == 1
+    assert claim["firsthand_source"] == "audited"
+    assert claim["firsthand"] == ["ev-a"]          # 撰写方声明的三条被核成一条
+    assert claim["firsthand_audit"]["ev-b"] == {
+        "firsthand": False, "reason": "仅复述官方公告",
+    }
+    # §3.2「至少一方」：ev-a 仍是一手，所以 (a,b)(a,c) 两对照过，只有 (b,c) 并簇。
+    assert (claim["k"], claim["verdict"]) == (2, "PASS")
+
+
+def test_条1_审计全判否则交叉维整个归零(tmp_path: Path) -> None:
+    """用户 09-01 拍板接受的口径变更：闸门守起来后交叉维可能整体下降甚至归零。"""
+
+    store, _ = _三源一断言(tmp_path)
+    auditor = _FirsthandAuditor(
+        {"ev-a": False, "ev-b": False, "ev-c": False}, reason="全篇转述发布稿",
+    )
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+
+    claim = store.get_report("r-c1")["extra"]["claims"][0]
+    assert claim["firsthand"] == []
+    assert (claim["k"], claim["verdict"]) == (1, "SINGLE")
+    rows = {row["id"]: row for row in store.list_evidence("r-c1")}
+    assert all(row["score_crossref"] == 0 for row in rows.values())
+
+
+def test_条1_审计判是则闸门放行_读数与声明一致(tmp_path: Path) -> None:
+    store, _ = _三源一断言(tmp_path)
+    auditor = _FirsthandAuditor({"ev-a": True, "ev-b": True, "ev-c": True})
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+
+    claim = store.get_report("r-c1")["extra"]["claims"][0]
+    assert claim["firsthand"] == ["ev-a", "ev-b", "ev-c"]
+    assert claim["k"] == 3
+    assert all(
+        entry["reason"] for entry in claim["firsthand_audit"].values()
+    )
+
+
+def test_条1_引擎整批失败则保留撰写方声明不覆盖(tmp_path: Path) -> None:
+    """失败不等于「全否」——全否会把交叉维直接打到零分，那是拿失败当结论。"""
+
+    class _FailingAuditor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, task, ctx=None, on_event=None):
+            del ctx, on_event
+            if "输入 (断言, 证据) 对：" in task.body:
+                self.calls += 1
+                return SimpleNamespace(succeeded=False)
+            return await NeverAdapter().run(task)
+
+    store, _ = _三源一断言(tmp_path)
+    events: list[dict] = []
+
+    async def on_event(payload):
+        events.append(payload)
+
+    auditor = _FailingAuditor()
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+        on_event=on_event,
+    ))
+
+    claim = store.get_report("r-c1")["extra"]["claims"][0]
+    assert auditor.calls >= 1
+    assert claim["firsthand_source"] == "declared_by_writer"   # 没升级
+    assert claim["firsthand"] == ["ev-a", "ev-b", "ev-c"]      # 声明原样留着
+    assert "firsthand_audit" not in claim
+    assert claim["k"] == 3                                     # 读数与改前相同
+    progress = [
+        event["data"] for event in events
+        if event["type"] == "firsthand_audit_progress"
+    ]
+    assert progress and progress[-1]["failed_total"] == 3
+    assert progress[-1]["audited_total"] == 0
+
+
+def test_条1_幂等_连跑两遍零差异且第二遍不再烧引擎(tmp_path: Path) -> None:
+    store, _ = _三源一断言(tmp_path)
+    auditor = _FirsthandAuditor({"ev-a": True, "ev-b": False, "ev-c": True})
+
+    def snapshot() -> dict:
+        rows = {row["id"]: row for row in store.list_evidence("r-c1")}
+        return {
+            "evidence": {
+                evidence_id: {
+                    key: row[key] for key in (
+                        "score_crossref", "score_total", "grade", "rating_notes",
+                    )
+                } | {"extra": row["extra"]}
+                for evidence_id, row in rows.items()
+            },
+            "claims": store.get_report("r-c1")["extra"]["claims"],
+        }
+
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+    first, calls_after_first = snapshot(), auditor.audit_calls
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+
+    assert snapshot() == first
+    assert calls_after_first == 1
+    assert auditor.audit_calls == 1, "已审计且逐条留痕的断言不得重烧引擎"
+
+
+def test_条1_force时重跑审计(tmp_path: Path) -> None:
+    store, _ = _三源一断言(tmp_path)
+    auditor = _FirsthandAuditor(
+        {"ev-a": True, "ev-b": True, "ev-c": True}, also_label=True,
+    )
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs",
+    ))
+    assert (auditor.audit_calls, auditor.label_calls) == (1, 0)
+    asyncio.run(backfill_report(
+        store, "r-c1", adapter=auditor, runs_root=tmp_path / "runs", force=True,
+    ))
+    assert auditor.audit_calls == 2
