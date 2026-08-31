@@ -444,6 +444,7 @@ def search(
     store: Any | None = None,
     report_id: str | None = None,
     goal_id: str | None = None,
+    agent_name: str | None = None,
     on_event: EventCallback | None = None,
     force_unavailable: bool = False,
     token: str | None = None,
@@ -591,6 +592,9 @@ def search(
                 "id": f"ev-{report_id}-douyin-{item['platform_item_id']}",
                 "report_id": report_id,
                 "goal_id": goal_id,
+                # §M6-a 货 2（照 RATE-2 5d012a2 xhs 口径）：直落库也要带章归属，
+                # 否则这一章采到的行没有任何章认领，评级章物化时看不见。
+                "agent_name": agent_name,
             }
             for item in normalized
         ])
