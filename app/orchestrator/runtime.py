@@ -45,6 +45,13 @@ from app.plan.cards import (
     CardStatus,
     CardType,
 )
+from app.login_repair import (
+    LOGIN_REQUIRED_REASON,
+    SKIP_ACTION_ID,
+    LoginRepairLedger,
+    build_login_repair_card,
+    retry_pool_read,
+)
 from app.plan.generate import generate_plan
 from app.sources_probe import SourceProbeBlocked, gate_report, probe_gate_mode
 from app.plan.editing import apply_edit, approve
@@ -199,6 +206,9 @@ class RuntimeCoordinator:
         #: §RATE-3：每个评级章物化时定下的片行数表 (research_id, agent_id) → [行数...]
         self._rating_batch_plan: dict[tuple[str, str], list[int]] = {}
         self._schedulers: dict[str, Any] = {}
+        #: §M6-c：登录卡台账（幂等 + 两败 degraded 停手）。进程内状态即可：
+        #: 阻塞档 none，重启后最坏是同一批次再提醒一次，不是卡死面。
+        self._login_repair = LoginRepairLedger()
         self._starting: set[str] = set()
         self._finalized: set[str] = set()
         self._auto_tasks: set[asyncio.Task[Any]] = set()
@@ -889,6 +899,11 @@ class RuntimeCoordinator:
                     await self._emit_scheduler_event(plan.research_id, payload)
                     return
                 await self.events.publish(plan.research_id, payload)
+                if payload.get("type") == "source_unavailable":
+                    # §M6-c 货 2：读池组件报 login_required → 发 LOGIN_REPAIR 卡。
+                    await self._maybe_issue_login_repair_card(
+                        plan.research_id, context.goal_id, agent.agent_id, payload,
+                    )
                 signal = payload.get("data")
                 await context.on_event(signal if isinstance(signal, dict) else payload)
                 return
@@ -2118,6 +2133,54 @@ class RuntimeCoordinator:
                 },
             )
 
+    async def _maybe_issue_login_repair_card(
+        self, research_id: str, goal_id: str | None, agent_id: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        """§M6-c 货 2：`source_unavailable reason=login_required` → LOGIN_REPAIR 卡。
+
+        发卡方是读池组件的事件（导入/探活/读池路径），不是 scheduler——这里只做
+        转译与幂等闸：同一研究同一源同一批次一张卡；degraded 后停手不再发。
+        卡走既有 `card_update` 通道（`_emit_scheduler_event`），行落 events 表。
+        """
+
+        data = payload.get("data") or {}
+        if str(data.get("reason") or "") != LOGIN_REQUIRED_REASON:
+            return
+        platform = str(data.get("source") or data.get("platform") or "")
+        batch_id = str(data.get("batch_id") or "")
+        if not platform or not batch_id:
+            return
+        if not self._login_repair.should_issue(research_id, platform, batch_id):
+            return
+        raw_limit = data.get("limit")
+        card = build_login_repair_card(
+            research_id=research_id, goal_id=goal_id, agent_id=agent_id,
+            platform=platform, batch_id=batch_id,
+            query=str(data.get("query") or ""),
+            window=str(data.get("window") or ""),
+            limit=raw_limit if isinstance(raw_limit, int) else None,
+            created_at=self.now_iso(),
+        )
+        self._login_repair.note_issued(research_id, platform, batch_id)
+        await self._emit_scheduler_event(research_id, card.to_event())
+
+    async def _publish_login_degraded(self, card: Card, *, cause: str) -> None:
+        """degraded 记录沿用 `source_unavailable` 事件形状（已拍：不新建类型）。"""
+
+        target = card.target if isinstance(card.target, dict) else {}
+        await self.events.publish(card.research_id, {
+            "type": "source_unavailable",
+            "data": {
+                "source": str(target.get("platform") or ""),
+                "reason": LOGIN_REQUIRED_REASON,
+                "closed_reason": "login_repair_degraded",
+                "degraded": True, "cause": cause,
+                "batch_id": target.get("batch_id"),
+                "task_continues": True,
+            },
+        })
+
     async def respond_card(self, card_id: str, *, action: str, payload: dict[str, Any]) -> Card:
         card = self.cards[card_id]
         if card.status is not CardStatus.PENDING:
@@ -2156,6 +2219,12 @@ class RuntimeCoordinator:
             ]
             await self.events.publish(card.research_id, card.to_event())
             return card
+        if card.card_type is CardType.LOGIN_REPAIR:
+            # §M6-c 货 3：登录卡不归 scheduler 管（发卡方是读池组件），
+            # 落进 scheduler.answer_card 只会撞「未知卡片」。
+            return await self._respond_login_repair(
+                card, action=action, payload=payload
+            )
         scheduler = self.scheduler_for(card.research_id)
         if scheduler is None:
             card.status = CardStatus.ANSWERED
@@ -2171,6 +2240,82 @@ class RuntimeCoordinator:
         await scheduler.answer_card(card_id, {"action": action, **dict(payload)})
         await self._finalize_if_terminal(card.research_id)
         return self.cards[card_id]
+
+    async def _respond_login_repair(
+        self, card: Card, *, action: str, payload: dict[str, Any]
+    ) -> Card:
+        """§M6-c 货 3：登录卡答复钩子。
+
+        「已补登录」→ 重扫池+重导入+重探活**一次**；仍失败即第二败 → 该源本研究
+        degraded 停手不再发卡（不无限重试，防新的卡死面）；「跳过」→ 直接
+        degraded 记录。占卡在首个 await 之前同步完成（D-013 之鉴：check-and-set
+        中间让出一次控制权，第二路回复就挤得进来）。
+        """
+
+        card.status = CardStatus.ANSWERED
+        target = card.target if isinstance(card.target, dict) else {}
+        platform = str(target.get("platform") or "")
+        choice = str(payload.get("choice") or action)
+        outcome: dict[str, Any] = {"action": action, "choice": choice}
+        skip = (
+            action == SKIP_ACTION_ID or choice == SKIP_ACTION_ID or "跳过" in choice
+        )
+        if skip:
+            self._login_repair.mark_degraded(
+                card.research_id, platform, cause="user_skipped"
+            )
+            outcome["outcome"] = "degraded_skipped"
+            await self._publish_login_degraded(card, cause="user_skipped")
+        else:
+            raw_limit = target.get("limit")
+            try:
+                retry = await asyncio.to_thread(
+                    retry_pool_read,
+                    platform=platform,
+                    query=str(target.get("query") or ""),
+                    window=str(target.get("window") or ""),
+                    limit=raw_limit if isinstance(raw_limit, int) else None,
+                    store=self.store,
+                    report_id=card.research_id,
+                    goal_id=card.goal_id,
+                    agent_name=card.agent_id,
+                    pool_root=target.get("pool_root"),
+                )
+            except Exception as exc:  # noqa: BLE001 —— 重试炸了是缺陷不是登录态
+                # 不算「第二败」、不 degrade：修复后用户还能再点一次（新请求会撞
+                # 幂等闸返回本卡，重发卡则等下一次读池事件）。
+                logger.exception(
+                    "登录卡重试自身失败：%s/%s", card.research_id, platform
+                )
+                outcome.update(
+                    outcome="retry_error", error=f"{type(exc).__name__}: {exc}"
+                )
+            else:
+                for event in retry.events:
+                    await self.events.publish(card.research_id, event)
+                outcome["imported"] = retry.imported
+                if retry.recovered:
+                    self._login_repair.clear_degraded(card.research_id, platform)
+                    outcome["outcome"] = "recovered"
+                else:
+                    self._login_repair.mark_degraded(
+                        card.research_id, platform, cause="retry_failed"
+                    )
+                    outcome.update(
+                        outcome="degraded_after_retry",
+                        failed_batch_id=retry.failed_batch_id,
+                    )
+                    await self._publish_login_degraded(card, cause="retry_failed")
+        card.result = outcome
+        card.resolved_at = self.now_iso()
+        state = self.researches.get(card.research_id)
+        if state is not None:
+            state["cards"] = [
+                card.to_dict() if item.get("card_id") == card.card_id else item
+                for item in state.get("cards", [])
+            ]
+        await self.events.publish(card.research_id, card.to_event())
+        return card
 
     async def pause(self, research_id: str) -> None:
         scheduler = self.scheduler_for(research_id)
