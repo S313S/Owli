@@ -83,6 +83,16 @@ class WebContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, history)
         self.assertIn("loaded.snapshot_source === 'store'", stream)
 
+    def test_工作板与历史页都有报告页入口(self) -> None:
+        # FE-1 货 4：路由补上了还得有人指过去，否则用户只能手敲 URL。
+        board = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
+        history = (WEB / "src" / "HistoricalResearchView.tsx").read_text(encoding="utf-8")
+        for source in (board, history):
+            self.assertIn('data-testid="open-report-page"', source)
+            self.assertIn("/report`", source)
+        # 历史只读页不放操作组件，入口只能是链接（见只读契约那条用例）
+        self.assertIn("<a data-testid=\"open-report-page\"", history)
+
     def test_历史报告_JSON_信封优先展示正文而不是原始载荷(self) -> None:
         history = (WEB / "src" / "HistoricalResearchView.tsx").read_text(encoding="utf-8")
         self.assertIn("function readableReport", history)

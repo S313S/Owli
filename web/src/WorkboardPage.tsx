@@ -46,6 +46,13 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
         <Typography.Title level={3}>{snapshot.title}</Typography.Title>
         <Tag color={statusColor[snapshot.status]}>{snapshot.status_label}</Tag>
         <span className="board-spacer" />
+        {/* FE-1 货 4：跑完了就把报告页入口摆出来，不让用户手敲 URL。
+            这是一条固定链接，不占后端 actions 数组的位置。 */}
+        {snapshot.status === 'completed' && <a
+          className="board-report-link"
+          data-testid="open-report-page"
+          href={`/researches/${encodeURIComponent(researchId)}/report`}
+        >打开报告页 →</a>}
         {snapshot.actions.map((action) => <ActionButtons key={action.id} actions={[action]} />)}
       </div>
       <div className="overall-progress">

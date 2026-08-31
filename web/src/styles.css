@@ -48,6 +48,7 @@ body { margin: 0; background: #f5f5f5; }
 .board-title { display: flex; align-items: center; gap: 12px; }
 .board-title h3 { margin: 0 !important; font-size: 20px !important; }
 .board-spacer { flex: 1; }
+.board-report-link { white-space: nowrap; font-weight: 500; }
 .overall-progress { display: grid; grid-template-columns: max-content 1fr max-content; align-items: center; gap: 12px; margin-top: 16px; }
 .goal-pips { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-top: 12px; }
 .goal-pips .ant-tag { margin: 0; padding: 4px 8px; overflow: hidden; text-align: center; text-overflow: ellipsis; }

@@ -63,7 +63,19 @@ export default function HistoricalResearchView({ snapshot }: { snapshot: Researc
     </Card>
 
     <section className="history-grid">
-      <Card title="报告产物" className="history-report" data-testid="history-report">
+      <Card
+        title="报告产物"
+        className="history-report"
+        data-testid="history-report"
+        // FE-1 货 4：报告页 /researches/<id>/report 有了路由也得有人指过去，
+        // 否则用户只能手敲 URL。只读视图不放 antd Button（历史页无操作组件契约）。
+        extra={reportBody
+          ? <a data-testid="open-report-page"
+               href={`/researches/${encodeURIComponent(snapshot.research_id)}/report`}>
+              打开报告页 →
+            </a>
+          : null}
+      >
         {reportBody
           ? <ReportView researchId={snapshot.research_id} fallback={reportBody} />
           : <Alert
