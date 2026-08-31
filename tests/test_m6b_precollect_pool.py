@@ -158,3 +158,22 @@ def test_导入器池空时退非零并说明原因(tmp_path: Path, capsys) -> N
     readout = json.loads(capsys.readouterr().out)
     assert readout["matched"] == 0
     assert readout["closed_reason"] == "precollect_pool_empty"
+
+
+def test_同note_id重复行去重后只算一条(tmp_path: Path) -> None:
+    """真机读数解释：34 行 jsonl 读出 33 条，差的那条是重复博文。
+
+    §M6-b 货 2 首采「茶叶」34 行里有 1 条同 `note_id` 的重复。去重沿用
+    evidence 既有唯一键，不另造 key（[[upsert-covers-one-key-only]]）。
+    """
+
+    from app.precollect import load_evidence
+
+    rows = [_row("dup"), _row("dup", content="同一条博文的第二次落盘"), _row("other")]
+    _write_batch(tmp_path, "20260901-1200-茶叶", rows)
+    result = load_evidence("weibo", root=tmp_path)
+
+    assert result.rows_seen == 3
+    assert len(result.items) == 2
+    # 去重不算「被过滤掉」：那两个计数是给「窗筛/词筛」用的，别混在一起。
+    assert result.dropped_by_query == 0 and result.dropped_by_window == 0
