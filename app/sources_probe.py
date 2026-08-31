@@ -1,12 +1,19 @@
 """§X-1 货 4：起跑前探活——逐源调适配器做一次最小搜索，判据是「取到数据」不是 HTTP 200。
 
 只调用 `app/sources/*` 的入口，不改源；每源 ≤2 次请求、总超时 ≤30s；凭证从 ~/.owli/.env
-读存在性、不打印；不自动挡起跑（挡不挡归 M6）。
+读存在性、不打印。
+
+§M6-a 货 4：探活结果**可挡起跑**。门禁三档由 `OWLI_SOURCE_PROBE_GATE` 选：
+`off`（默认，不探活）/ `warn`（探活失败只出告警事件）/ `block`（有源探不通就不起跑）。
+默认 off 不是「静默」——off 是压根没探活；只要门禁开着，失败源必留事件痕迹。
+默认之所以是 off：起跑前探活要发真网络请求，而 16 个用例文件走 /api/researches，
+默认打开会污染离线套件与耗时基线；生产/整跑由启动环境显式置 warn 或 block。
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -38,6 +45,48 @@ DEFAULT_PROBE_ITEM_LIMIT = 2
 PROBE_EXTRA_KWARGS: dict[str, dict[str, Any]] = {
     "douyin": {"comment_video_limit": 1},
 }
+
+
+PROBE_GATE_MODES = ("off", "warn", "block")
+
+
+class SourceProbeBlocked(RuntimeError):
+    """门禁 block 档：有源探不通，本次研究不起跑。"""
+
+    def __init__(self, report: Mapping[str, Any]) -> None:
+        failures = report.get("failures") or {}
+        super().__init__(
+            "起跑前探活未通过：" + "；".join(
+                f"{source}={reason}" for source, reason in sorted(failures.items())
+            )
+        )
+        self.report = dict(report)
+
+
+def probe_gate_mode(env: Mapping[str, str] | None = None) -> str:
+    """门禁档位；认不出的写法一律当 off，不猜。"""
+    value = str((env if env is not None else os.environ).get(
+        "OWLI_SOURCE_PROBE_GATE", "off",
+    )).strip().lower()
+    return value if value in PROBE_GATE_MODES else "off"
+
+
+def gate_report(
+    results: Mapping[str, Mapping[str, Any]], *, mode: str,
+) -> dict[str, Any]:
+    """把探活结果变成起跑前的门禁结论。判据是「取到数据」不是 HTTP 200。"""
+    failures = {
+        source: str(result.get("failure") or "unknown")
+        for source, result in results.items()
+        if not result.get("ok")
+    }
+    return {
+        "mode": mode,
+        "probed": sorted(results),
+        "degraded": sorted(failures),
+        "failures": failures,
+        "blocked": bool(failures) and mode == "block",
+    }
 
 
 def _env_keys(env_path: Path) -> set[str]:

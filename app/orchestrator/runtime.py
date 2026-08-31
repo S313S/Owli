@@ -46,6 +46,7 @@ from app.plan.cards import (
     CardType,
 )
 from app.plan.generate import generate_plan
+from app.sources_probe import SourceProbeBlocked, gate_report, probe_gate_mode
 from app.plan.editing import apply_edit, approve
 from app.plan.model import (
     SECTIONED_CHAPTER_KINDS,
@@ -172,6 +173,7 @@ class RuntimeCoordinator:
         auto_confirm: bool | None = None,
         routing_utc_clock: Callable[[], datetime],
         scale_config: ResearchScaleConfig | None = None,
+        source_probe: Callable[[], Any] | None = None,
     ) -> None:
         self.store = store
         self.events = event_buffer
@@ -191,6 +193,8 @@ class RuntimeCoordinator:
         )
         self.unattended = os.getenv("OWLI_UNATTENDED") == "1"
         self.scale_config = scale_config or load_research_scale_config()
+        #: §M6-a 货 4：起跑前探活器；None = 不做门禁（默认，见 sources_probe 模块头）。
+        self._source_probe = source_probe
         self._adapters: dict[str, Any] = {}
         #: §RATE-3：每个评级章物化时定下的片行数表 (research_id, agent_id) → [行数...]
         self._rating_batch_plan: dict[tuple[str, str], list[int]] = {}
@@ -447,6 +451,29 @@ class RuntimeCoordinator:
                 payload={"choice": first["value"], "auto": True},
             )
 
+    async def _gate_on_source_probe(self, research_id: str) -> None:
+        """§M6-a 货 4：起跑前探活结果不许静默——告警或直接挡住这次研究。
+
+        探活器不在场（默认）就什么都不做；在场则一律发一条 `source_probe_gate`
+        事件（通过与否都发），`block` 档再抛 `SourceProbeBlocked` 让起跑失败。
+        探活自身抛错只降级成告警，不把研究拖垮。
+        """
+        if self._source_probe is None:
+            return
+        mode = probe_gate_mode()
+        try:
+            results = await self._source_probe()
+        except Exception as exc:  # noqa: BLE001 —— 探活坏了不等于研究该死
+            logger.warning("起跑前探活失败，按不可判处理：%s", exc)
+            results = {}
+        report = gate_report(results, mode=mode)
+        await self.events.publish(research_id, {
+            "type": "source_probe_gate",
+            "data": {"research_id": research_id, **report},
+        })
+        if report["blocked"]:
+            raise SourceProbeBlocked(report)
+
     async def prepare_research(
         self,
         research_id: str,
@@ -459,6 +486,7 @@ class RuntimeCoordinator:
             if item.get("card_type") == CardType.HISTORY_REUSE.value
         ]
         history_gate_seen = bool(history_cards_at_start)
+        await self._gate_on_source_probe(research_id)
         adapter = self.adapter_factory()
         self._adapters[research_id] = adapter
         plan = await generate_plan(

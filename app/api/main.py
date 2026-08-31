@@ -49,6 +49,7 @@ from app.plan.editing import (
     reset,
 )
 from app.plan.model import Plan
+from app.sources_probe import probe_gate_mode, probe_sources
 from app.plan.store import PlanRevisionConflict, load_plan, save_plan
 from app.replay.import_research import ReplayImportError, import_research
 from app.store.dao import Store
@@ -193,6 +194,11 @@ def create_app(
         auto_confirm=auto_confirm,
         routing_utc_clock=routing_utc_clock,
         scale_config=product_scale_config,
+        # §M6-a 货 4：门禁开着才注入探活器；off（默认）连探活都不发起。
+        source_probe=(
+            None if probe_gate_mode() == "off"
+            else lambda: probe_sources()
+        ),
     )
 
     @asynccontextmanager
@@ -668,9 +674,10 @@ def create_app(
 
     @application.get("/api/sources/probe")
     async def probe_sources_route(sources: str | None = None) -> dict:
-        """§X-1 货 4：起跑前探活。判据是取到数据不是 HTTP 200；不自动挡起跑。"""
-        from app.sources_probe import probe_sources
+        """§X-1 货 4 起跑前探活；判据是取到数据不是 HTTP 200。
 
+        §M6-a 货 4：本路由只报数，挡不挡起跑由 OWLI_SOURCE_PROBE_GATE 决定。
+        """
         wanted = [s.strip() for s in (sources or "").split(",") if s.strip()] or None
         try:
             results = await probe_sources(wanted)
