@@ -79,6 +79,8 @@ def test_调研规模配置默认值环境无关() -> None:
         "web_search": 20,
         "x": 10,
         "xhs": 25,
+        # §M6-b：微博读本机预采集池，无 API 计费也无限流，与 xhs 同档。
+        "weibo": 25,
         "douyin": 25,
         "reddit": 25,
     }

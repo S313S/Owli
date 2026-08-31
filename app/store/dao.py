@@ -28,6 +28,7 @@ _NORM_NONE_REASONS = {
 _PRIMARY_METRICS = {
     "hacker_news": "points", "product_hunt": "votes_count", "x": "like_count",
     "bilibili": "view", "xhs": "liked_count", "douyin": "digg_count",
+    "weibo": "liked_count",
     "reddit": None, "web_search": None,
 }
 _SCORE_FIELDS = (

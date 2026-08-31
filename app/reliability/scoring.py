@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 
+from app.platforms import baselines as platform_baselines
+from app.platforms import primary_metrics as platform_primary_metrics
+
 SCORE_FIELDS = (
     "score_authority",
     "score_freshness",
@@ -18,24 +21,10 @@ SCORE_FIELDS = (
     "score_independence",
 )
 
-PLATFORM_BASELINES: dict[str, dict[str, int]] = {
-    "product_hunt": dict(zip(SCORE_FIELDS, (2, 2, 0, 1, 1))),
-    "hacker_news": dict(zip(SCORE_FIELDS, (1, 1, 1, 2, 2))),
-    "x": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 2))),
-    "web_search": dict(zip(SCORE_FIELDS, (1, 1, 1, 1, 1))),
-    "reddit": dict(zip(SCORE_FIELDS, (0, 1, 0, 0, 2))),
-    "xhs": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
-    "douyin": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
-    "bilibili": dict(zip(SCORE_FIELDS, (1, 1, 0, 2, 1))),
-    # §M6-a 货 6（M6-0 拍板，source-reliability.md §2 普通平台族三行）：
-    # 缺键时 scoring:240 / audit:98 / validation:957 一律回落 web_search
-    # （1/1/1/1/1 = 5 C）——文档写「微博/公众号交叉 0」，代码实际给的是 1。
-    # TODO(M6-b)：本表是 source-reliability.md §2 的手抄镜像（第七张表），
-    # 但平台可以没有源模块（bilibili/weibo/wechat_mp），收编不进 SOURCE_SPEC。
-    "weibo": dict(zip(SCORE_FIELDS, (1, 2, 0, 1, 1))),
-    "zhihu": dict(zip(SCORE_FIELDS, (1, 1, 1, 1, 1))),
-    "wechat_mp": dict(zip(SCORE_FIELDS, (1, 1, 0, 1, 1))),
-}
+#: 第七张手抄表已收编（§M6-b 货 6）：数值只在 `app/platforms.py` 写一次，
+#: 这里保留原名与原形状，所有消费点（scoring:240 / audit:98 / validation:957 /
+#: crossref:221）一行不用改。缺键仍回落 web_search，语义不变。
+PLATFORM_BASELINES: dict[str, dict[str, int]] = platform_baselines()
 
 AUTHORITY_SCORES = {
     "first_party_official": 2,
@@ -95,22 +84,11 @@ NORM_METHODS = {
     "log_zscore_in_window",
     "none",
 }
-PRIMARY_METRICS = {
-    "hacker_news": "points",
-    "product_hunt": "votes_count",
-    "x": "like_count",
-    "bilibili": "view",
-    "xhs": "liked_count",
-    "douyin": "digg_count",
-    # §M6-b 货 3 登记：微博池内行带 liked_count，本可归一化，但这张表在
-    # `app/store/dao.py:28` 有一份**手抄镜像**（第九张表，禁区文件），两边不一致
-    # 时 dao 的 norm_context 校验会当场拒收整批证据。加 weibo 要两处一起加，
-    # 已呈拍；在拍板前微博一律不归一化（normalized_score=NULL），不是漏了。
-    # 另注：本表 `.get()` 取不到键与「登记了但没指标」同样返回 None——
-    # 加源忘了这里不会报错，只会静默不归一化，是第八张手抄表。
-    "reddit": None,
-    "web_search": None,
-}
+#: 第八张手抄表已收编（§M6-b 货 6）。注意 `.get()` 取不到键与「登记了但没有
+#: 指标」同样返回 None——收编后前者不再可能发生（平台表就是全集）。
+#: 微博的主指标待拍：`app/store/dao.py:28` 有一份禁区里的镜像，两边不一致
+#: 会让整批证据入库时被拒收（§M6-b 呈拍二），拍板前微博一律不归一化。
+PRIMARY_METRICS = platform_primary_metrics()
 
 
 def _parse_time(value: str) -> datetime:
