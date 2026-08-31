@@ -35,7 +35,10 @@ _FORBIDDEN_FIELDS = {
 # 有大量海外产品讨论，Reddit 却几乎没有国内产品讨论，因此两档的许可范围有意不对称。
 # 放宽最多引入一个规划器可以不选的噪音源；卡死则会让该源永远不可达（D-013 即如此）。
 _SOURCE_MARKET_PROFILES = {
-    "cn_product": {"web_search", "x", "xhs", "douyin"},
+    # §M6-b：微博只进 cn_product——它由本机 MediaCrawler 预采集池供货，
+    # 池里是中文关键词采的国内热点面，进 global_product 只会让规划器选一个
+    # 必然空手而归的源（规则 23 选不出 ≠ 选得出但没货，后者更难查）。
+    "cn_product": {"web_search", "x", "xhs", "douyin", "weibo"},
     "global_product": {
         "web_search", "x", "hacker_news", "product_hunt", "reddit", "xhs",
         "douyin",
