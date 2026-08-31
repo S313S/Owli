@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from app.precollect import load_evidence
+from app.precollect import LOGIN_REQUIRED_REASON, load_evidence
 from app.reliability.scoring import normalize_evidence_metrics
 from app.sources.spec import SourceSpec
 
@@ -41,11 +41,12 @@ def _emit(on_event: EventCallback | None, event_type: str, **data: Any) -> None:
 
 
 def _unavailable(
-    on_event: EventCallback | None, *, closed_reason: str, **fields: Any
+    on_event: EventCallback | None, *, closed_reason: str,
+    reason: str = "tool_unavailable", **fields: Any,
 ) -> list[dict[str, Any]]:
     _emit(
         on_event, "source_unavailable",
-        reason="tool_unavailable", closed_reason=closed_reason,
+        reason=reason, closed_reason=closed_reason,
         provider="media_crawler", task_continues=True, **fields,
     )
     return []
@@ -82,12 +83,35 @@ def search(
         window=window or None,
         limit=limit, root=pool_root, now=moment,
     )
+    # §M6-c 货 1：**最新批次**因未登录失败 → 事件 reason 直接写 login_required
+    # （新增 reason 取值、沿用 source_unavailable 事件形状，不新建类型）。
+    # 老批次还有货时照样发——卡片阻塞档是 none，通知不拦研究；query/window/limit
+    # 一并带上，货 3 的「重扫池+重导入+重探活」要按原口径重放这一次读取。
+    login_failed = result.latest_failure_reason == LOGIN_REQUIRED_REASON
+    login_fields: dict[str, Any] = {
+        "reason": LOGIN_REQUIRED_REASON, "batch_id": result.latest_batch_id,
+        "query": needle, "window": window or "", "limit": limit,
+    }
     if not result.items:
+        if login_failed:
+            return _unavailable(
+                on_event, closed_reason=result.closed_reason,
+                batches_scanned=result.batches_scanned, rows_seen=result.rows_seen,
+                dropped_by_query=result.dropped_by_query,
+                dropped_by_window=result.dropped_by_window,
+                **login_fields,
+            )
         return _unavailable(
             on_event, closed_reason=result.closed_reason,
             batches_scanned=result.batches_scanned, rows_seen=result.rows_seen,
             dropped_by_query=result.dropped_by_query,
             dropped_by_window=result.dropped_by_window,
+        )
+    if login_failed:
+        _emit(
+            on_event, "source_unavailable",
+            closed_reason=LOGIN_REQUIRED_REASON, provider="media_crawler",
+            task_continues=True, **login_fields,
         )
 
     fetched_at = moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")

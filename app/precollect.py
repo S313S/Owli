@@ -34,13 +34,18 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 __all__ = [
-    "MANIFEST_NAME", "PLATFORM_PROFILES", "POOL_ROOT", "PlatformProfile",
-    "PoolContractError", "PoolReadResult", "PrecollectBatch",
-    "iter_batches", "load_evidence", "pool_root", "profile_for", "to_evidence",
+    "LOGIN_REQUIRED_REASON", "MANIFEST_NAME", "PLATFORM_PROFILES", "POOL_ROOT",
+    "PlatformProfile", "PoolContractError", "PoolReadResult", "PrecollectBatch",
+    "iter_batches", "latest_login_failure", "load_evidence", "pool_root",
+    "profile_for", "to_evidence",
 ]
 
 MANIFEST_NAME = "manifest.json"
 POOL_ROOT = Path.home() / ".owli" / "precollect"
+
+#: §M6-c 登录卡认的失败原因；判据 = **最新批次** manifest `status=failed` 且
+#: `failure.reason` 等于它（老批次的失败残骸不算——那是清理策略的事，不是登录卡的事）。
+LOGIN_REQUIRED_REASON = "login_required"
 
 #: 批次状态闭集；池里出现别的值一律当 `failed` 读（宁可报失败也不假绿）。
 BATCH_STATUSES = frozenset({"ok", "partial", "failed"})
@@ -310,6 +315,10 @@ class PoolReadResult:
     dropped_by_query: int = 0
     dropped_by_window: int = 0
     failure_reasons: tuple[str, ...] = ()
+    #: §M6-c：最新批次的读数。`latest_failure_reason` 只在**最新批次** `failed`
+    #: 时非空——登录卡的判据钉在这上面，老批次的失败残骸不触发发卡。
+    latest_batch_id: str | None = None
+    latest_failure_reason: str | None = None
 
     @property
     def closed_reason(self) -> str:
@@ -366,12 +375,38 @@ def load_evidence(
             seen.add(item["platform_item_id"])
             items.append(item)
     items.sort(key=lambda item: item.get("published_at") or "", reverse=True)
+    latest = batches[0] if batches else None
     return PoolReadResult(
         items=items[:limit] if limit else items,
         batches_scanned=len(batches), rows_seen=rows_seen,
         dropped_by_query=dropped_query, dropped_by_window=dropped_window,
         failure_reasons=tuple(reasons),
+        latest_batch_id=latest.batch_id if latest is not None else None,
+        latest_failure_reason=(
+            latest.failure_reason
+            if latest is not None and latest.status == "failed"
+            else None
+        ),
     )
+
+
+def latest_login_failure(
+    platform: str, *, root: Path | str | None = None
+) -> str | None:
+    """最新批次因未登录而失败时返回其 batch_id，否则 None（§M6-c）。
+
+    这是登录卡「重试」后的复核尺子：用户答「已补登录」→ 本机重跑预采集 →
+    池里应出现**更新的成功批次**顶掉失败批次；判据落在池状态上，
+    不落在「重试函数退没退出异常」上（[[verdict-is-data-not-http200]]）。
+    """
+
+    batches = iter_batches(platform, root=root)
+    if not batches:
+        return None
+    latest = batches[0]
+    if latest.status == "failed" and latest.failure_reason == LOGIN_REQUIRED_REASON:
+        return latest.batch_id
+    return None
 
 
 def _matches(item: Mapping[str, Any], needle: str) -> bool:
