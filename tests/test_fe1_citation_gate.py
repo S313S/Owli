@@ -80,3 +80,22 @@ def test_提示词写死了层级与方括号约束并真的下发到写手(tmp_
     assert "## 证据缺口" in body  # 骨架示例里要有形可依
     # 写手照新提示词写出的形状（证据缺口写成 `##` 同级）必须能过关
     assert result.succeeded is True
+
+
+def test_报告页不因快照接口404而整页失败() -> None:
+    """D-030：8721 实测 /api/researches/<id> 对历史调研 404、而 /report 是 200。
+
+    快照只用来取标题，拿不到就退成显示 research_id，报告本身能不能读由
+    ReportView 自己报——不能让取标题失败拖垮整个报告页。
+    """
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "web" / "src" / "ReportPage.tsx").read_text(
+        encoding="utf-8"
+    )
+    # 只在「快照没到且没报错」时转圈；报错了照样往下渲染
+    assert "if (!snapshot && !error)" in source
+    assert "snapshot?.title ?? researchId" in source
+    assert 'data-testid="snapshot-unavailable"' in source
+    # 报告体不受快照影响，始终挂 ReportView
+    assert "<ReportView researchId={researchId} />" in source
