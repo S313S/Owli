@@ -2272,8 +2272,10 @@ class RuntimeCoordinator:
                 for source in capability.get("sources") or []:
                     planned[str(source)] += 1
                     first_goal.setdefault(str(source), goal.goal_id)
-        yielded: Counter[str] = Counter(
-            str(row.get("platform") or "") for row in self.store.list_evidence(research_id)
+        rows = self.store.list_evidence(research_id)
+        yielded: Counter[str] = Counter(str(row.get("platform") or "") for row in rows)
+        by_chapter: Counter[str] = Counter(
+            str(row.get("agent_name") or "") for row in rows
         )
         unavailable: dict[str, dict[str, Any]] = {}
         for event in self.store.list_events_window(research_id, created_since="", limit=5000):
@@ -2297,7 +2299,55 @@ class RuntimeCoordinator:
             "first_goal": first_goal,
             "missing": [s for s in candidates if yielded.get(s, 0) == 0],
             "degraded": [s for s in candidates if s in unavailable and yielded.get(s, 0) > 0],
+            # §M6-a 货 3：逐采集章「计划要 N 条 vs 实际入库几条」。
+            "chapters": self._chapter_yield_rows(plan, by_chapter),
         }
+
+    async def _publish_chapter_yield_shortfalls(
+        self, research_id: str, chapters: list[dict[str, Any]],
+    ) -> None:
+        """§M6-a 货 3：逐章缺口单独发事件——判据落库上不落日志上。"""
+        for entry in chapters:
+            if int(entry.get("gap") or 0) <= 0:
+                continue
+            await self.events.publish(research_id, {
+                "type": "chapter_yield_shortfall",
+                "data": {"research_id": research_id, **entry},
+            })
+
+    def _chapter_yield_rows(
+        self, plan: Plan | None, by_chapter: Mapping[str, int],
+    ) -> list[dict[str, Any]]:
+        """§M6-a 货 3：给 `closing.expected_count` 一个消费点。
+
+        它此前只在 `plan/chapters.py` 校验类型、全项目没有任何读取处——
+        「每源出货 ≥N 条」因此一直没有尺子。这里按 `evidence.agent_name`
+        认章归属逐章对账；章归属为空的行（货 2 之前的直落库源）算不到任何
+        章头上，会表现为缺口，不静默。
+        """
+        entries: list[dict[str, Any]] = []
+        for goal in (plan.goals if plan is not None else []):
+            for agent in goal.agents:
+                chapter = agent.chapter or {}
+                if chapter.get("chapter_type") != "collection":
+                    continue
+                expected = (chapter.get("closing") or {}).get("expected_count")
+                if not isinstance(expected, int) or isinstance(expected, bool):
+                    continue
+                capability = (
+                    agent.capability if isinstance(agent.capability, dict) else {}
+                )
+                got = int(by_chapter.get(agent.agent_id, 0))
+                entries.append({
+                    "goal_id": goal.goal_id,
+                    "agent_id": agent.agent_id,
+                    "sources": [str(item) for item in (capability.get("sources") or [])],
+                    "entity": agent.entity,
+                    "expected": expected,
+                    "yielded": got,
+                    "gap": max(expected - got, 0),
+                })
+        return entries
 
     def _source_yield_entries(self, summary: dict[str, Any], fallback_goal: str) -> list[dict[str, Any]]:
         """把源对账结果变成缺失清单条目（chapter_id = source/<platform>，两路落盘自动带上）。"""
@@ -2584,8 +2634,12 @@ class RuntimeCoordinator:
                 "missing": yield_summary["missing"],
                 "degraded": yield_summary["degraded"],
                 "unavailable": yield_summary["unavailable"],
+                "chapters": yield_summary["chapters"],
             },
         })
+        await self._publish_chapter_yield_shortfalls(
+            research_id, yield_summary["chapters"],
+        )
         if report_format == "markdown":
             report_validators = [
                 "file_exists",
