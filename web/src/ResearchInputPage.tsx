@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Input, Space, Typography } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import ActionCardView from './ActionCardView'
+import { backendOrigin } from './origin'
 import type { ActionCard, ApiEnvelope, NormalizedEvent, ServerAction } from './types'
 
 const { TextArea } = Input
@@ -127,7 +128,8 @@ export default function ResearchInputPage() {
       openRecallStream(result.data.research_id)
       setStatusMessage('研究已创建，历史匹配在后台继续')
     } catch {
-      setError('没能提交需求：本地服务没有响应（127.0.0.1:8721）。你输入的内容已保留，确认 Owli 仍在运行后可直接重试')
+      // FE-1：报真实来源，不写死 8721
+      setError(`没能提交需求：本地服务没有响应（${backendOrigin()}）。你输入的内容已保留，确认 Owli 仍在运行后可直接重试`)
       setSubmitting(false)
     }
   }

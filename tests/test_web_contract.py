@@ -8,14 +8,32 @@ WEB = ROOT / "web"
 
 
 class WebContractTest(unittest.TestCase):
-    def test_需求输入_计划编辑_实时工作板三个路由(self) -> None:
+    def test_需求输入_计划编辑_实时工作板_报告四个路由(self) -> None:
         app = WEB / "src" / "App.tsx"
         self.assertTrue(app.is_file(), "web/src/App.tsx 尚未创建")
         source = app.read_text(encoding="utf-8")
         self.assertIn("<ResearchInputPage", source)
         self.assertIn("<PlanEditorPage", source)
         self.assertIn("<WorkboardPage", source)
-        self.assertNotIn("ReportPage", source)
+        # FE-1：报告页此前没有路由，/researches/<id>/report 会落到兜底渲染成
+        # 需求输入页（任意端口皆然，含 8721），用户因此「找不到报告」。
+        self.assertIn("<ReportPage", source)
+        self.assertIn(r"^\/researches\/([^/]+)\/report$", source)
+
+    def test_前端不写死后端地址(self) -> None:
+        sources = list((WEB / "src").glob("**/*.ts")) + list((WEB / "src").glob("**/*.tsx"))
+        self.assertTrue(sources, "web/src 尚无 TypeScript 源码")
+        for path in sources:
+            body = "\n".join(
+                line for line in path.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            self.assertNotIn(
+                "127.0.0.1:8721", body,
+                f"{path.name} 写死了后端地址；展示用地址请走 backendOrigin()",
+            )
+        origin = (WEB / "src" / "origin.ts").read_text(encoding="utf-8")
+        self.assertIn("window.location.host", origin)
 
     def test_计划编辑器包含_origin_恢复_追问_批准冻结与409提示(self) -> None:
         editor = WEB / "src" / "PlanEditorPage.tsx"
