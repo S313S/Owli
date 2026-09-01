@@ -518,3 +518,24 @@ def test_片被验证器拒_失败原因带给同轮后面的片(tmp_path: Path)
     assert "本章上一批判定失败原因" in adapter.bodies[2]
     assert "rating_notes_matches_regex" in adapter.bodies[2]
     assert "不符合五段式格式" in adapter.bodies[3]
+
+
+# ------------------------------------- §M6-e 货 4：规划期规则 25 咬合（骨架 subjects）
+
+
+def test_m6e_骨架提示词禁止把题目领域当研究实体() -> None:
+    """§M6-e 整跑前小跑 r-5cb1314f1c83 的死因：题面「茶叶领域社媒竞品洞察」
+    只给了领域没点名主体，骨架把「中国茶叶品牌社媒」当成一个 subject 写进闭集，
+    段级 lint 规则 25 要求每个 subject 都有同名实体的采集章——段规划器不可能
+    给一个领域名配采集章，而**段级重试只重生成 goal 段、从不重生成骨架**，
+    于是三轮全败、计划不保存、研究 failed。修在骨架提示词这一侧。
+    """
+    from app.plan.generate import _skeleton_prompt
+
+    prompt = _skeleton_prompt("茶叶领域社媒竞品洞察", [])
+    assert "具体实体专名" in prompt
+    assert "不得写进 subjects" in prompt
+    # 把规则 25 的下游义务写在产 subjects 的那一步，别等段级才说
+    assert "每一个 subject 都有一个同名实体的采集章" in prompt
+    # 题面只给领域时要自己点主体，而不是把领域名塞进闭集
+    assert "不要把领域名当主体" in prompt
