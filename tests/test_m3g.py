@@ -125,9 +125,11 @@ def test_中文市场选源覆盖表进入规划提示且_lint_拦_HN_PH() -> No
     )
 
     assert '"market_profile":"cn_product"' in prompt
-    # §M6-b：微博加入 cn_product 许可名单（本机预采集池供货的国内热点面）。
+    # §M6-b/§M6-d：微博与公众号加入 cn_product 许可名单（本机预采集池供货的
+    # 国内热点面与行业长文面）。
     assert (
-        '"applicable_sources":["douyin","web_search","weibo","x","xhs"]' in prompt
+        '"applicable_sources":["douyin","web_search","wechat_mp","weibo","x","xhs"]'
+        in prompt
     )
 
     plan = make_plan_dict()
@@ -150,7 +152,7 @@ def test_中文市场选源覆盖表进入规划提示且_lint_拦_HN_PH() -> No
 
     errors = lint(plan)["errors"]
     assert any("规则23" in item and "hacker_news" in item
-               and "web_search,weibo,x" in item for item in errors)
+               and "web_search,wechat_mp,weibo,x" in item for item in errors)
 
     ok = _collector("web-collector", "goal-1", "web_search")
     ok["chapter"] = {**bad["chapter"], "closing": {**bad["chapter"]["closing"],

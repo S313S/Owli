@@ -38,7 +38,8 @@ _SOURCE_MARKET_PROFILES = {
     # §M6-b：微博只进 cn_product——它由本机 MediaCrawler 预采集池供货，
     # 池里是中文关键词采的国内热点面，进 global_product 只会让规划器选一个
     # 必然空手而归的源（规则 23 选不出 ≠ 选得出但没货，后者更难查）。
-    "cn_product": {"web_search", "x", "xhs", "douyin", "weibo"},
+    # §M6-d：公众号同理只进 cn_product——池里是中文关键词采的国内行业长文。
+    "cn_product": {"web_search", "x", "xhs", "douyin", "weibo", "wechat_mp"},
     "global_product": {
         "web_search", "x", "hacker_news", "product_hunt", "reddit", "xhs",
         "douyin",

@@ -73,7 +73,12 @@ PLATFORMS: dict[str, PlatformProfile] = {
     "weibo": PlatformProfile("微博", (1, 2, 0, 1, 1), "liked_count"),
     "zhihu": PlatformProfile(
         "知乎", (1, 1, 1, 1, 1), None, frozenset({"zhihu.com"})),
-    "wechat_mp": PlatformProfile("微信公众号", (1, 1, 0, 1, 1)),
+    # 公众号文章全在同一个域名下。不进白名单，两篇**不同公众号**的文章会被判
+    # 「域名相同 → 同簇」，交叉维天花板掉一档；进了才按平台惯例认作不同主体。
+    # `crossref.py:128` 那份禁区镜像已随本包同步（2026-09-02 用户拍板解禁一处）。
+    "wechat_mp": PlatformProfile(
+        "微信公众号", (1, 1, 0, 1, 1), None,
+        frozenset({"mp.weixin.qq.com"})),
 }
 
 
