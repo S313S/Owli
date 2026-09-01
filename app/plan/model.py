@@ -102,7 +102,10 @@ def rating_rows_path(collector_output_path: str) -> str:
 #: 50 行 ≈ 3.7 min；RATE-3 第 1 轮重放实测 goal-1（web_search 行，正文长）50 行的片
 #: 三章全在 305 s 被本机代理掐流（goal-2 小红书行 50 行只要 127 s）——按提货单坑 2
 #: 「被掐就降到 30」落成默认值；`OWLI_RATING_BATCH_ROWS` 仍可按环境调。
-RATING_BATCH_ROWS = 20
+#: §M6-e 货 1（防掐流，用户拍板）：关账整跑前再压 20 → 15——RATE-3 第 3 轮 20 行片
+#: 仍有片贴着 300 s 适配器超时线跑（`claude.py` 300 s 不动、片钟 330 s 不加时间），
+#: 只能继续往下切片；字节封顶 32 KB 与并发均不动。
+RATING_BATCH_ROWS = 15
 
 #: §RATE-3 第 2 轮实测：行的「重量」按源差 6 倍——web_search 行带 1200 字正文
 #: ≈ 3.3 KB/行，小红书行 ≈ 0.57 KB/行；同样 30 行/片，前者 ≥300 s 被引擎超时掐掉、

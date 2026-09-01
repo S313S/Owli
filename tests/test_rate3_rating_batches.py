@@ -24,8 +24,9 @@ def test_按批大小切片_135行切成50_50_35() -> None:
     assert rating_batches(50, 50) == [50]
     assert rating_batches(25, 30) == [25]
     assert rating_batches(0) == []
-    # 默认批大小 20（第 1 轮 50 行 / 第 2 轮 30 行的 web_search 片都在 300 s 被掐）。
-    assert rating_batches(135) == [20, 20, 20, 20, 20, 20, 15]
+    # 默认批大小 15（§M6-e 货 1 由 20 再压；第 1 轮 50 行 / 第 2 轮 30 行的
+    # web_search 片都在 300 s 被掐，第 3 轮 20 行片仍贴线）。
+    assert rating_batches(135) == [15] * 9
     assert rating_batches(130, 30) == [30, 30, 30, 30, 10]
     assert rating_batch_path("goals/goal-1/data-collection.rows.json", 2) == (
         "goals/goal-1/data-collection.rows.2.json"
@@ -121,13 +122,34 @@ def test_批大小可由环境变量下调_非法值回默认(monkeypatch) -> No
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "30")
     assert RuntimeCoordinator._rating_batch_rows() == 30
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "abc")
-    assert RuntimeCoordinator._rating_batch_rows() == 20
+    assert RuntimeCoordinator._rating_batch_rows() == 15
     monkeypatch.setenv("OWLI_RATING_BATCH_ROWS", "0")
-    assert RuntimeCoordinator._rating_batch_rows() == 20
+    assert RuntimeCoordinator._rating_batch_rows() == 15
     monkeypatch.setenv("OWLI_RATING_BATCH_BYTES", "9000")
     assert RuntimeCoordinator._rating_batch_bytes() == 9000
     monkeypatch.setenv("OWLI_RATING_BATCH_BYTES", "-1")
     assert RuntimeCoordinator._rating_batch_bytes() == 32_000
+
+
+def test_m6e_默认评级片15行_字节封顶不变() -> None:
+    """§M6-e 货 1：关账整跑前的防掐流口径——片行数默认 15，字节封顶仍 32 KB。
+
+    锁常量本身（防后续包无声改回），并验轻行按 15 行封片、重行仍按字节先封。
+    """
+    from app.plan.model import (
+        RATING_BATCH_BYTES, RATING_BATCH_ROWS, rating_batch_sizes,
+    )
+
+    assert RATING_BATCH_ROWS == 15
+    assert RATING_BATCH_BYTES == 32_000
+
+    light = [{"i": i, "t": "x" * 100} for i in range(40)]
+    assert rating_batch_sizes(light) == [15, 15, 10]
+
+    heavy = [{"i": i, "t": "字" * 4000} for i in range(8)]
+    sizes = rating_batch_sizes(heavy)
+    assert sizes and max(sizes) < RATING_BATCH_ROWS
+    assert sum(sizes) == 8
 
 
 # ---------------------------------------------------------------- 货 2：按片跑
