@@ -11,9 +11,15 @@ Owli 核心不返工。
     <root>/<platform>/<batch_id>/manifest.json          批次自述
     <root>/<platform>/<batch_id>/**/jsonl/*contents*.jsonl   采集产物（原样）
     <root>/<platform>/<batch_id>/**/jsonl/*comments*.jsonl   评论（本包未开，读取端忽略）
+    <root>/<platform>/<batch_id>/snapshots/*.html            正文快照（§M6-d，见下）
 
 MediaCrawler 把 `SAVE_DATA_PATH` 指到批次目录即可，产物落在
 `<batch>/<platform>/jsonl/` 下，无需二次搬运（`tools/async_file_writer.py:37-44`）。
+
+**permalink 口径（§M6-d 货 2，2026-09-02 用户拍板）**：固定永久链优先；只在
+补充/兜底面收临时签名链，且**必须伴一份正文 HTML 快照落盘**，快照路径写在行内
+（相对批次目录），缺快照当场拒收这一行。理由见 `_require_snapshot`——临时链会
+在交付之后才过期，「链接可追溯」这条判据验收当天全绿、一周后全断。
 
 `manifest.json` 的 `status` 只有三种值：`ok` / `partial` / `failed`；失败批次带
 `failure.reason`，其中 `login_required` / `qrcode_timeout` 是 §M6-c 登录卡要认的
@@ -207,6 +213,28 @@ class PlatformProfile:
     baseline_tag: str = ""
     #: 五段式 rating_notes 的五个理由，顺序同 scoring.SCORE_FIELDS，各 ≤14 字。
     rating_reasons: tuple[str, ...] = ()
+    #: 证据的内容类型（`dao._CONTENT_KINDS` 闭集）。微博是网友短讯，公众号是
+    #: 署名长文，两者在交叉维里不是一回事，所以不该共用一个硬编码值。
+    content_kind: str = "user_opinion"
+    #: 采集分层（`schema.sql` 的 `fetch_method` CHECK）；行内同名字段可覆盖
+    #: ——同一平台可能有两条发现路（如公众号的客户端搜一搜 vs 搜狗 curl），
+    #: 让本机脚本照实写，比在这里替它猜一个诚实。
+    fetch_method: str = "media_crawler"
+    #: 固定永久链的正则。非空即启用**「临时链必附正文快照」闸门**（§M6-d 货 2
+    #: 口径 2）：permalink 不匹配 = 临时签名链，几小时到一天就过期，那时报告里
+    #: 的角标点开是空的——所以临时链只在**同时落盘了正文快照**时才收。
+    permanent_permalink_pattern: str = ""
+    #: 行内正文快照的相对路径字段名（相对批次目录）。
+    snapshot_key: str = ""
+
+
+#: `schema.sql:82-84` 的 `fetch_method` CHECK 闭集。在池契约这层先挡一道，
+#: 是为了让「本机脚本写错采集分层」当场报错、而不是等 upsert 时被 sqlite
+#: 的 CHECK 拒收**整批**证据（[[upsert-covers-one-key-only]] 同类教训）。
+FETCH_METHODS = frozenset({
+    "official_api", "search_index", "third_party_api",
+    "media_crawler", "browser_agent", "manual",
+})
 
 
 PLATFORM_PROFILES: dict[str, PlatformProfile] = {
@@ -230,6 +258,33 @@ PLATFORM_PROFILES: dict[str, PlatformProfile] = {
             "平台社区基线", "搜索近期博文", "缺断言血缘簇",
             "正文可取评论未开", "普通用户短讯",
         ),
+    ),
+    # §M6-d 货 2。字段名由本机发现脚本产出（`owli-precollect/`，不进仓），
+    # 不是某个第三方库的产物格式——所以这张表就是这些字段名的唯一定义处。
+    # 公众号没有可比的互动量（阅读数/在看数未登录抓不到），`platforms.py` 里
+    # 它的 primary_metric 因此是 None：`raw_metrics` 照收原始值，归一化整批
+    # 走 `norm_method=none / reason=no_metric_available`，不编分数。
+    "wechat_mp": PlatformProfile(
+        source_type="article",
+        item_id_key="article_id",
+        content_key="content",
+        permalink_key="url",
+        permalink_template="https://mp.weixin.qq.com/s/{item_id}",
+        author_key="account_name",
+        author_id_key="account_biz",
+        metric_keys={"read_count": "read_count", "like_count": "like_count"},
+        created_key="publish_time",
+        baseline_tag="baseline:wechat_mp@v1",
+        rating_reasons=(
+            "认证主体待核", "发布时间可取", "缺断言血缘簇",
+            "正文全无评论", "账号多为自营",
+        ),
+        content_kind="industry_view",
+        fetch_method="browser_agent",
+        # 固定链 = `/s/` 加一段 base64url 串，**不带查询参数**；带
+        # `?src=11&timestamp=&signature=` 的是临时签名链（勘察 §一实证）。
+        permanent_permalink_pattern=r"^https://mp\.weixin\.qq\.com/s/[A-Za-z0-9_-]+/?$",
+        snapshot_key="snapshot_path",
     ),
 }
 
@@ -270,6 +325,13 @@ def to_evidence(
     permalink = str(row.get(profile.permalink_key) or "").strip()
     if not permalink:
         permalink = profile.permalink_template.format(item_id=item_id)
+    snapshot = _require_snapshot(row, profile, batch, permalink=permalink)
+    fetch_method = str(row.get("fetch_method") or "").strip() or profile.fetch_method
+    if fetch_method not in FETCH_METHODS:
+        raise PoolContractError(
+            f"{platform} 池内行的 fetch_method={fetch_method!r} 不在采集分层闭集"
+            f"（schema.sql）：{sorted(FETCH_METHODS)}"
+        )
     content = str(row.get(profile.content_key) or "").strip()
     baseline = PLATFORM_BASELINES.get(platform)
     if baseline is None:
@@ -298,8 +360,8 @@ def to_evidence(
             "profile_url": str(row.get("profile_url") or ""),
         },
         "source_keyword": str(row.get("source_keyword") or "") or None,
-        # 采集分层第三档：本机自备爬虫，不是官方 API 也不是第三方付费 API。
-        "fetch_method": "media_crawler",
+        # 采集分层第三档：本机自备爬虫/客户端，不是官方 API 也不是第三方付费 API。
+        "fetch_method": fetch_method,
         "published_at": _iso(row.get(profile.created_key), unit=profile.created_unit),
         "fetched_at": (
             fetched_at or collected or _iso(row.get("last_modify_ts"), unit="ms")
@@ -310,11 +372,47 @@ def to_evidence(
         "rating_notes": _rating_notes(baseline, profile),
         "rated_by": profile.baseline_tag,
         "extra": {
-            "content_kind": "user_opinion",
+            "content_kind": profile.content_kind,
             "provider": "media_crawler",
             "precollect_batch": batch.batch_id if batch is not None else None,
+            # 快照路径**相对批次目录**存：池目录会随定容清理搬走/删掉，存绝对
+            # 路径将来只会指向一个不存在的地方。批次没了快照也没了，那是清理
+            # 策略的既定后果，不在这里假装还在。
+            "content_snapshot": snapshot or None,
+            "permalink_kind": (
+                "permanent" if not profile.permanent_permalink_pattern
+                or re.match(profile.permanent_permalink_pattern, permalink)
+                else "temporary"
+            ),
         },
     }
+
+
+def _require_snapshot(
+    row: Mapping[str, Any], profile: PlatformProfile,
+    batch: PrecollectBatch | None, *, permalink: str,
+) -> str:
+    """临时签名链必须伴正文快照落盘（§M6-d 口径 2），缺一即拒收这一行。
+
+    为什么这道闸非有不可：临时链几小时到一天就过期，过期后报告角标点开是
+    「参数错误」页——**「链接可追溯」这条核心判据会在交付之后才失效**，
+    验收当天全绿、一周后全断。快照是这类链唯一的兜底证据。
+    """
+
+    if not profile.permanent_permalink_pattern:
+        return ""
+    snapshot = str(row.get(profile.snapshot_key) or "").strip()
+    if re.match(profile.permanent_permalink_pattern, permalink):
+        return snapshot
+    if not snapshot:
+        raise PoolContractError(
+            f"临时签名链必须附正文快照（{profile.snapshot_key} 为空）：{permalink}"
+        )
+    if batch is not None and not (batch.directory / snapshot).is_file():
+        raise PoolContractError(
+            f"临时签名链的正文快照不在批次目录里：{snapshot}（批次 {batch.batch_id}）"
+        )
+    return snapshot
 
 
 @dataclass(frozen=True)
