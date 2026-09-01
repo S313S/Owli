@@ -220,6 +220,9 @@ class PlatformProfile:
     #: ——同一平台可能有两条发现路（如公众号的客户端搜一搜 vs 搜狗 curl），
     #: 让本机脚本照实写，比在这里替它猜一个诚实。
     fetch_method: str = "media_crawler"
+    #: 供货方（写进 evidence.extra，与事件里的 provider 同名同义）：谁把这批行
+    #: 采回来的。微博是 MediaCrawler，公众号是本机自己的发现+抓正文脚本。
+    provider: str = "media_crawler"
     #: 固定永久链的正则。非空即启用**「临时链必附正文快照」闸门**（§M6-d 货 2
     #: 口径 2）：permalink 不匹配 = 临时签名链，几小时到一天就过期，那时报告里
     #: 的角标点开是空的——所以临时链只在**同时落盘了正文快照**时才收。
@@ -281,6 +284,7 @@ PLATFORM_PROFILES: dict[str, PlatformProfile] = {
         ),
         content_kind="industry_view",
         fetch_method="browser_agent",
+        provider="owli_precollect",
         # 固定链 = `/s/` 加一段 base64url 串，**不带查询参数**；带
         # `?src=11&timestamp=&signature=` 的是临时签名链（勘察 §一实证）。
         permanent_permalink_pattern=r"^https://mp\.weixin\.qq\.com/s/[A-Za-z0-9_-]+/?$",
@@ -373,7 +377,7 @@ def to_evidence(
         "rated_by": profile.baseline_tag,
         "extra": {
             "content_kind": profile.content_kind,
-            "provider": "media_crawler",
+            "provider": profile.provider,
             "precollect_batch": batch.batch_id if batch is not None else None,
             # 快照路径**相对批次目录**存：池目录会随定容清理搬走/删掉，存绝对
             # 路径将来只会指向一个不存在的地方。批次没了快照也没了，那是清理
