@@ -190,3 +190,39 @@ def test_没有标题字段的平台仍退回正文开头(tmp_path: Path) -> Non
     item = load_evidence("wechat_mp", root=tmp_path).items[0]
 
     assert item["title"].startswith("今年茶叶线上销售")
+
+
+LONG_PERMANENT = (
+    "https://mp.weixin.qq.com/s?__biz=MjM5NDEyNjQxMQ%3D%3D"
+    "&mid=2650768050&idx=1&sn=6031caaffd1603b974cfa419dfcd7ca5"
+)
+
+
+def test_永久链两种形态都不要快照临时链才要() -> None:
+    """公众号永久链有两种：短链 /s/xxx 与长链 /s?__biz=&mid=&sn=。
+
+    长链是通用搜索引擎收录得最多的形态，它同样不会过期——早先只认短链，
+    等于对一大批本来永久的链白要快照，还会把它们标成 temporary 误导下游。
+    会过期的只有带 signature 的临时签名链。
+    """
+
+    import re
+
+    from app.precollect import PLATFORM_PROFILES
+
+    pattern = re.compile(PLATFORM_PROFILES["wechat_mp"].permanent_permalink_pattern)
+    assert pattern.match(PERMANENT)
+    assert pattern.match(PERMANENT + "?mpshare=1&scene=1")
+    assert pattern.match(LONG_PERMANENT)
+    assert not pattern.match(TEMPORARY)
+    assert not pattern.match(LONG_PERMANENT + "&signature=xx")
+
+
+def test_长永久链不要求快照(tmp_path: Path) -> None:
+    from app.precollect import load_evidence
+
+    _write_batch(tmp_path, "20260902-1009-茶叶", [_row("L1", url=LONG_PERMANENT)])
+    item = load_evidence("wechat_mp", root=tmp_path).items[0]
+
+    assert item["extra"]["permalink_kind"] == "permanent"
+    assert item["extra"]["content_snapshot"] is None

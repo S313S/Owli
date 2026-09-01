@@ -289,9 +289,19 @@ PLATFORM_PROFILES: dict[str, PlatformProfile] = {
         content_kind="industry_view",
         fetch_method="browser_agent",
         provider="owli_precollect",
-        # 固定链 = `/s/` 加一段 base64url 串，**不带查询参数**；带
-        # `?src=11&timestamp=&signature=` 的是临时签名链（勘察 §一实证）。
-        permanent_permalink_pattern=r"^https://mp\.weixin\.qq\.com/s/[A-Za-z0-9_-]+/?$",
+        # 公众号永久链有**两种**形态，都不会过期：
+        #   ① 短链 `/s/<base64url>`（客户端「复制链接」给的就是它）
+        #   ② 长链 `/s?__biz=..&mid=..&idx=..&sn=..`（通用搜索引擎收录的多是它）
+        # 会过期的只有带 `timestamp`+`signature` 的临时签名链（搜狗给的那种）。
+        # 早先只认①，把②也当临时链、白要一份快照——它其实是这个平台最经典的
+        # 永久链形态。所以②用前瞻断言把「有 biz/mid/sn 且无 signature」写进正则。
+        permanent_permalink_pattern=(
+            r"^https://mp\.weixin\.qq\.com/s(?:"
+            r"/[A-Za-z0-9_-]+/?(?:\?(?![^#]*signature=)[^#]*)?"
+            r"|\?(?=[^#]*[?&]?__biz=)(?=[^#]*[&]mid=)(?=[^#]*[&]sn=)"
+            r"(?![^#]*[&]signature=)[^#]*"
+            r")$"
+        ),
         snapshot_key="snapshot_path",
     ),
 }
