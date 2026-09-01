@@ -76,9 +76,11 @@ PLATFORMS: dict[str, PlatformProfile] = {
     # 公众号文章全在同一个域名下。不进白名单，两篇**不同公众号**的文章会被判
     # 「域名相同 → 同簇」，交叉维天花板掉一档；进了才按平台惯例认作不同主体。
     # `crossref.py:128` 那份禁区镜像已随本包同步（2026-09-02 用户拍板解禁一处）。
+    # 值是 **qq.com** 不是 mp.weixin.qq.com：白名单比的是 `_registered_domain`
+    # 归约后的注册域名（`get_sld`），写全主机名这道闸静默不生效——本包实测。
+    # 归约到 qq.com 不会误伤：这条判断本身以「两条证据同平台」为前提。
     "wechat_mp": PlatformProfile(
-        "微信公众号", (1, 1, 0, 1, 1), None,
-        frozenset({"mp.weixin.qq.com"})),
+        "微信公众号", (1, 1, 0, 1, 1), None, frozenset({"qq.com"})),
 }
 
 

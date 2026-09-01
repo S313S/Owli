@@ -129,7 +129,7 @@ def _institutions_differ(left: Mapping[str, Any], right: Mapping[str, Any]) -> b
             "hacker_news": {"ycombinator.com"}, "x": {"x.com", "twitter.com"},
             "xhs": {"xiaohongshu.com", "xhslink.com"}, "douyin": {"douyin.com"},
             "bilibili": {"bilibili.com"}, "reddit": {"reddit.com"},
-            "zhihu": {"zhihu.com"}, "wechat_mp": {"mp.weixin.qq.com"},
+            "zhihu": {"zhihu.com"}, "wechat_mp": {"qq.com"},
         }
         platform = left.get("platform") if left.get("platform") == right.get("platform") else None
         if platform and {left_domain, right_domain} <= platform_domains.get(str(platform), set()):
