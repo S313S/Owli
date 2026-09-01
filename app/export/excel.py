@@ -43,10 +43,21 @@ def _mark(number: int) -> str:
     return f"S{number:02d}"
 
 
+def _cellable(value: Any) -> Any:
+    """§M6-e：openpyxl 只收标量，塞进去一个 dict/list 就 `Cannot convert … to Excel`
+    并把**整份导出**掀掉（500）。raw_metrics 的契约本来就允许嵌套（`_raw` 子字典），
+    所以这里兜一道：非标量一律转成紧凑 JSON 串，宁可单元格难看也不能整表导不出。"""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (Mapping, list, tuple, set)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
 def _write_rows(ws: Worksheet, start: int, rows: Sequence[Sequence[Any]], *, header: bool = True) -> int:
     for r, row in enumerate(rows, start=start):
         for c, value in enumerate(row, start=1):
-            cell = ws.cell(row=r, column=c, value=value)
+            cell = ws.cell(row=r, column=c, value=_cellable(value))
             cell.font = F_HEAD if (header and r == start) else F_BODY
     return start + len(rows)
 
@@ -117,10 +128,12 @@ def _sheet_summary(ws: Worksheet, question: str, conclusions: Sequence[str], tit
 
 def _sheet_details(ws: Worksheet, evidence: Sequence[Mapping[str, Any]], marks: str) -> None:
     """`03_明细数据`：全部证据摊平；原始指标列按平台原样 + 平台内归一化列（R4）。"""
+    # `_raw` 是 raw_metrics 契约里的「原始串镜像」，逐键重复已解析值，摊成一列只会得到
+    # 一列字典（M6 的 weibo/wechat_mp/web_search 都带它）——不作指标列。
     metric_keys = sorted({
         str(k) for item in evidence
         for k in (item.get("raw_metrics") or {}) if isinstance(item.get("raw_metrics"), Mapping)
-    })
+    } - {"_raw"})
     ws["A1"] = f"表1 证据明细（{len(evidence)} 条，原始指标不可跨平台相加） {marks}".rstrip()
     ws["A1"].font = F_HEAD
     header = ["角标ID", "平台", "类型", "采集方式", "标题", "URL", "作者", "发布时间", "抓取时间",

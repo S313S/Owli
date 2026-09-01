@@ -62,3 +62,40 @@ def test_校验器能抓出故意做坏的产物(tmp_path: Path) -> None:
     wb.save(tmp_path / "cells.xlsx")
     codes = sorted({e.split(" ", 1)[0] for e in check_workbook(tmp_path / "cells.xlsx")})
     assert codes == ["1", "3", "5", "7"]
+
+
+def test_m6e_raw_metrics_带嵌套_raw_也导得出(tmp_path: Path) -> None:
+    """§M6-e 关账整跑实证：weibo/wechat_mp/web_search 的 raw_metrics 里带一个
+    `_raw` 子字典（契约「解析值+原始串双留」），摊成「原始:_raw」列后 openpyxl
+    直接 `Cannot convert {...} to Excel`，**整份导出 500**——判据②与⑤d 两条红
+    都是它一个引起的（DLV-1 当时底料只有 xhs，没有 `_raw`，所以没踩到）。
+
+    修两层：`_raw` 不进指标列；单元格再兜一道非标量转 JSON 串。
+    """
+    import json as _json
+    import sqlite3
+
+    from app.export.excel import export_excel
+    from app.export.excel_check import check_workbook
+    from app.store.dao import Store
+    from tests.test_dlv1_delivery import _seed_evidence, _seed_history, _write_json_report
+
+    database, research_id, report_path = _seed_history(tmp_path)
+    _write_json_report(report_path)
+    _seed_evidence(database, research_id)
+    # 把真跑里 wechat_mp 的形状原样塞进去（含嵌套 _raw 与全 None）
+    con = sqlite3.connect(database)
+    con.execute(
+        "UPDATE evidence SET platform='wechat_mp', raw_metrics=? WHERE id=("
+        "SELECT id FROM evidence LIMIT 1)",
+        (_json.dumps({"read_count": None, "like_count": None,
+                      "_raw": {"read_count": None, "like_count": None}}),),
+    )
+    con.commit()
+    con.close()
+
+    path = export_excel(Store(database), research_id, tmp_path / "runs",
+                        report_path.read_text(encoding="utf-8"))
+    assert path.is_file() and check_workbook(path) == []
+    headers = [c.value for c in load_workbook(path)["03_明细数据"][2]]
+    assert not any(str(h or "").startswith("原始:_raw") for h in headers)
