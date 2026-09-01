@@ -137,3 +137,33 @@ def test_池空导入器退出码2且打出closed_reason(tmp_path: Path, capsys)
 
     assert code == 2
     assert "precollect_pool_empty" in capsys.readouterr().out
+
+
+def test_最新批次未登录时发的事件形状能被登录卡认出来(tmp_path: Path) -> None:
+    """§M6-c 的 LOGIN_REPAIR 卡是平台无关的：它按 source+batch_id 发卡。
+
+    公众号将来走客户端搜一搜必然要登录态，这条钉住「新平台白拿这条链路」，
+    而不是等真机撞上才发现事件里少个 batch_id 所以卡永远发不出来。
+    """
+
+    import json
+
+    from app.precollect import LOGIN_REQUIRED_REASON
+    from app.sources.wechat_mp import search
+
+    pool = tmp_path / "pool"
+    directory = pool / "wechat_mp" / "20260902-1300-茶叶"
+    directory.mkdir(parents=True)
+    (directory / "manifest.json").write_text(json.dumps({
+        "platform": "wechat_mp", "status": "failed",
+        "failure": {"reason": LOGIN_REQUIRED_REASON, "detail": "搜一搜未登录"},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    events: list[dict] = []
+    assert search("茶叶", limit=5, on_event=events.append, pool_root=pool) == []
+    data = next(e["data"] for e in events if e["type"] == "source_unavailable")
+    # 发卡的三个必要字段：runtime 缺 source 或 batch_id 就直接 return 不发卡。
+    assert data["reason"] == LOGIN_REQUIRED_REASON
+    assert data["source"] == "wechat_mp"
+    assert data["batch_id"] == "20260902-1300-茶叶"
+    assert data["query"] == "茶叶" and data["limit"] == 5
