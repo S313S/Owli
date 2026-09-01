@@ -210,6 +210,9 @@ class PlatformProfile:
     metric_keys: Mapping[str, str]
     created_key: str
     created_unit: str = "s"
+    #: 行内标题字段名。空 = 该平台的行没有标题（微博就没有），退回用正文开头。
+    #: 有真标题却拿正文前 80 字当标题，报告角标与 Excel 那一列会全是半句话。
+    title_key: str = ""
     baseline_tag: str = ""
     #: 五段式 rating_notes 的五个理由，顺序同 scoring.SCORE_FIELDS，各 ≤14 字。
     rating_reasons: tuple[str, ...] = ()
@@ -277,6 +280,7 @@ PLATFORM_PROFILES: dict[str, PlatformProfile] = {
         author_id_key="account_biz",
         metric_keys={"read_count": "read_count", "like_count": "like_count"},
         created_key="publish_time",
+        title_key="title",
         baseline_tag="baseline:wechat_mp@v1",
         rating_reasons=(
             "认证主体待核", "发布时间可取", "缺断言血缘簇",
@@ -355,7 +359,11 @@ def to_evidence(
         "source_type": profile.source_type,
         "platform_item_id": item_id,
         "permalink": permalink,
-        "title": content[:80] or f"{platform} {item_id}",
+        "title": (
+            (str(row.get(profile.title_key) or "").strip()
+             if profile.title_key else "")
+            or content[:80] or f"{platform} {item_id}"
+        ),
         "content_excerpt": content[:8000] or None,
         "author_name": str(row.get(profile.author_key) or "") or None,
         "author_meta": {

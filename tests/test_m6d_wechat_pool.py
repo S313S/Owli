@@ -169,3 +169,24 @@ def test_公众号没有可比互动量整批走无指标归一化而不是编�
     assert {item["norm_context"]["reason"] for item in normalized} == {
         "no_metric_available"}
     assert {item["norm_context"]["metric"] for item in normalized} == {None}
+
+
+def test_有真标题就用真标题不拿正文前八十字充数(tmp_path: Path) -> None:
+    """报告角标与 Excel 那一列印的就是这个字段；拿正文开头充数会全是半句话。"""
+
+    from app.precollect import load_evidence
+
+    _write_batch(tmp_path, "20260902-1007-茶叶", [_row("h1")])
+    item = load_evidence("wechat_mp", root=tmp_path).items[0]
+
+    assert item["title"] == "2026 年中国茶叶消费趋势观察"
+    assert item["content_excerpt"].startswith("今年茶叶线上销售")
+
+
+def test_没有标题字段的平台仍退回正文开头(tmp_path: Path) -> None:
+    from app.precollect import load_evidence
+
+    _write_batch(tmp_path, "20260902-1008-茶叶", [_row("h2", title="")])
+    item = load_evidence("wechat_mp", root=tmp_path).items[0]
+
+    assert item["title"].startswith("今年茶叶线上销售")
