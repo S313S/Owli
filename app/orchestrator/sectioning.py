@@ -2045,6 +2045,38 @@ async def run_sectioned_task(
                         section_deadline,
                     )
             except SectionWallClockExpired:
+                # §D-033：分片节里这个异常来自**一片**跑满自己那份墙钟，不等于
+                # 整节预算用完——已成片就在盘上（`_run_section_shards` 抛之前已经
+                # 合并落盘），一次节级重试只补坏片、其余片 `write_shard_skipped`，
+                # 比整节作废便宜一个数量级。真跑实证 goal-2 ch-6/sec-2：四片写成
+                # 三片、节 attempts 只用了 1/3 就整节 missing，与 §D-031「已写的
+                # 字不白丢」相悖。闸沿用节级重试那一套、不新造：attempts 未满 +
+                # 剩余节墙钟（已按片数放大）还够一次 resume 成本下限。不分片的节
+                # （shard_count == 1）走的仍是原路：那时异常本就意味着节墙钟到点，
+                # 这道闸必然关着。resume=True 指**片级** resume——不续引擎会话，
+                # 靠盘上已成的片跳过。
+                if (
+                    shard_count > 1
+                    and section_attempt < attempt_budget
+                    and _section_resume_within_deadline(
+                        section_deadline,
+                        retry_delay=retry_delay,
+                        wall_clock_seconds=section_wall_clock_effective,
+                        wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                    )
+                ):
+                    await _emit_section_retry(
+                        on_event,
+                        context=context,
+                        section=section,
+                        attempt=section_attempt + 1,
+                        resume=True,
+                        session_id=None,
+                    )
+                    await _wait_before_section_retry(timer, retry_delay)
+                    resume_session_id = None
+                    continue
                 await _finish_section_timeout(
                     plan=plan, context=context, section=section,
                     section_path=section_path, store=store,
