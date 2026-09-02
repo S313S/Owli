@@ -91,6 +91,12 @@ class PlanSegmentWorkspace:
     def partial_path(self, name: str) -> Path:
         return self.root / f"{self._checked_name(name)}.json.partial"
 
+    def previous_text(self, name: str) -> str | None:
+        """上一轮已落盘的段原文（§PLAN-1 货 3 补丁式重试用）；没有就 None。"""
+
+        path = self.formal_path(name)
+        return path.read_text(encoding="utf-8").strip() if path.is_file() else None
+
     async def generate(
         self,
         name: str,

@@ -163,6 +163,7 @@ def _prompt(
     agent: Agent,
     upstream_info: Mapping[str, Any],
     errors: list[str] | None = None,
+    previous: str | None = None,
 ) -> str:
     history = json.dumps(
         upstream_info.get("dependency_artifacts", []),
@@ -182,6 +183,12 @@ def _prompt(
         "上一轮章节结构错误（逐条修正）：" + "；".join(errors or [])
         if errors else ""
     )
+    if errors and previous:
+        # §PLAN-1 货 3：补丁式重试，只改报错处，不整章重写。
+        retry += (
+            f"上一轮本章 JSON 原文={previous}；"
+            "只修改上述报错点名的字段，其余字段逐字保留，仍输出完整 JSON。"
+        )
     entity_rule = (
         f"，且逐字为 {json.dumps(entity, ensure_ascii=False)}。"
         if entity else "。"
@@ -473,10 +480,11 @@ async def _generate_selected_chapter_specs(
                 value = validate_chapter_value(value, agent)
             workspace.reset_attempts(segment_name)
             semantic_errors = list(lint_errors or [])
+            previous = workspace.previous_text(segment_name) if semantic_errors else None
             for _ in range(0 if value is not None else workspace.config.plan_segment_retries):
                 raw = await workspace.generate(
                     segment_name,
-                    _prompt(agent, history, semantic_errors),
+                    _prompt(agent, history, semantic_errors, previous),
                     adapter,
                     output_schema=CHAPTER_OUTPUT_SCHEMA,
                 )
@@ -485,6 +493,7 @@ async def _generate_selected_chapter_specs(
                     break
                 except ValueError as exc:
                     semantic_errors = [str(exc)]
+                    previous = json.dumps(raw, ensure_ascii=False)
             if value is None:
                 raise ValueError(
                     f"章节 {segment_name} 连续语义校验失败："

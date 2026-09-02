@@ -239,6 +239,17 @@ def _skeleton_prompt(
     )
 
 
+def _patch_rule(label: str, previous: str | None) -> str:
+    """§PLAN-1 货 3：第二轮起只让模型改报错处，不整段重写（整段重写会引入新的随机违规）。"""
+
+    if not previous:
+        return ""
+    return (
+        f"\n上一轮{label} JSON 原文={previous}\n"
+        "只修改上述报错点名的字段，其余字段逐字保留，仍输出完整 JSON。"
+    )
+
+
 def _goal_prompt(
     query: str,
     goal_id: str,
@@ -251,11 +262,13 @@ def _goal_prompt(
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
     collection_slots: Sequence[Mapping[str, str]] | None = None,
+    previous: str | None = None,
 ) -> str:
     profile = _scale_profile(scale, scale_config)
     retry = ""
     if errors:
         retry = "\n上一轮整计划 lint 错误原文（只修正本 goal 结构）：\n" + "\n".join(errors)
+        retry += _patch_rule("本段", previous)
     slots = list(collection_slots or [])
     slots_json = json.dumps(slots, ensure_ascii=False, separators=(",", ":"))
     slot_names = "、".join(f"{s['collector_name']}·{s['entity']}" for s in slots) or "无"
@@ -1424,6 +1437,7 @@ async def generate_plan(
                 scale=scale,
                 scale_config=product_scale_config,
                 collection_slots=collection_plan.get(goal_id, []),
+                previous=workspace.previous_text(goal_id) if errors else None,
             ),
             adapter,
             on_retry=lambda retry, error: _emit(
