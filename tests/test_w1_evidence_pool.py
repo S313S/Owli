@@ -19,6 +19,27 @@ from tests.test_m3h_ledger import _store
 POOL_MARKER = "本节可引用证据池 JSON（唯一引用源）：\n"
 
 
+def _section_pool(bodies: dict[str, str], section: str) -> dict:
+    """§D-031：节可能被切成片下发，本节池要把各片的 items 按片序并回来。
+
+    没分片时就是 `sec-N.md` 那一份，与分片前逐字相同；分片时按
+    `sec-N.part.1.md`、`.part.2.md`… 的片序拼——池的组成、顺序、omitted_count
+    这些本用例真正要守的东西，一样都没放松。
+    """
+    single = bodies.get(f"{section}.md")
+    if single is not None:
+        return _pool_from_body(single)
+    names = sorted(
+        (name for name in bodies if name.startswith(f"{section}.part.")),
+        key=lambda name: int(name.split(".part.")[1].split(".")[0]),
+    )
+    assert names, f"{section} 既没有整节 body 也没有片 body：{sorted(bodies)}"
+    pools = [_pool_from_body(bodies[name]) for name in names]
+    merged = dict(pools[0])
+    merged["items"] = [item for pool in pools for item in pool["items"]]
+    return merged
+
+
 def _pool_from_body(body: str) -> dict:
     raw = body.split(POOL_MARKER, 1)[1]
     decoder = json.JSONDecoder()
@@ -157,7 +178,8 @@ def _run_sectioned(
                 mutate_during_run(store, section_task)
             section_task.output_path.parent.mkdir(parents=True, exist_ok=True)
             if render is None:
-                index = int(section_task.output_path.stem.removeprefix("sec-")) - 1
+                stem = section_task.output_path.stem.split(".part.")[0]
+                index = int(stem.removeprefix("sec-")) - 1
                 item = pool["items"][-1 if index == 0 else 0]
                 text = (
                     f"## 结论\n\n- 本节判断 {item['citation']}\n\n"
@@ -245,7 +267,7 @@ def test_跨_goal_done_覆盖的证据先投影再按全局稳定角标进入每
 
     assert result.succeeded is True
     assert projected == ["goal-1", "goal-2", "goal-3"]
-    pools = [_pool_from_body(bodies[f"sec-{index}.md"]) for index in range(1, 4)]
+    pools = [_section_pool(bodies, f"sec-{index}") for index in range(1, 4)]
     assert [item["goal_id"] for item in pools[0]["items"]] == [
         "goal-1", "goal-2", "goal-3",
     ]
@@ -284,7 +306,7 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
     )
 
     assert result.succeeded is True
-    pool = _pool_from_body(bodies["sec-1.md"])
+    pool = _section_pool(bodies, "sec-1")
     assert len(pool["items"]) == 30
     assert pool["omitted_count"] == 71
     assert pool["items"][-1]["citation"] == "[S30]"
@@ -299,10 +321,15 @@ def test_证据池超过99条截断并发一次事件且摘要标注截断(tmp_p
     assert truncations[0]["data"]["goal_quotas"] == {"goal-1": 99}
     assert truncations[0]["data"]["goal_selected_counts"] == {"goal-1": 99}
     assert truncations[0]["data"]["goal_floor_degraded"] is False
-    assert "本节可见角标池已裁剪至 30 条" in bodies["sec-1.md"]
-    assert "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面" in bodies[
-        "sec-1.md"
-    ]
+    # §D-031：告示按整节全池算（片只换 items），逐片下发时每片都带着它。
+    assert all(
+        "本节可见角标池已裁剪至 30 条" in body
+        for name, body in bodies.items() if name.startswith("sec-1")
+    )
+    assert all(
+        "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面" in body
+        for name, body in bodies.items() if name.startswith("sec-1")
+    )
     assert validation._CITATION.fullmatch("[S99]")
     assert validation._CITATION.fullmatch("[S100]") is None
 
@@ -339,7 +366,7 @@ def test_81条证据单节只喂30条并记录裁剪事件(tmp_path):
     )
 
     assert result.succeeded is True
-    pool = _pool_from_body(bodies["sec-1.md"])
+    pool = _section_pool(bodies, "sec-1")
     assert len(pool["items"]) == 30
     assert pool["omitted_count"] == 51
     truncations = [event for event in events if event["type"] == "evidence_pool_truncated"]
@@ -385,8 +412,8 @@ def test_按平台轮转裁剪且同输入结果逐字节确定(tmp_path):
         declared_paths=[],
         seed=seed,
     )[2]
-    first_pool = _pool_from_body(first["sec-1.md"])
-    second_pool = _pool_from_body(second["sec-1.md"])
+    first_pool = _section_pool(first, "sec-1")
+    second_pool = _section_pool(second, "sec-1")
 
     assert len(first_pool["items"]) == 30
     assert {item["platform"] for item in first_pool["items"]} == {"xhs", "web_search"}
@@ -619,7 +646,7 @@ def test_evidence非空且done只有撰写章产物时本节池仍非空(tmp_pat
     )
 
     assert result.succeeded is True
-    assert _pool_from_body(bodies["sec-1.md"])["items"][0]["goal_id"] == "goal-1"
+    assert _section_pool(bodies, "sec-1")["items"][0]["goal_id"] == "goal-1"
 
 
 def test_evidence只有无goal归属行时回退池仍非空():
@@ -681,7 +708,9 @@ def test_库内但被本节裁掉的_URL_出现在正文则节校验通过(tmp_p
 
     def render(pool, section_task):
         del section_task
-        assert len(pool["items"]) == 30
+        # §D-031：本节池按片下发，这里看到的是本片那几条；本用例守的是
+        # 「被裁掉的库内 URL 不在池里」，整节 30 条另在下面按片并回后断言。
+        assert pool["items"]
         assert not ({item["permalink"] for item in pool["items"]} & set(real_urls))
         item = pool["items"][0]
         return (
@@ -694,7 +723,7 @@ def test_库内但被本节裁掉的_URL_出现在正文则节校验通过(tmp_p
             f"[{item['title']}]({item['permalink']})\n"
         )
 
-    result, store, _, _, _, _ = _run_sectioned(
+    result, store, bodies, _, _, _ = _run_sectioned(
         tmp_path,
         goal_ids=["goal-1"],
         declared_paths=[],
@@ -704,6 +733,12 @@ def test_库内但被本节裁掉的_URL_出现在正文则节校验通过(tmp_p
 
     assert result.succeeded is True
     assert store.list_chapters("r-ledger")[0]["status"] == "done"
+    # 整节仍是 30 条、且一条库内被裁 URL 都没混进来（片并回来后判）。
+    section_pool = _section_pool(bodies, "sec-1")
+    assert len(section_pool["items"]) == 30
+    assert not (
+        {item["permalink"] for item in section_pool["items"]} & set(real_urls)
+    )
 
 
 def test_claims_permalink_用_research_全量证据池而非本节裁剪子集(tmp_path):
@@ -1074,8 +1109,8 @@ def test_父章写节期间直写新证据不改变已冻结_S_编号(tmp_path):
     )
 
     assert result.succeeded is True
-    first = _pool_from_body(bodies["sec-1.md"])
-    second = _pool_from_body(bodies["sec-2.md"])
+    first = _section_pool(bodies, "sec-1")
+    second = _section_pool(bodies, "sec-2")
     assert [(item["evidence_id"], item["citation"]) for item in first["items"]] == [
         ("ev-z-goal-1", "[S01]"),
     ]

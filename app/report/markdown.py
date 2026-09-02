@@ -220,6 +220,19 @@ def _merge_shard_structures(
     return merged_sections, merged_conclusions, inventory, plain_source_lines
 
 
+def section_conclusion_items(text: str) -> list[str]:
+    """一节/一片正文里「结论」段的列表项原文（不含前导符号）。
+
+    §D-031 片间衔接用：把前面几片已写过的结论条目摘给后续片，让它别重复。
+    """
+    _, conclusion, _ = _split_section_structures(text)
+    return [
+        line.strip().lstrip("-* ")
+        for line in conclusion.splitlines()
+        if line.strip().startswith(("-", "*"))
+    ]
+
+
 def merge_section_shards(
     shard_texts: Sequence[str],
     *,

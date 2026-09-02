@@ -17,7 +17,11 @@ from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
-from app.report.markdown import merge_sectioned_markdown
+from app.report.markdown import (
+    merge_section_shards,
+    merge_sectioned_markdown,
+    section_conclusion_items,
+)
 
 
 SECTIONED_KINDS = {"cross_validation", "summary", "report", "report_writing"}
@@ -1266,6 +1270,211 @@ def _assemble(
     )
 
 
+def _shard_pool(pool: Mapping[str, Any], start: int, size: int) -> dict[str, Any]:
+    """本片可见的池：除 items 只留本片那几条外，其余字段原样带走。"""
+    shard = dict(pool)
+    shard["items"] = list(pool["items"])[start:start + size]
+    return shard
+
+
+def _shard_envelope(path: Path) -> tuple[str, list[Any]] | None:
+    """读一份片产物；不是可解析的非空 `{markdown, claims}` 信封就当没有。"""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, UnicodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    markdown = payload.get("markdown")
+    claims = payload.get("claims")
+    if not isinstance(markdown, str) or not markdown.strip():
+        return None
+    return markdown.strip(), list(claims) if isinstance(claims, list) else []
+
+
+def _merge_shard_files(
+    section_path: Path,
+    shard_count: int,
+    citation_numbers: Mapping[str, int] | None,
+) -> int:
+    """把盘上已有的片产物按片序合并成节产物；返回合进去的片数。
+
+    一片都没有就不落盘——让下游 `artifact_empty` 照旧判空，不造假产物。
+    """
+    texts: list[str] = []
+    claims: list[Any] = []
+    for index in range(1, shard_count + 1):
+        envelope = _shard_envelope(write_shard_path(section_path, index))
+        if envelope is None:
+            continue
+        texts.append(envelope[0])
+        claims.extend(envelope[1])
+    if not texts:
+        return 0
+    section_path.write_text(
+        json.dumps(
+            {
+                "markdown": merge_section_shards(
+                    texts, citation_numbers=citation_numbers,
+                ),
+                "claims": claims,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return len(texts)
+
+
+def _shard_prior_digest(section_path: Path, upto: int) -> str:
+    """前面几片已写的结论条目摘要（每条首 40 字），给后续片防重复。"""
+    digests: list[str] = []
+    for index in range(1, upto + 1):
+        envelope = _shard_envelope(write_shard_path(section_path, index))
+        if envelope is None:
+            continue
+        digests.extend(item[:40] for item in section_conclusion_items(envelope[0]))
+    return "\n".join(f"- {item}" for item in digests)
+
+
+async def _emit(
+    on_event: Any, event_type: str, data: dict[str, Any], *, is_error: bool = False,
+) -> None:
+    """发一条事件；on_event 同步/异步两种都认（本模块其余处逐个手写的那段）。"""
+    result = on_event({"type": event_type, "data": data, "is_error": is_error})
+    if inspect.isawaitable(result):
+        await result
+
+
+def _shard_notice(index: int, total: int, prior_digest: str) -> str:
+    """【本片】段：把「只写本片这几条」「别重复前面写过的」讲死。
+
+    §D-031：不这么讲，写手会拿到十条证据仍照章任务写整节，产出体量降不下来——
+    分片就白切了。缺口/假设/风险这类**全节口径**的段落只让第 1 片写，
+    否则 K 片各写一份，合并后是三段重复。
+    """
+    notice = (
+        f"\n\n【本片】本节的证据池已按 {total} 片切开，你现在写第 {index}/{total} 片。"
+        "上面那份『本节可引用证据池 JSON』只列了本片的条目——"
+        "**只就这几条写**：`## 结论` 列表项与 `## 信息源` 条目都只覆盖它们，"
+        "不要提及也不要引用不在本片池里的角标。\n"
+        "本片不写节标题行、不写总起或收束段落；系统会把各片按片序合并成一节，"
+        "合并时信息源按链接去重、角标沿用全局编号（同一条证据在哪一片都是同一个号）。\n"
+        f"本片断言 id 固定使用 c-{index:02d}01、c-{index:02d}02… 的区间"
+        "（覆盖上文给的区间口径），避免跨片重号。\n"
+    )
+    if index == 1:
+        notice += (
+            "『证据缺口』『假设与不确定性』『适用人群与风险提示』这类**全节口径**的段落"
+            "只在本片（第 1 片）写一次，后续片不要再写。\n"
+        )
+    else:
+        notice += (
+            "『证据缺口』『假设与不确定性』『适用人群与风险提示』已由第 1 片写过，"
+            "本片不要再写。\n"
+        )
+    if prior_digest:
+        notice += (
+            "前面几片已经写过下列结论条目，**不要重复、不要再引它们的角标**：\n"
+            f"{prior_digest}\n"
+        )
+    return notice
+
+
+async def _run_section_shards(
+    *,
+    adapter: Any,
+    section_task: EngineTask,
+    section_path: Path,
+    section_body: Any,
+    evidence_pool: Mapping[str, Any],
+    shard_sizes: list[int],
+    citation_numbers: Mapping[str, int] | None,
+    runs_root: Path,
+    store: Any,
+    on_event: Any,
+    section_deadline: Any,
+    resume_session_id: str | None,
+    context: Any,
+    section: dict[str, Any],
+    section_attempt: int,
+) -> tuple[Any, EngineTask]:
+    """一节切 K 片串行跑，跑完按片序合并成节产物。
+
+    §D-031。返回 (用来判本次节尝试成败的结果, 产生它的那个任务)——
+    有片失败就返回**第一个失败片**的结果，让节循环照旧判失败、照旧按节级
+    attempts 重试；重试时盘上已成的片会被跳过，只补失败那片。
+    """
+    total = len(shard_sizes)
+    start = 0
+    resume_for = resume_session_id
+    last: tuple[Any, EngineTask] | None = None
+    first_failure: tuple[Any, EngineTask] | None = None
+    for index, size in enumerate(shard_sizes, start=1):
+        shard_path = write_shard_path(section_path, index)
+        if _shard_envelope(shard_path) is not None:
+            # 上一次节尝试已经写成的片：不重跑、不重写，已写的字不白丢。
+            await _emit(on_event, "write_shard_skipped", {
+                "goal_id": context.goal_id,
+                "chapter_id": section["section_id"],
+                "shard": index, "shards": total,
+            })
+            start += size
+            continue
+        body = section_body(_shard_pool(evidence_pool, start, size))
+        body += _shard_notice(
+            index, total, _shard_prior_digest(section_path, index - 1),
+        )
+        shard_task = replace(
+            section_task, body=body, output_path=shard_path,
+            agent_id=f"{section_task.agent_id}-part-{index}",
+        )
+        await _emit(on_event, "write_shard_started", {
+            "goal_id": context.goal_id,
+            "chapter_id": section["section_id"],
+            "shard": index, "shards": total, "pool_items": size,
+            "attempt": section_attempt,
+        })
+        started_at = asyncio.get_running_loop().time()
+        result = await _run_before_section_deadline(
+            adapter, shard_task,
+            _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
+            on_event, section_deadline,
+        )
+        resume_for = None
+        succeeded = (
+            bool(getattr(result, "succeeded", False))
+            and _shard_envelope(shard_path) is not None
+        )
+        await _emit(on_event, "write_shard_finished", {
+            "goal_id": context.goal_id,
+            "chapter_id": section["section_id"],
+            "shard": index, "shards": total, "succeeded": succeeded,
+            "reason": None if succeeded else section_failure_reason(
+                result, shard_path,
+            ),
+            "elapsed_seconds": asyncio.get_running_loop().time() - started_at,
+            "engine_error": getattr(result, "engine_error", None),
+        }, is_error=not succeeded)
+        last = (result, shard_task)
+        if not succeeded and first_failure is None:
+            first_failure = (result, shard_task)
+        start += size
+    merged = _merge_shard_files(section_path, total, citation_numbers)
+    await _emit(on_event, "write_shards_merged", {
+        "goal_id": context.goal_id,
+        "chapter_id": section["section_id"],
+        "shards": total, "done": merged,
+    })
+    return first_failure or last or (None, section_task)
+
+
 async def run_sectioned_task(
     *,
     plan: Any,
@@ -1546,97 +1755,108 @@ async def run_sectioned_task(
                     f" 本节可见角标池已裁剪至 {len(evidence_pool['items'])} 条；"
                     "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面。"
                 )
-            body = (
-                f"{base_task.body}\n\n"
-                "本次只写一个报告节；禁止生成整份报告。\n"
-                "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
-                "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
-                # §SRC-1 货 5：原文是「只覆盖本节范围」，写手照办后把池里
-                # 其他 goal 的证据全部跳过——D-013 那轮 sec-1 可见池里躺着 10 条
-                # 抖音（S73–S82）却一条没引，正文还专门声明「与本 goal 新增的
-                # douyin、x 采集不重叠」。写手没错，是这句话把它挡住了。
-                "本节以『节目标』给出的目标为主线；结论与信息源不得替其他报告节做总结，"
-                "但**可以引用本节证据池里其他目标的证据做对照或佐证**——"
-                "引用时须在句中点明它来自哪个目标（例如「goal-3 的抖音证据显示……」），"
-                "且这类对照不得喧宾夺主，占本节结论的少数。\n"
-                "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
-                f"{section_path}\n"
-                f"节目标={json.dumps(section, ensure_ascii=False)}\n"
-                "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
-                "章级 opening.inputs 声明且账本 status=done 的上游产物；"
-                "每条都带 goal_id/chapter_id/path/actual_count。\n"
-                "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
-                "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
-                "done 产物只作事实与上下文来源，不作引用来源；产物 path 只用于定位，"
-                "不是 permalink。池外 URL 一律不得出现在正文，包括散文里的裸链接。"
-                "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
-                f"本节上游输入 JSON：\n{json.dumps(inputs, ensure_ascii=False, indent=2)}\n"
-                f"{pool_notice}\n"
-                "content_excerpt_truncated=true 表示该摘要已截到 120 个 Unicode 字符。\n"
-                "本节可引用证据池 JSON（唯一引用源）：\n"
-                f"{json.dumps(evidence_pool, ensure_ascii=False, indent=2)}"
-            )
-            if (
-                base_task.agent_kind in SECTIONED_KINDS
-                and _declared_shape(agent) != "array"
-            ):
-                body += (
-                    # §FE-1 货 2：原文只说「放独立的『证据缺口』段」，没说几级标题。
-                    # 写手照办却写成 `### 证据缺口` 挂在 `## 结论` 底下，落进
-                    # citation_marks_resolvable 的结论子树，于是「本节没有官方保修
-                    # 数据」这类**天然无源可引**的话被逐条要求带 [Sxx]，必挂。
-                    # D-025 重放 6 节里 5 节栽在这，19 个被点名项 18 个是这么来的；
-                    # 同章唯一通过的那节把这几段写成了 `##` 同级——只差一个井号。
-                    "\n缺口/限制性陈述（『本节可见证据不足』『未覆盖 X』这类）"
-                    "不许进『结论』列表，放独立的『证据缺口』段。"
-                    "『证据缺口』『假设与不确定性』『适用人群与风险提示』这类段落"
-                    "**必须写成 `##` 二级标题，与 `## 结论` 同级**；"
-                    "`## 结论` 段内不得出现任何 `###` 及更深的子标题——"
-                    "写成子标题会被判成结论条目，而缺口陈述本就没有证据可引，必被退。\n"
-                    "『结论』列表每一项必须带至少一个 [Sxx]。"
-                    "角标一律写成 `[S01]` 这样的**半角方括号**，多个并排写 `[S01][S02]`；"
-                    "禁止写成 `（S01、S02）`、`(S01, S02)` 这类括号内联形式——"
-                    "括号形式识别不出来，同样会被判成没带角标。\n"
-                    "**先按证据池里的 grade 分层**（A/B 已通过可靠度审计、C 存疑、"
-                    "空 = 本节写作时还没评到；D 级已被系统挡在池外）：A/B 可以直陈、"
-                    "逐条当事实引；C 与空等级只作旁证，必须带上限定语（『有用户反馈…』"
-                    "『尚待其他来源印证』），不得单独支撑结论。同层内再按来源类型区分——"
-                    "权威来源（官网 / 媒体 / 评测站）：可以直陈，逐条当事实引。"
-                    "社交媒体这类权重不高的来源：以汇总式、带平台与倾向的句式提及，"
-                    "并挂角标，不逐条当权威引。样例：『在国内小红书平台上，"
-                    "大多数……情况是……』。社媒证据要出现在正文，但以『平台 + 群体倾向』"
-                    "的方式说，不设置社媒排序或配额规则。"
-                    "claims 的 stance / firsthand 对这类汇总句照常登记。\n"
-                    "本节产物必须使用 JSON 信封，须显式写 JSON object；裸 Markdown 不接受："
-                    "markdown 为本节 Markdown 正文；claims 为本节结论断言数组。"
-                    "每条断言必须含报告内唯一 id（c- 加至少两位数字）、非空 text、"
-                    "至少一条 evidence；evidence 用 permalink 联接，可选 stance="
-                    "contradicts、firsthand=true、origin_url。不得用 [Sxx] 代替 permalink，"
-                    "不得从正文事后抽取断言。"
-                    f"本节断言 id 固定使用 c-{section_number:02d}01、"
-                    f"c-{section_number:02d}02…的区间，避免跨节重号。"
-                    "若本节确无可证否结论，claims 写空数组。\n"
-                    "输出骨架示例（照此形状写，只换内容）：\n"
-                    # §FE-1 货 2：示例里补上 `## 证据缺口`，让「独立一段」有形可依——
-                    # 此前示例只有结论与信息源两段，写手只能自己猜层级。
-                    '{"markdown": "# 节标题\\n\\n## 结论\\n\\n- 结论一 [S01][S02]\\n\\n'
-                    '## 证据缺口\\n\\n- 未覆盖 X：本节可见证据里没有 …\\n\\n'
-                    '## 信息源\\n\\n- [S01] [标题一](permalink1)\\n- [S02] [标题二](permalink2)", '
-                    '"claims": [{"id": "c-0101", "text": "断言原文", '
-                    '"evidence": [{"permalink": "https://…"}]}]}\n'
-                    "整份节产物的第一个字符必须是 `{`；不得使用 ``` 代码围栏，"
-                    "不得在 JSON 之外附加任何说明文字。"
+
+            def _section_body(prompt_pool: dict[str, Any]) -> str:
+                """§D-031：正文按传进来的池组装——整节一次写时传全池，
+                分片时每片只传本片那几条，产出体量随之降下来。"""
+                body = (
+                    f"{base_task.body}\n\n"
+                    "本次只写一个报告节；禁止生成整份报告。\n"
+                    "本节须包含一个『结论』小节与一个『信息源』小节（标题逐字使用），"
+                    "Markdown 标题分别写为 `## 结论` 与 `## 信息源`，且两个小节正文均不得为空。\n"
+                    # §SRC-1 货 5：原文是「只覆盖本节范围」，写手照办后把池里
+                    # 其他 goal 的证据全部跳过——D-013 那轮 sec-1 可见池里躺着 10 条
+                    # 抖音（S73–S82）却一条没引，正文还专门声明「与本 goal 新增的
+                    # douyin、x 采集不重叠」。写手没错，是这句话把它挡住了。
+                    "本节以『节目标』给出的目标为主线；结论与信息源不得替其他报告节做总结，"
+                    "但**可以引用本节证据池里其他目标的证据做对照或佐证**——"
+                    "引用时须在句中点明它来自哪个目标（例如「goal-3 的抖音证据显示……」），"
+                    "且这类对照不得喧宾夺主，占本节结论的少数。\n"
+                    "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
+                    f"{section_path}\n"
+                    f"节目标={json.dumps(section, ensure_ascii=False)}\n"
+                    "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
+                    "章级 opening.inputs 声明且账本 status=done 的上游产物；"
+                    "每条都带 goal_id/chapter_id/path/actual_count。\n"
+                    "missing 仍只列本 goal 账本 missing/deferred 章及其 reason。\n"
+                    "只允许读取下方 done 列出的产物；不得越过节协议读取未列出的其他 goal 产物。\n"
+                    "done 产物只作事实与上下文来源，不作引用来源；产物 path 只用于定位，"
+                    "不是 permalink。池外 URL 一律不得出现在正文，包括散文里的裸链接。"
+                    "不得把本地路径改写成 file:// 角标，也不得编造 URL。\n"
+                    f"本节上游输入 JSON：\n{json.dumps(inputs, ensure_ascii=False, indent=2)}\n"
+                    f"{pool_notice}\n"
+                    "content_excerpt_truncated=true 表示该摘要已截到 120 个 Unicode 字符。\n"
+                    "本节可引用证据池 JSON（唯一引用源）：\n"
+                    f"{json.dumps(prompt_pool, ensure_ascii=False, indent=2)}"
                 )
-            if envelope_retry_source is not None:
-                # D-025 货 4：定向重试只要求补包信封，不重写正文。
-                body += (
-                    "\n上一次尝试的节产物因缺 JSON 信封被退。"
-                    "下面是被退原文：只需把它原样包进 JSON 信封"
-                    "（markdown 字段放正文、claims 数组按上述规则补），"
-                    "不要重写正文；若原文本身是语法损坏的 JSON，"
-                    "修正语法后输出完整信封。\n"
-                    f"被退原文：\n{envelope_retry_source}"
-                )
+                if (
+                    base_task.agent_kind in SECTIONED_KINDS
+                    and _declared_shape(agent) != "array"
+                ):
+                    body += (
+                        # §FE-1 货 2：原文只说「放独立的『证据缺口』段」，没说几级标题。
+                        # 写手照办却写成 `### 证据缺口` 挂在 `## 结论` 底下，落进
+                        # citation_marks_resolvable 的结论子树，于是「本节没有官方保修
+                        # 数据」这类**天然无源可引**的话被逐条要求带 [Sxx]，必挂。
+                        # D-025 重放 6 节里 5 节栽在这，19 个被点名项 18 个是这么来的；
+                        # 同章唯一通过的那节把这几段写成了 `##` 同级——只差一个井号。
+                        "\n缺口/限制性陈述（『本节可见证据不足』『未覆盖 X』这类）"
+                        "不许进『结论』列表，放独立的『证据缺口』段。"
+                        "『证据缺口』『假设与不确定性』『适用人群与风险提示』这类段落"
+                        "**必须写成 `##` 二级标题，与 `## 结论` 同级**；"
+                        "`## 结论` 段内不得出现任何 `###` 及更深的子标题——"
+                        "写成子标题会被判成结论条目，而缺口陈述本就没有证据可引，必被退。\n"
+                        "『结论』列表每一项必须带至少一个 [Sxx]。"
+                        "角标一律写成 `[S01]` 这样的**半角方括号**，多个并排写 `[S01][S02]`；"
+                        "禁止写成 `（S01、S02）`、`(S01, S02)` 这类括号内联形式——"
+                        "括号形式识别不出来，同样会被判成没带角标。\n"
+                        "**先按证据池里的 grade 分层**（A/B 已通过可靠度审计、C 存疑、"
+                        "空 = 本节写作时还没评到；D 级已被系统挡在池外）：A/B 可以直陈、"
+                        "逐条当事实引；C 与空等级只作旁证，必须带上限定语（『有用户反馈…』"
+                        "『尚待其他来源印证』），不得单独支撑结论。同层内再按来源类型区分——"
+                        "权威来源（官网 / 媒体 / 评测站）：可以直陈，逐条当事实引。"
+                        "社交媒体这类权重不高的来源：以汇总式、带平台与倾向的句式提及，"
+                        "并挂角标，不逐条当权威引。样例：『在国内小红书平台上，"
+                        "大多数……情况是……』。社媒证据要出现在正文，但以『平台 + 群体倾向』"
+                        "的方式说，不设置社媒排序或配额规则。"
+                        "claims 的 stance / firsthand 对这类汇总句照常登记。\n"
+                        "本节产物必须使用 JSON 信封，须显式写 JSON object；裸 Markdown 不接受："
+                        "markdown 为本节 Markdown 正文；claims 为本节结论断言数组。"
+                        "每条断言必须含报告内唯一 id（c- 加至少两位数字）、非空 text、"
+                        "至少一条 evidence；evidence 用 permalink 联接，可选 stance="
+                        "contradicts、firsthand=true、origin_url。不得用 [Sxx] 代替 permalink，"
+                        "不得从正文事后抽取断言。"
+                        f"本节断言 id 固定使用 c-{section_number:02d}01、"
+                        f"c-{section_number:02d}02…的区间，避免跨节重号。"
+                        "若本节确无可证否结论，claims 写空数组。\n"
+                        "输出骨架示例（照此形状写，只换内容）：\n"
+                        # §FE-1 货 2：示例里补上 `## 证据缺口`，让「独立一段」有形可依——
+                        # 此前示例只有结论与信息源两段，写手只能自己猜层级。
+                        '{"markdown": "# 节标题\\n\\n## 结论\\n\\n- 结论一 [S01][S02]\\n\\n'
+                        '## 证据缺口\\n\\n- 未覆盖 X：本节可见证据里没有 …\\n\\n'
+                        '## 信息源\\n\\n- [S01] [标题一](permalink1)\\n- [S02] [标题二](permalink2)", '
+                        '"claims": [{"id": "c-0101", "text": "断言原文", '
+                        '"evidence": [{"permalink": "https://…"}]}]}\n'
+                        "整份节产物的第一个字符必须是 `{`；不得使用 ``` 代码围栏，"
+                        "不得在 JSON 之外附加任何说明文字。"
+                    )
+                if envelope_retry_source is not None:
+                    # D-025 货 4：定向重试只要求补包信封，不重写正文。
+                    body += (
+                        "\n上一次尝试的节产物因缺 JSON 信封被退。"
+                        "下面是被退原文：只需把它原样包进 JSON 信封"
+                        "（markdown 字段放正文、claims 数组按上述规则补），"
+                        "不要重写正文；若原文本身是语法损坏的 JSON，"
+                        "修正语法后输出完整信封。\n"
+                        f"被退原文：\n{envelope_retry_source}"
+                    )
+                return body
+
+            # §D-031：按证据池切片。切完只得一片（池 ≤ 一片装得下）时
+            # shard_sizes 长度为 1，下面 shard_count == 1，走的仍是分片前那条路。
+            shard_sizes = write_shard_sizes(evidence_pool["items"])
+            shard_count = max(1, len(shard_sizes))
+            body = _section_body(evidence_pool)
             section_task = replace(
                 base_task,
                 body=body,
@@ -1646,19 +1866,42 @@ async def run_sectioned_task(
                 validators=["file_exists"],
                 capability=base_task.capability,
             )
+            # §D-031：engine_task 是「真正跑出这个结果的那个任务」——不分片时
+            # 就是 section_task，分片时是失败/最后那一片的任务。下面两条既有的
+            # 定向重试（resume 失败重跑、结论块不合法）都对着它重发，才不会打到空处。
+            engine_task = section_task
             try:
-                result = await _run_before_section_deadline(
-                    adapter,
-                    section_task,
-                    _ctx(
-                        section_task,
-                        runs_root,
-                        store,
+                if shard_count > 1:
+                    result, engine_task = await _run_section_shards(
+                        adapter=adapter,
+                        section_task=section_task,
+                        section_path=section_path,
+                        section_body=_section_body,
+                        evidence_pool=evidence_pool,
+                        shard_sizes=shard_sizes,
+                        citation_numbers=citation_numbers,
+                        runs_root=runs_root,
+                        store=store,
+                        on_event=on_event,
+                        section_deadline=section_deadline,
                         resume_session_id=resume_session_id,
-                    ),
-                    on_event,
-                    section_deadline,
-                )
+                        context=context,
+                        section=section,
+                        section_attempt=section_attempt,
+                    )
+                else:
+                    result = await _run_before_section_deadline(
+                        adapter,
+                        section_task,
+                        _ctx(
+                            section_task,
+                            runs_root,
+                            store,
+                            resume_session_id=resume_session_id,
+                        ),
+                        on_event,
+                        section_deadline,
+                    )
             except SectionWallClockExpired:
                 await _finish_section_timeout(
                     plan=plan, context=context, section=section,
