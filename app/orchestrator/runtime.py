@@ -2067,17 +2067,51 @@ class RuntimeCoordinator:
             payloads.extend(items)
         if not payloads and not rating_agents:
             return
-        content_fields = (
+        # D-032：已入库行**只允许产物补空，不允许顶掉非空**。内容四列之外，
+        # 身份/来源列一并进保护名单——采集期薄源（`app/sources/_pool_source.py`）
+        # 写的是真值，采集章的引擎产物只是回显，回显里既没有 platform 也没有
+        # platform_item_id，`dao._update_evidence` 的全列 UPDATE 会把
+        # weibo/media_crawler/provider 顶成 web_search/official_api/NULL
+        # （`r-f59fdba77cd7` goal-2 的 25 行微博即此）。产物首次写入的行
+        # （`existing` 里没有）不受影响，D-020 的降级留痕照旧。
+        protected_fields = (
             "title", "content_excerpt", "author_name", "raw_metrics",
+            "platform", "platform_item_id", "fetch_method", "source_type",
+            "published_at",
         )
+        downgraded: list[dict[str, str]] = []
         for payload in payloads:
+            payload_extra = payload.get("extra")
+            artifact_platform = (
+                payload_extra.get(evidence_artifacts.ARTIFACT_PLATFORM_KEY)
+                if isinstance(payload_extra, dict) else None
+            )
             stored = existing.get(str(payload["permalink"]))
+            if artifact_platform and stored is None:
+                # 只报「这一次真降级了的」：已入库行的平台受保护名单保住，
+                # 没被改；库里旧留痕（extra.artifact_platform）合并回来时也
+                # 不该再报一次，否则同一批条目每次收尾/补扫都重复计数。
+                downgraded.append({
+                    "permalink": str(payload["permalink"]),
+                    "artifact_platform": str(artifact_platform),
+                    "platform": str(payload["platform"]),
+                })
             if stored is None:
                 continue
-            for field in content_fields:
+            for field in protected_fields:
                 value = stored.get(field)
                 if value not in (None, "", {}):
                     payload[field] = value
+            stored_extra = stored.get("extra")
+            if isinstance(stored_extra, dict) and stored_extra:
+                # extra 合并不替换：库里已有的键保留（provider /
+                # precollect_batch），产物只补库里没有的键。
+                merged = dict(payload.get("extra") or {})
+                merged.update({
+                    key: value for key, value in stored_extra.items()
+                    if value not in (None, "", {})
+                })
+                payload["extra"] = merged
         if payloads:
             self.store.upsert_evidence_batch(payloads)
         for agent in rating_agents:
@@ -2100,18 +2134,6 @@ class RuntimeCoordinator:
                     },
                 },
             )
-        downgraded = [
-            {
-                "permalink": str(payload["permalink"]),
-                "artifact_platform": str(
-                    payload["extra"][evidence_artifacts.ARTIFACT_PLATFORM_KEY]
-                ),
-                "platform": str(payload["platform"]),
-            }
-            for payload in payloads
-            if isinstance(payload.get("extra"), dict)
-            and payload["extra"].get(evidence_artifacts.ARTIFACT_PLATFORM_KEY)
-        ]
         if downgraded:
             logger.warning(
                 "产物 platform 越出闭集，已降级并留痕：research=%s goal=%s 条数=%d",
