@@ -1503,12 +1503,19 @@ async def _run_section_shards(
         # 片墙钟：**每片一份自己的**（口径同 RATE-3 评级片），不共用节那一个
         # 绝对时刻——共用的话第 1 片跑掉 221 s，剩下三片分 109 s，必全灭。
         # 章预算已按 节数 × WRITE_SHARD_MAX 放大，覆盖得住。
+        # §D-033：这一份再夹到节那个绝对时刻里——D-033 放开节级重试后，
+        # 最后一次重试可能在只剩 136 s 时放行，而片墙钟原来不看节剩余时间，
+        # 单节最坏耗时会从 330×片数 涨到 330×片数×2。夹住就封回 330×片数。
+        # 夹的是**上界**不是共用：片各自还是从自己起点算 330 s，只在节预算
+        # 快见底时才被截短（那时本来也跑不完）。
         started_at = asyncio.get_running_loop().time()
         shard_deadline = (
             started_at + section_wall_clock
             if section_wall_clock is not None
             else section_deadline
         )
+        if shard_deadline is not None and section_deadline is not None:
+            shard_deadline = min(shard_deadline, section_deadline)
         shard_attempt = 0
         while True:
             shard_attempt += 1

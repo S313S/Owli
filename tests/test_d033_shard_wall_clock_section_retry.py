@@ -7,6 +7,8 @@ retry_exhausted 却能走节级重试 + 已成片 `write_shard_skipped`，一次
 
 from __future__ import annotations
 
+import pytest
+
 from tests.test_d031_write_sharding import _shard_run
 
 
@@ -77,3 +79,68 @@ def test_d033_guard_剩余节墙钟不足一次resume成本时仍落timeout(tmp_
     assert result.succeeded is False
     row = store.list_chapters("r-ledger")[0]
     assert (row["status"], row["reason"]) == ("missing", "timeout")
+
+
+def _shift_loop_clock(monkeypatch, sectioning, offset: dict) -> None:
+    """让 sectioning 看到的 loop.time() 多走 offset["s"] 秒（虚拟钟）。"""
+    import asyncio as real_asyncio
+
+    class _Loop:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def time(self):
+            return self._inner.time() + offset["s"]
+
+    class _AsyncioProxy:
+        def __getattr__(self, name):
+            return getattr(real_asyncio, name)
+
+        def get_running_loop(self):
+            return _Loop(real_asyncio.get_running_loop())
+
+    monkeypatch.setattr(sectioning, "asyncio", _AsyncioProxy())
+
+
+def test_d033_节级重试放行的坏片_片墙钟夹在节剩余时间内(tmp_path, monkeypatch):
+    """D-033 放开节级重试后，最后一次重试可能在只剩 136 s 时放行；片墙钟
+    若还按整份 330 s 发，单节最坏耗时要翻一倍。夹到节绝对时刻上就封回去。"""
+    import app.orchestrator.sectioning as sectioning
+
+    offset = {"s": 0.0}
+    _shift_loop_clock(monkeypatch, sectioning, offset)
+    original = sectioning._run_before_section_deadline
+    calls: list[tuple[float, float]] = []
+    seen = {"n": 0}
+
+    async def spy(adapter, task, ctx, on_event, deadline):
+        now = sectioning.asyncio.get_running_loop().time()
+        calls.append((now, deadline))
+        if ".part.2." in task.output_path.name:
+            seen["n"] += 1
+            if seen["n"] == 1:
+                # 这一片跑满了自己那份墙钟：节预算随之逼近见底。
+                offset["s"] = 800.0
+                raise sectioning.SectionWallClockExpired("片 2 跑满片墙钟")
+        return await original(adapter, task, ctx, on_event, deadline)
+
+    monkeypatch.setattr(sectioning, "_run_before_section_deadline", spy)
+    result, store, _, events, _ = _shard_run(
+        tmp_path, evidence=30, wall_clock=330.0,
+    )
+
+    assert [e["data"]["attempt"] for e in events if e["type"] == "section_retry"] == [2]
+    section_start, _ = calls[0]
+    # 节预算 = 330 × 3 片；重试放行时只剩 190 s。
+    budget_end = section_start + 330.0 * 3
+    retry_now, retry_deadline = calls[-1]
+    assert retry_now - section_start == pytest.approx(800.0, abs=2.0)
+    # 夹住了：不是「起点 + 整份 330 s」，而是节那个绝对时刻。
+    assert retry_deadline <= budget_end + 1.0
+    assert retry_deadline < retry_now + 330.0 - 100.0
+    assert all(deadline <= budget_end + 1.0 for _, deadline in calls)
+    assert result.succeeded is True
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
