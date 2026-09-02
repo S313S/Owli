@@ -1453,16 +1453,41 @@ async def _run_section_shards(
             if section_wall_clock is not None
             else section_deadline
         )
-        result = await _run_before_section_deadline(
-            adapter, shard_task,
-            _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
-            on_event, shard_deadline,
-        )
-        resume_for = None
-        succeeded = (
-            bool(getattr(result, "succeeded", False))
-            and _shard_envelope(shard_path) is not None
-        )
+        shard_attempt = 0
+        while True:
+            shard_attempt += 1
+            result = await _run_before_section_deadline(
+                adapter, shard_task,
+                _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
+                on_event, shard_deadline,
+            )
+            resume_for = None
+            succeeded = (
+                bool(getattr(result, "succeeded", False))
+                and _shard_envelope(shard_path) is not None
+            )
+            if succeeded or shard_attempt >= SECTION_RETRY_MAX_ATTEMPTS:
+                break
+            reason = section_failure_reason(result, shard_path)
+            if not _is_transport_failure(result, reason):
+                break
+            # 片内传输断连：在**本片墙钟内**原地重试，不占节级 attempts。
+            # 实测断连水位约 0.3 次/分钟，一节四片跑近十分钟必撞好几次；
+            # 让它掉到节级重试去，3 次节尝试会被断连烧光（第二轮重放实证）。
+            remaining = (
+                shard_deadline - asyncio.get_running_loop().time()
+                if shard_deadline is not None
+                else None
+            )
+            if remaining is not None and remaining < SECTION_RESUME_COST_FLOOR_SECONDS:
+                break
+            resume_for = str(getattr(result, "session_id", None) or "") or None
+            await _emit(on_event, "write_shard_retry", {
+                "goal_id": context.goal_id,
+                "chapter_id": section["section_id"],
+                "shard": index, "shards": total, "attempt": shard_attempt + 1,
+                "resume": bool(resume_for), "remaining_seconds": remaining,
+            })
         await _emit(on_event, "write_shard_finished", {
             "goal_id": context.goal_id,
             "chapter_id": section["section_id"],
@@ -1470,6 +1495,7 @@ async def _run_section_shards(
             "reason": None if succeeded else section_failure_reason(
                 result, shard_path,
             ),
+            "attempts": shard_attempt,
             "elapsed_seconds": asyncio.get_running_loop().time() - started_at,
             "engine_error": getattr(result, "engine_error", None),
         }, is_error=not succeeded)

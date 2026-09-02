@@ -114,6 +114,7 @@ def test_d031_片合并_保留结论信息源之外的正文():
 
 def _shard_run(
     tmp_path, *, evidence: int, fail_shards=(), seed_parts=None, wall_clock=None,
+    flaky_shards=(),
 ):
     """一节切片跑一趟：假引擎按片写产物，fail_shards 里的片故意不落盘。"""
     import asyncio
@@ -165,6 +166,7 @@ def _shard_run(
     )
     bodies: dict[str, str] = {}
     events: list[dict] = []
+    seen: dict[int, int] = {}
 
     class Adapter:
         async def run(self, shard_task, ctx, on_event=None):
@@ -173,7 +175,10 @@ def _shard_run(
             bodies[name] = shard_task.body
             pool = _pool_from_body(shard_task.body)
             shard = int(name.split(".part.")[1].split(".")[0]) if ".part." in name else 1
-            if shard in fail_shards:
+            seen[shard] = seen.get(shard, 0) + 1
+            if shard in fail_shards or (
+                shard in flaky_shards and seen[shard] == 1
+            ):
                 return EngineRunResult(
                     conclusion=None, conclusion_error="socket closed",
                     validation=validation.ValidationReport(
@@ -299,8 +304,11 @@ def test_d031_一片失败_其余片照跑并合并落盘_节尝试判失败(tmp
     finished = [e["data"] for e in events if e["type"] == "write_shard_finished"]
     # 第一次节尝试跑满三片；断连属节级可重试，后两次尝试只补第 2 片
     # （1、3 直接跳过），这正是分片要换来的东西：已写的字不重写。
-    assert [(item["shard"], item["succeeded"]) for item in finished] == [
-        (1, True), (2, False), (3, True), (2, False), (2, False),
+    assert [
+        (item["shard"], item["succeeded"], item["attempts"]) for item in finished
+    ] == [
+        (1, True, 1), (2, False, 3), (3, True, 1),
+        (2, False, 3), (2, False, 3),
     ]
     assert [
         e["data"]["shard"] for e in events if e["type"] == "write_shard_skipped"
@@ -382,3 +390,22 @@ def test_d031_每片一份自己的墙钟_不共用节那一个绝对时刻(tmp_
     # 三片各拿一个自己的绝对时刻，且逐片后移——不是同一个数。
     assert len(set(deadlines)) == 3
     assert deadlines == sorted(deadlines)
+
+
+def test_d031_断连片在本片墙钟内重试一次即成功_不占节级重试(tmp_path):
+    """断连水位约 0.3 次/分钟，一节四片跑近十分钟必撞好几次——
+    掉到节级重试去会把 3 次节尝试烧光（第二轮重放实证）。"""
+    result, store, bodies, events, _ = _shard_run(
+        tmp_path, evidence=30, flaky_shards=(2,), wall_clock=330.0,
+    )
+
+    assert result.succeeded is True
+    retries = [e["data"] for e in events if e["type"] == "write_shard_retry"]
+    assert [(item["shard"], item["attempt"]) for item in retries] == [(2, 2)]
+    finished = [e["data"] for e in events if e["type"] == "write_shard_finished"]
+    # 三片各一条 finished：断连那次在片内消化掉，没冒到节级。
+    assert [(item["shard"], item["succeeded"], item["attempts"]) for item in finished] == [
+        (1, True, 1), (2, True, 2), (3, True, 1),
+    ]
+    assert not [e for e in events if e["type"] == "section_retry"]
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
