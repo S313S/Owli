@@ -387,10 +387,19 @@ def test_d031_片提示词把产物路径指到本片而不是节(tmp_path):
         assert f"{section_root / 'sec-1.md'}\n" not in body
 
 
-def test_d031_片提示词把结论条数钉在本片证据条数上(tmp_path):
+def test_d031_片提示词把结论条数钉在本片证据条数上_且硬约束在最末(tmp_path):
+    """第三轮重放实证：同一句话写在正文中段会被无视——5 条证据的片照写
+    10 条结论、5.3 KB、288 s（离 300 s 只剩 12 s）。硬约束要放在最末。"""
     _, _, bodies, _, _ = _shard_run(tmp_path, evidence=30)
 
-    assert "**不超过 10 条**" in bodies["sec-1.part.1.md"]
+    first = bodies["sec-1.part.1.md"]
+    assert "**不超过 10 条**" in first
+    assert "【本片硬约束，写之前再读一遍】" in first
+    assert "`## 结论` 列表项**最多 10 条**" in first
+    assert "全节口径的三段合计不超过 6 行" in first
+    # 硬约束必须是正文最后一段，别被信封示例挤到中间去。
+    assert first.rstrip().endswith("全节口径的三段合计不超过 6 行。")
+    assert "全节口径的三段" not in bodies["sec-1.part.2.md"].split("【本片硬约束")[1]
 
 
 def test_d031_每片一份自己的墙钟_不共用节那一个绝对时刻(tmp_path, monkeypatch):
