@@ -1666,7 +1666,13 @@ async def run_sectioned_task(
             )
             for section in sections:
                 if section["section_id"] in stale_done_ids:
-                    (section_root / section["filename"]).unlink(missing_ok=True)
+                    section_path = section_root / section["filename"]
+                    section_path.unlink(missing_ok=True)
+                    # §D-031：这一支是「已 done 的节角标失效、必须重写」。
+                    # 片产物在这里**必须一起删**——别处（节级重试）留着它们是为了
+                    # 不重写已写的字，但这里正文本身过期了，留着只会被原样合并回来。
+                    for stale in section_root.glob(f"{section_path.stem}.part.*.md"):
+                        stale.unlink(missing_ok=True)
             existing = {
                 row["chapter_id"]: row
                 for row in store.list_chapters(plan.research_id)

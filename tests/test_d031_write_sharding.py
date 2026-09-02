@@ -114,7 +114,7 @@ def test_d031_片合并_保留结论信息源之外的正文():
 
 def _shard_run(
     tmp_path, *, evidence: int, fail_shards=(), seed_parts=None, wall_clock=None,
-    flaky_shards=(),
+    flaky_shards=(), stale_done=False,
 ):
     """一节切片跑一趟：假引擎按片写产物，fail_shards 里的片故意不落盘。"""
     import asyncio
@@ -153,6 +153,27 @@ def _shard_run(
                 json.dumps({"markdown": markdown, "claims": []}, ensure_ascii=False),
                 encoding="utf-8",
             )
+    if stale_done:
+        # 已 done 的节 + 一份引用了库外链接的片产物：角标解析不了，
+        # run_sectioned_task 会把这一节复位重写。
+        section_root = output.parent / output.stem
+        section_root.mkdir(parents=True, exist_ok=True)
+        body = json.dumps({
+            "markdown": "## 结论\n\n- 过期正文 [S01]\n\n"
+                        "## 信息源\n\n- [S01] [旧](https://gone.example/1)\n",
+            "claims": [],
+        }, ensure_ascii=False)
+        (section_root / "sec-1.part.1.md").write_text(body, encoding="utf-8")
+        (section_root / "sec-1.md").write_text(body, encoding="utf-8")
+        store.ensure_chapters(
+            "r-ledger", [{"goal_id": "goal-1", "chapter_id": "ch-report/sec-1"}],
+            updated_at="2026-09-02T00:00:00Z",
+        )
+        store.finish_chapter(
+            "r-ledger", "goal-1", "ch-report/sec-1", status="done", reason=None,
+            actual_output_path=str(section_root / "sec-1.md"), actual_count=1,
+            updated_at="2026-09-02T00:00:01Z",
+        )
     task = EngineTask(
         body="写报告", output_path=output, output_format="markdown",
         research_id="r-ledger", goal_id="goal-1", agent_id="report-writing",
@@ -409,3 +430,23 @@ def test_d031_断连片在本片墙钟内重试一次即成功_不占节级重�
     ]
     assert not [e for e in events if e["type"] == "section_retry"]
     assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_d031_角标失效复位时片产物一起删_不把过期正文合并回来(tmp_path):
+    """节级重试留着片产物是为了不重写；但「已 done 的节角标失效」这一支
+    正文本身过期了，片留着只会被原样合并回来。"""
+    result, _, _, _, output = _shard_run(
+        tmp_path, evidence=30, stale_done=True,
+    )
+
+    section_root = output.parent / output.stem
+    stale = section_root / "sec-1.part.1.md"
+    assert result.succeeded is True
+    # 过期片被删掉后重跑，正文里不会再有那句过期话。
+    import json
+
+    assert "过期正文" not in stale.read_text(encoding="utf-8")
+    assert "过期正文" not in json.dumps(
+        json.load((section_root / "sec-1.md").open(encoding="utf-8")),
+        ensure_ascii=False,
+    )
