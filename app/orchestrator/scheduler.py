@@ -785,8 +785,16 @@ class Scheduler:
             )
             output_format = str(agent.output.get("format", ""))
             if should_section(kind, output_format):
+                # §D-031：节化章的每一节可能再切成片（撰写/交叉章写不完 300 s
+                # 的那个缺口），片数要组完池才知道，所以章预算乘的是**片数上限**
+                # 常量而不是实际片数——它是天花板不是开销：片跑得快就攒下余量，
+                # 一片都没切（池 ≤ 一片装得下）时余量原样不花。
+                from app.orchestrator.sectioning import WRITE_SHARD_MAX
+
                 section_deadline_seconds = deadline_seconds
-                deadline_seconds *= len(_section_specs(self.plan, agent))
+                deadline_seconds *= (
+                    len(_section_specs(self.plan, agent)) * WRITE_SHARD_MAX
+                )
             elif kind == "reliability_audit" and self._batch_count is not None:
                 # §RATE-3：评级章一章内分片，每片一份自己的墙钟、章预算 = 片数 ×
                 # 章墙钟——与节化章「墙钟按节计」同一口径，不新造概念。

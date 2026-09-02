@@ -178,14 +178,19 @@ def _scheduled_wall_clock(
 
 
 def test_节化章墙钟按节数放大而非节化与采集章不变(tmp_path: Path) -> None:
+    # §D-031：节内还可能再切片，章预算改乘「节数 × 片数上限」。
+    # 片墙钟（section_deadline_seconds）一秒没加，仍是章墙钟本身；
+    # 放大的是**预算天花板**——池 ≤ 一片装得下时一片都不切，余量原样不花。
+    from app.orchestrator.sectioning import WRITE_SHARD_MAX
+
     assert _scheduled_wall_clock(
         tmp_path / "fast", scale="fast", deadline=330,
         agent_id="report-writing", profile="report-writer", output_format="markdown",
-    ) == (990.0, 330)
+    ) == (330.0 * 3 * WRITE_SHARD_MAX, 330)
     assert _scheduled_wall_clock(
         tmp_path / "standard", scale="standard", deadline=1800,
         agent_id="report-writing", profile="report-writer", output_format="markdown",
-    ) == (5400.0, 1800)
+    ) == (1800.0 * 3 * WRITE_SHARD_MAX, 1800)
     for agent_id, profile, output_format in (
         ("agent-1", "readonly-analyst", "markdown"),
         ("data-collection", "web-collector", "json"),
