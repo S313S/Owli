@@ -52,6 +52,62 @@ SECTION_EVIDENCE_POOL_LIMIT = 30
 #: 取 20 与 `EVIDENCE_POOL_GOAL_FLOOR` 同源：一节论证需要的号数；
 #: 剩下 10 个位留给跨 goal 对照证据（货 5 放开的那条用法）。
 SECTION_GOAL_FLOOR = 20
+
+#: §D-031 撰写/交叉节分片。M6-e 关账整跑九个节里八个 timeout（两个死法各半：
+#: `claude.py` 300 s 适配器硬顶、节墙钟 330 s 跑满），成稿只剩占位、全库角标全空。
+#: 瓶颈量过了是**产出体量**不是入参体量：可见池恒为 30 条 ≈ 15 KB，而 RATE-3 那轮
+#: 写成功的节产物是 7.0/7.1/15.5 KB 中文正文——一次会话写这么多，本来就在 300 s 线上下。
+#: 所以按证据池顺序切片，让「一次会话要写多少字」降下来；池 ≤ 一片就走原路。
+WRITE_SHARD_ITEMS = 10
+#: 单片池 JSON 字节封顶。照 RATE-3 的教训：只按条数切会被重条目击穿
+#: （rating_notes / content_excerpt 长的证据条，同样条数能差出数倍字节）。
+WRITE_SHARD_BYTES = 6_000
+#: 一节最多切几片。片数是**天花板不是开销**（章预算按它乘），防病态计划把一节炸成十几次会话。
+WRITE_SHARD_MAX = 4
+
+
+def write_shard_sizes(
+    items: list[Any], *, shard_items: int = WRITE_SHARD_ITEMS,
+    shard_bytes: int = WRITE_SHARD_BYTES, max_shards: int = WRITE_SHARD_MAX,
+) -> list[int]:
+    """按池原序顺序切片：条数到 shard_items 或字节到 shard_bytes 就封一片。
+
+    池已按 (goal_id, 评级) 排好序，连续切因此天然让第 1 片是本 goal 高等级证据、
+    末片是跨 goal 对照证据，一片之内主题内聚。单条超字节预算时自成一片（不丢条）。
+    片数超过 max_shards 时，**多出来的条目并进最后一片**——宁可最后一片胖，
+    也不能把证据丢掉（丢条 = 角标断档）。返回每片条数表。
+    """
+    max_items = max(1, int(shard_items))
+    max_bytes = max(1, int(shard_bytes))
+    sizes: list[int] = []
+    count = 0
+    used = 0
+    for item in items:
+        weight = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+        if count and (count >= max_items or used + weight > max_bytes):
+            sizes.append(count)
+            count, used = 0, 0
+        count += 1
+        used += weight
+    if count:
+        sizes.append(count)
+    limit = max(1, int(max_shards))
+    if len(sizes) > limit:
+        merged = sizes[:limit]
+        merged[-1] += sum(sizes[limit:])
+        sizes = merged
+    return sizes
+
+
+def write_shard_path(section_path: Path, index: int) -> Path:
+    """第 index 片的产物：`sec-1.md` → `sec-1.part.1.md`。
+
+    片产物**不是任何 agent 的声明产物**（同 RATE-3 的 `.part.<n>.json`）；
+    系统按片序合并成 `sec-<n>.md`，下游 `_assemble` 只读后者。
+    """
+    return section_path.with_name(
+        f"{section_path.stem}.part.{int(index)}{section_path.suffix}"
+    )
 _EVIDENCE_SCORE_FIELDS = (
     "score_authority", "score_freshness", "score_crossref",
     "score_completeness", "score_independence",
