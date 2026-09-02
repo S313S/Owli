@@ -197,19 +197,38 @@ def _declared_shape(agent: Any) -> str:
     return ""
 
 
+#: §D-036：codex MCP 断连的报错原文形态。M3-a 那份 socket 词表
+#: （`classify_transport_error`，在 app/adapters/ 里，本包不动）认不出它，
+#: 于是 `chapter_failure_reason` 把它归到 empty_result 而不是 retry_exhausted。
+#: 真跑原文（r-e74541583a05 goal-3/ch-3/sec-1 片 3）：
+#: `Transport channel closed … chatgpt.com/backend-api/ps/mcp`。
+_CODEX_TRANSPORT_PATTERN = re.compile(
+    r"transport\s+channel\s+closed", re.IGNORECASE,
+)
+
+
 def _is_transport_failure(result: Any, reason: str) -> bool:
     """传输断连（socket 断开这类）才退避重试；限流 / 超时 / 结论不合法都不算。
 
     先看归一后的 reason —— `classify_rate_limit` 与超时兜底都排在传输判定之前，
     所以 reason 落到 retry_exhausted 时才轮得到传输判定，真 429 不会被误吞。
+
+    §D-036 例外：codex 的 `Transport channel closed` 指纹太具体，不可能是限流或
+    超时的措辞，但它带不出 retry_exhausted（报错文本里没有 socket 词表的词，
+    也没有 timeout 字样，片产物又没落盘 → empty_result）。所以这一条按**文本**认，
+    不过 reason 那道闸；只把 quota_exhausted 排除在外，让结构化限流信号仍然优先。
     """
 
-    if reason != SECTION_RETRYABLE_REASON:
-        return False
     engine_error = str(getattr(result, "engine_error", "") or "")
     conclusion_error = str(getattr(result, "conclusion_error", "") or "")
     errors = " ".join(filter(None, (engine_error, conclusion_error)))
-    return bool(errors) and classify_transport_error(errors)
+    if not errors:
+        return False
+    if reason != "quota_exhausted" and _CODEX_TRANSPORT_PATTERN.search(errors):
+        return True
+    if reason != SECTION_RETRYABLE_REASON:
+        return False
+    return bool(classify_transport_error(errors))
 
 
 async def _wait_before_section_retry(timer: Any, delay: float) -> None:
@@ -2353,6 +2372,45 @@ async def run_sectioned_task(
                     if inspect.isawaitable(skipped):
                         await skipped
                     reason = "timeout"
+                if (
+                    shard_count > 1
+                    and not pool_failed
+                    and section_attempt < attempt_budget
+                    and _section_resume_within_deadline(
+                        section_deadline,
+                        retry_delay=retry_delay,
+                        wall_clock_seconds=section_wall_clock_effective,
+                        wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                    )
+                ):
+                    # §D-036：分片节里 result 是**第一个失败片**的结果，它的失败
+                    # 不等于整节问不出来——其余片的字已经合并落盘了。D-033 只给
+                    # 片墙钟到点（`SectionWallClockExpired`）开了这条补坏片的路，
+                    # 引擎硬顶 300 s、codex 传输断、codex 无产物这三种片级失败各自
+                    # 落 missing，一片坏就作废 17–23 KB 好稿（真跑 r-e74541583a05
+                    # §g #3/#4/#5，节 attempts 只用了 1/3、剩余预算还有 ~580 s）。
+                    # 这里把判定统一到同一道闸上：不论片级失败的 reason 是什么，
+                    # attempts 未满且剩余节墙钟（已按片数放大）还够一次 resume
+                    # 成本下限，就只补坏片、已成片 `write_shard_skipped`。
+                    # 闸沿用既有那一套、不新造，常量一个不动。
+                    # 三处不动：① 不分片的节（shard_count == 1）逐字照旧；
+                    # ② pool_failed 是**合并后**节产物的校验失败（信封/角标），
+                    #    不是片级失败，仍走下面 D-025 那条定向重试；
+                    # ③ attempts 用尽或余量不足时 reason / timeout_kind 原样落账，
+                    #    这里只决定「要不要再来一次」，不改写失败原因。
+                    # resume=True 指**片级** resume——不续引擎会话，靠盘上已成的片跳过。
+                    await _emit_section_retry(
+                        on_event,
+                        context=context,
+                        section=section,
+                        attempt=section_attempt + 1,
+                        resume=True,
+                        session_id=None,
+                    )
+                    await _wait_before_section_retry(timer, retry_delay)
+                    resume_session_id = None
+                    continue
                 if (
                     pool_failed
                     and pool_result is not None
