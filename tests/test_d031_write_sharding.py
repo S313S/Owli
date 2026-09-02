@@ -41,13 +41,15 @@ def test_d031_重条目按字节先封片():
     assert write_shard_sizes([_item(1, "正" * 5000)]) == [1]
 
 
-def test_d031_片数上限把多出来的条目并进最后一片():
+def test_d031_片数上限把多出来的条目均摊重切():
+    """§D-034 改语义：原断言 [10, 10, 10, 30]（溢出全并进末片）已被均摊取代。"""
+
     from app.orchestrator.sectioning import WRITE_SHARD_MAX, write_shard_sizes
 
     sizes = write_shard_sizes([_item(i) for i in range(1, 61)])
     assert len(sizes) == WRITE_SHARD_MAX
     assert sum(sizes) == 60
-    assert sizes == [10, 10, 10, 30]
+    assert sizes == [15, 15, 15, 15]
 
 
 def test_d031_片产物路径不是声明产物路径():

@@ -78,16 +78,22 @@ def write_shard_sizes(
 
     池已按 (goal_id, 评级) 排好序，连续切因此天然让第 1 片是本 goal 高等级证据、
     末片是跨 goal 对照证据，一片之内主题内聚。单条超字节预算时自成一片（不丢条）。
-    片数超过 max_shards 时，**多出来的条目并进最后一片**——宁可最后一片胖，
-    也不能把证据丢掉（丢条 = 角标断档）。返回每片条数表。
+    片数超过 max_shards 时，**把全部条目在 max_shards 片内按字节均摊重切**
+    （§D-034）：仍保持池原序、不丢条、片数恰为 max_shards，但任一片不再比
+    「总字节 / max_shards」胖超过一条的权重。旧实现把溢出条目全并进末片
+    （「宁可末片胖」），末片体量 = 池总量 − 前几片，双封顶在末片形同虚设——
+    r-f59fdba77cd7 goal-3/ch-5/sec-2 切成 5/4/4/17，末片 305.6 s 撞 300 s 硬顶，
+    为消灭超时做的分片反而在末片把超时造了回来。返回每片条数表。
     """
     max_items = max(1, int(shard_items))
     max_bytes = max(1, int(shard_bytes))
+    weights = [
+        len(json.dumps(item, ensure_ascii=False).encode("utf-8")) for item in items
+    ]
     sizes: list[int] = []
     count = 0
     used = 0
-    for item in items:
-        weight = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+    for weight in weights:
         if count and (count >= max_items or used + weight > max_bytes):
             sizes.append(count)
             count, used = 0, 0
@@ -97,9 +103,39 @@ def write_shard_sizes(
         sizes.append(count)
     limit = max(1, int(max_shards))
     if len(sizes) > limit:
-        merged = sizes[:limit]
-        merged[-1] += sum(sizes[limit:])
-        sizes = merged
+        sizes = _rebalanced_shard_sizes(weights, limit)
+    return sizes
+
+
+def _rebalanced_shard_sizes(weights: list[int], limit: int) -> list[int]:
+    """把全部条目按原序均摊进 `limit` 片，返回每片条数表（§D-034）。
+
+    贪心封片，目标字节按「剩余字节 / 剩余片数」动态取——静态目标会让前几片
+    每片都欠一点、把欠账全堆到末片，正是旧实现的病。每片至少一条，也至少给
+    后面的片各留一条，因此片数恰为 `limit`（前提：条数 ≥ limit，溢出时必然成立）。
+    """
+
+    total = len(weights)
+    sizes: list[int] = []
+    index = 0
+    for remaining_shards in range(limit, 0, -1):
+        if remaining_shards == 1:
+            sizes.append(total - index)
+            break
+        # 后面每片至少留一条，本片最多能拿这么多。
+        takeable = total - index - (remaining_shards - 1)
+        target = sum(weights[index:]) / remaining_shards
+        count = 1
+        used = weights[index]
+        while count < takeable:
+            weight = weights[index + count]
+            # 取到「离目标最近」为止：加上这条比停在这里更接近 target 才继续。
+            if used + weight - target >= target - used:
+                break
+            used += weight
+            count += 1
+        sizes.append(count)
+        index += count
     return sizes
 
 
