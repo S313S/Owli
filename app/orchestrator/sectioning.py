@@ -2039,6 +2039,11 @@ async def run_sectioned_task(
                             now_iso=now_iso, on_event=on_event,
                         )
                     raise
+            if shard_count > 1 and engine_task is not section_task:
+                # §D-031：上面两条既有重试（resume 失败重跑 / 结论块定向重试）
+                # 打在**片任务**上，重跑成功也只更新片产物；不再合并一次的话，
+                # 节产物还是重试前那一份。合并是幂等的，白跑一次也没副作用。
+                _merge_shard_files(section_path, shard_count, citation_numbers)
             try:
                 artifact_empty = (
                     not section_path.is_file()
