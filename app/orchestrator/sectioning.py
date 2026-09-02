@@ -1729,6 +1729,14 @@ async def run_sectioned_task(
             else None
         )
         section_wall_clock_started_at = now() if callable(now) else None
+        # §D-031：节级重试的那道闸（「剩余节墙钟够不够再跑一次」）用的是**节**墙钟。
+        # 分片后每片各拿一份自己的墙钟，四片跑完早就超出原来那一份，于是闸永远关着——
+        # 真跑实证：ch-5/sec-1 四片写成三片，只因一片断连就直接落 missing、
+        # 一次节级重试都没有（timeout_kind=resume_floor）。所以节这边也要按片数放大。
+        # 放大只做一次（`shard_budget_applied`），且只在真的切了多片时做——
+        # 池 ≤ 一片装得下的节一秒不多给，行为与分片前逐字相同。
+        section_wall_clock_effective = section_wall_clock
+        shard_budget_applied = False
         resume_session_id: str | None = None
         envelope_retry_source: str | None = None
 
@@ -1942,6 +1950,16 @@ async def run_sectioned_task(
             # shard_sizes 长度为 1，下面 shard_count == 1，走的仍是分片前那条路。
             shard_sizes = write_shard_sizes(evidence_pool["items"])
             shard_count = max(1, len(shard_sizes))
+            if (
+                shard_count > 1
+                and section_wall_clock is not None
+                and not shard_budget_applied
+            ):
+                extra = section_wall_clock * (shard_count - 1)
+                if section_deadline is not None:
+                    section_deadline += extra
+                section_wall_clock_effective = section_wall_clock * shard_count
+                shard_budget_applied = True
             body = _section_body(evidence_pool, section_path)
             section_task = replace(
                 base_task,
@@ -2177,7 +2195,7 @@ async def run_sectioned_task(
                     if _section_resume_within_deadline(
                         section_deadline,
                         retry_delay=retry_delay,
-                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
                     ):
@@ -2202,7 +2220,7 @@ async def run_sectioned_task(
                     timeout_kind = "resume_floor"
                     remaining_seconds = _section_remaining_seconds(
                         section_deadline,
-                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
                     )
@@ -2234,7 +2252,7 @@ async def run_sectioned_task(
                     # 会话成本下限就不给，直接如实落终态。
                     envelope_remaining = _section_remaining_seconds(
                         section_deadline,
-                        wall_clock_seconds=section_wall_clock,
+                        wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
                     )

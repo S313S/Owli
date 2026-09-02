@@ -495,3 +495,48 @@ def test_d031_一片跑满自己那份墙钟只废这一片_后面的片照跑(t
     assert result.succeeded is False
     row = store.list_chapters("r-ledger")[0]
     assert (row["status"], row["reason"]) == ("missing", "timeout")
+
+
+def test_d031_节级重试的墙钟闸按片数放大(tmp_path, monkeypatch):
+    """真跑实证：ch-5/sec-1 四片写成三片，只因一片断连就直接落 missing、
+    一次节级重试都没有——timeout_kind=resume_floor。节级重试那道闸用的是
+    **节**墙钟，而分片后每片各拿一份自己的，四片跑完早就超了，闸永远关着。"""
+    import app.orchestrator.sectioning as sectioning
+
+    seen: list[float | None] = []
+    original = sectioning._section_resume_within_deadline
+
+    def spy(deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at, now):
+        seen.append(wall_clock_seconds)
+        return original(
+            deadline, retry_delay=retry_delay,
+            wall_clock_seconds=wall_clock_seconds,
+            wall_clock_started_at=wall_clock_started_at, now=now,
+        )
+
+    monkeypatch.setattr(sectioning, "_section_resume_within_deadline", spy)
+    _shard_run(tmp_path, evidence=30, fail_shards=(2,), wall_clock=330.0)
+
+    # 30 条切 3 片 → 节这边的闸按 330×3 算，不是 330。
+    assert seen and set(seen) == {990.0}, seen
+
+
+def test_d031_不分片的节墙钟一秒不多给(tmp_path, monkeypatch):
+    """放大只在真的切了多片时做；池 ≤ 一片装得下的节行为与分片前逐字相同。"""
+    import app.orchestrator.sectioning as sectioning
+
+    seen: list[float | None] = []
+    original = sectioning._section_resume_within_deadline
+
+    def spy(deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at, now):
+        seen.append(wall_clock_seconds)
+        return original(
+            deadline, retry_delay=retry_delay,
+            wall_clock_seconds=wall_clock_seconds,
+            wall_clock_started_at=wall_clock_started_at, now=now,
+        )
+
+    monkeypatch.setattr(sectioning, "_section_resume_within_deadline", spy)
+    _shard_run(tmp_path, evidence=8, fail_shards=(1,), wall_clock=330.0)
+
+    assert seen and set(seen) == {330.0}, seen
