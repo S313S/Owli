@@ -54,3 +54,57 @@ def test_d031_片产物路径不是声明产物路径():
     assert write_shard_path(Path("/x/report/sec-1.md"), 2) == Path(
         "/x/report/sec-1.part.2.md"
     )
+
+
+def test_d031_片合并_单结论单信息源且按链接去重():
+    from app.report.markdown import merge_section_shards
+
+    shard_1 = (
+        "## 结论\n\n- 甲结论 [S03]\n\n"
+        "## 信息源\n\n- [S03] [来源三](https://example.com/3)\n"
+    )
+    shard_2 = (
+        "## 结论\n\n- 乙结论 [S03][S07]\n\n"
+        "## 信息源\n\n- [S03] [来源三](https://example.com/3)\n"
+        "- [S07] [来源七](https://example.com/7)\n"
+    )
+    merged = merge_section_shards(
+        [shard_1, shard_2],
+        citation_numbers={"https://example.com/3": 3, "https://example.com/7": 7},
+    )
+    assert merged.count("## 结论") == 1
+    assert merged.count("## 信息源") == 1
+    # 两片都引了 S03，信息源只留一条——重复条目会让 source_citations 直接抛。
+    assert merged.count("[来源三](https://example.com/3)") == 1
+    assert "- 甲结论 [S03]" in merged and "- 乙结论 [S03][S07]" in merged
+    # 角标是证据的全局属性，合并不重排。
+    assert "[S07]" in merged
+    # 片级合并产出的是节不是整卷：不写缺失清单。
+    assert "缺失清单" not in merged
+
+
+def test_d031_片合并_解析得出的角标与信息源一一对上():
+    from app.report.markdown import merge_section_shards, source_citations
+
+    shards = [
+        "## 结论\n\n- 甲 [S01]\n\n## 信息源\n\n- [S01] [一](https://example.com/1)\n",
+        "## 结论\n\n- 乙 [S02]\n\n## 信息源\n\n- [S02] [二](https://example.com/2)\n",
+    ]
+    merged = merge_section_shards(shards)
+    assert source_citations(merged) == {
+        "https://example.com/1": 1, "https://example.com/2": 2,
+    }
+
+
+def test_d031_片合并_保留结论信息源之外的正文():
+    from app.report.markdown import merge_section_shards
+
+    shards = [
+        "# 节标题\n\n## 证据缺口\n\n- 未覆盖 X\n\n"
+        "## 结论\n\n- 甲 [S01]\n\n## 信息源\n\n- [S01] [一](https://example.com/1)\n",
+        "## 结论\n\n- 乙 [S02]\n\n## 信息源\n\n- [S02] [二](https://example.com/2)\n",
+    ]
+    merged = merge_section_shards(shards)
+    # 证据缺口只有第 1 片写，合并后仍在结论之前。
+    assert merged.index("## 证据缺口") < merged.index("## 结论")
+    assert "# 节标题" in merged

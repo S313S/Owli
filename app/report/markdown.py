@@ -170,25 +170,21 @@ def _split_section_structures(text: str) -> tuple[str, str, list[str]]:
     return remainder, "\n\n".join(part for part in conclusion_parts if part), source_lines
 
 
-def merge_sectioned_markdown(
-    title: str,
-    section_texts: Sequence[str],
-    missing_lines: Sequence[str],
-    *,
-    citation_numbers: Mapping[str, int] | None = None,
-) -> str:
-    """把各节 Markdown 归并成单结论、单信息源的整卷报告。
+def _merge_shard_structures(
+    texts: Sequence[str],
+    citation_numbers: Mapping[str, int] | None,
+) -> tuple[list[str], list[str], dict[str, tuple[str, str]], list[str]]:
+    """节/片归并的共用零件：拆结构、按 permalink 去重信息源、按全局号重排角标。
 
-    节按 goal 切且每节都带自己的「结论/信息源」，直接拼接会得到三份并列的
-    小报告（worklog report-module §10.4）。这里做确定性归并：各节的结论合入
-    章末唯一的「结论」，信息源按 permalink 去重合入唯一的「信息源」并全卷
-    统一重排 [SNN] 角标（各节独立编号会互相撞号）。
+    §D-031：片级合并（`merge_section_shards`）与节级合并
+    （`merge_sectioned_markdown`）要的是同一套去重与重排，只是外层形状不同，
+    所以抽出来共用——两处各写一份迟早会漂。
     """
     inventory: dict[str, tuple[str, str]] = {}  # 去重键 → (新角标, 条目行)
     plain_source_lines: list[str] = []  # 无角标条目按原文去重保留，不参与重排
     merged_sections: list[str] = []
     merged_conclusions: list[str] = []
-    for index, text in enumerate(section_texts):
+    for index, text in enumerate(texts):
         remainder, conclusion, source_lines = _split_section_structures(text)
         mapping: dict[str, str] = {}
         for line in source_lines:
@@ -221,6 +217,57 @@ def merge_sectioned_markdown(
             merged_sections.append(renumber(remainder))
         if conclusion:
             merged_conclusions.append(renumber(conclusion))
+    return merged_sections, merged_conclusions, inventory, plain_source_lines
+
+
+def merge_section_shards(
+    shard_texts: Sequence[str],
+    *,
+    citation_numbers: Mapping[str, int] | None = None,
+) -> str:
+    """§D-031：把一节的 K 份片正文归并成**一节**的正文。
+
+    与 `merge_sectioned_markdown` 的差别只在外层形状：片级产出的是节，不是整卷，
+    所以既不写 `# 标题`（节标题由片正文自己带或不带），也不写 `## 缺失清单`
+    （那份由章拼装器按账本另写权威的一份）。
+
+    去重与重排共用 `_merge_shard_structures`：信息源按 permalink 去重——
+    两片各列一遍同一条源，`source_citations` 会直接抛「信息源清单含重复
+    permalink 或 citation_no」。角标本身不需要跨片编号：`_evidence_index`
+    是先按全报告排序再编号、每节只挑子集，同一条证据在哪片都是同一个号。
+    """
+    merged_sections, merged_conclusions, inventory, plain_source_lines = (
+        _merge_shard_structures(shard_texts, citation_numbers)
+    )
+    blocks: list[str] = []
+    for part in merged_sections:
+        blocks.extend([part, ""])
+    if merged_conclusions:
+        blocks.extend(["## 结论", "", *merged_conclusions, ""])
+    if inventory or plain_source_lines:
+        blocks.extend(["## 信息源", ""])
+        blocks.extend(line for _, line in inventory.values())
+        blocks.extend(plain_source_lines)
+    return "\n".join(blocks).rstrip() + "\n"
+
+
+def merge_sectioned_markdown(
+    title: str,
+    section_texts: Sequence[str],
+    missing_lines: Sequence[str],
+    *,
+    citation_numbers: Mapping[str, int] | None = None,
+) -> str:
+    """把各节 Markdown 归并成单结论、单信息源的整卷报告。
+
+    节按 goal 切且每节都带自己的「结论/信息源」，直接拼接会得到三份并列的
+    小报告（worklog report-module §10.4）。这里做确定性归并：各节的结论合入
+    章末唯一的「结论」，信息源按 permalink 去重合入唯一的「信息源」并全卷
+    统一重排 [SNN] 角标（各节独立编号会互相撞号）。
+    """
+    merged_sections, merged_conclusions, inventory, plain_source_lines = (
+        _merge_shard_structures(section_texts, citation_numbers)
+    )
     blocks = [f"# {title}", ""]
     for part in merged_sections:
         blocks.extend([part, ""])
