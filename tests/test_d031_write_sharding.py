@@ -290,8 +290,9 @@ def test_d031_片提示词把本片口径讲死(tmp_path):
     assert "你现在写第 1/3 片" in first and "你现在写第 2/3 片" in second
     assert "**只就这几条写**" in first
     assert "本片不写节标题行、不写总起或收束段落" in first
-    # claims id 区间按片走，跨片不撞号。
-    assert "c-0101、c-0102" in first and "c-0201、c-0202" in second
+    # claims id 区间带**节号 + 片号**：只带片号的话，两个不同节的第 1 片会撞号，
+    # 而断言 id 要求报告内唯一。
+    assert "c-010101、c-010102" in first and "c-010201、c-010202" in second
     # 全节口径的段落只让第 1 片写。
     assert "只在本片（第 1 片）写一次" in first
     assert "已由第 1 片写过" in second

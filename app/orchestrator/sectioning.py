@@ -1352,7 +1352,9 @@ async def _emit(
         await result
 
 
-def _shard_notice(index: int, total: int, items: int, prior_digest: str) -> str:
+def _shard_notice(
+    index: int, total: int, items: int, section_number: int, prior_digest: str,
+) -> str:
     """【本片】段：把「只写本片这几条」「别重复前面写过的」讲死。
 
     §D-031：不这么讲，写手会拿到十条证据仍照章任务写整节，产出体量降不下来——
@@ -1368,8 +1370,10 @@ def _shard_notice(index: int, total: int, items: int, prior_digest: str) -> str:
         "一条证据撑一条结论足够；写超了不会更全面，只会挤掉后面几片的时间）。\n"
         "本片不写节标题行、不写总起或收束段落；系统会把各片按片序合并成一节，"
         "合并时信息源按链接去重、角标沿用全局编号（同一条证据在哪一片都是同一个号）。\n"
-        f"本片断言 id 固定使用 c-{index:02d}01、c-{index:02d}02… 的区间"
-        "（覆盖上文给的区间口径），避免跨片重号。\n"
+        f"本片断言 id 固定使用 c-{section_number:02d}{index:02d}01、"
+        f"c-{section_number:02d}{index:02d}02… 的区间（覆盖上文给的区间口径）。"
+        "**节号也要带上**：只带片号的话，两个不同节的第 1 片会撞同一个 id，"
+        "而断言 id 要求报告内唯一。\n"
     )
     if index == 1:
         notice += (
@@ -1419,6 +1423,7 @@ async def _run_section_shards(
     resume_session_id: str | None,
     context: Any,
     section: dict[str, Any],
+    section_number: int,
     section_attempt: int,
 ) -> tuple[Any, EngineTask]:
     """一节切 K 片串行跑，跑完按片序合并成节产物。
@@ -1445,7 +1450,8 @@ async def _run_section_shards(
             continue
         body = section_body(_shard_pool(evidence_pool, start, size), shard_path)
         body += _shard_notice(
-            index, total, size, _shard_prior_digest(section_path, index - 1),
+            index, total, size, section_number,
+            _shard_prior_digest(section_path, index - 1),
         )
         shard_task = replace(
             section_task, body=body, output_path=shard_path,
@@ -1950,6 +1956,7 @@ async def run_sectioned_task(
                         resume_session_id=resume_session_id,
                         context=context,
                         section=section,
+                        section_number=section_number,
                         section_attempt=section_attempt,
                     )
                 else:
