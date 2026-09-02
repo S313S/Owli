@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
 import re
@@ -26,6 +27,7 @@ from app.plan.allocation import (
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
+from app.plan.normalize import normalize_plan
 from app.plan.model import (
     DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS, rating_rows_path,
     rating_task_text,
@@ -765,6 +767,36 @@ def _origin() -> dict[str, str]:
     return {field: "generated" for field in fields}
 
 
+def _align_deliverable_shape(
+    raw: Any, deliverable: dict[str, Any], goal_id: str, repairs: list[str],
+) -> Any:
+    """[修正17] 归属 deliverable 的末位 agent 与 deliverable 的 shape 对齐。
+
+    两者都是同一段模型写的，不一致只是漂移：deliverable 是 goal 的对外契约，
+    以它为准；节化章种类（规则 27）两边一律 object。修正记进 repairs 留痕。
+    """
+
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("output"), Mapping):
+        return raw
+    shape = str(raw["output"].get("shape", "")).strip().casefold()
+    target = str(deliverable.get("shape", "")).strip().casefold()
+    if shape not in _SHAPES or target not in _SHAPES or shape == target:
+        return raw
+    name = str(raw.get("display_name") or raw.get("name") or "").strip()
+    try:
+        kind, _ = _classify(name, str(raw.get("task", "")))
+    except ValueError:
+        return raw
+    final = "object" if kind in SECTIONED_CHAPTER_KINDS else target
+    if final != target:
+        deliverable["shape"] = final
+    repairs.append(
+        f"[修正17] {goal_id}/{name} output.shape {shape}→{final}"
+        f"（归属 deliverable.shape={target}{'→object' if final != target else ''}）"
+    )
+    return {**raw, "output": {**raw["output"], "shape": final}}
+
+
 def _build_plan(
     skeleton: Any,
     *,
@@ -777,6 +809,7 @@ def _build_plan(
     market_profile_justification: str = "兼容旧调用的全球产品默认。",
     subjects: list[str] | None = None,
     subjects_justification: str = "兼容旧调用，未声明研究实体。",
+    repairs: list[str] | None = None,
 ) -> Plan:
     if not isinstance(skeleton, Mapping) or not isinstance(skeleton.get("goals"), list):
         raise ValueError("规划产物顶层必须是含 goals 数组的 object")
@@ -854,6 +887,10 @@ def _build_plan(
                 if item["goal_id"] in ancestors
             ]
             for agent_index, item in enumerate(raw_agents):
+                if agent_index == len(raw_agents) - 1 and repairs is not None:
+                    item = _align_deliverable_shape(
+                        item, deliverables[goal_id], goal_id, repairs,
+                    )
                 agent = _build_agent(
                     item,
                     goal_id,
@@ -1222,6 +1259,14 @@ def _progress_event(research_id: str, text: str) -> NormalizedEvent:
     )
 
 
+async def _emit_repairs(store: Any, research_id: str, repairs: list[str]) -> None:
+    """§PLAN-1 货 2：每条机械修正各发一条事件，工作板与探针都看得见。"""
+
+    for note in repairs:
+        event = _progress_event(research_id, f"机械修正：{note}")
+        await _emit(store, dataclasses.replace(event, raw={"repair": note}))
+
+
 def _allocation_event(
     research_id: str, collection_plan: Mapping[str, list[dict[str, str]]],
 ) -> NormalizedEvent:
@@ -1427,6 +1472,7 @@ async def generate_plan(
                     "agents": expansion.get("agents"),
                 })
             assembled = {"goals": expanded_goals}
+            repairs: list[str] = []
             assembled_path = workspace.root / "assembled.json"
             assembled_path.write_text(
                 json.dumps(assembled, ensure_ascii=False, indent=2) + "\n",
@@ -1443,7 +1489,10 @@ async def generate_plan(
                 market_profile_justification=market_profile_justification,
                 subjects=subjects,
                 subjects_justification=subjects_justification,
+                repairs=repairs,
             )
+            repairs.extend(normalize_plan(plan))
+            await _emit_repairs(store, research_id, repairs)
             errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
                 collection_plan=collection_plan,
@@ -1502,6 +1551,7 @@ async def generate_plan(
                 only_chapters=only_chapters,
                 lint_errors=chapter_errors,
             )
+            await _emit_repairs(store, research_id, normalize_plan(plan))
             chapter_errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
                 collection_plan=collection_plan,
