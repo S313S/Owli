@@ -33,8 +33,12 @@ _CONSUMED_FIELDS = frozenset({
 # 而采集期适配器写的是 "xhs"）。两套词让 dao._evidence_identity 的
 # native-identity 查认不出同一行，落到 INSERT 上撞 UNIQUE(report_id, permalink)——
 # 即 D-019。词表以 app/sources/*.py 里适配器写的值为准，别名一律归到那一侧。
+# D-032：国内两源（`app/sources/weibo.py`、公众号）采集期写的就是这两个值，
+# 词表里没有 → hint=weibo 每次收尾都被降级成 web_search。这里只加这两个值，
+# 不从 `app/platforms.py` 派生：派生会把还没有适配器的 bilibili/zhihu 一起
+# 放进闭集，闭集要跟「适配器实际写了什么」对齐，不跟「登记了什么」对齐。
 _PLATFORM_CANON = ("xhs", "douyin", "web_search", "reddit", "product_hunt",
-                   "hacker_news", "x")
+                   "hacker_news", "x", "weibo", "wechat_mp")
 _PLATFORM_ALIASES = {
     "xiaohongshu": "xhs", "xiao_hong_shu": "xhs", "xiaohongshu.com": "xhs",
     "redbook": "xhs", "red_book": "xhs", "rednote": "xhs",
@@ -58,6 +62,11 @@ _PLATFORM_DOMAINS = {
     "ycombinator.com": "hacker_news",
     "producthunt.com": "product_hunt",
     "x.com": "x", "twitter.com": "x",
+    # D-032：微博永久链实测是 m.weibo.cn/detail/<mid>（域名走后缀回退，
+    # weibo.cn 已能覆盖 m.weibo.cn，这里显式列出以免后续误删）。
+    "weibo.cn": "weibo", "m.weibo.cn": "weibo", "weibo.com": "weibo",
+    # 公众号只认 mp.weixin.qq.com 这一层，qq.com 本身不是平台。
+    "mp.weixin.qq.com": "wechat_mp",
 }
 # platform 降级时，归一化三件套按的是**降级前**那个（错的）平台算的，平台一改就不
 # 再成立；留着会撞 dao._validate_normalization 的一致性校验，让整批 upsert 回滚、

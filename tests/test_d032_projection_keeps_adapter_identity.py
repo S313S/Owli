@@ -291,5 +291,38 @@ class ProjectionIdentityTest(unittest.TestCase):
         )
 
 
+class VocabularyCoversDomesticSourcesTest(unittest.TestCase):
+    """D-032 候选(2)：weibo / wechat_mp 进闭集，域名表认得出两家永久链。"""
+
+    def test_hint为weibo不再降级且微博永久链归weibo(self) -> None:
+        from app.store.evidence_artifacts import (
+            PLATFORM_VOCABULARY, resolve_platform,
+        )
+
+        self.assertIn("weibo", PLATFORM_VOCABULARY)
+        self.assertIn("wechat_mp", PLATFORM_VOCABULARY)
+        # 产物没写平台、agent 唯一信息源是 weibo：命中闭集，不降级不留痕
+        self.assertEqual(
+            resolve_platform(None, permalink=_WEIBO_PERMALINK, hint="weibo"),
+            ("weibo", None),
+        )
+        # 产物把平台写成自由文本时，永久链自己指得出平台
+        # （m.weibo.cn 走域名后缀回退到 weibo.cn），原值照旧留痕。
+        self.assertEqual(
+            resolve_platform("微博热搜", permalink=_WEIBO_PERMALINK),
+            ("weibo", "微博热搜"),
+        )
+        self.assertEqual(
+            resolve_platform(None, permalink=_MP_PERMALINK, hint="wechat_mp"),
+            ("wechat_mp", None),
+        )
+        # qq.com 本身不是平台，只认 mp.weixin.qq.com 这一层
+        self.assertEqual(
+            resolve_platform(None, permalink="https://v.qq.com/x/page/a",
+                             hint="web_search"),
+            ("web_search", None),
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
