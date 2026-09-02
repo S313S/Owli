@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.adapters import validation
-from app.adapters.contracts import EngineTask
+from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 from app.adapters.ratelimit import classify_transport_error
 from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
@@ -1442,6 +1442,30 @@ def _shard_notice(
     return notice
 
 
+def _merged_shard_result(
+    section_task: EngineTask, runs_root: Path, store: Any,
+) -> EngineRunResult:
+    """全片跳过时，用盘上那份合并稿当本次节尝试的结果（§D-035）。
+
+    不造终态、不绕校验：产物验证照旧跑 section_task 自己那串 validators
+    （file_exists / sections_exist / citation_marks_resolvable / no_orphan_citation），
+    验不过就仍是失败结果，交回节循环按既有闭集判 reason。也不起引擎——
+    这一步是纯出口修正，零新增会话、零新增循环。
+    """
+    return EngineRunResult(
+        conclusion=OwliResult(
+            "done", str(section_task.output_path),
+            "本次尝试全片跳过，节产物取盘上合并稿", [], [], [], None,
+        ),
+        conclusion_error=None,
+        validation=validation.validate(
+            _ctx(section_task, runs_root, store), section_task.validators,
+        ),
+        events=[],
+        permission_denials=[],
+    )
+
+
 async def _run_section_shards(
     *,
     adapter: Any,
@@ -1474,6 +1498,7 @@ async def _run_section_shards(
     last: tuple[Any, EngineTask] | None = None
     first_failure: tuple[Any, EngineTask] | None = None
     wall_clock_expired: SectionWallClockExpired | None = None
+    ran_any = False
     for index, size in enumerate(shard_sizes, start=1):
         shard_path = write_shard_path(section_path, index)
         if _shard_envelope(shard_path) is not None:
@@ -1500,6 +1525,7 @@ async def _run_section_shards(
             "shard": index, "shards": total, "pool_items": size,
             "attempt": section_attempt,
         })
+        ran_any = True
         # 片墙钟：**每片一份自己的**（口径同 RATE-3 评级片），不共用节那一个
         # 绝对时刻——共用的话第 1 片跑掉 221 s，剩下三片分 109 s，必全灭。
         # 章预算已按 节数 × WRITE_SHARD_MAX 放大，覆盖得住。
@@ -1589,6 +1615,18 @@ async def _run_section_shards(
         "chapter_id": section["section_id"],
         "shards": total, "done": merged,
     })
+    if (
+        not ran_any
+        and merged == total
+        and merged > 0
+        and _shard_envelope(section_path) is not None
+    ):
+        # §D-035：这一次节尝试一片都没跑——因为所有片在上一次尝试里已经落盘，
+        # 合并稿也已经在盘上（22.7 KB 真稿）。原来这里返回 (None, …)，节循环
+        # 把 None 判成 empty_result，把刚合出来的整节挪进 .rejected.md。
+        # 盘上有完整合并稿 = 本次尝试的产物已经具备，按成功出口交回节循环，
+        # 由它照旧跑 conclusion / 证据池格式契约那两道闸。
+        return _merged_shard_result(section_task, runs_root, store), section_task
     return first_failure or last or (None, section_task)
 
 
