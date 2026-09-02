@@ -460,3 +460,38 @@ def test_d031_角标失效复位时片产物一起删_不把过期正文合并�
         json.load((section_root / "sec-1.md").open(encoding="utf-8")),
         ensure_ascii=False,
     )
+
+
+def test_d031_一片跑满自己那份墙钟只废这一片_后面的片照跑(tmp_path, monkeypatch):
+    """原样往上抛会掀掉整节，后面的片连跑都跑不上——与「一片失败后面照跑」相反。"""
+    import app.orchestrator.sectioning as sectioning
+
+    original = sectioning._run_before_section_deadline
+    calls = {"n": 0}
+
+    async def spy(adapter, task, ctx, on_event, deadline):
+        calls["n"] += 1
+        if ".part.1." in task.output_path.name:
+            raise sectioning.SectionWallClockExpired("片 1 跑满自己那份墙钟")
+        return await original(adapter, task, ctx, on_event, deadline)
+
+    monkeypatch.setattr(sectioning, "_run_before_section_deadline", spy)
+    result, store, _, events, output = _shard_run(
+        tmp_path, evidence=30, wall_clock=330.0,
+    )
+
+    finished = [e["data"] for e in events if e["type"] == "write_shard_finished"]
+    first_round = finished[:3]
+    assert [(item["shard"], item["succeeded"]) for item in first_round] == [
+        (1, False), (2, True), (3, True),
+    ]
+    assert first_round[0]["reason"] == "timeout"
+    # 2、3 片的字留在盘上了，下一次节尝试直接跳过、不用重写。
+    section_root = output.parent / output.stem
+    assert (section_root / "sec-1.part.2.md").is_file()
+    assert (section_root / "sec-1.part.3.md").is_file()
+    # 本次节尝试仍按 timeout 收尾——交回既有的 _finish_section_timeout，
+    # 不自造终态；那一段不重试，所以这一轮就到此为止。
+    assert result.succeeded is False
+    row = store.list_chapters("r-ledger")[0]
+    assert (row["status"], row["reason"]) == ("missing", "timeout")

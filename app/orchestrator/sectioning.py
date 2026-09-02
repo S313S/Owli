@@ -1437,6 +1437,7 @@ async def _run_section_shards(
     resume_for = resume_session_id
     last: tuple[Any, EngineTask] | None = None
     first_failure: tuple[Any, EngineTask] | None = None
+    wall_clock_expired: SectionWallClockExpired | None = None
     for index, size in enumerate(shard_sizes, start=1):
         shard_path = write_shard_path(section_path, index)
         if _shard_envelope(shard_path) is not None:
@@ -1475,11 +1476,21 @@ async def _run_section_shards(
         shard_attempt = 0
         while True:
             shard_attempt += 1
-            result = await _run_before_section_deadline(
-                adapter, shard_task,
-                _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
-                on_event, shard_deadline,
-            )
+            try:
+                result = await _run_before_section_deadline(
+                    adapter, shard_task,
+                    _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
+                    on_event, shard_deadline,
+                )
+            except SectionWallClockExpired as expired:
+                # 这一片跑满了**自己那份**墙钟。原样往上抛会掀掉整节，
+                # 后面的片连跑都跑不上——与「一片失败后面照跑」相反。
+                # 记下来、当这片失败、继续下一片；末尾若一个片都没跑出结果，
+                # 再把它抛出去交给既有的节超时收尾。
+                wall_clock_expired = expired
+                result = None
+                succeeded = False
+                break
             resume_for = None
             succeeded = (
                 bool(getattr(result, "succeeded", False))
@@ -1511,18 +1522,25 @@ async def _run_section_shards(
             "goal_id": context.goal_id,
             "chapter_id": section["section_id"],
             "shard": index, "shards": total, "succeeded": succeeded,
-            "reason": None if succeeded else section_failure_reason(
-                result, shard_path,
+            "reason": None if succeeded else (
+                "timeout" if result is None
+                else section_failure_reason(result, shard_path)
             ),
             "attempts": shard_attempt,
             "elapsed_seconds": asyncio.get_running_loop().time() - started_at,
             "engine_error": getattr(result, "engine_error", None),
         }, is_error=not succeeded)
-        last = (result, shard_task)
-        if not succeeded and first_failure is None:
-            first_failure = (result, shard_task)
+        if result is not None:
+            last = (result, shard_task)
+            if not succeeded and first_failure is None:
+                first_failure = (result, shard_task)
         start += size
     merged = _merge_shard_files(section_path, total, citation_numbers)
+    if wall_clock_expired is not None:
+        # 有片跑满了自己那份墙钟：本次节尝试按 timeout 收尾（交回既有那段，
+        # 不自造终态）。**先把本轮跑成的片合并落盘**再抛——它们的字留在片产物里，
+        # 下一次节尝试直接跳过，不用重写。
+        raise wall_clock_expired
     await _emit(on_event, "write_shards_merged", {
         "goal_id": context.goal_id,
         "chapter_id": section["section_id"],
