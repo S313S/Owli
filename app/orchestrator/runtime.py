@@ -2078,6 +2078,13 @@ class RuntimeCoordinator:
             "title", "content_excerpt", "author_name", "raw_metrics",
             "platform", "platform_item_id", "fetch_method", "source_type",
             "published_at",
+            # 归一化三件套同理：采集期薄源按真平台算过一次，产物里没有，
+            # 全列 UPDATE 会把它抹成 NULL（r-f59fdba77cd7 那 25 行的
+            # normalized_score 现已全 NULL）。平台列已受保护、没被改，
+            # dao._validate_normalization 的「norm_context.platform 与
+            # platform 一致」照旧成立。评分五列不进名单：评级章产物在
+            # 采集 payload 之后重贴（_persist_rating_chapter），正常路径能复原。
+            "normalized_score", "norm_method", "norm_context",
         )
         downgraded: list[dict[str, str]] = []
         for payload in payloads:

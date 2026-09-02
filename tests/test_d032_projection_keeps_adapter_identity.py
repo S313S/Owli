@@ -218,6 +218,31 @@ class ProjectionIdentityTest(unittest.TestCase):
         self.assertEqual(rows[0]["fetch_method"], "media_crawler")
         self.assertEqual(rows[0]["extra"]["provider"], "media_crawler")
 
+    def test_投影不抹掉归一化三件套(self) -> None:
+        """薄源按真平台算过的 norm 三件套，产物里没有，也不许被抹成 NULL。"""
+
+        row = self._pool_row(
+            platform="weibo", item_id=_WEIBO_ITEM_ID, permalink=_WEIBO_PERMALINK,
+        )
+        row.update({
+            "norm_method": "percentile_in_batch",
+            "normalized_score": 0.62,
+            "norm_context": {
+                "scope": "batch", "platform": "weibo", "metric": "liked_count",
+                "n": 25, "formula": "percentile", "stats": {"p50": 3},
+                "computed_at": "2026-09-02T13:00:00Z",
+            },
+        })
+        self.store.upsert_evidence_batch([row])
+
+        rows = self._project(
+            [self._artifact_item(_WEIBO_PERMALINK)], sources=["weibo"],
+        )
+
+        self.assertEqual(rows[0]["normalized_score"], 0.62)
+        self.assertEqual(rows[0]["norm_method"], "percentile_in_batch")
+        self.assertEqual(rows[0]["norm_context"]["metric"], "liked_count")
+
     def test_已入库行不再重复报降级(self) -> None:
         """行没被改就不该报降级；库里旧留痕合并回来也不许重复计数。"""
 
