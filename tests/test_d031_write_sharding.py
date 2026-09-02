@@ -112,7 +112,9 @@ def test_d031_片合并_保留结论信息源之外的正文():
     assert "# 节标题" in merged
 
 
-def _shard_run(tmp_path, *, evidence: int, fail_shards=(), seed_parts=None):
+def _shard_run(
+    tmp_path, *, evidence: int, fail_shards=(), seed_parts=None, wall_clock=None,
+):
     """一节切片跑一趟：假引擎按片写产物，fail_shards 里的片故意不落盘。"""
     import asyncio
     import json
@@ -211,7 +213,10 @@ def _shard_run(tmp_path, *, evidence: int, fail_shards=(), seed_parts=None):
 
     result = asyncio.run(run_sectioned_task(
         plan=plan, agent=agent,
-        context=SimpleNamespace(goal_id="goal-1", engine="claude"),
+        context=SimpleNamespace(
+            goal_id="goal-1", engine="claude",
+            section_deadline_seconds=wall_clock,
+        ),
         base_task=task, adapter=Adapter(), store=store, runs_root=runs_root,
         now_iso=lambda: "2026-09-02T00:00:02Z", on_event=on_event,
         persist_goal_evidence=lambda _plan, _goal: None,
@@ -340,3 +345,40 @@ def test_d031_节级重试只重跑失败片(tmp_path):
     # 跳过的片仍参与合并，上一轮写的字没丢。
     merged = [e["data"] for e in events if e["type"] == "write_shards_merged"]
     assert merged[0]["done"] == 3
+
+
+def test_d031_片提示词把产物路径指到本片而不是节(tmp_path):
+    """第一次重放实测的坑：路径句还写着节路径，写手把整份信封写进了 sec-1.md。"""
+    _, _, bodies, _, output = _shard_run(tmp_path, evidence=30)
+
+    section_root = output.parent / output.stem
+    for shard in (1, 2, 3):
+        body = bodies[f"sec-1.part.{shard}.md"]
+        assert str(section_root / f"sec-1.part.{shard}.md") in body
+        assert f"{section_root / 'sec-1.md'}\n" not in body
+
+
+def test_d031_片提示词把结论条数钉在本片证据条数上(tmp_path):
+    _, _, bodies, _, _ = _shard_run(tmp_path, evidence=30)
+
+    assert "**不超过 10 条**" in bodies["sec-1.part.1.md"]
+
+
+def test_d031_每片一份自己的墙钟_不共用节那一个绝对时刻(tmp_path, monkeypatch):
+    """共用的话第 1 片跑掉大半、后面几片分残额必全灭。"""
+    import app.orchestrator.sectioning as sectioning
+
+    deadlines: list[float] = []
+    original = sectioning._run_before_section_deadline
+
+    async def spy(adapter, task, ctx, on_event, deadline):
+        deadlines.append(deadline)
+        return await original(adapter, task, ctx, on_event, deadline)
+
+    monkeypatch.setattr(sectioning, "_run_before_section_deadline", spy)
+    _shard_run(tmp_path, evidence=30, wall_clock=330.0)
+
+    assert len(deadlines) == 3
+    # 三片各拿一个自己的绝对时刻，且逐片后移——不是同一个数。
+    assert len(set(deadlines)) == 3
+    assert deadlines == sorted(deadlines)

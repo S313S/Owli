@@ -1352,7 +1352,7 @@ async def _emit(
         await result
 
 
-def _shard_notice(index: int, total: int, prior_digest: str) -> str:
+def _shard_notice(index: int, total: int, items: int, prior_digest: str) -> str:
     """【本片】段：把「只写本片这几条」「别重复前面写过的」讲死。
 
     §D-031：不这么讲，写手会拿到十条证据仍照章任务写整节，产出体量降不下来——
@@ -1364,6 +1364,8 @@ def _shard_notice(index: int, total: int, prior_digest: str) -> str:
         "上面那份『本节可引用证据池 JSON』只列了本片的条目——"
         "**只就这几条写**：`## 结论` 列表项与 `## 信息源` 条目都只覆盖它们，"
         "不要提及也不要引用不在本片池里的角标。\n"
+        f"本片的 `## 结论` 列表项**不超过 {items} 条**（本片证据就这么多条，"
+        "一条证据撑一条结论足够；写超了不会更全面，只会挤掉后面几片的时间）。\n"
         "本片不写节标题行、不写总起或收束段落；系统会把各片按片序合并成一节，"
         "合并时信息源按链接去重、角标沿用全局编号（同一条证据在哪一片都是同一个号）。\n"
         f"本片断言 id 固定使用 c-{index:02d}01、c-{index:02d}02… 的区间"
@@ -1400,6 +1402,7 @@ async def _run_section_shards(
     store: Any,
     on_event: Any,
     section_deadline: Any,
+    section_wall_clock: float | None,
     resume_session_id: str | None,
     context: Any,
     section: dict[str, Any],
@@ -1427,9 +1430,9 @@ async def _run_section_shards(
             })
             start += size
             continue
-        body = section_body(_shard_pool(evidence_pool, start, size))
+        body = section_body(_shard_pool(evidence_pool, start, size), shard_path)
         body += _shard_notice(
-            index, total, _shard_prior_digest(section_path, index - 1),
+            index, total, size, _shard_prior_digest(section_path, index - 1),
         )
         shard_task = replace(
             section_task, body=body, output_path=shard_path,
@@ -1441,11 +1444,19 @@ async def _run_section_shards(
             "shard": index, "shards": total, "pool_items": size,
             "attempt": section_attempt,
         })
+        # 片墙钟：**每片一份自己的**（口径同 RATE-3 评级片），不共用节那一个
+        # 绝对时刻——共用的话第 1 片跑掉 221 s，剩下三片分 109 s，必全灭。
+        # 章预算已按 节数 × WRITE_SHARD_MAX 放大，覆盖得住。
         started_at = asyncio.get_running_loop().time()
+        shard_deadline = (
+            started_at + section_wall_clock
+            if section_wall_clock is not None
+            else section_deadline
+        )
         result = await _run_before_section_deadline(
             adapter, shard_task,
             _ctx(shard_task, runs_root, store, resume_session_id=resume_for),
-            on_event, section_deadline,
+            on_event, shard_deadline,
         )
         resume_for = None
         succeeded = (
@@ -1756,9 +1767,15 @@ async def run_sectioned_task(
                     "裁剪不缩小本 research 全量 evidence permalink 的 URL 判定面。"
                 )
 
-            def _section_body(prompt_pool: dict[str, Any]) -> str:
-                """§D-031：正文按传进来的池组装——整节一次写时传全池，
-                分片时每片只传本片那几条，产出体量随之降下来。"""
+            def _section_body(
+                prompt_pool: dict[str, Any], target_path: Path,
+            ) -> str:
+                """§D-031：正文按传进来的池与产物路径组装。
+
+                整节一次写时传全池与节路径；分片时传本片那几条与**本片的路径**——
+                路径这句必须跟着片走：第一次重放实测，正文里还写着节路径时，
+                写手照它把整份信封写进了 `sec-1.md`，片产物落空、片判失败。
+                """
                 body = (
                     f"{base_task.body}\n\n"
                     "本次只写一个报告节；禁止生成整份报告。\n"
@@ -1772,8 +1789,8 @@ async def run_sectioned_task(
                     "但**可以引用本节证据池里其他目标的证据做对照或佐证**——"
                     "引用时须在句中点明它来自哪个目标（例如「goal-3 的抖音证据显示……」），"
                     "且这类对照不得喧宾夺主，占本节结论的少数。\n"
-                    "本节产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
-                    f"{section_path}\n"
+                    "本次产物路径（写文件与 owli-result.output_path 都必须逐字使用）："
+                    f"{target_path}\n"
                     f"节目标={json.dumps(section, ensure_ascii=False)}\n"
                     "本节可用的上游产物：done = 本 goal 账本 status=done 的章 + "
                     "章级 opening.inputs 声明且账本 status=done 的上游产物；"
@@ -1856,7 +1873,7 @@ async def run_sectioned_task(
             # shard_sizes 长度为 1，下面 shard_count == 1，走的仍是分片前那条路。
             shard_sizes = write_shard_sizes(evidence_pool["items"])
             shard_count = max(1, len(shard_sizes))
-            body = _section_body(evidence_pool)
+            body = _section_body(evidence_pool, section_path)
             section_task = replace(
                 base_task,
                 body=body,
@@ -1884,6 +1901,7 @@ async def run_sectioned_task(
                         store=store,
                         on_event=on_event,
                         section_deadline=section_deadline,
+                        section_wall_clock=section_wall_clock,
                         resume_session_id=resume_session_id,
                         context=context,
                         section=section,
