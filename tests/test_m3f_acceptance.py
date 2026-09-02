@@ -120,7 +120,7 @@ def test_验收_规划段中断续写落盘并整体过_lint(tmp_path):
     print(f"规划分段文件={names}")
     print(f"plan_lint errors={lint(plan)['errors']}")
     assert names == [
-        "assembled.json", "goal-1-ch-1.json", "goal-1.json",
+        "allocation.json", "assembled.json", "goal-1-ch-1.json", "goal-1.json",
         "goal-2-ch-1.json", "goal-2.json", "goal-3-ch-1.json",
         "goal-3.json", "skeleton.json"
     ]

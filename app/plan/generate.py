@@ -7,7 +7,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from app.adapters import validation
 from app.adapters.events import ItemKind, NormalizedEvent
@@ -19,6 +19,10 @@ from app.config import (
     ResilienceConfig,
     load_research_scale_config,
     load_resilience_config,
+)
+from app.plan.allocation import (
+    allocate_collections, collection_capacity, collection_plan_dict,
+    per_goal_capacity,
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
@@ -184,6 +188,18 @@ def _scale_profile(
     return (scale_config or load_research_scale_config()).profile(scale)
 
 
+def _subjects_cap_rule(profile: ResearchScaleProfile) -> str:
+    """§PLAN-1：有章数上限的档位把 subjects 上限讲在骨架这一步。"""
+
+    capacity = collection_capacity(profile.max_goals, profile)
+    if capacity is None:
+        return ""
+    return (
+        f"subjects 最多 {capacity} 个（{profile.max_goals} 个 goal × 每 goal "
+        f"{per_goal_capacity(profile)} 个采集位），超出会让骨架作废；"
+    )
+
+
 def _skeleton_prompt(
     query: str,
     errors: list[str],
@@ -210,6 +226,7 @@ def _skeleton_prompt(
         "**每一个 subject 都有一个同名实体的采集章**，写不出采集对象的词"
         "放进来会让整份计划作废；题目只给了领域没点名主体时，"
         "自己点出该领域里可采集的具体主体，不要把领域名当主体。"
+        f"{_subjects_cap_rule(profile)}"
         "subjects_justification 用一句可复核理由说明纳入边界；market_profile 只能取 "
         "cn_product/global_product，justification 用一句可复核理由；"
         "每个 goal 只能含 title、"
@@ -231,11 +248,25 @@ def _goal_prompt(
     market_profile: str = "global_product",
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
+    collection_slots: Sequence[Mapping[str, str]] | None = None,
 ) -> str:
     profile = _scale_profile(scale, scale_config)
     retry = ""
     if errors:
         retry = "\n上一轮整计划 lint 错误原文（只修正本 goal 结构）：\n" + "\n".join(errors)
+    slots = list(collection_slots or [])
+    slots_json = json.dumps(slots, ensure_ascii=False, separators=(",", ":"))
+    slot_names = "、".join(f"{s['collector_name']}·{s['entity']}" for s in slots) or "无"
+    per_goal = per_goal_capacity(profile)
+    non_collection_budget = (
+        f"本 goal 非采集章最多 {max(profile.max_chapters_per_goal - len(slots), 1)} 个；"
+        if per_goal is not None and profile.max_chapters_per_goal is not None else ""
+    )
+    allocation_rule = (
+        "本 goal 必采清单（硬性，系统分配，逐条建采集 agent，name 逐字用「注册表原名·实体」），"
+        f"必采清单 JSON={slots_json}，即 {slot_names}；清单外可加采集章但不得与清单及上游重复 "
+        "(source_id, entity) 组合，且须在章预算内；{non_collection_budget}"
+    ).replace("{non_collection_budget}", non_collection_budget)
     sources = "、".join(
         f"{item.display_name}（{item.collector_name}）"
         for item in planning_catalog()
@@ -275,8 +306,7 @@ def _goal_prompt(
         scale_rule = (
             f"快速档每个 goal 采集源最多 {profile.max_sources_per_goal} 个；"
             f"本 goal 章数上限为 {profile.max_chapters_per_goal}；"
-            "超预算时只允许以下两条出路：同一实体的多源合并为一章，或把实体分摊到多个 goal"
-            "（跨 goal 采同一源的不同实体是允许的）；"
+            "采集清单已由系统按预算分配，超预算时先删清单外的采集章；"
             f"每源采集条数参数：{source_limits}；"
         )
         hn_rule = (
@@ -295,6 +325,7 @@ def _goal_prompt(
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
         f"注册表选择：{sources}；源 × 市场属性覆盖表={coverage}；"
         f"全计划研究实体闭集={json.dumps(list(subjects or scaffold.get('subjects', [])), ensure_ascii=False)}；"
+        f"{allocation_rule}"
         f"采集章只能选择 applicable_sources 中的 source_id；{reuse_rule}{scale_rule}"
         "采集 agent 的 name 必须唯一确定 capability.sources "
         "与 source.* 工具；在章数预算内，优先一实体一源；name 用“注册表原名·竞品名”"
@@ -332,6 +363,13 @@ def _skeleton_scaffolds(
     if not 3 <= len(goals) <= profile.max_goals:
         raise ValueError(
             f"goal 数必须在 3–{profile.max_goals}，实际为 {len(goals)}"
+        )
+    capacity = collection_capacity(len(goals), profile)
+    if capacity is not None and len(subjects) > capacity:
+        raise ValueError(
+            f"subjects 有 {len(subjects)} 个，超出 {scale} 档采集容量 {capacity}"
+            f"（{len(goals)} 个 goal × 每 goal {per_goal_capacity(profile)} 个采集位）；"
+            "请合并或删减研究实体"
         )
     result: list[dict[str, Any]] = []
     for index, raw in enumerate(goals, start=1):
@@ -1184,6 +1222,27 @@ def _progress_event(research_id: str, text: str) -> NormalizedEvent:
     )
 
 
+def _allocation_event(
+    research_id: str, collection_plan: Mapping[str, list[dict[str, str]]],
+) -> NormalizedEvent:
+    """§PLAN-1：采集分配表落盘后发一条可读事件，工作板与探针都能看到。"""
+
+    summary = "；".join(
+        f"{goal_id}=" + "、".join(f"{s['source_id']}·{s['entity']}" for s in slots)
+        for goal_id, slots in collection_plan.items() if slots
+    ) or "无"
+    return NormalizedEvent(
+        engine="Owli",
+        thread_id=research_id,
+        turn_id="plan-progress",
+        item_kind=ItemKind.THINKING,
+        text=f"采集分配表：{summary}",
+        is_error=False,
+        raw={"collection_plan": dict(collection_plan)},
+        outcome="plan_progress",
+    )
+
+
 def _retry_event(research_id: str, attempt: int, errors: list[str]) -> NormalizedEvent:
     return NormalizedEvent(
         engine="Owli",
@@ -1239,6 +1298,7 @@ async def generate_plan(
     market_profile_justification = ""
     subjects: list[str] = []
     subjects_justification = ""
+    collection_plan: dict[str, list[dict[str, str]]] = {}
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
@@ -1268,12 +1328,21 @@ async def generate_plan(
                 _skeleton_market_profile(skeleton)
             )
             subjects, subjects_justification = _skeleton_subjects(skeleton)
+            collection_plan = collection_plan_dict(allocate_collections(
+                subjects, market_profile, scaffolds,
+                product_scale_config.profile(scale),
+            ))
+            (workspace.root / "allocation.json").write_text(
+                json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             await _emit(
                 store,
                 _progress_event(
                     research_id, f"规划骨架落盘：{len(scaffolds)} 个 goal"
                 ),
             )
+            await _emit(store, _allocation_event(research_id, collection_plan))
             break
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -1309,6 +1378,7 @@ async def generate_plan(
                 subjects=subjects,
                 scale=scale,
                 scale_config=product_scale_config,
+                collection_slots=collection_plan.get(goal_id, []),
             ),
             adapter,
             on_retry=lambda retry, error: _emit(
@@ -1376,6 +1446,7 @@ async def generate_plan(
             )
             errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
+                collection_plan=collection_plan,
             )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -1433,6 +1504,7 @@ async def generate_plan(
             )
             chapter_errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
+                collection_plan=collection_plan,
             )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, deque
 from pathlib import PurePosixPath
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.plan.model import (
     Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of, rated_collector_id,
@@ -896,8 +896,15 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
-def _rule_25(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
-    """骨架研究实体必须被至少一个采集 agent 的结构化 entity 覆盖。"""
+def _rule_25(
+    raw: Mapping[str, Any], goals: list[dict[str, Any]],
+    collection_plan: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
+) -> list[str]:
+    """骨架研究实体必须被至少一个采集 agent 的结构化 entity 覆盖。
+
+    有分配表时错误锚到该实体被分配的 goal（重试才会重做对的那一段）；
+    没有时沿用旧锚点（最后一个 goal）。
+    """
 
     subjects = {
         str(item).strip()
@@ -913,9 +920,15 @@ def _rule_25(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
         and isinstance(agent.get("entity"), str)
         and str(agent.get("entity")).strip()
     }
-    anchor = str(goals[-1].get("goal_id", "goal-1")) if goals else "goal-1"
+    default_anchor = str(goals[-1].get("goal_id", "goal-1")) if goals else "goal-1"
+    assigned = {
+        str(slot.get("entity", "")).strip(): str(goal_id)
+        for goal_id, slots in (collection_plan or {}).items()
+        for slot in slots
+    }
     return [
-        f"[规则25] {anchor}/subjects 缺少实体采集 agent：{entity}；"
+        f"[规则25] {assigned.get(entity, default_anchor)}/subjects "
+        f"缺少实体采集 agent：{entity}；"
         "请在本 goal 补充该实体的采集 agent，或在其他 goal 分摊该实体"
         for entity in sorted(subjects - collected)
     ]
@@ -1208,11 +1221,46 @@ def _warnings(goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _rule_31(
+    goals: list[dict[str, Any]],
+    collection_plan: Mapping[str, Sequence[Mapping[str, str]]] | None,
+) -> list[str]:
+    """分配表里的每个 (source_id, entity) 对必须落成采集 agent（允许挪 goal，不许丢）。"""
+
+    if not collection_plan:
+        return []
+    present: set[tuple[str, str]] = set()
+    for _, agent in _agents(goals):
+        entity = str(agent.get("entity") or "").strip()
+        if not _is_collection_agent(agent) or not entity:
+            continue
+        for source_id in agent.get("capability", {}).get("sources", []):
+            present.add((str(source_id), entity))
+    messages: list[str] = []
+    for goal_id, slots in collection_plan.items():
+        for slot in slots:
+            key = (str(slot.get("source_id", "")), str(slot.get("entity", "")).strip())
+            if key in present:
+                continue
+            messages.append(
+                f"[规则31] {goal_id}/collection-plan 分配的采集对未落实："
+                f"{slot.get('collector_name')}·{key[1]}（source_id={key[0]}）；"
+                "请在本 goal 逐字按该 name 补采集 agent"
+            )
+    return messages
+
+
 def lint(
     plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
     max_chapters_per_goal: int | None = None,
+    collection_plan: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
 ) -> dict[str, list[str]]:
-    """按 §10 返回问题；规则 12/29 是批准闸门，普通保存不阻断。"""
+    """按 §10 返回问题；规则 12/29 是批准闸门，普通保存不阻断。
+
+    collection_plan 是 §PLAN-1 的采集分配表（goal_id → [{entity, source_id,
+    collector_name}]），只在生成期传入：规则 25 借它把错误锚到该实体被分配的
+    goal，规则 31 核每个分配对是否落实。批准闸门不传，两条规则退回旧行为。
+    """
     raw = _data(plan)
     goals = list(raw.get("goals", []))
     errors: list[str] = []
@@ -1242,9 +1290,10 @@ def lint(
     errors.extend(_rule_22(goals))
     errors.extend(_rule_23(raw, goals))
     errors.extend(_rule_24(goals, max_chapters_per_goal))
-    errors.extend(_rule_25(raw, goals))
+    errors.extend(_rule_25(raw, goals, collection_plan))
     errors.extend(_rule_26(goals))
     errors.extend(_rule_27(goals))
     errors.extend(_rule_28(goals))
     errors.extend(_rule_30(goals))
+    errors.extend(_rule_31(goals, collection_plan))
     return {"errors": errors, "warnings": _warnings(goals)}

@@ -101,7 +101,7 @@ def test_规则21_同源同实体重复必须拦截并点名实体() -> None:
     assert "entity=豆包" in errors[0]
 
 
-def test_fast_goal提示词写明章数预算与两个合法出路() -> None:
+def test_fast_goal提示词写明章数预算与必采清单() -> None:
     from app.config import load_research_scale_config
     from app.plan.generate import _goal_prompt
 
@@ -116,9 +116,11 @@ def test_fast_goal提示词写明章数预算与两个合法出路() -> None:
     )
 
     assert "本 goal 章数上限为 4" in prompt
-    assert "同一实体的多源合并为一章" in prompt
-    assert "把实体分摊到多个 goal" in prompt
-    assert "跨 goal 采同一源的不同实体是允许的" in prompt
+    # §PLAN-1：「多源合并为一章」在代码里本就不存在（一 agent 一源），
+    # 出路改为系统预分配的必采清单；同源不同实体跨 goal 仍允许。
+    assert "采集清单已由系统按预算分配" in prompt
+    assert "本 goal 必采清单" in prompt
+    assert "同源不同实体允许跨 goal 采集" in prompt
     assert "在章数预算内，优先一实体一源" in prompt
     assert "必须把 agents 拆到一项只负责一个竞品与一个信息源" not in prompt
 

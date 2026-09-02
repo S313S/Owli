@@ -173,7 +173,10 @@ class FakeEngine:
                 },
                 "closing": {
                     "output": {"path": output_path},
-                    "entities": ["飞书"] if chapter_type == "collection" else [],
+                    "entities": (
+                        [str(raw_agent["name"]).partition("·")[2] or "飞书"]
+                        if chapter_type == "collection" else []
+                    ),
                     "expected_count": 1,
                     "notes": {},
                 },
@@ -246,6 +249,7 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
     assert store.saved[0][0::2] == (RESEARCH_ID, 0)
     segment_root = store.runs_root / RESEARCH_ID / "plan-segments"
     assert sorted(path.name for path in segment_root.iterdir()) == [
+        "allocation.json",
         "assembled.json",
         "goal-1-ch-1.json",
         "goal-1.json",
@@ -459,6 +463,9 @@ def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) 
     skeleton["goals"][0]["agents"] = [
         _agent("X 数据抓取·飞书", "通过 recent search 采集 X 证据")
     ]
+    # §PLAN-1：分配表把「飞书」派给 goal-1 走 HN；X 采集是清单外加章，
+    # 主体覆盖仍要有人按清单采（规则 31 允许挪 goal，不允许丢）。
+    _add_coverage_collector(skeleton)
 
     plan, _, _ = _generate(tmp_path, [skeleton])
 
