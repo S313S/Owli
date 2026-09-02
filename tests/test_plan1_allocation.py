@@ -201,3 +201,22 @@ def test_不听话引擎丢一对_只重生被分配的goal_且第二轮过(tmp_
     assert "[规则25] goal-2/subjects" in retries[0].text
     assert "[规则31]" in engine.tasks[-1].body  # 错误原文回灌到被点名那段
     assert {a.entity for g in plan.goals for a in g.agents if a.entity} >= set(TEA)
+
+
+def test_骨架提示词给market_profile下定义_按面向市场判不按原产地() -> None:
+    """§D-031-wb 抓到的新缺陷：`market_profile` 是个没定义的枚举。
+
+    「国内大家对workbuddy的看法」被骨架判成 `global_product`，理由写「措辞暗含其
+    并非本土原生产品」——模型自造了「按产品原产地判」的语义。一判海外，
+    `_SOURCE_MARKET_PROFILES` 就把 weibo/douyin/wechat_mp 整体滤掉，分配表根本
+    不给微博这个源，计划零微博章。提示词层只能锁文案（模型输出不可测），
+    锁的是「按面向的市场判」与「国内一律 cn_product」这两句口径。
+    """
+
+    from app.plan.generate import _skeleton_prompt
+
+    prompt = _skeleton_prompt("国内大家对workbuddy的看法", [])
+    assert "面向哪个市场的受众与舆论" in prompt
+    assert "与产品的原产地、公司归属、名字是不是英文都无关" in prompt
+    assert "一律取 cn_product" in prompt
+    assert "拿不准时取 cn_product" in prompt
