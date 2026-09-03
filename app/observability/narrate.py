@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -32,6 +33,8 @@ STAGE_RESULT = "工具返回"
 STAGE_WRITE = "写入产物"
 STAGE_DONE = "本节完成"
 STAGE_FAIL = "失败"
+STAGE_RETRY = "重试"
+STAGE_NOTE = "提示"
 
 
 @dataclass(frozen=True)
@@ -122,15 +125,31 @@ def _count_rows(payload: Any) -> int | None:
     return None
 
 
+_FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _unfence(text: str) -> str:
+    """剥掉 markdown 代码围栏。
+
+    真机里模型常把 JSON 信封写成 ```json owli-result\n{...}```——首字符是反引号，
+    只看首字符的 `_looks_like_json` 认不出来，整串就漏进进程栏了（判据 1 现场打红）。
+    """
+
+    match = _FENCE.match(text)
+    return match.group(1).strip() if match else text
+
+
 def _plain_say(text: str) -> str:
     """模型正文：像 JSON 信封就抽里头的 markdown/summary，抽不出只留一句话。
 
     判据 1 要求进程栏零裸 JSON——正文里塞了整份信封的情形真机第一份底料就有。
     """
 
-    flat = str(text or "").strip()
+    flat = _unfence(str(text or "").strip())
     if not flat:
         return ""
+    if flat.startswith("Stop hook feedback:"):  # 系统钩子回灌，不是模型在说话
+        return _clip(f"系统提醒：{flat[len('Stop hook feedback:'):].strip()}")
     if not _looks_like_json(flat):
         return _clip(flat)
     try:
@@ -198,6 +217,14 @@ def _narrate_claude(event: Mapping[str, Any], ts: float, seq: int) -> list[Progr
 
     if event.get("subtype") == "init" or "rate_limit_info" in event:
         return []  # 系统初始化块与限额心跳：机器看的，不进进程栏
+    system = event.get("data") if isinstance(event.get("data"), Mapping) else {}
+    if event.get("subtype") == "api_retry":  # 接口在重试，人最想知道的一类
+        attempt, total = system.get("attempt"), system.get("max_retries")
+        detail = f"第 {attempt}/{total} 次" if attempt and total else ""
+        return [ProgressLine(ts, seq, STAGE_RETRY, f"接口重试{detail}", "retry")]
+    if event.get("subtype") == "notification":
+        note = _clip(str(system.get("text") or ""))
+        return [ProgressLine(ts, seq, STAGE_NOTE, note, "say")] if note else []
     subtype = event.get("subtype")
     if subtype in ("success", "error", "error_max_turns", "error_during_execution"):
         return _claude_finish(event, ts, seq)

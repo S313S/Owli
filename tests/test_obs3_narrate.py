@@ -158,6 +158,12 @@ def test_同一句话被说三遍只留最后一条() -> None:
 FIXTURES = Path(__file__).parent / "fixtures" / "obs3"
 #: 允许「一行都不出」的类别：系统初始化、限额心跳、以及 SDK 只回签名正文为空的消息。
 DROPPABLE = {"init", "rate_limit_info,session_id,uuid", "content,error,message_id"}
+#: 三份真机样本：小（4 条）、长（53 条）、带围栏信封（本包重放当场落的 34 条）。
+REAL_SAMPLES = (
+    "claude-small.transcript.jsonl",
+    "claude-long.transcript.jsonl",
+    "claude-fenced.transcript.jsonl",
+)
 
 
 def _load(name: str) -> list[dict]:
@@ -165,7 +171,7 @@ def _load(name: str) -> list[dict]:
 
 
 def test_真机底料译出的每一行都干净() -> None:
-    for name in ("claude-small.transcript.jsonl", "claude-long.transcript.jsonl"):
+    for name in REAL_SAMPLES:
         lines = narrate_lines(_load(name))
         assert lines, name
         for line in lines:
@@ -173,14 +179,14 @@ def test_真机底料译出的每一行都干净() -> None:
             assert "signature" not in line.text
             assert "Esoq" not in line.text  # 签名串的真机前缀
             assert '"type": "system"' not in line.text
-            assert not line.text.lstrip().startswith(("{", "["))
+            assert not line.text.lstrip().startswith(("{", "[", "```"))
             assert line.stage and line.text
 
 
 def test_真机底料未译事件只落在应丢类别() -> None:
     """判据 3：分母是「本该出行的事件」，白名单外一条未译都不许有。"""
 
-    for name in ("claude-small.transcript.jsonl", "claude-long.transcript.jsonl"):
+    for name in REAL_SAMPLES:
         tally = unmatched_kinds(_load(name))
         assert set(tally) <= DROPPABLE, (name, tally)
 
@@ -191,3 +197,31 @@ def test_真机底料出得来写盘与收尾两类关键行() -> None:
     assert {"调用工具", "写入产物", "本节完成"} <= stages
     written = [line.text for line in lines if line.stage == "写入产物"]
     assert any("约" in text and "字" in text for text in written)
+
+
+def test_围栏包着的JSON信封也不许漏进进程栏() -> None:
+    """真机现场打红：模型把信封写成 ```json owli-result\\n{...}```，首字符是反引号。"""
+
+    envelope = ('```json owli-result\n'
+                '{"status": "done", "output_path": "goals/goal-3/sec-2.part.2.md",'
+                ' "summary": "已按分片规范落盘 ch-4/sec-2 第 2/4 片"}\n```')
+    (line,) = narrate_record(_record({"content": [{"text": envelope}]}))
+    assert line.text == "已按分片规范落盘 ch-4/sec-2 第 2/4 片"
+    assert "output_path" not in line.text and "```" not in line.text
+
+
+def test_钩子回灌的英文提示标成系统提醒() -> None:
+    hook = "Stop hook feedback: You MUST call the StructuredOutput tool to complete this request."
+    (line,) = narrate_record(_record({"content": [{"text": hook}]}))
+    assert line.text.startswith("系统提醒：You MUST call")
+
+
+def test_接口重试与系统提示都出行() -> None:
+    retry = {"subtype": "api_retry", "data": {"type": "system", "subtype": "api_retry",
+                                              "attempt": 1, "max_retries": 20}}
+    (line,) = narrate_record(_record(retry))
+    assert (line.stage, line.text) == ("重试", "接口重试第 1/20 次")
+    note = {"subtype": "notification", "data": {"type": "system", "key": "stop-hook-error",
+                                                "text": "Stop hook error occurred"}}
+    (line,) = narrate_record(_record(note))
+    assert (line.stage, line.text) == ("提示", "Stop hook error occurred")
