@@ -220,3 +220,44 @@ def test_实体叫法闭集写进_goal_提示词() -> None:
     assert "交叉验证章对它只并列不跨市场交叉" in text
     assert "豆包→豆包、Doubao；" in text or "豆包→豆包、Doubao。" in text
     assert _entity_rule([]) == "" and _entity_rule(None) == ""
+
+
+def test_JSON_成稿也带研究对象节且排在最前() -> None:
+    """§ENT-1 货 6：报告章多数声明 format=json，走的是 _write_object_document。"""
+    from app.orchestrator.sectioning import _write_object_document
+    from app.plan.model import Entity
+    from app.report.render import parse_report
+    import json as _json
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    plan = SimpleNamespace(title="国内大家对 workbuddy 的看法", entities=[
+        Entity.from_dict({
+            "id": "飞书", "canonical": "飞书",
+            "names": {"zh": "飞书", "en": "Feishu", "aliases": []},
+            "official_handles": {}, "same_product": False,
+            "note": "飞书与 Lark 是面向国内与海外的两套部署，数据不互通。",
+        }),
+    ])
+    agent = SimpleNamespace(
+        chapter={"chapter_id": "ch-6"}, goal_id="goal-1",
+        output={"path": "goals/goal-1/x.json", "shape": "object"},
+    )
+    with tempfile.TemporaryDirectory() as raw:
+        target = Path(raw) / "x.json"
+        _write_object_document(
+            plan=plan, agent=agent, output_path=target,
+            section_items=[{
+                "section_id": "ch-6/sec-1", "goal_id": "goal-1", "title": "一节",
+                "markdown": "## 一节\n\n正文 [S01]", "done": True,
+            }],
+            missing_items=[],
+        )
+        document = _json.loads(target.read_text(encoding="utf-8"))
+        view = parse_report(target.read_text(encoding="utf-8"))
+    assert document["sections"][0]["title"] == "研究对象"
+    assert document["sections"][0]["section_id"] == "ch-6/entities"
+    assert "只并列不交叉" in document["sections"][0]["markdown"]
+    assert [item["name"] for item in view["entities"]] == ["飞书"]
+    assert view["entities"][0]["same_product"] is False

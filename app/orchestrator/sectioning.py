@@ -20,6 +20,7 @@ from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunRe
 from app.report.markdown import (
     merge_section_shards,
     merge_sectioned_markdown,
+    render_entity_section,
     section_conclusion_items,
 )
 
@@ -1154,10 +1155,22 @@ def _write_object_document(
     missing_items: list[dict[str, Any]],
     claims: list[Any] | None = None,
 ) -> None:
+    # §ENT-1 货 6：JSON 成稿也要有「研究对象」节。它不是某个写手写出来的节，
+    # 是系统按计划的实体卡确定性生成的一节，排在最前面——读报告的人先知道这份
+    # 报告说的是哪几个产品，再看正文。entities 为空时这一节整个不存在。
+    entity_lines = render_entity_section(
+        [item.to_dict() for item in getattr(plan, "entities", []) or []]
+    )
+    entity_section = [{
+        "section_id": f"{_chapter_id(agent)}/entities",
+        "goal_id": getattr(agent, "goal_id", None),
+        "title": "研究对象",
+        "markdown": "\n".join(entity_lines).strip(),
+    }] if entity_lines else []
     document = {
         "title": plan.title,
         "chapter_id": _chapter_id(agent),
-        "sections": [
+        "sections": entity_section + [
             {key: value for key, value in item.items() if key != "done"}
             for item in section_items
         ],
