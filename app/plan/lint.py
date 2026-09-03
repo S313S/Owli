@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from app.plan.model import (
     Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of, rated_collector_id,
 )
+from app.sources.registry import planning_catalog
 
 
 _KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -45,6 +46,64 @@ _SOURCE_MARKET_PROFILES = {
         "douyin",
     },
 }
+
+# §ENT-2：源的语域——这个源上的讨论主要用哪种语言写。与 `source_mcp._SOURCE_LOCALES`
+# 是同一张表（那边按语域给实体取查询词，这边按语域决定排不排这个源），adapters 是
+# 本包禁区不能搬过去共用，改由 tests/test_plan_source_locales.py 守住两表一致。
+# None = 跨语域（网页搜索两种语言都能搜），跟着 market_profile 走、不参与实体放宽。
+_SOURCE_LOCALES: dict[str, str | None] = {
+    "xhs": "zh", "douyin": "zh", "weibo": "zh", "wechat_mp": "zh",
+    "bilibili": "zh", "zhihu": "zh",
+    "x": "en", "reddit": "en", "hacker_news": "en", "product_hunt": "en",
+    "web_search": None,
+}
+
+
+def entity_locales(entities: Sequence[Mapping[str, Any]] | None) -> set[str]:
+    """实体卡里实际存在的检索名覆盖了哪几个语域。
+
+    口径与 `source_mcp.entity_queries` 一致：正式名 `names.zh` / `names.en`，
+    外加按字形归档的别名（中文字符 → zh，其余 → en）。canonical **不算**——
+    entity_queries 只在该语域一个名字都挑不出来时才退回 canonical，那种退回
+    产出的是「拿中文名去搜 Reddit」，正是本包要避免的事。
+    """
+    locales: set[str] = set()
+    for entity in entities or []:
+        if not isinstance(entity, Mapping):
+            continue
+        names = entity.get("names")
+        names = names if isinstance(names, Mapping) else {}
+        for locale in ("zh", "en"):
+            if str(names.get(locale) or "").strip():
+                locales.add(locale)
+        for alias in names.get("aliases") or []:
+            text = str(alias).strip()
+            if not text:
+                continue
+            locales.add("zh" if any("一" <= char <= "\u9fff" for char in text) else "en")
+    return locales
+
+
+def applicable_sources(
+    market_profile: str,
+    entities: Sequence[Mapping[str, Any]] | None = None,
+) -> set[str]:
+    """本次调研可排的源闭集：市场属性给底盘，实体叫法再放宽。
+
+    用户 2026-09-03 傍晚口径：「中文名在中文平台搜，英文名在英文平台搜，这样就能
+    突破一个产品只局限于国内、国外的搜索」。所以 `market_profile` 从此只决定
+    **顺序与权重**（见 `allocation.ordered_sources`），「有没有」由实体有没有那个
+    语域的叫法决定。没有实体卡时原样退回旧行为。
+    """
+    applicable = set(_SOURCE_MARKET_PROFILES[market_profile])
+    locales = entity_locales(entities)
+    registered = {spec.source_id for spec in planning_catalog()}
+    # 放宽只放已注册的源：`_SOURCE_LOCALES` 为对齐 source_mcp 而保留了 bilibili /
+    # zhihu 两个还没注册的条目，它们不能因为实体有中文名就凭空进许可名单。
+    return applicable | {
+        source for source, locale in _SOURCE_LOCALES.items()
+        if locale in locales and source in registered
+    }
 
 # 值为 (最少参数个数, 最多参数个数, 参数是否必须为整数)。
 _VALIDATORS: dict[str, tuple[int, int | None, bool]] = {
@@ -875,7 +934,12 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
             "[规则23] plan.market_profile 必须取 cn_product/global_product，"
             "且 market_profile_justification 不能为空"
         ]
-    applicable = set(_SOURCE_MARKET_PROFILES[profile])
+    # §ENT-2：实体有英文名就允许排海外源、有中文名就允许排国内源，
+    # market_profile 只剩顺序与权重。无实体卡时闭集与旧行为逐字相同。
+    raw_entities = raw.get("entities")
+    applicable = applicable_sources(
+        profile, raw_entities if isinstance(raw_entities, list) else None,
+    )
     messages: list[str] = []
     for goal, agent in _agents(goals):
         chapter = agent.get("chapter")

@@ -220,3 +220,69 @@ def test_骨架提示词给market_profile下定义_按面向市场判不按原�
     assert "与产品的原产地、公司归属、名字是不是英文都无关" in prompt
     assert "一律取 cn_product" in prompt
     assert "拿不准时取 cn_product" in prompt
+
+
+# —— §ENT-2 货 1：分配表按实体叫法定「有没有」，market_profile 只定顺序 ——
+
+DOUBAO = {
+    "id": "豆包", "canonical": "豆包",
+    "names": {"zh": "豆包", "en": "Doubao", "aliases": []},
+}
+XHS_ONLY = {
+    "id": "小罐茶", "canonical": "小罐茶",
+    "names": {"zh": "小罐茶", "en": None, "aliases": ["小罐茶业"]},
+}
+
+
+def test_ent2_国内题面有英文名时海外源进闭集且排在国内源之后() -> None:
+    from app.plan.allocation import ordered_sources
+
+    assert ordered_sources("cn_product", [DOUBAO])[:6] == ordered_sources("cn_product")
+    assert "reddit" in ordered_sources("cn_product", [DOUBAO])
+    assert "reddit" not in ordered_sources("cn_product", [XHS_ONLY])
+
+
+def test_ent2_海外题面有中文名时国内源进闭集() -> None:
+    from app.plan.allocation import ordered_sources
+
+    assert "xhs" in ordered_sources("global_product", [DOUBAO])
+    assert "weibo" in ordered_sources("global_product", [DOUBAO])
+    assert "weibo" not in ordered_sources("global_product")
+
+
+def test_ent2_无实体时排源与分配表逐字退回旧行为() -> None:
+    from app.plan.allocation import ordered_sources
+
+    assert ordered_sources("cn_product", []) == ordered_sources("cn_product")
+    assert ordered_sources("cn_product", None) == ordered_sources("cn_product")
+    for profile in (FAST, STANDARD):
+        assert collection_plan_dict(
+            allocate_collections(TEA, "cn_product", SCAFFOLDS, profile, [])
+        ) == collection_plan_dict(
+            allocate_collections(TEA, "cn_product", SCAFFOLDS, profile)
+        )
+
+
+def test_ent2_中外都有叫法的实体两侧各一个采集位() -> None:
+    plan = allocate_collections(
+        ["豆包"], "cn_product", SCAFFOLDS, STANDARD, [DOUBAO],
+    )
+    got = {source for source, entity in _pairs(plan) if entity == "豆包"}
+    assert got == {"xhs", "reddit"}, got
+    # 反过来：题面判成海外，中文名照样把小红书排进来
+    plan = allocate_collections(
+        ["豆包"], "global_product", SCAFFOLDS, STANDARD, [DOUBAO],
+    )
+    assert {s for s, e in _pairs(plan) if e == "豆包"} == {"hacker_news", "xhs"}
+
+
+def test_ent2_只有单侧叫法的实体不补位_章预算不够时也不抛错() -> None:
+    plan = allocate_collections(
+        ["小罐茶"], "cn_product", SCAFFOLDS, STANDARD, [XHS_ONLY],
+    )
+    assert len(_pairs(plan)) == 1
+    # fast 档 6 个采集位装 5 个实体，补位只补得下 1 个，剩下的静默放弃
+    entities = [dict(DOUBAO, id=name, canonical=name) for name in TEA]
+    plan = allocate_collections(TEA, "cn_product", SCAFFOLDS, FAST, entities)
+    assert len(_pairs(plan)) == 6
+    assert all(len(slots) <= 2 for slots in plan.values())
