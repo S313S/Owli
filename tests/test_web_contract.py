@@ -132,12 +132,19 @@ class WebContractTest(unittest.TestCase):
         )
         self.assertNotRegex(merged, r"setInterval|setTimeout\s*\([^)]*fetch")
 
-    def test_运行面板的定时拉取只碰_transcript_接口(self) -> None:
+    def test_运行面板的定时拉取只碰节的只读视图(self) -> None:
+        """§OBS-3：面板两栏各拉一条流——`/transcript`（日志）与 `/progress`（进程）。
+
+        两条都是节的只读视图，跑完即停；除此之外不许再碰别的接口。
+        """
+
         source = (WEB / "src" / "RunPanel.tsx").read_text(encoding="utf-8")
         endpoints = re.findall(r"fetch\(\s*\n?\s*`([^`]+)`", source)
         self.assertTrue(endpoints, "运行面板没有任何请求")
         for endpoint in endpoints:
-            self.assertIn("/transcript?", endpoint)
+            self.assertRegex(endpoint, r"/sections/.+/\$\{view\}\?|/(transcript|progress)\?")
+        self.assertIn("'transcript'", source)
+        self.assertIn("'progress'", source)
         # 只在跑的时候拉，跑完必须停。
         self.assertIn("if (!live || !tab) return", source)
 
