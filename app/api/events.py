@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Mapping
 
 from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
+from app.observability.narrate import narrate_record, short
 
 logger = logging.getLogger(__name__)
 
@@ -217,39 +218,18 @@ class ResearchEventBuffer:
 
 
 def _step_hint(record: Mapping[str, Any]) -> str:
-    """从一条原始事件里挑出「此刻在干什么」：工具名 / 阶段名，挑不出就留空。"""
+    """§OBS-3 货 5：角标「最近」与进程栏同一口径——一句人话，不出英文 token。
 
-    event = record.get("event")
-    if isinstance(event, str):
-        return event[:80]
-    if not isinstance(event, Mapping):
-        return ""
-    item = event.get("item")
-    if isinstance(item, Mapping):
-        for key in ("tool_name", "name", "type"):
-            value = item.get(key)
-            if isinstance(value, str) and value:
-                return value[:80]
-    # Claude 走 SDK 消息：工具名在 content 块里（Write / StructuredOutput …）。
-    content = event.get("content")
-    if isinstance(content, list):
-        for block in reversed(content):
-            if not isinstance(block, Mapping):
-                continue
-            name = block.get("name")
-            if isinstance(name, str) and name:
-                return name[:80]
-            if block.get("tool_use_id"):
-                return "工具返回"
-            if block.get("thinking") is not None:
-                return "思考中"
-            if isinstance(block.get("text"), str):
-                return "输出正文"
-    for key in ("subtype", "type"):
-        value = event.get(key)
-        if isinstance(value, str) and value:
-            return value[:80]
-    return ""
+    翻译交给 `app.observability.narrate`，这里只把它截成角标放得下的长度。
+    """
+
+    lines = narrate_record(record)
+    if not lines:
+        return "引擎处理中"
+    line = lines[-1]
+    if line.kind in ("think", "say"):
+        return f"{line.stage}：{short(line.text, 16)}"
+    return short(line.text, 24)
 
 
 _SHARD_SUFFIX = re.compile(r"-part-\d+$")

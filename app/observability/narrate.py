@@ -252,15 +252,22 @@ def _codex_item(item: Mapping[str, Any], ts: float, seq: int) -> ProgressLine | 
         return ProgressLine(ts, seq, STAGE_WRITE, f"写好 {_name_of(target or '产物')}", "write")
     if "web_search" in kind:
         query = _clip(str(item.get("query") or ""), MAX_ARG)
-        return ProgressLine(ts, seq, STAGE_TOOL, f"调用 网页搜索（{query}）", "tool",
-                            tool="网页搜索", count=1)
-    if "command_execution" in kind or "exec" in kind:
+        text = "调用 网页搜索" + (f"（{query}）" if query else "")
+        return ProgressLine(ts, seq, STAGE_TOOL, text, "tool", tool="网页搜索", count=1)
+    if "command_execution" in kind or "exec" in kind or "shell" in kind:
         name = _clip(str(item.get("command") or ""), MAX_ARG)
-        line = ProgressLine(ts, seq, STAGE_TOOL, f"执行命令（{name}）", "tool",
+        label = f"执行命令（{name}）" if name else "执行命令"
+        line = ProgressLine(ts, seq, STAGE_TOOL, label, "tool",
                             tool="命令", count=1)
         return line if not item.get("exit_code") else ProgressLine(
             ts, seq, STAGE_FAIL, _clip(f"命令失败（{name}）：{item.get('aggregated_output') or ''}"),
             "error")
+
+
+def short(text: str, limit: int = 24) -> str:
+    """给角标用的短句：压平 + 截断（`_clip` 的公开出口）。"""
+
+    return _clip(text, limit)
     if "mcp_tool_call" in kind or "tool" in kind:
         name = str(item.get("tool") or item.get("name") or "工具")
         summary = _arg_summary(item.get("arguments") or item.get("input"))

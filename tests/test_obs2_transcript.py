@@ -257,7 +257,8 @@ def test_心跳_每20条或每15秒发一次且_elapsed_递增(tmp_path: Path) -
     beats = [round_[0]["data"] for round_ in rounds if round_]
     assert [beat["elapsed_s"] for beat in beats] == [0.0, 6.0, 30.0]
     assert [beat["last_seq"] for beat in beats] == [1, 22, 23]
-    assert [beat["step_hint"] for beat in beats] == ["web_search", "shell", "turn.completed"]
+    # §OBS-3 货 5：角标口径由英文事件名改人话（narrate），此处随语义替换更新
+    assert [beat["step_hint"] for beat in beats] == ["调用 网页搜索", "执行命令", "这一轮跑完了"]
     assert beats[0]["goal"] == "goal-1" and beats[0]["chapter"] == "ch-3"
     assert beats[0]["engine"] == "Codex" and beats[0]["agent"] == "report-writing"
 
@@ -268,7 +269,8 @@ def test_心跳进_SSE_事件流(tmp_path: Path) -> None:
     writer = TranscriptWriter(
         _task(runs_root, goal / "ch-1.md", "goal-2"), engine="Claude"
     )
-    writer.append({"type": "assistant", "subtype": "tool_use"})
+    writer.append({"content": [{"id": "t1", "name": "Write",
+                               "input": {"file_path": "/x/goals/goal-2/sec-1.md"}}]})
     buffer, publisher = _publisher(runs_root, lambda: 1.0)
 
     async def scenario() -> str:
@@ -279,7 +281,7 @@ def test_心跳进_SSE_事件流(tmp_path: Path) -> None:
 
     sse = asyncio.run(scenario())
     assert "event: section_heartbeat" in sse
-    assert '"step_hint":"tool_use"' in sse
+    assert '"step_hint":"调用 Write（sec-1.md）"' in sse
 
 
 def test_只重跑选中的那一节_同名章不被连坐(tmp_path: Path) -> None:
@@ -336,7 +338,8 @@ def test_心跳按卡片认领而不是按片任务(tmp_path: Path) -> None:
     assert card_agent_id("report-writing-3-sec-2-part-1") == "report-writing-3"
     assert card_agent_id("data-collection-5") == "data-collection-5"
     # Claude 的原始消息把工具名放在 content 块里（真机样本形状）。
-    assert _step_hint({"event": {"content": [{"id": "t1", "name": "Write"}]}}) == "Write"
-    assert _step_hint({"event": {"content": [{"tool_use_id": "t1"}]}}) == "工具返回"
-    assert _step_hint({"event": {"content": [{"thinking": ""}]}}) == "思考中"
-    assert _step_hint({"event": {"subtype": "init"}}) == "init"
+    # §OBS-3 货 5：一律人话，英文事件名与 init 这类系统块不再露到角标上
+    assert _step_hint({"event": {"content": [{"id": "t1", "name": "Write"}]}}) == "调用 Write"
+    assert _step_hint({"event": {"content": [{"tool_use_id": "t1"}]}}) == "工具返回空"
+    assert _step_hint({"event": {"content": [{"thinking": ""}]}}) == "引擎处理中"
+    assert _step_hint({"event": {"subtype": "init"}}) == "引擎处理中"

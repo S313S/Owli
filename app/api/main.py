@@ -28,6 +28,7 @@ from app.adapters.selfcheck import (
 )
 from app.adapters.recall import PrimaryEngineRecallJudge
 from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
+from app.observability.narrate import narrate_lines
 from app.api.delivery import register_delivery_routes
 from app.api.events import ResearchEventBuffer, SectionHeartbeatPublisher
 from app.config import ResearchScaleConfig, load_research_scale_config
@@ -893,6 +894,27 @@ def create_app(
 
         path = transcript_file(research_id, goal_id, chapter)
         return envelope(read_transcript(path, tail=tail, after_seq=after_seq))
+
+    @application.get(
+        "/api/researches/{research_id}/sections/{goal_id}/{chapter}/progress"
+    )
+    async def get_section_progress(
+        research_id: str,
+        goal_id: str,
+        chapter: str,
+        tail: int = Query(200, ge=1, le=2000),
+        after_seq: int | None = Query(None, ge=0),
+    ) -> dict:
+        """§OBS-3 货 4：同一份 transcript 的**人话视图**——「时间 · 阶段 · 一句人话」。
+
+        与上面的 `/transcript` 同源同参、互不影响：那条给机器看（日志栏原样），
+        这条给人看（进程栏）。翻译在服务端做完，前端不解析 JSON。
+        """
+
+        path = transcript_file(research_id, goal_id, chapter)
+        raw = read_transcript(path, tail=tail, after_seq=after_seq)
+        lines = [line.as_dict() for line in narrate_lines(raw.get("lines") or [])]
+        return envelope({"lines": lines, "last_seq": raw.get("last_seq", 0)})
 
     def required_plan(research_id: str) -> Plan | JSONResponse:
         try:
