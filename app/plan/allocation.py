@@ -11,9 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
 from app.config import ResearchScaleProfile
-from app.plan.lint import (
-    _SOURCE_LOCALES, _SOURCE_MARKET_PROFILES, applicable_sources, entity_locales,
-)
+from app.plan.lint import _SOURCE_LOCALES, applicable_sources, entity_locales
 from app.sources.registry import planning_catalog
 
 # 每个 goal 至少给交叉验证 + 撰写留两章，剩下的才是采集位。
