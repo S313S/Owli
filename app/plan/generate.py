@@ -255,6 +255,25 @@ def _patch_rule(label: str, previous: str | None) -> str:
     )
 
 
+def _entity_rule(entities: list[dict[str, Any]] | None) -> str:
+    """§ENT-1 货 3：把实体卡的叫法闭集写进 goal 提示词，规则 32 才有得遵。"""
+    lines = []
+    for entity in entities or []:
+        names = entity.get("names") or {}
+        alias = "、".join(
+            str(item) for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
+            if str(item or "").strip()
+        )
+        divider = "" if entity.get("same_product", True) else "（与它的中外同名产品不是同一个产品，别混写）"
+        lines.append(f"{entity.get('id')}→{alias}{divider}")
+    if not lines:
+        return ""
+    return (
+        "研究对象的叫法闭集（采集卡的任务文本只能写本实体的这些叫法，"
+        f"写进别的实体的叫法会被段级校验打回）：{'；'.join(lines)}。"
+    )
+
+
 def _goal_prompt(
     query: str,
     goal_id: str,
@@ -263,6 +282,7 @@ def _goal_prompt(
     *,
     upstream_collections: list[Mapping[str, str]] | None = None,
     subjects: list[str] | None = None,
+    entities: list[dict[str, Any]] | None = None,
     market_profile: str = "global_product",
     scale: str = "standard",
     scale_config: ResearchScaleConfig | None = None,
@@ -345,6 +365,7 @@ def _goal_prompt(
         "方法要点：为这个 goal 选择能形成独立产物的执行链；信息源采集角色只从共享"
         f"注册表选择：{sources}；源 × 市场属性覆盖表={coverage}；"
         f"全计划研究实体闭集={json.dumps(list(subjects or scaffold.get('subjects', [])), ensure_ascii=False)}；"
+        f"{_entity_rule(entities)}"
         f"{allocation_rule}"
         f"采集章只能选择 applicable_sources 中的 source_id；{reuse_rule}{scale_rule}"
         "采集 agent 的 name 必须唯一确定 capability.sources "
@@ -1464,6 +1485,7 @@ async def generate_plan(
                 ),
                 market_profile=market_profile,
                 subjects=subjects,
+                entities=entities,
                 scale=scale,
                 scale_config=product_scale_config,
                 collection_slots=collection_plan.get(goal_id, []),

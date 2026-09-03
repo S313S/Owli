@@ -1250,6 +1250,95 @@ def _rule_31(
     return messages
 
 
+def _entity_names(entity: Mapping[str, Any]) -> list[str]:
+    """一张实体卡认可的全部叫法：id、canonical、中英正式名与别名。"""
+
+    names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
+    candidates = [
+        entity.get("id"), entity.get("canonical"),
+        names.get("zh"), names.get("en"), *(names.get("aliases") or []),
+    ]
+    picked: list[str] = []
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        # 一个字的名字（"X"）在正文里到处都是，拿它做包含匹配只会误报。
+        if len(text) >= 2 and text not in picked:
+            picked.append(text)
+    return picked
+
+
+def _mentions(text: str, name: str) -> bool:
+    """名字在正文里出现过没有：中文按包含算，拉丁名要求词边界。"""
+
+    if not name:
+        return False
+    if any("一" <= char <= "鿿" for char in name):
+        return name in text
+    return re.search(rf"(?<![0-9A-Za-z]){re.escape(name)}(?![0-9A-Za-z])", text) is not None
+
+
+def _mask(text: str, names: Iterable[str]) -> str:
+    """把本实体自己的叫法从正文里抹掉，避免「飞书妙记」里的「飞书」被当外人。"""
+
+    masked = text
+    for name in sorted(names, key=len, reverse=True):
+        masked = re.sub(re.escape(name), " ", masked, flags=re.IGNORECASE)
+    return masked
+
+
+def _rule_32(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
+    """§ENT-1 货 3：采集卡的实体必须有卡，卡的任务文本不许写别的实体的名字。
+
+    两件事，闭集都写进错误文案（沿规则 29 的写法，错误自带可选项，模型才改得动）：
+
+    1. `agent.entity` 必须能在 `plan.entities[].id` 里找到。实体数超过 `MAX_ENTITIES`
+       时多出来的 subject 没有卡，这是设计内的缺卡——只要它还在 `subjects` 里就放行，
+       否则就是凭空冒出来的实体，规则 25 也接不住。
+    2. 采集卡的任务文本（`agent.task` 与章 `opening.task`）里，不许出现**别的实体**
+       登记过的名字。判据落在登记表上：只认已登记的名字，不猜正文里哪个词是产品名。
+       先把本实体自己的叫法从正文里抹掉再找，`飞书妙记` 里的 `飞书` 不算外人。
+    """
+    entities = raw.get("entities")
+    if not isinstance(entities, list) or not entities:
+        return []
+    known: dict[str, list[str]] = {}
+    for entity in entities:
+        if isinstance(entity, Mapping) and str(entity.get("id") or "").strip():
+            known[str(entity["id"]).strip()] = _entity_names(entity)
+    subjects = {str(item).strip() for item in raw.get("subjects", []) if str(item).strip()}
+    closed_set = "、".join(sorted(known))
+    messages: list[str] = []
+    for goal, agent in _agents(goals):
+        entity_id = str(agent.get("entity") or "").strip()
+        if not _is_collection_agent(agent) or not entity_id:
+            continue
+        anchor = f"{goal.get('goal_id')}/{agent.get('agent_id')}"
+        if entity_id not in known:
+            if entity_id in subjects:
+                continue
+            messages.append(
+                f"[规则32] {anchor}.entity={entity_id} 不在实体卡闭集里；"
+                f"可选值：{closed_set}"
+            )
+            continue
+        chapter = agent.get("chapter") if isinstance(agent.get("chapter"), Mapping) else {}
+        opening = chapter.get("opening") if isinstance(chapter.get("opening"), Mapping) else {}
+        text = f"{agent.get('task') or ''}\n{opening.get('task') or ''}"
+        masked = _mask(text, known[entity_id])
+        for other_id, other_names in known.items():
+            if other_id == entity_id:
+                continue
+            hits = [name for name in other_names if _mentions(masked, name)]
+            if not hits:
+                continue
+            messages.append(
+                f"[规则32] {anchor} 是 {entity_id} 的采集卡，任务文本里却出现了"
+                f"实体 {other_id} 的叫法：{'、'.join(hits)}；"
+                f"本卡只能写 {entity_id} 的这些叫法：{'、'.join(known[entity_id])}"
+            )
+    return messages
+
+
 def lint(
     plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
     max_chapters_per_goal: int | None = None,
@@ -1296,4 +1385,5 @@ def lint(
     errors.extend(_rule_28(goals))
     errors.extend(_rule_30(goals))
     errors.extend(_rule_31(goals, collection_plan))
+    errors.extend(_rule_32(raw, goals))
     return {"errors": errors, "warnings": _warnings(goals)}
