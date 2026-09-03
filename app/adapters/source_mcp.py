@@ -551,6 +551,103 @@ def _second_hop(
     })
     return built
 
+#: §ENT-1 货 4：源的语域——国内源用中文名搜，海外源用英文名搜。
+#: 这不是「产品公司的国籍」而是「讨论发生在哪个语言生态」，与 `lint._SOURCE_MARKET_PROFILES`
+#: 的分档依据同口径。`web_search` 跨语域，按计划的 market_profile 决定。
+_SOURCE_LOCALES: dict[str, str | None] = {
+    "xhs": "zh", "douyin": "zh", "weibo": "zh", "wechat_mp": "zh",
+    "bilibili": "zh", "zhihu": "zh",
+    "x": "en", "reddit": "en", "hacker_news": "en", "product_hunt": "en",
+    "web_search": None,
+}
+
+#: 每实体每源最多几个查询词（用户 2026-09-03 午后拍板）。超出的别名只用于去重匹配。
+MAX_QUERIES_PER_ENTITY = 2
+
+
+def _plan_entities(store: Any, research_id: str) -> tuple[list[Mapping[str, Any]], str]:
+    """从计划快照读实体卡与市场属性；读不到就返回空，查询词组装原样退回单查询。"""
+    try:
+        report = store.get_report(research_id)
+    except Exception:
+        return [], ""
+    snapshot = (report or {}).get("plan_snapshot")
+    if not isinstance(snapshot, Mapping):
+        return [], ""
+    entities = snapshot.get("entities")
+    return (
+        [item for item in entities if isinstance(item, Mapping)] if isinstance(entities, list) else [],
+        str(snapshot.get("market_profile") or ""),
+    )
+
+
+def _agent_entity_id(store: Any, research_id: str, agent_id: str) -> str:
+    """这张采集卡采的是哪个实体；快照里找不到就空串。"""
+    try:
+        report = store.get_report(research_id)
+    except Exception:
+        return ""
+    snapshot = (report or {}).get("plan_snapshot")
+    if not isinstance(snapshot, Mapping):
+        return ""
+    for goal in snapshot.get("goals") or []:
+        for agent in (goal or {}).get("agents") or []:
+            if str(agent.get("agent_id")) == agent_id:
+                return str(agent.get("entity") or "").strip()
+    return ""
+
+
+def entity_queries(
+    entity: Mapping[str, Any], locale: str, fallback: str,
+) -> list[str]:
+    """按语域取本实体的检索名，最多 MAX_QUERIES_PER_ENTITY 个。
+
+    **分别查询再合并去重，不拼 OR**（`sources-v1.md` 已有「去掉 OR」的经验：
+    OR 串在几家源上都会把召回打到 0）。超出上限的别名不进检索，只留给去重匹配。
+    `same_product=false` 的实体天然不会跨语域借名——对方的名字压根不在本卡里。
+    """
+    names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
+    picked: list[str] = []
+    primary = names.get(locale)
+    if isinstance(primary, str) and primary.strip():
+        picked.append(primary.strip())
+    for alias in names.get("aliases") or []:
+        text = str(alias).strip()
+        if not text:
+            continue
+        is_zh = any("一" <= char <= "鿿" for char in text)
+        if (locale == "zh") == is_zh:
+            picked.append(text)
+    canonical = str(entity.get("canonical") or entity.get("id") or "").strip()
+    if not picked and canonical:
+        picked.append(canonical)
+    if not picked and fallback.strip():
+        picked.append(fallback.strip())
+    seen: set[str] = set()
+    unique = [name for name in picked if not (name in seen or seen.add(name))]
+    return unique[:MAX_QUERIES_PER_ENTITY]
+
+
+def _dedupe_evidence(batches: list[Any]) -> Any:
+    """多个查询词的结果合并去重；不是「全是列表」就原样退回第一批，不硬拗形状。"""
+    if not batches:
+        return None
+    if not all(isinstance(batch, list) for batch in batches):
+        return batches[0]
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for batch in batches:
+        for item in batch:
+            key = ""
+            if isinstance(item, Mapping):
+                key = str(item.get("permalink") or item.get("platform_item_id") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            merged.append(item)
+    return merged
+
 
 class SourceToolAdapter:
     """source.* 统一调用面；工具发现与实现细节只留在适配层。"""
@@ -627,6 +724,44 @@ class SourceToolAdapter:
             return self._source_tools[tool_name]
         except KeyError as exc:
             raise KeyError(f"未注册的信息源工具：{tool_name}") from exc
+
+    def _locale_queries(
+        self, source_id: str, query: str, *,
+        research_id: str, agent_id: str, on_event: Any = None,
+    ) -> list[str]:
+        """§ENT-1 货 4：把模型给的一个查询词换成本实体在本源语域下的 ≤2 个查询词。
+
+        没有库、没有计划快照、这张卡没登记实体、源不在语域表里——任何一条不成立
+        就原样退回模型给的那一个词。整步降级安全：实体卡是锦上添花，缺了不该让采集停。
+        """
+        if self._store is None:
+            return [query]
+        entities, market_profile = _plan_entities(self._store, research_id)
+        if not entities:
+            return [query]
+        entity_id = _agent_entity_id(self._store, research_id, agent_id)
+        entity = next(
+            (item for item in entities if str(item.get("id")) == entity_id), None
+        )
+        if entity is None:
+            return [query]
+        locale = _SOURCE_LOCALES.get(source_id, "")
+        if locale is None:  # 跨语域源（网页搜索）跟着计划的市场属性走
+            locale = "zh" if market_profile == "cn_product" else "en"
+        if locale not in {"zh", "en"}:
+            return [query]
+        queries = entity_queries(entity, locale, query)
+        if len(queries) <= 1:
+            return queries or [query]
+        if on_event is not None:
+            on_event({
+                "type": "source_query_plan",
+                "data": {
+                    "source_id": source_id, "entity": entity_id,
+                    "locale": locale, "queries": list(queries),
+                },
+            })
+        return queries
 
     async def call(
         self,
@@ -719,15 +854,27 @@ class SourceToolAdapter:
             call_kwargs["agent_name"] = agent_id
         if accepts_events:
             call_kwargs["on_event"] = capture
-        try:
+
+        async def run_once(text: str) -> Any:
             if inspect.iscoroutinefunction(entrypoint):
-                result = await entrypoint(query, window, **call_kwargs)
+                value = await entrypoint(text, window, **call_kwargs)
             else:
-                result = await asyncio.to_thread(
-                    entrypoint, query, window, **call_kwargs
+                value = await asyncio.to_thread(
+                    entrypoint, text, window, **call_kwargs
                 )
-            if inspect.isawaitable(result):
-                result = await result
+            if inspect.isawaitable(value):
+                value = await value
+            return value
+
+        try:
+            # §ENT-1 货 4（本包解禁的唯一一处）：按源的语域取实体的叫法，
+            # 每实体每源 ≤2 个查询词，**分别查询再合并去重**，不拼 OR。
+            queries = self._locale_queries(
+                source_id, query, research_id=research_id, agent_id=agent_id,
+                on_event=capture,
+            )
+            batches = [await run_once(text) for text in queries]
+            result = _dedupe_evidence(batches) if len(batches) > 1 else batches[0]
             if self._store is not None and not store_passed:
                 _persist_returned_evidence(
                     self._store,
