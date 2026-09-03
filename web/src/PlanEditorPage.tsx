@@ -4,7 +4,7 @@ import {
 } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
-  ApiEnvelope, DecisionQuestion, PlanAgent, PlanGoal, ResearchPlan,
+  ApiEnvelope, DecisionQuestion, PlanAgent, PlanEntity, PlanGoal, ResearchPlan,
 } from './types'
 
 const { TextArea } = Input
@@ -240,6 +240,15 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
     <Alert type="error" showIcon message={failure?.message ?? '计划暂不可用'} action={<Button onClick={() => void load()}>重试</Button>} />
   </main>
 
+  // §ENT-1 货 5：改实体卡走的还是 PUT /plan（editing 把 entities 记进调整日志），
+  // 与 goal / agent 编辑同一条保存路径：defaultValue + onBlur，焦点离开即保存。
+  const updateEntity = (entityIndex: number, mutate: (entity: PlanEntity) => void) => {
+    const next = structuredClone(plan)
+    if (!next.entities) return
+    mutate(next.entities[entityIndex])
+    void save(next)
+  }
+
   const updateGoal = (goalIndex: number, mutate: (goal: PlanGoal) => void) => {
     const next = structuredClone(plan)
     mutate(next.goals[goalIndex])
@@ -291,6 +300,78 @@ export default function PlanEditorPage({ researchId }: { researchId: string }) {
               disabled={frozen || saving || !entityMappingReady}
               onClick={applyEntityMapping}
             >应用实体映射并保存</Button>
+          </Space>
+        </Card>}
+        {(plan.entities?.length ?? 0) > 0 && <Card
+          className="question-queue plan-entities"
+          title={<Space>研究对象 <Tag color="blue">{plan.entities!.length} 个</Tag></Space>}
+        >
+          <Typography.Paragraph type="secondary">
+            采集时国内源按中文名搜、海外源按英文名搜，每个对象每个源最多两个查询词。
+            名字写错就搜不到人在讨论什么——起跑前请确认这里说的是不是你要研究的那个产品。
+          </Typography.Paragraph>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {plan.entities!.map((entity, entityIndex) => <div
+              key={entity.id} className="plan-entity-card" data-entity-id={entity.id}
+            >
+              <Space size={8} wrap>
+                <Tag>{entity.id}</Tag>
+                <Input
+                  key={`canonical-${entity.canonical}`} addonBefore="正式名"
+                  disabled={frozen || saving} defaultValue={entity.canonical}
+                  data-testid={`entity-canonical-${entity.id}`}
+                  onBlur={(event) => updateEntity(entityIndex, (item) => {
+                    item.canonical = event.target.value.trim() || item.canonical
+                  })}
+                />
+              </Space>
+              <Space size={8} wrap style={{ marginTop: 8 }}>
+                <Input
+                  key={`zh-${entity.names.zh ?? ''}`} addonBefore="中文名"
+                  disabled={frozen || saving} defaultValue={entity.names.zh ?? ''}
+                  data-testid={`entity-zh-${entity.id}`}
+                  onBlur={(event) => updateEntity(entityIndex, (item) => {
+                    item.names.zh = event.target.value.trim() || null
+                  })}
+                />
+                <Input
+                  key={`en-${entity.names.en ?? ''}`} addonBefore="英文名"
+                  disabled={frozen || saving} defaultValue={entity.names.en ?? ''}
+                  data-testid={`entity-en-${entity.id}`}
+                  onBlur={(event) => updateEntity(entityIndex, (item) => {
+                    item.names.en = event.target.value.trim() || null
+                  })}
+                />
+              </Space>
+              <Input
+                key={`aliases-${entity.names.aliases.join(',')}`}
+                addonBefore="别名" style={{ marginTop: 8 }}
+                placeholder="用逗号分隔，例如：豆包大模型, Doubao AI"
+                disabled={frozen || saving} defaultValue={entity.names.aliases.join(', ')}
+                data-testid={`entity-aliases-${entity.id}`}
+                onBlur={(event) => updateEntity(entityIndex, (item) => {
+                  item.names.aliases = [...new Set(event.target.value
+                    .split(/[,，]/).map((value) => value.trim()).filter(Boolean))]
+                })}
+              />
+              <Checkbox
+                style={{ marginTop: 8 }} disabled={frozen || saving}
+                checked={entity.same_product}
+                data-testid={`entity-same-${entity.id}`}
+                onChange={(event) => updateEntity(entityIndex, (item) => {
+                  item.same_product = event.target.checked
+                })}
+              >中外名字是同一个产品（取消勾选表示像抖音／TikTok 那样是两个产品，报告里只并列不交叉）</Checkbox>
+              <TextArea
+                key={`note-${entity.note}`} autoSize style={{ marginTop: 8 }}
+                placeholder={entity.same_product ? '一句话说清这是什么产品' : '必填：中外两个产品差在哪'}
+                disabled={frozen || saving} defaultValue={entity.note}
+                data-testid={`entity-note-${entity.id}`}
+                onBlur={(event) => updateEntity(entityIndex, (item) => {
+                  item.note = event.target.value
+                })}
+              />
+            </div>)}
           </Space>
         </Card>}
         <Card className="question-queue" title={<Space>决策天平追问 <Tag color={unanswered ? 'warning' : 'success'}>{unanswered ? `${unanswered} 个待回答` : '已全部回答'}</Tag></Space>}>

@@ -103,6 +103,15 @@ export type DecisionQuestion = {
   answered_at: string | null
 }
 
+export type PlanEntity = {
+  id: string
+  canonical: string
+  names: { zh: string | null; en: string | null; aliases: string[] }
+  official_handles: Record<string, string>
+  same_product: boolean
+  note: string
+}
+
 export type ResearchPlan = {
   research_id: string
   plan_rev: number
@@ -114,6 +123,7 @@ export type ResearchPlan = {
   decision_balance: DecisionQuestion[]
   expert_panel: Record<string, unknown> | null
   goals: PlanGoal[]
+  entities?: PlanEntity[]
   change_log: Array<Record<string, unknown>>
   baseline: { title: string; use_case: string; goals: PlanGoal[] }
   baseline_source: string

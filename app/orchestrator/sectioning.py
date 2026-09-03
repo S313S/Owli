@@ -1324,6 +1324,8 @@ def _assemble(
             [item["markdown"] for item in section_items],
             [item["text"] for item in missing_items],
             citation_numbers=citation_numbers,
+            # §ENT-1 货 6：报告开头先说清这份报告说的是哪几个产品。
+            entities=[item.to_dict() for item in getattr(plan, "entities", []) or []],
         ),
         encoding="utf-8",
     )

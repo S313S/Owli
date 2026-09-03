@@ -173,6 +173,32 @@ def _merge(sections: list[dict[str, Any]], *, title: str | None,
     }
 
 
+_ENTITY_LINE = re.compile(r"^\s*-\s+\*\*(?P<name>[^*]+)\*\*(?P<mark>（[^）]*）)?：(?P<rest>.+)$")
+
+
+def report_entity_lines(text: str) -> list[dict[str, str]]:
+    """§ENT-1 货 6：从成稿的「研究对象」节确定性摘出实体行，供 Excel 与导出复用。
+
+    只读成稿，不重算：报告里写的是什么，附件里就是什么（`verification-ruler`
+    的教训——尺子另写一份解析，量出来的数就不是报告里的数）。
+    """
+    lines = _HTML_COMMENT.sub("", text).splitlines()
+    picked: list[dict[str, str]] = []
+    for start, end, heading in _subtree_spans(lines):
+        if heading.strip() != "研究对象":
+            continue
+        for line in lines[start + 1:end]:
+            matched = _ENTITY_LINE.match(line)
+            if matched is None:
+                continue
+            picked.append({
+                "name": matched.group("name").strip(),
+                "same_product": "不是同一个" not in (matched.group("mark") or ""),
+                "text": matched.group("rest").strip(),
+            })
+    return picked
+
+
 def parse_report(text: str) -> dict[str, Any]:
     """成稿文本 → 结构化视图。JSON（节化成稿）与 Markdown 两种产物都认。"""
     stripped = text.lstrip()
@@ -182,23 +208,31 @@ def parse_report(text: str) -> dict[str, Any]:
             document = json.loads(text)
         except json.JSONDecodeError:
             document = None
+    entities = report_entity_lines(text if not stripped.startswith("{") else "")
     if isinstance(document, Mapping) and isinstance(document.get("sections"), list):
         sections = [_section_view(s) for s in document["sections"] if isinstance(s, Mapping)]
         raw_missing = document.get("缺失清单")
-        return _merge(
+        view = _merge(
             sections,
             title=document.get("title"),
             extra_missing=raw_missing if isinstance(raw_missing, list) else [],
             notes=document.get("收尾注释"),
             fmt="json",
         )
+        # JSON 成稿的「研究对象」节在合并后的 body 里，摘取跟 Markdown 走同一把尺子。
+        view["entities"] = report_entity_lines(
+            "\n".join(str(item.get("markdown") or "") for item in sections)
+        )
+        return view
     parts = split_markdown(text)
     section = {
         "section_id": None, "goal_id": None, "title": parts["title"],
         "markdown": parts["body"], "placeholder": False, "missing_reason": None,
         "_parts": parts,
     }
-    return _merge([section], title=parts["title"], extra_missing=[], notes=None, fmt="markdown")
+    view = _merge([section], title=parts["title"], extra_missing=[], notes=None, fmt="markdown")
+    view["entities"] = entities
+    return view
 
 
 def report_citation_map(text: str) -> dict[str, int]:

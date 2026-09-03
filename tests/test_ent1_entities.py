@@ -217,5 +217,6 @@ def test_实体叫法闭集写进_goal_提示词() -> None:
          "same_product": True},
     ])
     assert "抖音→抖音、Douyin、抖音短视频（与它的中外同名产品不是同一个产品" in text
+    assert "交叉验证章对它只并列不跨市场交叉" in text
     assert "豆包→豆包、Doubao；" in text or "豆包→豆包、Doubao。" in text
     assert _entity_rule([]) == "" and _entity_rule(None) == ""

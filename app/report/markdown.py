@@ -264,12 +264,37 @@ def merge_section_shards(
     return "\n".join(blocks).rstrip() + "\n"
 
 
+def render_entity_section(entities: Sequence[Mapping[str, Any]]) -> list[str]:
+    """§ENT-1 货 6：报告开头的「研究对象」节——这份报告说的到底是哪几个产品。
+
+    `same_product=false` 的实体在这里就标出来（「与同名的海外/国内产品不是同一个
+    产品」），交叉章据此只并列不交叉；读报告的人也不用自己猜抖音那节说的是不是
+    TikTok。没有实体卡（历史报告、解析失败）时返回空，报告结构一个字不变。
+    """
+    if not entities:
+        return []
+    lines = ["## 研究对象", ""]
+    for entity in entities:
+        names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
+        alias = "、".join(
+            str(item) for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
+            if str(item or "").strip()
+        )
+        canonical = str(entity.get("canonical") or entity.get("id") or "").strip()
+        mark = "" if entity.get("same_product", True) else "（中外同名产品不是同一个，本报告只并列不交叉）"
+        note = str(entity.get("note") or "").strip()
+        lines.append(f"- **{canonical}**{mark}：{alias or canonical}。{note}".rstrip())
+    lines.append("")
+    return lines
+
+
 def merge_sectioned_markdown(
     title: str,
     section_texts: Sequence[str],
     missing_lines: Sequence[str],
     *,
     citation_numbers: Mapping[str, int] | None = None,
+    entities: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     """把各节 Markdown 归并成单结论、单信息源的整卷报告。
 
@@ -282,6 +307,7 @@ def merge_sectioned_markdown(
         _merge_shard_structures(section_texts, citation_numbers)
     )
     blocks = [f"# {title}", ""]
+    blocks.extend(render_entity_section(entities or []))
     for part in merged_sections:
         blocks.extend([part, ""])
     if merged_conclusions:
