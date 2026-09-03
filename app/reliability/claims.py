@@ -44,17 +44,36 @@ def _error(message: str, offenders: Iterable[str]) -> ClaimsRegistrationError:
 
 
 def claims_from_documents(documents: Iterable[Mapping[str, Any]]) -> list[Any]:
-    """按章产物顺序收集可选顶层 claims；不从正文推断。"""
+    """按章产物顺序收集可选顶层 claims；不从正文推断。
+
+    §FIX-2 货 1（D-037）：id 由分片写手按「节序+片序+条序」生成，goal 与章两个
+    维度缺席，跨章同位片必撞 `c-010101`（真机 250 条只剩 84 唯一、166 处重复）。
+    这里按**文档序**给合法 id 加确定性命名空间 `c-{文档序:02d}{原数字}`——机械改写，
+    不靠提示词约束写手；形态仍满足 CLAIM_ID_PATTERN。文档内重复加前缀后照旧相撞、
+    id 格式违规原样透传，两条检出能力都不被掩盖。claim id 只是报告内部键：正文角标
+    走 `[Sxx]`，不引用 claim id，故改写不动正文。
+    """
 
     result: list[Any] = []
-    for document in documents:
+    for index, document in enumerate(documents, start=1):
         claims = document.get("claims")
         if claims is None:
             continue
         if not isinstance(claims, list):
             raise _error("章产物 claims 必须是数组", ["claims"])
-        result.extend(claims)
+        result.extend(_namespaced_claim(claim, index) for claim in claims)
     return result
+
+
+def _namespaced_claim(claim: Any, document_index: int) -> Any:
+    """给合法 id 加文档命名空间；其余原样返回（含非 Mapping 与非法 id）。"""
+
+    if not isinstance(claim, Mapping):
+        return claim
+    claim_id = claim.get("id")
+    if not isinstance(claim_id, str) or CLAIM_ID_PATTERN.fullmatch(claim_id) is None:
+        return claim
+    return {**claim, "id": f"c-{document_index:02d}{claim_id[2:]}"}
 
 
 def prepare_claim_registration(

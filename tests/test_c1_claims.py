@@ -632,7 +632,8 @@ def test_runtime_在角标回填后登记全部JSON报告章(tmp_path: Path, mon
     claim = store.get_report("r-ledger")["extra"]["claims"][0]
     assert claim["claims_source"] == "chapter"
     assert claim["evidence_ids"] == ["ev-runtime"]
-    assert store.list_evidence("r-ledger")[0]["extra"]["claim_ids"] == ["c-01"]
+    # D-037：登记入口按文档序加命名空间，单文档也一律加（c-01 → c-0101）。
+    assert store.list_evidence("r-ledger")[0]["extra"]["claim_ids"] == ["c-0101"]
     validation_events = [
         event for event in events if event.get("type") == "report_validation"
     ]
@@ -664,7 +665,7 @@ def test_runtime_全悬空断言降级记账且不把报告判失败(tmp_path: P
     assert validations[-1]["verdict"] == "pass"
     assert store.get_report("r-ledger")["extra"]["claims"] == []
     assert store.get_report("r-ledger")["extra"]["claims_dropped"] == [{
-        "claim_id": "c-01",
+        "claim_id": "c-0101",  # D-037 文档命名空间
         "reason": "all_evidence_dangling",
         "permalinks": ["https://missing.example/x"],
     }]
