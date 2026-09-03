@@ -61,9 +61,16 @@ def _missing_from_text(text: str) -> dict[str, Any] | None:
     }
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
 def split_markdown(text: str) -> dict[str, Any]:
-    """一段 Markdown → 正文 / 结论条 / 信息源条 / 缺失条；标题层级按子树切。"""
-    lines = text.splitlines()
+    """一段 Markdown → 正文 / 结论条 / 信息源条 / 缺失条；标题层级按子树切。
+
+    §RD-1：写手会把「<!-- q-1：两者兼顾 -->」这类追问批注当 HTML 注释吐进正文与结论，
+    前端 Markdown 渲染不认原生 HTML、会把注释原样当文字显示给读者——视图层一律剥掉。
+    """
+    lines = _HTML_COMMENT.sub("", text).splitlines()
     removed: set[int] = set()
     conclusions: list[str] = []
     sources: list[dict[str, Any]] = []

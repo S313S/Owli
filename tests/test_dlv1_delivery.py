@@ -132,3 +132,18 @@ def test_markdown_成稿也能解析且缺产物返回404(tmp_path: Path) -> Non
     assert _get(application, f"/api/researches/{research_id}/report").status_code == 404
     assert _get(application, "/api/researches/r-nope/report").status_code == 404
     assert _get(application, "/api/researches/r-nope/evidence").status_code == 404
+
+
+def test_rd1_视图层剥掉写手吐出的HTML注释():
+    """§RD-1：`<!-- q-1：两者兼顾 -->` 之类批注不能原样显示给读者。"""
+    from app.report.render import parse_report
+
+    text = (
+        "# 题\n\n正文一句。<!-- q-1：两者兼顾 -->\n\n## 结论\n"
+        "- 结论 A <!-- q-1 -->[S01]\n- <!-- q-1: 多行\n注释 -->结论 B[S01]\n\n"
+        "## 信息源\n- [S01] [标题](https://example.com/a)\n"
+    )
+    view = parse_report(text)
+    assert "<!--" not in view["sections"][0]["markdown"]
+    assert all("<!--" not in c for c in view["conclusions"]), view["conclusions"]
+    assert [c.split("[")[0].strip() for c in view["conclusions"]] == ["结论 A", "结论 B"]
