@@ -24,7 +24,13 @@ __all__ = [
 ]
 
 _API_BASE = "https://api.tikhub.io"
-_SEARCH_PATH = "/api/v1/douyin/search/fetch_video_search_v5"
+# §D-038：v5 为主、v4 为备。2026-09-03 傍晚 v5 连官方演示参数都恒 400（FIX-2 货 3 据此
+# 判「端点报废」），五小时后同一把 key 三次全 200——是**上游临时故障**不是端点死亡。
+# 单版本依赖在那几小时里让抖音 0 产出，所以保留 v5 主路，另接 v4 兜底：v5 请求失败时
+# 自动改打 v4，并把 v4 的 PascalCase 返回归一成 v5 形态，下游映射一行不用改。
+_SEARCH_PATH_V5 = "/api/v1/douyin/search/fetch_video_search_v5"
+_SEARCH_PATH_V4 = "/api/v1/douyin/search/fetch_video_search_v4"
+_SEARCH_PATH = _SEARCH_PATH_V5
 _COMMENTS_PATH = "/api/v1/douyin/app/v3/fetch_video_comments"
 _ENV_PATH = Path.home() / ".owli" / ".env"
 
@@ -270,11 +276,43 @@ def _integer(item: Mapping[str, Any], *names: str) -> int:
     return 0
 
 
+def _video_items_v4(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """v4 的列表在 `data.data.itemList[].AwemeInfo`，比 v5 多一层 `data`。"""
+
+    inner = data.get("data")
+    values = inner.get("itemList") if isinstance(inner, Mapping) else None
+    if not isinstance(values, list):
+        raise TikHubError(
+            "bad_response", endpoint=_SEARCH_PATH_V4, detail="搜索响应缺少 itemList",
+        )
+    result: list[Mapping[str, Any]] = []
+    for wrapper in values:
+        if not isinstance(wrapper, Mapping):
+            continue
+        aweme = wrapper.get("AwemeInfo")
+        video = _v4_video(aweme) if isinstance(aweme, Mapping) else None
+        if video is not None:
+            result.append(video)
+    return result
+
+
+def _v4_next_cursor(data: Mapping[str, Any], current: int) -> int | None:
+    """v4 翻页用 `hasMore` + `cursor`，没有 v5 的 search_id/backtrace。"""
+
+    inner = data.get("data")
+    if not isinstance(inner, Mapping) or not inner.get("hasMore"):
+        return None
+    cursor = inner.get("cursor")
+    if not isinstance(cursor, int) or isinstance(cursor, bool) or cursor <= current:
+        return None
+    return cursor
+
+
 def _video_items(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     values = data.get("items")
     if not isinstance(values, list):
         raise TikHubError(
-            "bad_response", endpoint=_SEARCH_PATH, detail="搜索响应缺少 items",
+            "bad_response", endpoint=_SEARCH_PATH_V5, detail="搜索响应缺少 items",
         )
     result = []
     for wrapper in values:
@@ -287,9 +325,56 @@ def _video_items(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _published_at(value: Any) -> str | None:
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-        return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
-    return None
+    """把 create_time 转成 ISO 时间。
+
+    §D-038 两处真机读数，都会静默出错：
+    ① v5 给的是**秒**（`1775107082`），v4 给的是**毫秒**（`1782789498000`）——直接
+    `fromtimestamp` 会把 v4 的时间算到公元 58 万年；按量级判断，2001-09-09 之后的
+    秒级时间戳都小于 1e11、毫秒级都大于它。
+    ② v4 的 `CreateTime` 是**字符串** `'1782789498000'` 不是数字——只认 int/float
+    的话真机跑出来整列 `published_at` 全是 None（本包第一版就是这么绿着错的）。
+    """
+
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    seconds = value / 1000 if value >= 1e11 else value
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
+
+
+def _v4_video(aweme: Mapping[str, Any]) -> dict[str, Any] | None:
+    """把 v4 的 PascalCase 视频体归一成 v5 形态，供 `_to_evidence` 原样消费。
+
+    v4 比 v5 少两样，都按「取不到就是 0/False」处理，不编造：
+    `Statistics` 没有 `CollectCount`（收藏数落 0）、`Author` 没有 `Uid` 与认证位
+    （`uid` 退用 `ShortId`，`is_verified` 恒 False）。
+    """
+
+    aweme_id = str(aweme.get("AwemeId") or "")
+    if not aweme_id:
+        return None
+    author = aweme.get("Author") if isinstance(aweme.get("Author"), Mapping) else {}
+    statistics = (
+        aweme.get("Statistics")
+        if isinstance(aweme.get("Statistics"), Mapping) else {}
+    )
+    return {
+        "aweme_id": aweme_id,
+        "desc": aweme.get("Desc") or "",
+        "create_time": aweme.get("CreateTime"),
+        "author": {
+            "nickname": author.get("Nickname") or "",
+            "uid": str(author.get("ShortId") or ""),
+            "sec_uid": str(author.get("SecUid") or ""),
+            "is_verified": False,
+        },
+        "statistics": {
+            "digg_count": _integer(statistics, "DiggCount"),
+            "comment_count": _integer(statistics, "CommentCount"),
+            "share_count": _integer(statistics, "ShareCount"),
+        },
+    }
 
 
 def _fetch_comments(
@@ -469,12 +554,58 @@ def _to_evidence(
     }
 
 
+def _collect_v5(
+    query: str, *, limit: int, request: Callable[..., Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    videos: list[Mapping[str, Any]] = []
+    pagination: Mapping[str, Any] = {
+        "offset": 0, "search_id": "", "backtrace": "", "has_more": 1,
+    }
+    page = 1
+    while len(videos) < limit and pagination.get("has_more"):
+        data = request(_SEARCH_PATH_V5, body={
+            "keyword": query,
+            "offset": int(pagination.get("offset") or 0),
+            "page": page,
+            "search_id": str(pagination.get("search_id") or ""),
+            "backtrace": str(pagination.get("backtrace") or ""),
+        })
+        page_items = _video_items(data)
+        videos.extend(page_items)
+        next_pagination = data.get("pagination")
+        if not isinstance(next_pagination, Mapping) or not page_items:
+            break
+        pagination = next_pagination
+        page += 1
+    return videos
+
+
+def _collect_v4(
+    query: str, *, limit: int, request: Callable[..., Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    videos: list[Mapping[str, Any]] = []
+    cursor = 0
+    while len(videos) < limit:
+        data = request(_SEARCH_PATH_V4, body={
+            "keyword": query, "cursor": cursor, "sort_type": "0",
+            "publish_time": "0", "filter_duration": "0", "content_type": "0",
+        })
+        page_items = _video_items_v4(data)
+        videos.extend(page_items)
+        next_cursor = _v4_next_cursor(data, cursor)
+        if next_cursor is None or not page_items:
+            break
+        cursor = next_cursor
+    return videos
+
+
 def _unavailable(
     on_event: EventCallback | None,
     *,
     reason: str,
     forced: bool,
     error: TikHubError | None = None,
+    extra: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     _emit(
         on_event,
@@ -485,6 +616,7 @@ def _unavailable(
         forced=forced,
         task_continues=True,
         **(error.event_fields() if error is not None else {}),
+        **(dict(extra) if extra else {}),
     )
     return []
 
@@ -510,7 +642,7 @@ def search(
 ) -> list[dict[str, Any]]:
     """搜索抖音视频，并为优先候选拉取评论正文。
 
-    §SRC-1 货 3：`window` **不参与检索**——TikHub 的 video_search_v5 没有时间窗
+    §SRC-1 货 3：`window` **不参与检索**——TikHub 的抖音视频搜索没有时间窗
     参数，此前它只被一条正则校验然后丢掉，却打回了 25% 的调用。现在
     `SOURCE_SPEC.window = None`，工具 schema 里不再向模型索取这个参数；
     形参保留且默认空串，只是为了与 `SourceToolAdapter.call` 的位置参数对齐，
@@ -534,7 +666,7 @@ def search(
     except RuntimeError:
         return _unavailable(on_event, reason="tikhub_credential_missing", forced=False)
 
-    request_counts = {"video_search_v5": 0, "video_comments": 0}
+    request_counts = {"video_search_v5": 0, "video_search_v4": 0, "video_comments": 0}
 
     def counted_http_request(
         method: str,
@@ -543,43 +675,62 @@ def search(
         body: bytes | None,
         timeout: float,
     ) -> HttpResponse:
-        key = "video_comments" if _COMMENTS_PATH in url else "video_search_v5"
+        if _COMMENTS_PATH in url:
+            key = "video_comments"
+        elif _SEARCH_PATH_V4 in url:
+            key = "video_search_v4"
+        else:
+            key = "video_search_v5"
         request_counts[key] += 1
         return http_request(method, url, headers, body, timeout)
 
-    videos: list[Mapping[str, Any]] = []
-    pagination: Mapping[str, Any] = {
-        "offset": 0, "search_id": "", "backtrace": "", "has_more": 1,
-    }
-    page = 1
+    def request(path: str, *, body: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _request_json(
+            path,
+            method="POST",
+            token=api_token,
+            http_request=counted_http_request,
+            timeout_seconds=timeout_seconds,
+            rate_gate=rate_gate,
+            body=body,
+        )
+
+    keyword = query.strip()
+    search_version = "v5"
     try:
-        while len(videos) < limit and pagination.get("has_more"):
-            data = _request_json(
-                _SEARCH_PATH,
-                method="POST",
-                token=api_token,
-                http_request=counted_http_request,
-                timeout_seconds=timeout_seconds,
-                rate_gate=rate_gate,
-                body={
-                    "keyword": query.strip(),
-                    "offset": int(pagination.get("offset") or 0),
-                    "page": page,
-                    "search_id": str(pagination.get("search_id") or ""),
-                    "backtrace": str(pagination.get("backtrace") or ""),
+        videos = _collect_v5(keyword, limit=limit, request=request)
+    except TikHubError as primary_error:
+        # §D-038：v5 抽风过整整几小时，那期间抖音 0 产出。这里不再直接判源不可用，
+        # 先改打 v4；兜底路平时不走，所以**每次触发都留痕**，别让它静默成功也静默失败。
+        _emit(
+            on_event,
+            "source_search_fallback",
+            provider="tikhub",
+            from_version="v5",
+            to_version="v4",
+            closed_reason=primary_error.closed_reason,
+            task_continues=True,
+            **primary_error.event_fields(),
+        )
+        search_version = "v4"
+        try:
+            videos = _collect_v4(keyword, limit=limit, request=request)
+        except TikHubError as fallback_error:
+            # 两条路都断了才算源不可用。头条报**主路**的分诊（SRC-1 的契约：
+            # `source_unavailable` 的 endpoint/status 指向主要死因），兜底那条的
+            # 分诊挂在 `fallback_*` 字段上，两个状态码都查得到。
+            return _unavailable(
+                on_event,
+                reason=primary_error.closed_reason,
+                forced=False,
+                error=primary_error,
+                extra={
+                    "fallback_version": "v4",
+                    "fallback_closed_reason": fallback_error.closed_reason,
+                    "fallback_endpoint": fallback_error.endpoint,
+                    "fallback_http_status": fallback_error.http_status,
                 },
             )
-            page_items = _video_items(data)
-            videos.extend(page_items)
-            next_pagination = data.get("pagination")
-            if not isinstance(next_pagination, Mapping) or not page_items:
-                break
-            pagination = next_pagination
-            page += 1
-    except TikHubError as error:
-        return _unavailable(
-            on_event, reason=error.closed_reason, forced=False, error=error,
-        )
 
     selected = videos[:limit]
     statistics = [
@@ -636,8 +787,9 @@ def search(
         report_id=report_id or "unpersisted",
         goal_id=goal_id or "unpersisted",
         queries=[query.strip()],
-        # 不写 window：video_search_v5 没有时间窗过滤，写进参照集描述是假的。
-        filters="video_search_v5;comments_app_v3",
+        # 不写 window：抖音视频搜索没有时间窗过滤，写进参照集描述是假的。
+        # §D-038：参照集要记**实际走的那个版本**，否则兜底跑了一轮，描述还印着 v5。
+        filters=f"video_search_{search_version};comments_app_v3",
     )
     if store is not None:
         assert report_id is not None and goal_id is not None
@@ -659,8 +811,10 @@ def search(
         provider="tikhub",
         calls={
             "video_search_v5": request_counts["video_search_v5"],
+            "video_search_v4": request_counts["video_search_v4"],
             "video_comments": request_counts["video_comments"],
         },
+        search_version=search_version,
         returned=len(normalized),
         completeness_2=sum(
             item.get("score_completeness") == 2 for item in normalized
@@ -676,7 +830,7 @@ SOURCE_SPEC = SourceSpec(
     entrypoint=search,
     display_name="抖音",
     collector_name="抖音数据抓取",
-    capability_description="TikHub 视频搜索 V5、视频文案、互动指标与评论正文",
+    capability_description="TikHub 视频搜索（V5 主 / V4 兜底）、视频文案、互动指标与评论正文",
     prompt_hint="优先选择评论量可全取的视频，完整评论区可把完整度上探到 2",
     # 抖音搜索没有时间窗，别向模型要一个用不上的参数（§SRC-1 货 3）。
     window=None,
