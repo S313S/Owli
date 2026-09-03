@@ -89,7 +89,8 @@ class PlanEngine:
             name = self.skeleton["subjects"][index - 1]
             payload = {
                 "canonical": name,
-                "names": {"zh": name, "en": f"{name}-en", "aliases": []},
+                # §ENT-2：只留中文叫法——给了英文名就等于要求分配表再排一张海外卡。
+                "names": {"zh": name, "en": None, "aliases": []},
                 "official_handles": {},
                 "same_product": True,
                 "note": f"{name} 的实体卡（替身引擎产出）",

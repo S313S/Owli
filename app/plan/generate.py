@@ -27,7 +27,10 @@ from app.plan.allocation import (
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.entities import resolve_entities
-from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
+from app.plan.lint import (
+    _SOURCE_MARKET_PROFILES, applicable_sources, duplicate_collection_goal_ids,
+    lint,
+)
 from app.plan.normalize import normalize_plan
 from app.plan.model import (
     DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS, rating_rows_path,
@@ -321,11 +324,13 @@ def _goal_prompt(
     )
     if market_profile not in _MARKET_SOURCES:
         raise ValueError(f"market_profile 不在闭集：{market_profile!r}")
-    applicable_sources = _MARKET_SOURCES[market_profile]
+    # §ENT-2：给 goal 段看的许可名单也要按实体叫法放宽，否则分配表里排了 Reddit，
+    # 提示词里却说 Reddit 不适用于本市场属性——模型只会照提示词把那张卡删掉。
+    applicable = applicable_sources(market_profile, entities)
     coverage = json.dumps(
         {
             "market_profile": market_profile,
-            "applicable_sources": sorted(applicable_sources),
+            "applicable_sources": sorted(applicable),
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -1423,13 +1428,13 @@ async def generate_plan(
                 _skeleton_market_profile(skeleton)
             )
             subjects, subjects_justification = _skeleton_subjects(skeleton)
-            collection_plan = collection_plan_dict(allocate_collections(
+            # §ENT-2：这一步只作**容量校验**——实体装不下章预算要当场触发骨架重试。
+            # 真正的分配表推迟到实体卡出来之后再算：排不排海外源看实体有没有英文
+            # 叫法，而实体卡在下面才解析。第二轮补位是尽力而为、不会新抛错，所以
+            # 这里校验通过就等于带实体也通过。
+            allocate_collections(
                 subjects, market_profile, scaffolds,
                 product_scale_config.profile(scale),
-            ))
-            (workspace.root / "allocation.json").write_text(
-                json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
             )
             await _emit(
                 store,
@@ -1437,7 +1442,6 @@ async def generate_plan(
                     research_id, f"规划骨架落盘：{len(scaffolds)} 个 goal"
                 ),
             )
-            await _emit(store, _allocation_event(research_id, collection_plan))
             break
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -1470,6 +1474,17 @@ async def generate_plan(
         store,
         _progress_event(research_id, f"研究对象实体卡就绪：{len(entities)} 张"),
     )
+
+    # §ENT-2 货 2：分配表在这里才定稿——实体的中外叫法决定排哪些源。
+    collection_plan = collection_plan_dict(allocate_collections(
+        subjects, market_profile, scaffolds,
+        product_scale_config.profile(scale), entities,
+    ))
+    (workspace.root / "allocation.json").write_text(
+        json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    await _emit(store, _allocation_event(research_id, collection_plan))
 
     expansions: dict[str, dict[str, Any]] = {}
 

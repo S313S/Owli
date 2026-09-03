@@ -102,12 +102,21 @@ def test_单张卡失败只丢这一张且整步降级不阻塞规划() -> None:
 
 def test_实体卡随计划落盘且规划期不因它变慢地打网络() -> None:
     """整条规划链：实体卡进 plan JSON；没注入 search 就一次网都不打。"""
-    from tests.test_plan_generate import _generate, _valid_skeleton
+    from tests.test_plan_generate import _agent, _generate, _valid_skeleton
     import tempfile
     from pathlib import Path
 
+    skeleton = _valid_skeleton()
+    # §ENT-2：夹具的实体卡默认只有中文名，本用例要验的正是 en 原样落盘，所以显式
+    # 打开双语——而带中文叫法的实体在 global_product 下会被分配表再排一张国内源卡，
+    # 骨架得把那张卡也写上，否则规则 31 打回（分配表按叫法定有无是本包的新语义）。
+    skeleton["goals"][1]["agents"].insert(
+        0, _agent("小红书数据抓取·飞书", "采集研究主体的国内讨论"),
+    )
     with tempfile.TemporaryDirectory() as raw:
-        plan, _, engine = _generate(Path(raw), [_valid_skeleton()])
+        plan, _, engine = _generate(
+            Path(raw), [skeleton], bilingual_entities=True,
+        )
     entities = plan.to_dict()["entities"]
     assert [item["id"] for item in entities] == plan.subjects
     assert entities[0]["names"]["en"].endswith("-en")
