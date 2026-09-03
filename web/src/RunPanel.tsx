@@ -91,9 +91,9 @@ function useTranscript(researchId: string, tab: PanelTab | undefined, live: bool
     const query = incremental && seqRef.current
       ? `tail=${TAIL_LINES}&after_seq=${seqRef.current}`
       : `tail=${TAIL_LINES}`
+    const section = `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.key)}`
     const response = await fetch(
-      `/api/researches/${encodeURIComponent(researchId)}/sections/`
-      + `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.key)}/transcript?${query}`,
+      `/api/researches/${encodeURIComponent(researchId)}/sections/${section}/transcript?${query}`,
     )
     if (!response.ok) return
     const body = await response.json() as ApiEnvelope<{ lines: TranscriptLine[]; last_seq: number }>

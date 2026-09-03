@@ -115,11 +115,31 @@ class WebContractTest(unittest.TestCase):
         self.assertIn("运行期调整", editor)
         self.assertIn("返回工作板继续", editor)
 
-    def test_前端不轮询(self) -> None:
+    def test_工作板状态不轮询(self) -> None:
+        """状态一律走 SSE。
+
+        §OBS-2 货 4 的运行面板是唯一例外，且它拉的不是状态：transcript 是
+        引擎原始流文件，只在节**运行中**每 3 s 取一次增量（用户 2026-09-03
+        午后拍板的方案原文）。所以豁免只给 RunPanel.tsx，且下面钉死它的
+        定时器除了 transcript 接口不许拉别的。
+        """
+
         sources = list((WEB / "src").glob("**/*.ts")) + list((WEB / "src").glob("**/*.tsx"))
         self.assertTrue(sources, "web/src 尚无 TypeScript 源码")
-        merged = "\n".join(path.read_text(encoding="utf-8") for path in sources)
+        merged = "\n".join(
+            path.read_text(encoding="utf-8") for path in sources
+            if path.name != "RunPanel.tsx"
+        )
         self.assertNotRegex(merged, r"setInterval|setTimeout\s*\([^)]*fetch")
+
+    def test_运行面板的定时拉取只碰_transcript_接口(self) -> None:
+        source = (WEB / "src" / "RunPanel.tsx").read_text(encoding="utf-8")
+        endpoints = re.findall(r"fetch\(\s*\n?\s*`([^`]+)`", source)
+        self.assertTrue(endpoints, "运行面板没有任何请求")
+        for endpoint in endpoints:
+            self.assertIn("/transcript?", endpoint)
+        # 只在跑的时候拉，跑完必须停。
+        self.assertIn("if (!live || !tab) return", source)
 
     def test_操作按钮由后端_actions_数组渲染(self) -> None:
         board = WEB / "src" / "WorkboardPage.tsx"
