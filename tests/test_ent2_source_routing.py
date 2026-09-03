@@ -93,3 +93,64 @@ def test_整条规划链_有中文名的海外产品会被排一张国内源采�
         for source in agent.get("capability", {}).get("sources", [])
     }
     assert {"hacker_news", "xhs"} <= sources
+
+
+# —— §ENT-2 货 3（ENT-1 挂账②）：别名清洗与 same_product 隔离 ——
+
+
+def _card(payload: dict, entity_id: str) -> dict:
+    from app.plan.entities import entity_card
+
+    card = entity_card(payload, entity_id=entity_id)
+    assert card is not None
+    return card.to_dict()
+
+
+def test_货3_ENT1真机样本的三条噪音别名全被清掉() -> None:
+    """「跳动」（字节跳动的截断）、「TT」「DS」（两字母缩写）——都出自 ENT-1 真机。"""
+    names = _card({
+        "canonical": "豆包",
+        "names": {"zh": "豆包", "en": "Doubao",
+                  "aliases": ["跳动", "TT", "DS", "Cici", "doubao AI"]},
+        "same_product": True,
+    }, "豆包")["names"]
+    assert names["aliases"] == ["Cici", "doubao AI"]
+    # 长得完全不一样的真别名（Cici 是豆包的海外名）在 same_product=true 时留着
+
+
+def test_货3_same_product为假时对方产品的名字绝不进本实体别名() -> None:
+    """ENT-1 真机最值钱的一条：飞书卡自己写着 same_product=false，却把 Lark 收进别名。"""
+    names = _card({
+        "canonical": "飞书",
+        "names": {"zh": "飞书", "en": "Feishu",
+                  "aliases": ["Lark", "飞书文档", "Feishu Suite"]},
+        "same_product": False,
+        "note": "飞书与 Lark 是面向国内与海外的两套部署，数据不互通。",
+    }, "飞书")["names"]
+    assert "Lark" not in names["aliases"]
+    assert names["aliases"] == ["飞书文档", "Feishu Suite"]   # 认得出是同一串名字的留着
+
+    names = _card({
+        "canonical": "抖音",
+        "names": {"zh": "抖音", "en": "Douyin",
+                  "aliases": ["TikTok", "抖音短视频", "Douyin App"]},
+        "same_product": False, "note": "抖音与 TikTok 内容生态独立。",
+    }, "抖音")["names"]
+    assert names["aliases"] == ["抖音短视频", "Douyin App"]
+
+
+def test_货3_截断与本实体正式名的边界() -> None:
+    from app.plan.entities import clean_aliases
+
+    # 截断不带来新召回，只带来更宽的误命中
+    assert clean_aliases(["字节"], ["字节跳动"], same_product=True) == []
+    # 等于本实体某个正式名的短名不受长度闸限制（「豆包」本来就是两个字）
+    assert clean_aliases(["豆包"], ["Doubao", "豆包"], same_product=True) == ["豆包"]
+    # 大小写变体与重复
+    assert clean_aliases(
+        ["DOUBAO", "doubao"], ["豆包"], same_product=True,
+    ) == ["DOUBAO"]
+    # same_product=false 的隔离闸不误伤本实体自己的变体
+    assert clean_aliases(
+        ["Feishu Docs"], ["飞书", "Feishu"], same_product=False,
+    ) == ["Feishu Docs"]

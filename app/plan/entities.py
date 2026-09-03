@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from app.plan.model import Entity
 
@@ -91,6 +91,87 @@ _HANDLE_PLATFORMS = frozenset({
 })
 _MAX_ALIASES = 4
 
+# §ENT-2 货 3（ENT-1 挂账②）：别名清洗。ENT-1 真机样本里模型吐过「跳动」（字节跳动
+# 的截断）、「TT」「DS」这类两字缩写，还把 Lark 写进了飞书卡的别名——而那张卡自己
+# 刚写完 same_product=false。别名有两条下游：它是第二个检索词（`entity_queries`），
+# 也进规则 32 的闭集，所以噪音别名既污染召回也污染 lint。
+_MIN_LATIN_ALIAS = 3   # 「TT」「DS」两字母缩写在正文里误命中率太高，不作检索词
+_MIN_CJK_ALIAS = 3     # 「跳动」同理；本实体自己的正式名走的是另一条路，不受此限
+_MIN_CJK_OVERLAP = 2   # 「飞书文档」与「飞书」共 2 字 → 认得出是同一串名字
+_MIN_LATIN_OVERLAP = 3
+
+
+def _has_cjk(text: str) -> bool:
+    return any("一" <= char <= "\u9fff" for char in text)
+
+
+def _normalized(text: str) -> str:
+    return "".join(
+        char.lower() for char in text if char.isalnum() or _has_cjk(char)
+    )
+
+
+def _overlap(left: str, right: str) -> int:
+    """两个名字的最长公共子串长度（已归一化）。"""
+    best = 0
+    for start in range(len(left)):
+        for end in range(start + best + 1, len(left) + 1):
+            if left[start:end] in right:
+                best = end - start
+            else:
+                break
+    return best
+
+
+def _looks_like_same_name(alias: str, names: Sequence[str]) -> bool:
+    """别名是不是本实体某个正式名的可辨认变体（大小写、加后缀、加空格…）。"""
+    text = _normalized(alias)
+    if not text:
+        return False
+    for name in names:
+        other = _normalized(name)
+        if not other:
+            continue
+        floor = _MIN_CJK_OVERLAP if _has_cjk(text) or _has_cjk(other) else _MIN_LATIN_OVERLAP
+        if _overlap(text, other) >= min(floor, len(text), len(other)):
+            return True
+    return False
+
+
+def clean_aliases(
+    aliases: Sequence[str], names: Sequence[str], *, same_product: bool,
+) -> list[str]:
+    """丢掉噪音别名。`names` 是本实体的正式名（id / canonical / zh / en）。
+
+    三条闸，逐条都有真机样本：
+    1. **太短**：拉丁 <3 字母、中文 <3 字的别名一律丢（「TT」「DS」「跳动」）。
+       等于本实体某个正式名的除外——「豆包」本来就是两个字。
+    2. **截断**：是某个正式名的真子串（「字节跳动」→「字节」）。截断不带来新召回，
+       只带来更宽的误命中。代价：canonical 带后缀时（「豆包 AI」→「豆包」）会误伤，
+       但那种情况正式名里通常已有干净的一个，第二个检索词位留给更不一样的叫法更值。
+    3. **`same_product=false` 的对方名字**：卡自己都说了中外名不是同一个产品，
+       那么和本实体所有正式名都认不出关系的别名（飞书卡里的「Lark」、抖音卡里的
+       「TikTok」），基本只能是那个被排除掉的对方产品，绝不放行。
+       `same_product=true` 时不设这一闸——豆包的「Cici」正是长得完全不一样的真别名。
+    """
+    formal = [str(name).strip() for name in names if str(name).strip()]
+    lowered = {name.lower() for name in formal}
+    kept: list[str] = []
+    for raw in aliases:
+        alias = str(raw).strip()
+        if not alias or alias.lower() in {item.lower() for item in kept}:
+            continue
+        if alias.lower() not in lowered:
+            floor = _MIN_CJK_ALIAS if _has_cjk(alias) else _MIN_LATIN_ALIAS
+            if len(alias.replace(" ", "")) < floor:
+                continue
+            if any(alias != name and alias in name for name in formal):
+                continue
+            if not same_product and not _looks_like_same_name(alias, formal):
+                continue
+        kept.append(alias)
+    return kept
+
 
 def entity_card(value: Any, *, entity_id: str) -> Entity | None:
     """把模型返回的 JSON 折成实体卡；折不动或模型自认不是实体时返回 None。
@@ -105,11 +186,6 @@ def entity_card(value: Any, *, entity_id: str) -> Entity | None:
         return None
     raw_names = value.get("names")
     names: dict[str, Any] = raw_names if isinstance(raw_names, Mapping) else {}
-    aliases: list[str] = []
-    for alias in names.get("aliases") or []:
-        text = str(alias).strip()
-        if text and text not in aliases and text not in {entity_id, canonical}:
-            aliases.append(text)
     handles = {
         str(key): str(handle).strip()
         for key, handle in (value.get("official_handles") or {}).items()
@@ -118,6 +194,12 @@ def entity_card(value: Any, *, entity_id: str) -> Entity | None:
     note = str(value.get("note") or "").strip()
     same_product = value.get("same_product")
     same_product = True if not isinstance(same_product, bool) else same_product
+    # 清洗要在 same_product 定下来之后做——第三条闸只对 same_product=false 生效。
+    aliases = clean_aliases(
+        [a for a in names.get("aliases") or [] if str(a).strip() not in {entity_id, canonical}],
+        [entity_id, canonical, names.get("zh"), names.get("en")],
+        same_product=same_product,
+    )
     if not same_product and not note:
         # note 是 same_product=false 的硬要求；模型没写就不敢下这个断言，
         # 退回 true 比整卡作废好——退回只是少一条「不要交叉」的提示。
@@ -214,5 +296,6 @@ async def _progress(on_progress: Any, text: str) -> None:
 
 
 __all__ = [
-    "MAX_ENTITIES", "entity_card", "entity_prompt", "resolve_entities",
+    "MAX_ENTITIES", "clean_aliases", "entity_card", "entity_prompt",
+    "resolve_entities",
 ]
