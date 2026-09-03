@@ -217,6 +217,12 @@ class ResearchEventBuffer:
             )
 
 
+#: 一条人话都译不出时角标显示什么。
+_HINT_FALLBACK = "引擎处理中"
+#: 角标往回看多少条原始事件找最近一句人话。
+_HINT_LOOKBACK = 12
+
+
 def _step_hint(record: Mapping[str, Any]) -> str:
     """§OBS-3 货 5：角标「最近」与进程栏同一口径——一句人话，不出英文 token。
 
@@ -225,7 +231,7 @@ def _step_hint(record: Mapping[str, Any]) -> str:
 
     lines = narrate_record(record)
     if not lines:
-        return "引擎处理中"
+        return _HINT_FALLBACK
     line = lines[-1]
     if line.kind in ("think", "say"):
         return f"{line.stage}：{short(line.text, 16)}"
@@ -315,7 +321,7 @@ class SectionHeartbeatPublisher:
         beat = self._beats.get(key)
         if beat is None:
             beat = self._beats.setdefault(key, _SectionBeat(started_at=now))
-        tail = read_transcript(path, tail=1)
+        tail = read_transcript(path, tail=_HINT_LOOKBACK)
         last_seq = int(tail.get("last_seq") or 0)
         if last_seq <= 0:
             return None
@@ -328,6 +334,13 @@ class SectionHeartbeatPublisher:
             return None
         lines = tail.get("lines") or []
         record = lines[-1] if lines else {}
+        # 真机里最后一条常是限额心跳或只带签名的空思考，一句人话都译不出。
+        # 往回多看几条取最近一句说得出的，角标才不会长期停在兜底文案上。
+        hint = _HINT_FALLBACK
+        for candidate in reversed(lines):
+            hint = _step_hint(candidate)
+            if hint != _HINT_FALLBACK:
+                break
         beat.emitted = True
         beat.last_emit_at = now
         beat.last_seq = last_seq
@@ -339,7 +352,7 @@ class SectionHeartbeatPublisher:
                 "agent": card_agent_id(str(record.get("agent") or "")),
                 "task_agent": str(record.get("agent") or ""),
                 "engine": str(record.get("engine") or ""),
-                "step_hint": _step_hint(record),
+                "step_hint": hint,
                 "elapsed_s": round(max(0.0, now - beat.started_at), 1),
                 "last_seq": last_seq,
             },

@@ -100,3 +100,24 @@ def test_日志栏一字未改_transcript接口仍原样倒出(tmp_path: Path) -
     assert signature.startswith("Esoq") and len(signature) > 1000  # 签名串照旧原样
     assert [line["seq"] for line in lines] == [1, 2, 3, 4, 5]
     assert json.dumps(lines[4]["event"], ensure_ascii=False).count("structured_output") == 1
+
+
+def test_角标往回找最近一句人话(tmp_path: Path) -> None:
+    """§OBS-3 货 5 真机修：最后一条常是限额心跳，兜底文案不该长期占着角标。"""
+
+    from app.api.events import ResearchEventBuffer, SectionHeartbeatPublisher
+
+    runs_root = tmp_path / "runs"
+    goal = runs_root / "r-obs3" / "goals" / "goal-1"
+    writer = TranscriptWriter(_Task(runs_root, goal / "ch-3.md"), engine="Claude")
+    writer.append({"content": [{"id": "t1", "name": "Write",
+                               "input": {"file_path": "/x/sec-1.md"}}]})
+    for _ in range(3):  # 之后连着来三条译不出人话的
+        writer.append({"rate_limit_info": {"status": "allowed"}, "session_id": "s"})
+
+    publisher = SectionHeartbeatPublisher(
+        ResearchEventBuffer(), runs_root, lambda: ["r-obs3"], clock=lambda: 1.0,
+    )
+    (beat,) = asyncio.run(publisher.tick())
+    assert beat["data"]["step_hint"] == "调用 Write（sec-1.md）"
+    assert beat["data"]["last_seq"] == 4  # 回看不影响 seq 口径
