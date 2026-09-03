@@ -156,6 +156,15 @@ export type SectionHeartbeat = {
 }
 
 /** §OBS-2 货 2：transcript 一行 = 一条引擎原始事件。 */
+/** §OBS-3 进程栏一行：翻译在服务端做完，前端只渲染，不解析 JSON。 */
+export type ProgressLine = {
+  ts: number
+  seq: number
+  stage: string
+  text: string
+  kind: string
+}
+
 export type TranscriptLine = {
   ts: number
   seq: number

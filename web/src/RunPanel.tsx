@@ -1,8 +1,14 @@
 import { Button, Empty, Tabs, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ApiEnvelope, ResearchSnapshot, SectionHeartbeat, TranscriptLine } from './types'
+import type {
+  ApiEnvelope, ProgressLine, ResearchSnapshot, SectionHeartbeat, TranscriptLine,
+} from './types'
 
-/** §OBS-2 货 4：工作板底部运行面板——一张卡片一个 tab，内容是引擎原始流。 */
+/** §OBS-2 货 4 + §OBS-3：底部运行面板——一张卡片一个 tab，tab 里并排两栏。
+ *
+ * 左「日志」= 引擎原始流原样倒出（OBS-2 的行为一字未改，只改了栏名）；
+ * 右「进程」= 后端 `/progress` 译好的人话行，前端只渲染不解析。
+ */
 
 const MIN_HEIGHT = 120
 const COLLAPSED_HEIGHT = 32
@@ -39,8 +45,12 @@ export function formatElapsed(seconds: number): string {
 }
 
 /** 一行原始事件压成一行可读文本：时间 + seq + 事件本体。 */
+export function stampOf(ts: number | undefined): string {
+  return new Date((ts ?? 0) * 1000).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
 export function renderLine(line: TranscriptLine): string {
-  const stamp = new Date((line.ts ?? 0) * 1000).toLocaleTimeString('zh-CN', { hour12: false })
+  const stamp = stampOf(line.ts)
   const body = typeof line.event === 'string' ? line.event : JSON.stringify(line.event)
   return `${stamp} #${line.seq} ${body}`
 }
@@ -89,8 +99,11 @@ export function defaultTabKey(
   return (tabs.find((tab) => tab.status === 'running') ?? tabs[0])?.key ?? ''
 }
 
-function useTranscript(researchId: string, tab: PanelTab | undefined, live: boolean) {
-  const [lines, setLines] = useState<TranscriptLine[]>([])
+/** 一个 tab 两条流：`transcript`（日志栏）与 `progress`（进程栏），同参同源。 */
+function useTail<T extends { seq: number }>(
+  researchId: string, tab: PanelTab | undefined, live: boolean, view: 'transcript' | 'progress',
+) {
+  const [lines, setLines] = useState<T[]>([])
   const seqRef = useRef(0)
 
   const pull = useCallback(async (incremental: boolean) => {
@@ -100,14 +113,14 @@ function useTranscript(researchId: string, tab: PanelTab | undefined, live: bool
       : `tail=${TAIL_LINES}`
     const section = `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.key)}`
     const response = await fetch(
-      `/api/researches/${encodeURIComponent(researchId)}/sections/${section}/transcript?${query}`,
+      `/api/researches/${encodeURIComponent(researchId)}/sections/${section}/${view}?${query}`,
     )
     if (!response.ok) return
-    const body = await response.json() as ApiEnvelope<{ lines: TranscriptLine[]; last_seq: number }>
+    const body = await response.json() as ApiEnvelope<{ lines: T[]; last_seq: number }>
     const fresh = body.data?.lines ?? []
     seqRef.current = body.data?.last_seq ?? seqRef.current
     setLines((current) => (incremental ? [...current, ...fresh].slice(-TAIL_LINES) : fresh))
-  }, [researchId, tab])
+  }, [researchId, tab, view])
 
   useEffect(() => {
     seqRef.current = 0
@@ -124,6 +137,20 @@ function useTranscript(researchId: string, tab: PanelTab | undefined, live: bool
   return lines
 }
 
+/** 进程栏：一行「时间 · 阶段 · 一句人话」。文本已由后端译好，这里只排版。 */
+function ProgressColumn({ tabKey, lines }: { tabKey: string; lines: ProgressLine[] }) {
+  return <div className="run-panel-col" data-testid={`run-panel-progress-${tabKey}`}>
+    <div className="run-panel-col-head">进程</div>
+    {lines.length ? <ol className="run-panel-progress">
+      {lines.map((line) => <li key={`${line.seq}-${line.stage}-${line.text.slice(0, 12)}`}>
+        <span className="progress-time">{stampOf(line.ts)}</span>
+        <span className={`progress-stage progress-${line.kind}`}>{line.stage}</span>
+        <span className="progress-text">{line.text}</span>
+      </li>)}
+    </ol> : <div className="run-panel-blank">这一节还没有可读的进展</div>}
+  </div>
+}
+
 export default function RunPanel({ researchId, snapshot }: {
   researchId: string
   snapshot: ResearchSnapshot
@@ -137,7 +164,10 @@ export default function RunPanel({ researchId, snapshot }: {
   const preferred = useMemo(() => defaultTabKey(tabs, snapshot.heartbeats), [tabs, snapshot.heartbeats])
   const current = tabs.find((tab) => tab.key === active) ?? tabs.find((tab) => tab.key === preferred)
   const live = current?.status === 'running' || current?.status === 'retrying'
-  const lines = useTranscript(researchId, collapsed ? undefined : current, live && !collapsed)
+  const target = collapsed ? undefined : current
+  const polling = live && !collapsed
+  const lines = useTail<TranscriptLine>(researchId, target, polling, 'transcript')
+  const progress = useTail<ProgressLine>(researchId, target, polling, 'progress')
 
   useEffect(() => {
     const move = (event: MouseEvent) => {
@@ -171,9 +201,16 @@ export default function RunPanel({ researchId, snapshot }: {
       items={tabs.map((tab) => ({
         key: tab.key,
         label: `${tab.goalIndex} · ${tab.name} · ${tab.engine}`,
-        children: <pre className="run-panel-lines" data-testid={`transcript-${tab.key}`}>
-          {lines.length ? lines.map(renderLine).join('\n') : '这一节还没有引擎原始事件落盘'}
-        </pre>,
+        children: <div className="run-panel-split">
+          {/* 左栏「日志」：OBS-2 的原样倒出，行为一字未改，只是有了栏名 */}
+          <div className="run-panel-col" data-testid={`run-panel-log-${tab.key}`}>
+            <div className="run-panel-col-head">日志</div>
+            <pre className="run-panel-lines" data-testid={`transcript-${tab.key}`}>
+              {lines.length ? lines.map(renderLine).join('\n') : '这一节还没有引擎原始事件落盘'}
+            </pre>
+          </div>
+          <ProgressColumn tabKey={tab.key} lines={progress} />
+        </div>,
       }))} />
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卡片跑起来" />}
   </div>

@@ -187,4 +187,42 @@ body { margin: 0; background: #f5f5f5; }
   white-space: pre-wrap;
   word-break: break-all;
 }
+/* §OBS-3：tab 里并排两栏——左「日志」给机器看，右「进程」给人看 */
+.run-panel-split { display: flex; gap: 1px; height: 100%; background: #f1f5f9; }
+.run-panel-col {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  overflow: hidden;
+}
+.run-panel-col-head {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid #f1f5f9;
+  background: #f8fafc;
+}
+.run-panel-blank { padding: 8px 10px; font-size: 12px; color: #94a3b8; }
+.run-panel-progress {
+  margin: 0;
+  padding: 6px 10px;
+  list-style: none;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.run-panel-progress li { display: flex; gap: 8px; align-items: baseline; }
+.progress-time { color: #94a3b8; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.progress-stage { flex: 0 0 auto; color: #2563eb; font-size: 12px; }
+.progress-stage.progress-error { color: #dc2626; }
+.progress-stage.progress-done { color: #16a34a; }
+.progress-stage.progress-write { color: #7c3aed; }
+.progress-text { color: #1f2937; word-break: break-word; }
+@media (max-width: 900px) {
+  .run-panel-split { flex-direction: column; overflow: auto; }
+}
+
 .agent-heartbeat { margin-top: 4px; font-size: 12px; color: #6b7280; }
