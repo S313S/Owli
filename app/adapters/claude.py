@@ -23,6 +23,7 @@ from app.adapters.events import ItemKind, NormalizedEvent, normalize_claude_even
 from app.adapters.logging import DEFAULT_LOG_ROOT, append_engine_error
 from app.adapters.ratelimit import classify_transport_error, route
 from app.adapters import validation as artifact_validation
+from app.adapters.transcript import TranscriptWriter
 from app.adapters.contracts import (
     EngineRunResult,
     EngineTask,
@@ -756,9 +757,12 @@ class ClaudeAdapter:
         self._client = client
         fallback_thread_id = f"{task.research_id}:{task.goal_id}:{task.agent_id}"
         run_turn_id = f"{fallback_thread_id}:turn-1"
+        transcript = TranscriptWriter(task, engine="Claude")
         try:
             await client.connect(_prompt_stream(compose_prompt(task.body)))
             async for message in client.receive_response():
+                # §OBS-2 货 1：归一化之前把原始消息原样落盘，写失败不中断节。
+                transcript.append(message)
                 output_text.extend(_assistant_text(message, sdk))
                 if isinstance(message, sdk.ResultMessage):
                     native_session_id = getattr(message, "session_id", None)

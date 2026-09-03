@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from app.adapters import validation as artifact_validation
+from app.adapters.transcript import TranscriptWriter
 from app.adapters.capability import (
     CapabilityValidationError,
     CodexArgs,
@@ -508,6 +509,7 @@ class CodexAdapter:
         stream: asyncio.StreamReader,
         events: list[NormalizedEvent],
         on_event: Any,
+        transcript: TranscriptWriter | None = None,
     ) -> None:
         thread_id: str | None = None
         turn_id: str | None = None
@@ -552,6 +554,9 @@ class CodexAdapter:
                 raw: Any = json.loads(text)
             except json.JSONDecodeError:
                 raw = text
+            # §OBS-2 货 1：归一化之前把原始事件原样落盘，写失败不中断节。
+            if transcript is not None:
+                transcript.append(raw)
             if isinstance(raw, dict) and raw.get("type") == "thread.started":
                 thread_id = raw.get("thread_id") or thread_id
             if isinstance(raw, dict) and raw.get("type") == "turn.started":
@@ -602,10 +607,11 @@ class CodexAdapter:
         process: asyncio.subprocess.Process,
         events: list[NormalizedEvent],
         on_event: Any,
+        transcript: TranscriptWriter | None = None,
     ) -> int | None:
         if process.stdout is None:
             raise RuntimeError("Codex 子进程未提供 JSONL 输出流")
-        await self._consume(process.stdout, events, on_event)
+        await self._consume(process.stdout, events, on_event, transcript)
         return await process.wait()
 
     async def _run_with_timeout(
@@ -613,9 +619,10 @@ class CodexAdapter:
         process: asyncio.subprocess.Process,
         events: list[NormalizedEvent],
         on_event: Any,
+        transcript: TranscriptWriter | None = None,
     ) -> int | None:
         consumer = asyncio.create_task(
-            self._consume_and_wait(process, events, on_event)
+            self._consume_and_wait(process, events, on_event, transcript)
         )
         done, _ = await asyncio.wait(
             {consumer}, timeout=self._timeout_seconds
@@ -796,7 +803,7 @@ class CodexAdapter:
             self._processes[token] = process
             self._process = process
             await self._run_with_timeout(
-                process, events, on_event
+                process, events, on_event, TranscriptWriter(task, engine="Codex")
             )
             if token in self._interrupted_runs:
                 result = self._interrupted_result(task, ctx, events)

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.adapters.transcript import TRANSCRIPT_SUFFIX
+
 _EVIDENCE_COLUMNS = (
     "goal_id", "agent_name", "engine", "platform", "source_type",
     "platform_item_id", "permalink", "title", "content_excerpt", "author_name",
@@ -275,6 +277,13 @@ def _drop_artifact(target_dir: Path, relative: Path) -> None:
     (target_dir / relative).unlink(missing_ok=True)
     rejected = relative.with_suffix(f".rejected{relative.suffix}")
     (target_dir / rejected).unlink(missing_ok=True)
+    # §OBS-2 货 1：章级复位连它的 transcript 一起丢，重放新写一份，
+    # 免得沙盒里带着底料那一轮的原始流冒充本轮读数。节级复位不动
+    # （同章其它节的原始流还在这一份里）。
+    parts = relative.parts
+    if len(parts) == 3 and parts[0] == "goals":
+        transcript = relative.parent / f"{relative.stem}{TRANSCRIPT_SUFFIX}"
+        (target_dir / transcript).unlink(missing_ok=True)
 
 
 def _copy_chapters(
