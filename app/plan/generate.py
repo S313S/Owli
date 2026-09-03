@@ -260,10 +260,11 @@ def _entity_rule(entities: list[dict[str, Any]] | None) -> str:
     lines = []
     for entity in entities or []:
         names = entity.get("names") or {}
-        alias = "、".join(
-            str(item) for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
+        alias = "、".join(dict.fromkeys(
+            str(item).strip()
+            for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
             if str(item or "").strip()
-        )
+        ))
         divider = "" if entity.get("same_product", True) else (
             "（与它的中外同名产品不是同一个产品：别混写，交叉验证章对它只并列不跨市场交叉）"
         )

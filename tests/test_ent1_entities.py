@@ -309,3 +309,15 @@ def test_带研究对象节的_JSON_信封过得了_sectioned_document_valid() -
         )
         result = sectioned_document_valid(ctx, [])
     assert result.verdict is Verdict.PASS, result.message
+
+
+def test_中英同名时研究对象节不重复列名() -> None:
+    """真机样本 WorkBuddy 的 zh 与 en 都是 WorkBuddy，渲染出「WorkBuddy、WorkBuddy」。"""
+    from app.report.markdown import render_entity_section
+
+    lines = render_entity_section([{
+        "id": "WorkBuddy", "canonical": "WorkBuddy",
+        "names": {"zh": "WorkBuddy", "en": "WorkBuddy", "aliases": ["workbuddy", "WorkBuddy"]},
+        "same_product": True, "note": "腾讯云的 AI 工作助理。",
+    }])
+    assert "WorkBuddy、workbuddy。" in "\n".join(lines)

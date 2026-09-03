@@ -276,10 +276,11 @@ def render_entity_section(entities: Sequence[Mapping[str, Any]]) -> list[str]:
     lines = ["## 研究对象", ""]
     for entity in entities:
         names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
-        alias = "、".join(
-            str(item) for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
+        alias = "、".join(dict.fromkeys(
+            str(item).strip()
+            for item in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]
             if str(item or "").strip()
-        )
+        ))
         canonical = str(entity.get("canonical") or entity.get("id") or "").strip()
         mark = "" if entity.get("same_product", True) else "（中外同名产品不是同一个，本报告只并列不交叉）"
         note = str(entity.get("note") or "").strip()
