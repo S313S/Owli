@@ -5,7 +5,7 @@
 内容发在哪个号/哪个站」写进了平台列，而 `app/sources/web_search.py` 里适配器
 自己写的是 `platform="web_search"`。
 
-`platform` 是闭集（适配器实际写的七个值）：下游按它分平台统计、判来源权重、
+`platform` 是闭集（适配器实际写的九个值，D-032 追认加 weibo / wechat_mp）：下游按它分平台统计、判来源权重、
 `app/reliability/crossref.py` 按它查域名归属。原样落库破坏闭集；硬抹成
 `web_search` 又把发布方信息丢掉（没有别的列接得住）。D-019 因此只做到「不认识
 的原样返回」，把这个决定留给本包。
@@ -43,12 +43,12 @@ def _artifact(directory: Path, items: list[dict]) -> Path:
 
 
 class ResolvePlatformTest(unittest.TestCase):
-    def test_闭集七值与闭集内的值一个字不动(self) -> None:
+    def test_闭集九值与闭集内的值一个字不动(self) -> None:
         from app.store.evidence_artifacts import PLATFORM_VOCABULARY, resolve_platform
 
         self.assertEqual(PLATFORM_VOCABULARY, frozenset({
             "xhs", "douyin", "web_search", "reddit", "product_hunt",
-            "hacker_news", "x",
+            "hacker_news", "x", "weibo", "wechat_mp",
         }))
         for platform in sorted(PLATFORM_VOCABULARY):
             self.assertEqual(
@@ -394,7 +394,7 @@ class DowngradeEventTest(unittest.TestCase):
             [publisher for publisher, _ in _PUBLISHER_ITEMS],
         )
         self.assertEqual({item["platform"] for item in data["items"]}, {"web_search"})
-        self.assertEqual(len(data["vocabulary"]), 7)
+        self.assertEqual(len(data["vocabulary"]), 9)
         self.assertEqual({row["platform"] for row in rows}, {"web_search"})
 
     def test_没越界就不发事件不制造噪音(self) -> None:
