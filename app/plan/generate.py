@@ -6,6 +6,7 @@ import dataclasses
 import inspect
 import json
 import re
+import time
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
@@ -1320,6 +1321,28 @@ async def _emit_repairs(store: Any, research_id: str, repairs: list[str]) -> Non
         await _emit(store, dataclasses.replace(event, raw={"repair": note}))
 
 
+def _entities_event(
+    research_id: str, entities: list[dict[str, Any]], elapsed: float,
+) -> NormalizedEvent:
+    """§ENT-2 货 4（ENT-1 挂账④）：实体卡这一步的独立耗时读数。
+
+    ENT-1 只留了一句「就绪 N 张」的人话，规划期从 354s 涨到 615s 时无从判断多出来
+    的时间是不是花在这里。`elapsed_s` 与 `count` 进 raw，探针与运行面板都读得到。
+    """
+
+    elapsed_s = round(max(0.0, elapsed), 1)
+    return NormalizedEvent(
+        engine="Owli",
+        thread_id=research_id,
+        turn_id="plan-progress",
+        item_kind=ItemKind.THINKING,
+        text=f"研究对象实体卡就绪：{len(entities)} 张，用时 {elapsed_s}s",
+        is_error=False,
+        raw={"entities_resolved": {"elapsed_s": elapsed_s, "count": len(entities)}},
+        outcome="plan_progress",
+    )
+
+
 def _allocation_event(
     research_id: str, collection_plan: Mapping[str, list[dict[str, str]]],
 ) -> NormalizedEvent:
@@ -1462,6 +1485,7 @@ async def generate_plan(
     # 查不动网、模型不配合，entities 就是空数组，计划照常生成，只是没有别名扩展。
     # `entity_search` 由调用方注入（生产在 runtime 里给 web_search.search）：规划的
     # 单元测试用替身适配器，不该因为多了一步就去打真实网络。
+    entities_started = time.monotonic()
     entities = await resolve_entities(
         normalized_query,
         subjects,
@@ -1470,10 +1494,9 @@ async def generate_plan(
         on_progress=lambda text: _emit(store, _progress_event(research_id, text)),
         search=entity_search,
     )
-    await _emit(
-        store,
-        _progress_event(research_id, f"研究对象实体卡就绪：{len(entities)} 张"),
-    )
+    await _emit(store, _entities_event(
+        research_id, entities, time.monotonic() - entities_started,
+    ))
 
     # §ENT-2 货 2：分配表在这里才定稿——实体的中外叫法决定排哪些源。
     collection_plan = collection_plan_dict(allocate_collections(

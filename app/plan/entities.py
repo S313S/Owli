@@ -32,6 +32,21 @@ SEARCH_RESULTS_PER_ENTITY = 5
 #: 网页搜索的时间窗：实体的中外叫法是长期事实，窗口开大一点更容易命中官网与百科。
 SEARCH_WINDOW = "1095d"
 
+#: 单张卡最多问几轮（§ENT-2 货 4）。第二轮是补丁式的，只让模型改折不动的那一处。
+#: 这不额外放宽预算——`PlanSegmentWorkspace` 按段名数总尝试次数，数满照样抛。
+CARD_ATTEMPTS = 2
+
+
+def _card_defect(value: Any) -> str:
+    """卡折不动的原因；返回空串表示**不该重试**（模型自己说了这不是实体）。"""
+    if not isinstance(value, Mapping):
+        return "顶层不是一个 JSON object"
+    if "canonical" in value and not str(value.get("canonical") or "").strip():
+        return ""
+    if not str(value.get("canonical") or "").strip():
+        return "缺 canonical（这个产品最常用的正式名）"
+    return "字段类型不对，names 必须是 object、same_product 必须是 true/false"
+
 
 def _search_context(items: Any) -> str:
     """把网页搜索命中折成喂给模型的几行线索；没有命中就返回空串。"""
@@ -48,8 +63,15 @@ def _search_context(items: Any) -> str:
     return "\n".join(lines[:SEARCH_RESULTS_PER_ENTITY])
 
 
-def entity_prompt(query: str, name: str, context: str) -> str:
-    """单张实体卡的短流提示词；只输出一个 JSON object，不带任何说明文字。"""
+def entity_prompt(
+    query: str, name: str, context: str,
+    *, defect: str = "", previous: str | None = None,
+) -> str:
+    """单张实体卡的短流提示词；只输出一个 JSON object，不带任何说明文字。
+
+    `defect` / `previous` 是 §ENT-2 货 4 的补丁式重试（沿 §PLAN-1 规则 21 写法）：
+    上一轮的卡折不动时，把原文和折不动的原因一起递回去，只让它改那一处。
+    """
     evidence = (
         f"下面是刚查到的网页线索（标题｜链接｜摘录），只作参考，写不进卡就别硬凑：\n{context}\n"
         if context.strip()
@@ -83,7 +105,21 @@ def entity_prompt(query: str, name: str, context: str) -> str:
         "没有把握就给空对象 {}，宁缺毋滥。\n"
         "5. 全部字段都写不出来（这不是一个真实存在的产品/品牌/公司）时，"
         '只输出 {"canonical": ""}，规划会把它跳过。\n'
+        + _patch_tail(defect, previous)
     )
+
+
+def _patch_tail(defect: str, previous: str | None) -> str:
+    """§ENT-2 货 4：补丁式重试的尾巴——只改报错处，其余逐字保留。"""
+    if not defect:
+        return ""
+    tail = f"\n上一轮这张卡没能成形：{defect}。"
+    if previous:
+        tail += f"\n上一轮原文={previous}\n只修改上面点名的地方，其余字段逐字保留，"
+        tail += "仍输出完整 JSON。"
+    else:
+        tail += "重新输出一个符合上面字段表的完整 JSON object。"
+    return tail
 
 
 _HANDLE_PLATFORMS = frozenset({
@@ -264,18 +300,38 @@ async def resolve_entities(
         if not entity_id:
             continue
         context = await _web_lookup(entity_id, search)
-        try:
-            value = await workspace.generate(
-                f"entity-{index}",
-                entity_prompt(query, entity_id, context),
-                adapter,
-            )
-        except Exception as exc:
-            await _progress(on_progress, f"实体卡 {entity_id} 解析失败，跳过：{exc}")
-            continue
-        card = entity_card(value, entity_id=entity_id)
+        segment = f"entity-{index}"
+        card = None
+        defect = ""
+        for attempt in range(1, CARD_ATTEMPTS + 1):
+            try:
+                value = await workspace.generate(
+                    segment,
+                    entity_prompt(
+                        query, entity_id, context, defect=defect,
+                        previous=workspace.previous_text(segment) if defect else None,
+                    ),
+                    adapter,
+                )
+            except Exception as exc:
+                # 段预算耗尽也走这里：workspace.generate 自己数着次数，
+                # 补丁重试不会把预算翻倍，只是把最后一次问得更准。
+                await _progress(on_progress, f"实体卡 {entity_id} 解析失败，跳过：{exc}")
+                break
+            card = entity_card(value, entity_id=entity_id)
+            if card is not None:
+                break
+            defect = _card_defect(value)
+            if not defect:  # 模型明确说「这不是一个真实存在的产品」——不该再问一遍
+                await _progress(on_progress, f"实体卡 {entity_id} 模型判定不是实体，跳过")
+                break
+            if attempt < CARD_ATTEMPTS:
+                await _progress(
+                    on_progress, f"实体卡 {entity_id} 未成形，按报错处补一轮：{defect}",
+                )
         if card is None:
-            await _progress(on_progress, f"实体卡 {entity_id} 未成形，跳过")
+            if defect:
+                await _progress(on_progress, f"实体卡 {entity_id} 未成形，跳过")
             continue
         cards.append(card.to_dict())
         await _progress(
@@ -296,6 +352,6 @@ async def _progress(on_progress: Any, text: str) -> None:
 
 
 __all__ = [
-    "MAX_ENTITIES", "clean_aliases", "entity_card", "entity_prompt",
-    "resolve_entities",
+    "CARD_ATTEMPTS", "MAX_ENTITIES", "clean_aliases", "entity_card",
+    "entity_prompt", "resolve_entities",
 ]

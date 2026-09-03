@@ -154,3 +154,76 @@ def test_货3_截断与本实体正式名的边界() -> None:
     assert clean_aliases(
         ["Feishu Docs"], ["飞书", "Feishu"], same_product=False,
     ) == ["Feishu Docs"]
+
+
+# —— §ENT-2 货 4（ENT-1 挂账④⑤）：实体卡耗时事件与补丁式重试 ——
+
+
+def test_货4_实体卡耗时事件带_elapsed_s_与_count() -> None:
+    from tests.test_plan_generate import _generate, _valid_skeleton
+
+    with tempfile.TemporaryDirectory() as raw:
+        plan, store, _ = _generate(Path(raw), [_valid_skeleton()])
+    resolved = [
+        event.raw["entities_resolved"]
+        for event in store.events if "entities_resolved" in (event.raw or {})
+    ]
+    assert len(resolved) == 1
+    assert resolved[0]["count"] == len(plan.subjects)
+    assert isinstance(resolved[0]["elapsed_s"], float)
+    assert resolved[0]["elapsed_s"] >= 0.0
+
+
+class _CardEngine:
+    """按序吐出预设的实体卡原文；记下每轮拿到的提示词。"""
+
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = list(payloads)
+        self.prompts: list[str] = []
+
+    async def generate(self, name, prompt, adapter):
+        del name, adapter
+        self.prompts.append(prompt)
+        return self.payloads[min(len(self.prompts) - 1, len(self.payloads) - 1)]
+
+    @staticmethod
+    def previous_text(name: str) -> str:
+        del name
+        return '{"canonical": ""}'
+
+
+def test_货4_卡折不动时按报错处补一轮_原文与原因都递回去() -> None:
+    import asyncio
+
+    from app.plan.entities import resolve_entities
+
+    engine = _CardEngine([
+        {"names": {"zh": "豆包"}},                       # 缺 canonical，折不动
+        {"canonical": "豆包", "names": {"zh": "豆包", "en": "Doubao"}},
+    ])
+    progress: list[str] = []
+    cards = asyncio.run(resolve_entities(
+        "国内大家对豆包的看法", ["豆包"], engine, None,
+        on_progress=progress.append, search=None,
+    ))
+    assert [card["id"] for card in cards] == ["豆包"]
+    assert len(engine.prompts) == 2
+    assert "缺 canonical" in engine.prompts[1]
+    assert "只修改上面点名的地方" in engine.prompts[1]
+    assert "缺 canonical" not in engine.prompts[0]
+    assert any("补一轮" in text for text in progress)
+
+
+def test_货4_模型明确说不是实体时不再补问() -> None:
+    import asyncio
+
+    from app.plan.entities import resolve_entities
+
+    engine = _CardEngine([{"canonical": ""}])
+    progress: list[str] = []
+    cards = asyncio.run(resolve_entities(
+        "国内", ["国内"], engine, None, on_progress=progress.append, search=None,
+    ))
+    assert cards == []
+    assert len(engine.prompts) == 1, "这是合法的否定答案，不该拿补丁重试去磨它"
+    assert any("不是实体" in text for text in progress)
