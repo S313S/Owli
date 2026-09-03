@@ -102,6 +102,7 @@ def open_sandbox(
 
     runs_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source_runs / research_id, runs_root / research_id)
+    _rebase_ledger_paths(database, research_id, runs_root)
     return ReplaySandbox(
         workspace=workspace,
         database=database,
@@ -110,3 +111,40 @@ def open_sandbox(
         source_runs=source_runs / research_id,
         source_fingerprint=before,
     )
+
+
+def _rebase_ledger_paths(database: Path, research_id: str, runs_root: Path) -> int:
+    """把账本里指向底料根的绝对产物路径改写到沙盒根。
+
+    §RD-1 抓到的保真缺口：`chapter_progress.actual_output_path` 落库时是绝对路径
+    （指向底料那台 worktree 的 runs），而计划里 `opening.inputs` 是相对路径，跑时按
+    沙盒根拼绝对路径；两边对不上，`_declared_done_goal_closure` 就永远只剩本 goal，
+    跨 goal 证据在沙盒里全部不可见——已 done 的节被判角标失效重写，重放读数全污染。
+    只改这一列：闭包只读它，别的绝对路径（事件 payload 等）不参与判定。
+    """
+
+    marker = f"/{research_id}/"
+    connection = sqlite3.connect(database)
+    try:
+        rows = connection.execute(
+            "SELECT rowid, actual_output_path FROM chapter_progress"
+            " WHERE research_id = ? AND actual_output_path LIKE '/%'",
+            (research_id,),
+        ).fetchall()
+        changed = 0
+        for rowid, raw in rows:
+            text = str(raw or "")
+            index = text.find(marker)
+            if index < 0:
+                continue
+            rebased = str(runs_root.resolve() / research_id / text[index + len(marker):])
+            if rebased != text:
+                connection.execute(
+                    "UPDATE chapter_progress SET actual_output_path = ? WHERE rowid = ?",
+                    (rebased, rowid),
+                )
+                changed += 1
+        connection.commit()
+    finally:
+        connection.close()
+    return changed

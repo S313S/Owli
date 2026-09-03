@@ -433,3 +433,38 @@ def test_导入中途炸了不留半份研究(tmp_path: Path) -> None:
     assert reports == [SOURCE_ID], f"回滚没干净，库里还剩：{reports}"
     assert chapters == 3, "外键 CASCADE 没把新研究的章账本带走"
     assert [d.name for d in runs.iterdir()] == [SOURCE_ID], "新研究的产物目录没删掉"
+
+
+def test_沙盒把账本里的绝对产物路径改写到沙盒根(tmp_path: Path) -> None:
+    """§RD-1 保真缺口：底料账本 actual_output_path 是绝对路径（指向底料那台 worktree），
+    计划 opening.inputs 却按沙盒根拼相对路径，两边对不上就没有跨 goal 证据可见。"""
+
+    from app.replay.sandbox import open_sandbox
+
+    source_db = tmp_path / "source.db"
+    source_runs = tmp_path / "source-runs"
+    _seed(source_db, source_runs, statuses={"goal-1": "done", "goal-2": "done", "goal-3": "missing"})
+    foreign = f"/somewhere/else/Owli-night/runs/{SOURCE_ID}/goals/goal-1/agent-1.md"
+    connection = sqlite3.connect(source_db)
+    connection.execute(
+        "UPDATE chapter_progress SET actual_output_path = ? WHERE research_id = ? AND goal_id = 'goal-1'",
+        (foreign, SOURCE_ID),
+    )
+    connection.commit()
+    connection.close()
+
+    sandbox = open_sandbox(
+        source_database=source_db, source_runs=source_runs,
+        research_id=SOURCE_ID, workspace=tmp_path / "ws",
+    )
+    rebased = sqlite3.connect(sandbox.database).execute(
+        "SELECT actual_output_path FROM chapter_progress WHERE research_id = ? AND goal_id = 'goal-1'",
+        (SOURCE_ID,),
+    ).fetchone()[0]
+    assert rebased == str(sandbox.runs_root.resolve() / SOURCE_ID / "goals/goal-1/agent-1.md")
+    assert Path(rebased).is_file(), "改写后的路径必须真落在沙盒复制出来的产物上"
+    untouched = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True).execute(
+        "SELECT actual_output_path FROM chapter_progress WHERE research_id = ? AND goal_id = 'goal-1'",
+        (SOURCE_ID,),
+    ).fetchone()[0]
+    assert untouched == foreign, "底料原件一个字不许动"
