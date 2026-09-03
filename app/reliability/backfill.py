@@ -23,6 +23,7 @@ from app.reliability.scoring import (
     SCORE_FIELDS,
     normalize_evidence_metrics,
     claim_support_is_valid,
+    is_comment_row,
     score_evidence_partial,
 )
 from app.reliability.crossref import build_claim_clusters
@@ -98,11 +99,14 @@ def _claim_crossref_item(
     )
     item["stance_by_claim"] = {claim_id: stance_value}
     firsthand = claim.get("firsthand")
-    item["firsthand_by_claim"] = {
-        claim_id: evidence_id in firsthand
-        if isinstance(firsthand, list)
-        else False
-    }
+    if isinstance(firsthand, list):
+        item_firsthand = evidence_id in firsthand
+    else:
+        # §CMT-1 货 4：评论行按「用户直述」起评——写手没逐条登记 firsthand 时，
+        # 一条读者自己写的评论本来就是一手材料，起评点不该和转载稿一样是 False。
+        # 写手显式给了 firsthand 列表就以它为准，这里只兜没登记的那一路。
+        item_firsthand = is_comment_row(item)
+    item["firsthand_by_claim"] = {claim_id: item_firsthand}
     origins = claim.get("origin_overrides")
     if isinstance(origins, Mapping) and origins.get(evidence_id):
         item["explicit_origin_by_claim"] = {

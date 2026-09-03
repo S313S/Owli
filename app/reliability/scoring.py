@@ -238,6 +238,15 @@ def _baseline(platform: str, supplied: Mapping[str, int] | None) -> dict[str, in
     return result
 
 
+def is_comment_row(evidence: Mapping[str, Any]) -> bool:
+    """这一行是不是评论（§CMT-1 货 3 的 kind 列；旧行回落 source_type）。"""
+
+    kind = evidence.get("kind")
+    if kind is not None:
+        return str(kind) == "comment"
+    return str(evidence.get("source_type") or "") == "comment"
+
+
 def _rating_notes(
     scores: Mapping[str, int | None], reasons: Sequence[str], warning: str | None
 ) -> str:
@@ -291,6 +300,12 @@ def score_evidence(
     authority_kind = extra.get("authority_kind")
     authority = AUTHORITY_SCORES.get(authority_kind, prior["score_authority"])
     authority_reason = AUTHORITY_REASONS.get(authority_kind, "沿用平台基线")
+    # §CMT-1 货 4：评论行是读者反应、不是帖子作者的说法，评分理由第一段就要说清
+    # 「这是评论」——报告角标悬停、Excel 证据表和人工复核都只看这一行。
+    # 父帖链接不进这一行（五段式正则每段上限 14 字，塞不下 URL），
+    # 它在 extra.comment_of 与 evidence.parent_permalink 两处都留了。
+    if is_comment_row(evidence):
+        authority_reason = f"评论·{authority_reason}"[:14]
     if (
         authority_kind == "community_high_signal"
         and not evidence.get("author_history_verified")
@@ -369,6 +384,9 @@ def score_evidence_partial(
             raise ValueError(f"{field} 的诚实缺失原因不得为空")
         scores[field] = None
         reasons[SCORE_FIELDS.index(field)] = normalized
+    # 诚实缺失会把权威那段整段换掉，「评论」标记不能跟着丢（§CMT-1 货 4）。
+    if is_comment_row(evidence) and not any("评论" in reason for reason in reasons):
+        reasons[0] = f"评论·{reasons[0]}"[:14]
     notes = _rating_notes(scores, reasons, None)
     problem = rating_notes_problem(notes, scores)
     if problem is not None:

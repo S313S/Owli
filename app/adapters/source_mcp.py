@@ -442,8 +442,15 @@ def _comment_row(
         "raw_metrics": {"likes": comment.likes},
         "extra": {
             "content_kind": "user_opinion",
+            # 评论作者是个昵称，核不了——别沿用父帖那一档平台基线权威分。
+            "authority_kind": "anonymous_or_unverifiable",
+            "interest_relation": "arms_length",
             "comment_of": parent_permalink,
             "parent_author": str(parent.get("author_name") or ""),
+            # 交叉验证按「同一线程最多选 2 簇」裁剪（crossref._thread_key，
+            # backfill._CROSSREF_LIFT_KEYS 会把它从 extra 提上来）：
+            # 一条帖子下的 20 条评论不是 20 个独立信源。
+            "thread_key": parent_permalink,
         },
     }
 

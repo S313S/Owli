@@ -777,7 +777,11 @@ def _evidence_index(
             "evidence_id": row.get("id"),
             "goal_id": row.get("goal_id"),
             "fetched_at": row.get("fetched_at"),
+            # §CMT-1 货 4/5：写手要能分清「帖子作者说的」和「读者说的」。
+            "kind": str(row.get("kind") or "post"),
         }
+        if item["kind"] == "comment" and row.get("parent_permalink"):
+            item["parent_permalink"] = row["parent_permalink"]
         for field in (*_EVIDENCE_SCORE_FIELDS, *_EVIDENCE_RATING_FIELDS):
             if row.get(field) is not None:
                 item[field] = row[field]
@@ -1989,6 +1993,13 @@ async def run_sectioned_task(
                     f"本节上游输入 JSON：\n{json.dumps(inputs, ensure_ascii=False, indent=2)}\n"
                     f"{pool_notice}\n"
                     "content_excerpt_truncated=true 表示该摘要已截到 120 个 Unicode 字符。\n"
+                    # §CMT-1 货 4/5：评论二跳把读者反应也放进了池子。
+                    "证据池里 kind=\"comment\" 的条目是**读者在该帖下的评论**，"
+                    "不是帖子作者的说法，parent_permalink 指向它的父帖。"
+                    "引用这类条目时正文要点明是评论（如『该帖评论区有用户提到…』），"
+                    "不得当成作者本人或平台官方的表述。"
+                    "若某条评论的观点与它父帖正文相反，在 claims 里给这条 evidence "
+                    "写 stance=contradicts——这正是交叉验证要看见的分歧。\n"
                     "本节可引用证据池 JSON（唯一引用源）：\n"
                     f"{json.dumps(prompt_pool, ensure_ascii=False, indent=2)}"
                 )
