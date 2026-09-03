@@ -39,7 +39,7 @@ ln -s /绝对路径/到/私有仓/docs/design .docs-ref
 - **所有输出一律中文**：终端回复、文档、代码注释、commit message。
 - 专有名词（Owli、Agent、API、SSE、token 等）保留英文原文。
 
-## 4. 开发期硬约束（七条，每条都是实测踩出来的，不是建议）
+## 4. 开发期硬约束（八条，每条都是实测踩出来的，不是建议）
 
 违反其中任何一条，代码评审直接打回。
 
@@ -65,6 +65,12 @@ ln -s /绝对路径/到/私有仓/docs/design .docs-ref
    不写进代码、不写进注释、不写进文档、不写进测试固件、不打印到日志。
 7. **可写路径白名单收敛到 `runs/<research_id>/goals/goal-N/**`。** 越界即产物校验失败。
    注意 Claude 侧 `cwd` **不是沙箱**，路径必须显式自校，不能依赖引擎兜底。
+8. **新建 worktree 清单（§RD-1 起，09-03 事故落档）。** 前端构建产物 `web/dist` 不进版本库，
+   新 worktree 建完必须先 `ln -s ../../Owli/web/dist web/dist`，否则页面路由全 404「页面不存在」
+   而 `/api/...` 照常 200——跑了 193 min 的报告没人能打开。起服务脚本起完必须
+   `curl /researches/<任意id>` 断言 **200 + text/html**，红即停服务（需求仓
+   `scripts/acceptance/rd1/rd1_serve.sh`）；把报告链接交人前自己先 curl 页面路由。
+   关账判据从此固定含「可看性」（`scripts/acceptance/rd1/check_readable.py` 全绿）。
 
 ## 5. 目录结构
 
