@@ -67,10 +67,20 @@ def test_骨架层拦住超容量subjects_提示词写明上限() -> None:
             {"title": "三", "objective": "写", "depends_on": ["goal-1"]},
         ],
     }
-    with pytest.raises(ValueError, match="超出 fast 档采集容量 6"):
+    # §ENT-2（用户 09-03 拍板乙）：上限从「采集位总数 6」改为「6 留一位 = 5」，
+    # 留下的那一位给同一产品的外文名（跨语域补位），与实体卡上限 5 对齐。
+    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 5"):
         _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
-    assert "subjects 最多 6 个" in _skeleton_prompt("茶叶", [], scale="fast")
+    assert "subjects 最多 5 个" in _skeleton_prompt("茶叶", [], scale="fast")
+    assert "留一位给同一产品的外文名" in _skeleton_prompt("茶叶", [], scale="fast")
     assert "subjects 最多" not in _skeleton_prompt("茶叶", [], scale="standard")
+
+    # 恰好 5 个照过；第 6 个才拦
+    skeleton["subjects"] = [f"品牌{i}" for i in range(5)]
+    _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
+    skeleton["subjects"] = [f"品牌{i}" for i in range(6)]
+    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 5"):
+        _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
 
 
 def test_规则25锚到被分配的goal_规则31点名未落实的对_且都能路由() -> None:

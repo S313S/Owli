@@ -23,8 +23,8 @@ from app.config import (
     load_resilience_config,
 )
 from app.plan.allocation import (
-    allocate_collections, collection_capacity, collection_plan_dict,
-    per_goal_capacity,
+    allocate_collections, collection_plan_dict, per_goal_capacity,
+    subjects_budget,
 )
 from app.plan.chapters import generate_chapter_specs
 from app.plan.entities import resolve_entities
@@ -198,12 +198,13 @@ def _scale_profile(
 def _subjects_cap_rule(profile: ResearchScaleProfile) -> str:
     """§PLAN-1：有章数上限的档位把 subjects 上限讲在骨架这一步。"""
 
-    capacity = collection_capacity(profile.max_goals, profile)
-    if capacity is None:
+    budget = subjects_budget(profile.max_goals, profile)
+    if budget is None:
         return ""
     return (
-        f"subjects 最多 {capacity} 个（{profile.max_goals} 个 goal × 每 goal "
-        f"{per_goal_capacity(profile)} 个采集位），超出会让骨架作废；"
+        f"subjects 最多 {budget} 个（{profile.max_goals} 个 goal × 每 goal "
+        f"{per_goal_capacity(profile)} 个采集位，留一位给同一产品的外文名），"
+        "超出会让骨架作废；"
     )
 
 
@@ -414,12 +415,12 @@ def _skeleton_scaffolds(
         raise ValueError(
             f"goal 数必须在 3–{profile.max_goals}，实际为 {len(goals)}"
         )
-    capacity = collection_capacity(len(goals), profile)
-    if capacity is not None and len(subjects) > capacity:
+    budget = subjects_budget(len(goals), profile)
+    if budget is not None and len(subjects) > budget:
         raise ValueError(
-            f"subjects 有 {len(subjects)} 个，超出 {scale} 档采集容量 {capacity}"
-            f"（{len(goals)} 个 goal × 每 goal {per_goal_capacity(profile)} 个采集位）；"
-            "请合并或删减研究实体"
+            f"subjects 有 {len(subjects)} 个，超出 {scale} 档研究实体上限 {budget}"
+            f"（{len(goals)} 个 goal × 每 goal {per_goal_capacity(profile)} 个采集位，"
+            "留一位给同一产品的外文名）；请合并或删减研究实体"
         )
     result: list[dict[str, Any]] = []
     for index, raw in enumerate(goals, start=1):

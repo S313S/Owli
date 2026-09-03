@@ -63,6 +63,26 @@ def per_goal_capacity(profile: ResearchScaleProfile) -> int | None:
     return max(profile.max_chapters_per_goal - RESERVED_NON_COLLECTION_CHAPTERS, 0)
 
 
+def subjects_budget(goal_count: int, profile: ResearchScaleProfile) -> int | None:
+    """骨架能挑几个研究实体：采集位总数**留一位**给跨语域补位（§ENT-2，用户 09-03 拍板乙）。
+
+    为什么留：`collection_capacity` 是采集位总数，骨架此前被允许挑满。挑满之后
+    「中外都有叫法的实体再补一张对面语域的卡」（`allocate_collections` 第二轮）
+    一个空位都不剩，快速档铺满型题面（一个主角 + 五个竞品）永远跨不了语域，
+    而那正是用户要的效果。
+
+    为什么是留一位而不是按实体数留：跨语域补位是尽力而为，留一位就够让**主角**
+    （subjects 原序第一个）拿到对面那张卡；留更多会成比例地削竞品数。而且被让掉的
+    那个名额本来就领不到实体卡——实体卡上限是 5 张（`entities.MAX_ENTITIES`），
+    快速档第 6 个竞品既没有中外叫法也不会被跨语域路由。**两个上限就此对齐。**
+
+    章数无上限的档位（standard）不受影响，返回 None。
+    """
+
+    capacity = collection_capacity(goal_count, profile)
+    return None if capacity is None else max(capacity - 1, 1)
+
+
 def ordered_sources(
     market_profile: str,
     entities: Sequence[Mapping[str, Any]] | None = None,
