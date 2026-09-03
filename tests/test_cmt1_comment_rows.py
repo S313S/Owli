@@ -169,3 +169,54 @@ def test_迁移幂等_重复初始化不重跑_ALTER(tmp_path: Path) -> None:
     initialize_database_if_empty(database, SCHEMA_PATH)
     with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+
+
+def test_父帖签名换了也不再产生孤儿评论(tmp_path: Path) -> None:
+    """裁决丙：父帖链接带一次性签名，下一轮换新签名后帖子行 permalink 被覆盖，
+    早先写的评论 parent_permalink 就悬空。评论另存一个去签名键，按它仍追得回。"""
+
+    from app.adapters.source_mcp import _comment_row
+    from app.reliability.crossref import normalize_origin_url
+    from app.sources.comments import Comment
+
+    store = Store(_database(tmp_path))
+    _report(store)
+    note = "https://www.xiaohongshu.com/explore/note-1"
+
+    def build(token: str, comment_id: str) -> dict[str, Any]:
+        parent = f"{note}?xsec_token={token}&xsec_source=pc_feed"
+        row = _comment_row(
+            Comment(
+                parent_permalink=parent, permalink="", author="读者甲",
+                text="用下来转录准确率一般", likes=1, published_at=None,
+                platform="xhs", comment_id=comment_id,
+            ),
+            parent={"permalink": parent, "title": "笔记一", "author_name": "博主"},
+            report_id="r-1", goal_id="goal-1", agent_id="data-collection",
+            fetched_at="2026-09-03T00:00:00+00:00",
+        )
+        assert row is not None
+        return row
+
+    first = build("AAA", "c1")
+    store.upsert_evidence_batch([
+        _row(id="ev-p1", platform_item_id="note-1",
+             permalink=f"{note}?xsec_token=AAA"),
+        first,
+    ])
+    # 下一轮：同一篇笔记签名换了，帖子行的 permalink 被覆盖
+    store.upsert_evidence_batch([
+        _row(id="ev-p1", platform_item_id="note-1", permalink=f"{note}?xsec_token=BBB"),
+        build("BBB", "c2"),
+    ])
+
+    rows = store.list_evidence("r-1")
+    posts = {normalize_origin_url(r["permalink"]) for r in rows if r["kind"] == "post"}
+    comments = [r for r in rows if r["kind"] == "comment"]
+    assert len(comments) == 2
+    # 逐字比对会出孤儿（这正是被判红的老口径）
+    literal = {r["permalink"] for r in rows if r["kind"] == "post"}
+    assert any(c["parent_permalink"] not in literal for c in comments)
+    # 按去签名键比对，一条孤儿都没有
+    for comment in comments:
+        assert comment["extra"]["parent_origin_key"] in posts

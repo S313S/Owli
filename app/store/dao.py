@@ -745,15 +745,24 @@ class Store:
             return None
         if not payload["parent_permalink"]:
             return None
+        extra = payload["extra"] if isinstance(payload["extra"], dict) else {}
+        # 父帖链接可能带一次性签名，下一轮就变；采集侧另存了一个去签名键
+        # （extra.parent_origin_key），认行时优先按它比，缺了才回落逐字链接。
+        origin_key = str(extra.get("parent_origin_key") or "")
         return connection.execute(
             """
             SELECT id FROM evidence
-            WHERE report_id = ? AND kind = 'comment' AND parent_permalink = ?
+            WHERE report_id = ? AND kind = 'comment'
+              AND (
+                parent_permalink = ?
+                OR (? <> '' AND json_extract(extra, '$.parent_origin_key') = ?)
+              )
               AND ifnull(author_name, '') = ?
               AND substr(ifnull(content_excerpt, ''), 1, 64) = ?
             """,
             (
                 payload["report_id"], payload["parent_permalink"],
+                origin_key, origin_key,
                 payload["author_name"] or "",
                 (payload["content_excerpt"] or "")[:64],
             ),

@@ -381,6 +381,17 @@ def _engagement(row: Mapping[str, Any]) -> tuple[float, int]:
     return (float(score) if isinstance(score, (int, float)) else 0.0, total)
 
 
+def _origin_key(permalink: str) -> str:
+    """父帖链接的去签名形式；剥不动就原样返回，绝不因此丢一条评论。"""
+
+    from app.reliability.crossref import normalize_origin_url
+
+    try:
+        return normalize_origin_url(str(permalink))
+    except Exception:  # noqa: BLE001 — 归一化失败不该掐掉采集
+        return str(permalink)
+
+
 def _comment_permalink(comment: Any, parent_permalink: str) -> str:
     """评论有自己的链接就用自己的；没有就在父帖链接上挂一个评论锚点参数。
 
@@ -446,6 +457,13 @@ def _comment_row(
             "authority_kind": "anonymous_or_unverifiable",
             "interest_relation": "arms_length",
             "comment_of": parent_permalink,
+            # §CMT-1 裁决丙（调度 d1，2026-09-03）：父帖链接**不是稳定身份**——
+            # 小红书的 permalink 带一次性 xsec_token，同一篇笔记下一轮被搜出来
+            # 签名就换了，帖子行 permalink 被 upsert 覆盖后，早先写的评论
+            # parent_permalink 就成了悬空值（两轮重放实测 10 条孤儿）。
+            # 这里另存一个去签名键，口径与 crossref.normalize_origin_url 对齐；
+            # parent_permalink 保留逐字链接，报告页那个「父帖」还得能点。
+            "parent_origin_key": _origin_key(parent_permalink),
             "parent_author": str(parent.get("author_name") or ""),
             # 交叉验证按「同一线程最多选 2 簇」裁剪（crossref._thread_key，
             # backfill._CROSSREF_LIFT_KEYS 会把它从 extra 提上来）：
