@@ -34,7 +34,6 @@ STAGE_WRITE = "写入产物"
 STAGE_DONE = "本节完成"
 STAGE_FAIL = "失败"
 STAGE_RETRY = "重试"
-STAGE_NOTE = "提示"
 
 
 @dataclass(frozen=True)
@@ -104,6 +103,61 @@ def _arg_summary(payload: Any) -> str:
     return _clip(" · ".join(parts), MAX_ARG)
 
 
+_PART_FILE = re.compile(r"^sec-\d+\.part\.(\d+)\.md$")
+_SECTION_FILE = re.compile(r"^sec-\d+\.md$")
+_CHAPTER_FILE = re.compile(r"^ch-\d+\.md$")
+
+
+def _write_task(path: Any) -> str:
+    """写文件 → 人话任务描述。产物名只用来判断「在写什么」，不出现在行里。"""
+
+    name = Path(str(path or "")).name
+    part = _PART_FILE.match(name)
+    if part:
+        return f"写第 {part.group(1)} 片初稿"
+    if _SECTION_FILE.match(name):
+        return "写这一节初稿"
+    if _CHAPTER_FILE.match(name):
+        return "写这一章正文"
+    if ".rows." in name or name.endswith(".rows.json"):
+        return "整理采集结果"
+    return "落盘结构化产物" if name.endswith(".json") else "写文档"
+
+
+#: 工具名 → 任务描述。认不出的一律不出行（宁可少一行，也不让工具名露到进程栏）。
+_TOOL_TASKS = {
+    "structuredoutput": "按规范整理本节结论",
+    "edit": "修改已写的内容",
+    "notebookedit": "修改已写的内容",
+    "glob": "查找文件",
+    "grep": "检索内容",
+    "bash": "执行命令",
+}
+
+
+def _tool_task(name: str, payload: Any) -> str | None:
+    """工具调用 → 一句任务描述；认不出返回 None。"""
+
+    lowered = str(name or "").lower().rsplit("__", 1)[-1]
+    if not lowered:
+        return None
+    if lowered == "write":
+        target = payload.get("file_path") if isinstance(payload, Mapping) else None
+        return _write_task(target)
+    if lowered == "read":
+        target = str(payload.get("file_path") or "") if isinstance(payload, Mapping) else ""
+        return "读取任务卡" if ("task" in target or "采集卡" in target) else "读取上游产物"
+    if lowered in _TOOL_TASKS:
+        return _TOOL_TASKS[lowered]
+    if any(token in lowered for token in ("comment", "评论")):
+        return "拉取评论"
+    if any(token in lowered for token in ("collect", "crawl", "fetch", "采集")):
+        return "采集数据"
+    if any(token in lowered for token in ("search", "query", "检索")):
+        return "检索资料"
+    return None
+
+
 def _count_rows(payload: Any) -> int | None:
     """从工具返回体里数条数：JSON 数组或常见 rows/items/data 字段，数不出就 None。"""
 
@@ -148,8 +202,8 @@ def _plain_say(text: str) -> str:
     flat = _unfence(str(text or "").strip())
     if not flat:
         return ""
-    if flat.startswith("Stop hook feedback:"):  # 系统钩子回灌，不是模型在说话
-        return _clip(f"系统提醒：{flat[len('Stop hook feedback:'):].strip()}")
+    if flat.startswith("Stop hook feedback:"):
+        return ""  # 系统钩子回灌，不是模型在说话，也不是失败——不出行
     if not _looks_like_json(flat):
         return _clip(flat)
     try:
@@ -174,17 +228,22 @@ def _claude_block(block: Mapping[str, Any], ts: float, seq: int) -> ProgressLine
         body = _plain_say(block["text"])
         return ProgressLine(ts, seq, STAGE_SAY, body, "say") if body else None
     name = block.get("name")
-    if isinstance(name, str) and name:  # 工具调用：只出名字 + 参数摘要
-        summary = _arg_summary(block.get("input"))
-        text = f"调用 {name}" + (f"（{summary}）" if summary else "")
-        return ProgressLine(ts, seq, STAGE_TOOL, text, "tool", tool=name, count=1)
+    if isinstance(name, str) and name:  # 工具调用：只出任务描述（货 11）
+        task = _tool_task(name, block.get("input"))
+        return ProgressLine(ts, seq, STAGE_TOOL, task, "tool", tool=task, count=1) if task else None
     if block.get("tool_use_id"):
         return _claude_tool_result(block, ts, seq)
     return None
 
 
-def _claude_tool_result(block: Mapping[str, Any], ts: float, seq: int) -> ProgressLine:
-    """工具返回：报错出原文，能数条数就数，数不出只说一句「详见日志栏」。"""
+def _claude_tool_result(
+    block: Mapping[str, Any], ts: float, seq: int
+) -> ProgressLine | None:
+    """工具返回：**只有失败才出行**（原文照给）；成功只在数得出条数时报条数。
+
+    货 11 用户口径：成功路径不出英文 token——「Structured output provided
+    successfully」这种套话对人零信息，日志栏里有。
+    """
 
     payload = block.get("content")
     if block.get("is_error"):
@@ -192,12 +251,7 @@ def _claude_tool_result(block: Mapping[str, Any], ts: float, seq: int) -> Progre
     rows = _count_rows(payload)
     if rows is not None:
         return ProgressLine(ts, seq, STAGE_RESULT, f"取到 {rows} 条", "result", count=rows)
-    text = str(payload or "")
-    if not text.strip():
-        return ProgressLine(ts, seq, STAGE_RESULT, "工具返回空", "result")
-    if _looks_like_json(text):
-        return ProgressLine(ts, seq, STAGE_RESULT, "工具返回结果（详见日志栏）", "result")
-    return ProgressLine(ts, seq, STAGE_RESULT, _clip(text), "result")
+    return None
 
 
 def _claude_write(result: Mapping[str, Any], ts: float, seq: int) -> ProgressLine | None:
@@ -208,8 +262,9 @@ def _claude_write(result: Mapping[str, Any], ts: float, seq: int) -> ProgressLin
         return None
     body = result.get("content")
     words = len(" ".join(str(body).split())) if isinstance(body, str) else 0
+    task = _write_task(path).replace("写", "", 1)
     tail = f"，约 {words} 字" if words else ""
-    return ProgressLine(ts, seq, STAGE_WRITE, f"写好 {_name_of(path)}{tail}", "write")
+    return ProgressLine(ts, seq, STAGE_WRITE, f"{task}已落盘{tail}", "write")
 
 
 def _narrate_claude(event: Mapping[str, Any], ts: float, seq: int) -> list[ProgressLine]:
@@ -223,8 +278,7 @@ def _narrate_claude(event: Mapping[str, Any], ts: float, seq: int) -> list[Progr
         detail = f"第 {attempt}/{total} 次" if attempt and total else ""
         return [ProgressLine(ts, seq, STAGE_RETRY, f"接口重试{detail}", "retry")]
     if event.get("subtype") == "notification":
-        note = _clip(str(system.get("text") or ""))
-        return [ProgressLine(ts, seq, STAGE_NOTE, note, "say")] if note else []
+        return []  # SDK 内部提示（stop-hook 之类），不是任务进展也不是真失败
     subtype = event.get("subtype")
     if subtype in ("success", "error", "error_max_turns", "error_during_execution"):
         return _claude_finish(event, ts, seq)
@@ -276,25 +330,23 @@ def _codex_item(item: Mapping[str, Any], ts: float, seq: int) -> ProgressLine | 
         changes = item.get("changes") or item.get("path") or item.get("files")
         first = changes[0] if isinstance(changes, list) and changes else changes
         target = first.get("path") if isinstance(first, Mapping) else first
-        return ProgressLine(ts, seq, STAGE_WRITE, f"写好 {_name_of(target or '产物')}", "write")
+        task = _write_task(target).replace("写", "", 1)
+        return ProgressLine(ts, seq, STAGE_WRITE, f"{task}已落盘", "write")
     if "web_search" in kind:
         query = _clip(str(item.get("query") or ""), MAX_ARG)
-        text = "调用 网页搜索" + (f"（{query}）" if query else "")
-        return ProgressLine(ts, seq, STAGE_TOOL, text, "tool", tool="网页搜索", count=1)
+        text = "检索资料" + (f"（{query}）" if query else "")
+        return ProgressLine(ts, seq, STAGE_TOOL, text, "tool", tool="检索资料", count=1)
     if "command_execution" in kind or "exec" in kind or "shell" in kind:
         name = _clip(str(item.get("command") or ""), MAX_ARG)
-        label = f"执行命令（{name}）" if name else "执行命令"
-        line = ProgressLine(ts, seq, STAGE_TOOL, label, "tool",
-                            tool="命令", count=1)
-        return line if not item.get("exit_code") else ProgressLine(
-            ts, seq, STAGE_FAIL, _clip(f"命令失败（{name}）：{item.get('aggregated_output') or ''}"),
-            "error")
+        if item.get("exit_code"):  # 只有失败才把命令与报错原文放出来
+            detail = _clip(f"命令失败（{name}）：{item.get('aggregated_output') or ''}")
+            return ProgressLine(ts, seq, STAGE_FAIL, detail, "error")
+        return ProgressLine(ts, seq, STAGE_TOOL, "执行命令", "tool", tool="执行命令", count=1)
 
     if "mcp_tool_call" in kind or "tool" in kind:
-        name = str(item.get("tool") or item.get("name") or "工具")
-        summary = _arg_summary(item.get("arguments") or item.get("input"))
-        text = f"调用 {name}" + (f"（{summary}）" if summary else "")
-        return ProgressLine(ts, seq, STAGE_TOOL, text, "tool", tool=name, count=1)
+        name = str(item.get("tool") or item.get("name") or "")
+        task = _tool_task(name, item.get("arguments") or item.get("input"))
+        return ProgressLine(ts, seq, STAGE_TOOL, task, "tool", tool=task, count=1) if task else None
     if "error" in kind:
         return ProgressLine(ts, seq, STAGE_FAIL, _clip(f"出错：{text}"), "error")
     return None
@@ -371,7 +423,7 @@ def _fold_tools(run: list[ProgressLine]) -> list[ProgressLine]:
                 if line.kind != "result" or not line.text.startswith("工具返回")]
         return kept or [head]
     tail = f"，取到 {total} 条" if total is not None else ""
-    text = head.text if len(calls) == 1 else f"调用 {head.tool} {len(calls)} 次"
+    text = head.text if len(calls) == 1 else f"{head.text} {len(calls)} 次"
     return [ProgressLine(head.ts, head.seq, STAGE_TOOL, _clip(text + tail), "tool",
                          tool=head.tool, count=total)]
 
@@ -386,7 +438,7 @@ def _dedupe(lines: list[ProgressLine]) -> list[ProgressLine]:
     sayish = {"say", "error", "done"}
     out: list[ProgressLine] = []
     for line in lines:
-        head = line.text[:40]
+        head = line.text[:24]
         while (out and head and line.kind in sayish and out[-1].kind in sayish
                and (head in out[-1].text or out[-1].text[:40] in line.text)):
             out.pop()

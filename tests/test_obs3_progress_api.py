@@ -67,7 +67,7 @@ def test_progress_接口出人话行且零签名零JSON(tmp_path: Path) -> None:
     assert stages == ["思考", "调用工具", "写入产物", "本节完成"]  # init 那条不出行
     texts = " ".join(line["text"] for line in lines)
     assert "Esoq" not in texts and "signature" not in texts and '"type"' not in texts
-    assert "写好 sec-1.md，约 100 字" in texts and "写完 sec-1" in texts
+    assert "这一节初稿已落盘，约 100 字" in texts and "写完 sec-1" in texts
     for line in lines:
         assert set(line) == {"ts", "seq", "stage", "text", "kind"}
 
@@ -119,5 +119,5 @@ def test_角标往回找最近一句人话(tmp_path: Path) -> None:
         ResearchEventBuffer(), runs_root, lambda: ["r-obs3"], clock=lambda: 1.0,
     )
     (beat,) = asyncio.run(publisher.tick())
-    assert beat["data"]["step_hint"] == "调用 Write（sec-1.md）"
+    assert beat["data"]["step_hint"] == "写这一节初稿"  # 货 11：角标同口径，不出工具名
     assert beat["data"]["last_seq"] == 4  # 回看不影响 seq 口径
