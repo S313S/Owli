@@ -493,11 +493,17 @@ def _second_hop(
             )
         except Exception as error:  # 单帖失败只记账
             failed += 1
+            # 源自带的 closed_reason 才说得清是限流、凭证还是上游 5xx；
+            # 只记异常类名等于把三种死法抹成一个词（§SRC-1 的老账）。
             emit({
                 "type": "source_comment_partial",
                 "data": {
                     "parent_permalink": permalink,
-                    "reason": type(error).__name__,
+                    "reason": str(
+                        getattr(error, "closed_reason", "") or type(error).__name__
+                    ),
+                    "detail": str(getattr(error, "detail", "") or "")[:200],
+                    "http_status": getattr(error, "http_status", None),
                     "task_continues": True,
                 },
             })
