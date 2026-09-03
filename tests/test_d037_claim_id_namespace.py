@@ -147,3 +147,88 @@ def test_runtime_交叉章与报告章同位id收尾判pass(tmp_path: Path, monk
     assert validations[-1]["verdict"] == "pass"
     claims = store.get_report("r-ledger")["extra"]["claims"]
     assert [claim["id"] for claim in claims] == ["c-01010101", "c-02010101"]
+
+
+def test_闭集外的键被机械剥离且逐条记账(tmp_path: Path) -> None:
+    """用户 09-03 拍板「甲」：只剥闭集外的键，剥了什么可查。"""
+
+    store = make_store(tmp_path, "r-d037-strip")
+    add_evidence(
+        store, "r-d037-strip", "ev-a", platform="web_search",
+        permalink=URL_A, author="甲",
+    )
+    claim = raw_claim("c-010101", [dict(ref(URL_A), fetched_at="2026-09-03T00:00:00Z")])
+    claim["stance"] = "supports"
+    stripped: list[dict] = []
+
+    collected = claims_from_documents([_document([claim])], stripped=stripped)
+
+    assert set(collected[0]) == {"id", "text", "evidence"}
+    assert set(collected[0]["evidence"][0]) == {"permalink"}
+    assert stripped == [{
+        "location": "claims[0]", "origin": "文档 1 的第 1 条",
+        "claim_id": "c-01010101",
+        "removed": {"claim": ["stance"], "evidence": ["fetched_at"]},
+    }]
+    claims = register_claims(store, "r-d037-strip", collected, source="chapter")
+    assert [c["id"] for c in claims] == ["c-01010101"]
+
+
+def test_闭集本身不放宽_登记入口仍拒未知键(tmp_path: Path) -> None:
+    """guard：剥离只发生在装配层；直接送进登记的未知键照旧整批拒绝。"""
+
+    from app.reliability.claims import prepare_claim_registration
+
+    claim = raw_claim("c-0101", [ref(URL_A)])
+    claim["stance"] = "supports"
+    with pytest.raises(ClaimsRegistrationError) as excinfo:
+        prepare_claim_registration([], [claim], source="chapter")
+    assert "claims[0] 含未知键 ['stance']" in excinfo.value.offenders
+
+
+def test_片提示词讲死断言键闭集() -> None:
+    """乙：双保险落在提示词里，别让写手一开始就写多。"""
+
+    from app.orchestrator.sectioning import _shard_notice
+
+    notice = _shard_notice(1, 4, 5, 1, "")
+    assert "`id`／`text`／`evidence`／`conflict_note`" in notice
+    assert "`permalink`／`stance`／`firsthand`／`origin_url`" in notice
+
+
+def test_runtime_剥离闭集外键后收尾判pass且发记账事件(tmp_path: Path, monkeypatch) -> None:
+    """判据落在事件上：剥了什么、剥了几处，收尾事件里查得到。"""
+
+    from tests.test_m3h_finalize import _finalize, _plan
+
+    plan = _plan(report_format="json", path="goals/goal-3/report.json")
+    plan.goals[2].agents[0].output["shape"] = "object"
+    claim = raw_claim("c-010101", [dict(ref(URL_A), fetched_at="2026-09-03T00:00:00Z")])
+    claim["stance"] = "supports"
+    artifact = tmp_path / "runs/r-ledger/goals/goal-3/report.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(json.dumps({
+        "title": "报告", "chapter_id": "ch-3",
+        "sections": [{
+            "section_id": "ch-3/sec-1", "goal_id": "goal-1", "title": "节",
+            "markdown": "## 结论\n\n- 断言。\n\n## 信息源\n\n- 无。",
+        }],
+        "缺失清单": [], "claims": [claim],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def prepare(store):
+        add_evidence(
+            store, "r-ledger", "ev-a", platform="web_search",
+            permalink=URL_A, author="甲",
+        )
+
+    _, store, events = _finalize(tmp_path, plan, monkeypatch, prepare=prepare)
+
+    validations = [e["data"] for e in events if e.get("type") == "report_validation"]
+    assert validations[-1]["verdict"] == "pass"
+    stripped = [e["data"] for e in events if e.get("type") == "claims_keys_stripped"]
+    assert len(stripped) == 1 and stripped[0]["count"] == 1
+    assert stripped[0]["entries"][0]["removed"] == {
+        "claim": ["stance"], "evidence": ["fetched_at"],
+    }
+    assert store.get_report("r-ledger")["extra"]["claims"][0]["id"] == "c-01010101"

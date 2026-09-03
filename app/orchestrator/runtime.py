@@ -2893,15 +2893,27 @@ class RuntimeCoordinator:
             validation_report.verdict is validation.Verdict.PASS
             and citation_error is None
         ):
+            claims_stripped: list[dict[str, Any]] = []
             try:
                 documents = self._claim_documents(plan)
                 if any("claims" in document for document in documents):
                     register_claims(
                         self.store,
                         research_id,
-                        claims_from_documents(documents),
+                        claims_from_documents(documents, stripped=claims_stripped),
                         source="chapter",
                     )
+                # §FIX-2 货 1：闭集外的键是机械剥掉的，剥了什么必须留痕可查
+                # （用户 09-03 拍板「甲」：只剥闭集外、剥了记账、闭集不放宽）。
+                if claims_stripped:
+                    await self.events.publish(research_id, {
+                        "type": "claims_keys_stripped",
+                        "data": {
+                            "research_id": research_id,
+                            "count": len(claims_stripped),
+                            "entries": claims_stripped[:50],
+                        },
+                    })
             except ClaimsRegistrationError as exc:
                 claims_error = str(exc)
                 claims_offenders = exc.offenders

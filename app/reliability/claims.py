@@ -43,7 +43,11 @@ def _error(message: str, offenders: Iterable[str]) -> ClaimsRegistrationError:
     return ClaimsRegistrationError(message, list(offenders))
 
 
-def claims_from_documents(documents: Iterable[Mapping[str, Any]]) -> list[Any]:
+def claims_from_documents(
+    documents: Iterable[Mapping[str, Any]],
+    *,
+    stripped: list[dict[str, Any]] | None = None,
+) -> list[Any]:
     """按章产物顺序收集可选顶层 claims；不从正文推断。
 
     §FIX-2 货 1（D-037）：id 由分片写手按「节序+片序+条序」生成，goal 与章两个
@@ -61,8 +65,56 @@ def claims_from_documents(documents: Iterable[Mapping[str, Any]]) -> list[Any]:
             continue
         if not isinstance(claims, list):
             raise _error("章产物 claims 必须是数组", ["claims"])
-        result.extend(_namespaced_claim(claim, index) for claim in claims)
+        for position, claim in enumerate(claims):
+            claim = _namespaced_claim(claim, index)
+            result.append(_strip_unknown_keys(
+                claim, location=f"claims[{len(result)}]",
+                origin=f"文档 {index} 的第 {position + 1} 条", account=stripped,
+            ))
     return result
+
+
+def _strip_unknown_keys(
+    claim: Any, *, location: str, origin: str, account: list[dict[str, Any]] | None,
+) -> Any:
+    """机械剥离闭集外的键（用户 09-03 拍板「甲」），剥了什么逐条记账。
+
+    §FIX-2 货 1：写手会在 claim 顶层多写 `stance`、在 evidence 条目里多写 `fetched_at`
+    这类闭集外字段，登记是「一处不合规整批退回」，于是 250 条断言全被拒、库里恒空。
+    这里只剥**闭集外**的键（CLAIM_FIELDS / CLAIM_EVIDENCE_FIELDS 本身一个字不放宽），
+    剥掉的键与出处进 account，由调用方落进事件；剥不动的（缺 id、类型不对）原样透传，
+    照旧由 prepare_claim_registration 报错。
+    """
+
+    if not isinstance(claim, Mapping):
+        return claim
+    removed: dict[str, list[str]] = {}
+    kept = {k: v for k, v in claim.items() if k in CLAIM_FIELDS}
+    top_unknown = sorted(set(claim) - CLAIM_FIELDS)
+    if top_unknown:
+        removed["claim"] = top_unknown
+    evidence = kept.get("evidence")
+    if isinstance(evidence, list):
+        cleaned: list[Any] = []
+        for item in evidence:
+            if not isinstance(item, Mapping):
+                cleaned.append(item)
+                continue
+            unknown = sorted(set(item) - CLAIM_EVIDENCE_FIELDS)
+            if unknown:
+                removed.setdefault("evidence", [])
+                removed["evidence"].extend(k for k in unknown if k not in removed["evidence"])
+            cleaned.append({k: v for k, v in item.items() if k in CLAIM_EVIDENCE_FIELDS})
+        kept["evidence"] = cleaned
+    if not removed:
+        return claim
+    if account is not None:
+        account.append({
+            "location": location, "origin": origin,
+            "claim_id": kept.get("id") if isinstance(kept.get("id"), str) else None,
+            "removed": removed,
+        })
+    return kept
 
 
 def _namespaced_claim(claim: Any, document_index: int) -> Any:
