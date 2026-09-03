@@ -142,7 +142,9 @@ def _validate_and_collect(
         ))
         next_number += 1
 
-    for field, label in (("title", "计划标题"), ("use_case", "调研类型")):
+    for field, label in (
+        ("title", "计划标题"), ("use_case", "调研类型"), ("entities", "研究对象"),
+    ):
         record("plan", current.research_id, field, before.get(field), proposed.get(field), label)
 
     old_questions = list(before.get("decision_balance", []))

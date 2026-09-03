@@ -830,6 +830,7 @@ def _build_plan(
     market_profile_justification: str = "兼容旧调用的全球产品默认。",
     subjects: list[str] | None = None,
     subjects_justification: str = "兼容旧调用，未声明研究实体。",
+    entities: list[dict[str, Any]] | None = None,
     repairs: list[str] | None = None,
 ) -> Plan:
     if not isinstance(skeleton, Mapping) or not isinstance(skeleton.get("goals"), list):
@@ -1000,6 +1001,7 @@ def _build_plan(
         "market_profile_justification": market_profile_justification,
         "subjects": list(subjects or []),
         "subjects_justification": subjects_justification,
+        "entities": list(entities or []),
         "scale": scale,
         "status": "awaiting_review",
         "approved_at": None,

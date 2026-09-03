@@ -229,6 +229,105 @@ def _thaw(value: Any) -> Any:
 
 
 @dataclass
+class Entity:
+    """§ENT-1 货 2：研究对象的「实体卡」——同一产品在中外市场的叫法与身份。
+
+    `id` 是稳定标识，取骨架 `subjects` 里的原名：采集卡的 `entity`、分配表的
+    `entity`、规则 25 的覆盖判定全按这个字符串对齐，所以它一旦定下就不再改；
+    用户在计划编辑页改的是 `canonical`（展示名）与 `names`（检索用名）。
+
+    `same_product` 说的是**本实体的中外名字是不是同一个产品**：豆包 / Doubao
+    是（true）；抖音 / TikTok 不是（false，字节面向国内与海外的两个独立产品，
+    内容生态不互通）。false 时 `note` 必须写清差异——报告交叉章据此只并列、
+    不做跨市场交叉，查询词组装也不会把对方的名字当别名去搜。
+    """
+
+    id: str
+    canonical: str
+    names: dict[str, Any]
+    official_handles: dict[str, str]
+    same_product: bool
+    note: str
+
+    _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
+        "id", "canonical", "names", "official_handles", "same_product", "note",
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("entity.id 必须是非空字符串")
+        if not isinstance(self.canonical, str) or not self.canonical.strip():
+            raise ValueError(f"entity {self.id}.canonical 必须是非空字符串")
+        if not isinstance(self.names, dict):
+            raise ValueError(f"entity {self.id}.names 必须是 object")
+        unknown = set(self.names) - {"zh", "en", "aliases"}
+        if unknown:
+            raise ValueError(f"entity {self.id}.names 含未知字段：{sorted(unknown)}")
+        for key in ("zh", "en"):
+            value = self.names.get(key)
+            if value is not None and not (isinstance(value, str) and value.strip()):
+                raise ValueError(f"entity {self.id}.names.{key} 必须是非空字符串或 null")
+        aliases = self.names.setdefault("aliases", [])
+        if not isinstance(aliases, list) or not all(
+            isinstance(item, str) and item.strip() for item in aliases
+        ):
+            raise ValueError(f"entity {self.id}.names.aliases 必须是非空字符串数组")
+        if len(set(aliases)) != len(aliases):
+            raise ValueError(f"entity {self.id}.names.aliases 不得重复")
+        if not isinstance(self.official_handles, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in self.official_handles.items()
+        ):
+            raise ValueError(f"entity {self.id}.official_handles 必须是 str→str 映射")
+        if not isinstance(self.same_product, bool):
+            raise ValueError(f"entity {self.id}.same_product 必须是布尔值")
+        if not self.same_product and not str(self.note or "").strip():
+            raise ValueError(
+                f"entity {self.id}.same_product=false 时 note 必须写清中外名字的差异"
+            )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "Entity":
+        _strict_fields(data, set(cls._FIELDS_ORDER), "entity")
+        values = _copy(dict(data))
+        values.setdefault("canonical", values.get("id", ""))
+        values.setdefault("names", {})
+        values.setdefault("official_handles", {})
+        values.setdefault("same_product", True)
+        values.setdefault("note", "")
+        return cls(**values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {name: _copy(getattr(self, name)) for name in self._FIELDS_ORDER}
+
+    def search_names(self, locale: str) -> list[str]:
+        """§ENT-1 货 4：按语域取检索用名——中文源取中文名与中文别名，海外源取英文。
+
+        顺序即优先级：先主名后别名，调用方按「每实体每源 ≤2 个查询词」截断。
+        `same_product=false` 的实体不跨语域借名（抖音不会去搜 TikTok）；这条在
+        取名阶段就成立，因为对方的名字压根不在本实体的 names 里。
+        """
+        if locale not in {"zh", "en"}:
+            raise ValueError(f"locale 只能取 zh 或 en：{locale!r}")
+        picked: list[str] = []
+        primary = self.names.get(locale)
+        if isinstance(primary, str) and primary.strip():
+            picked.append(primary.strip())
+        for alias in self.names.get("aliases", []):
+            if _name_locale(alias) == locale:
+                picked.append(alias.strip())
+        if not picked:
+            picked.append(self.canonical.strip())
+        seen: set[str] = set()
+        return [name for name in picked if not (name in seen or seen.add(name))]
+
+
+def _name_locale(name: str) -> str:
+    """名字按字符判语域：含 CJK 字符即中文名，否则按英文名。"""
+    return "zh" if any("一" <= ch <= "鿿" for ch in str(name)) else "en"
+
+
+@dataclass
 class Agent:
     agent_id: str
     display_name: str
@@ -345,6 +444,7 @@ class Plan:
     market_profile_justification: str
     subjects: list[str]
     subjects_justification: str
+    entities: list[Entity]
     scale: str
     status: str
     approved_at: str | None
@@ -360,7 +460,7 @@ class Plan:
     _FIELDS_ORDER: ClassVar[tuple[str, ...]] = (
         "research_id", "plan_rev", "title", "research_question", "use_case",
         "market_profile", "market_profile_justification", "subjects",
-        "subjects_justification", "scale", "status",
+        "subjects_justification", "entities", "scale", "status",
         "approved_at", "decision_balance", "expert_panel", "goals",
         "change_log", "baseline", "baseline_source", "created_at", "updated_at",
     )
@@ -379,6 +479,9 @@ class Plan:
             raise ValueError(
                 f"agent_id 跨 goal 重复：{sorted(duplicate_agent_ids)}"
             )
+        entity_ids = [entity.id for entity in self.entities]
+        if len(set(entity_ids)) != len(entity_ids):
+            raise ValueError(f"entities[].id 重复：{sorted(entity_ids)}")
         if self.scale not in {"fast", "standard"}:
             raise ValueError(f"scale 只能取 fast 或 standard：{self.scale!r}")
         if self.market_profile not in {"cn_product", "global_product"}:
@@ -421,6 +524,8 @@ class Plan:
         values.setdefault("scale", "standard")
         values.setdefault("subjects", [])
         values.setdefault("subjects_justification", "历史计划未记录研究实体。")
+        values.setdefault("entities", [])
+        values["entities"] = [Entity.from_dict(item) for item in values["entities"]]
         values.setdefault("market_profile", "global_product")
         values.setdefault(
             "market_profile_justification", "历史计划未记录市场属性，按全球产品兼容。"
@@ -438,11 +543,19 @@ class Plan:
     def to_dict(self) -> dict[str, Any]:
         result = {name: _copy(getattr(self, name)) for name in self._FIELDS_ORDER}
         result["goals"] = [goal.to_dict() for goal in self.goals]
+        result["entities"] = [entity.to_dict() for entity in self.entities]
         result["baseline"] = _thaw(self.baseline)
         return result
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"))
+
+    def entity_by_id(self, entity_id: str) -> Entity | None:
+        """按 id 取实体卡；没有实体卡（历史计划 entities=[]）时恒为 None。"""
+        for entity in self.entities:
+            if entity.id == entity_id:
+                return entity
+        return None
 
     def next_goal_id(self) -> str:
         """新增编号只向后增长，删除造成的空洞永不复用。"""

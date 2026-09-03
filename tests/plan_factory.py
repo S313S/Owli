@@ -94,6 +94,7 @@ def make_plan_dict() -> dict:
         "market_profile_justification": "产品面向全球市场。",
         "subjects": [],
         "subjects_justification": "历史测试计划未声明研究实体。",
+        "entities": [],
         "scale": "standard",
         "status": "awaiting_review",
         "approved_at": None,
