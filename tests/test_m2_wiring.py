@@ -88,6 +88,7 @@ def _skeleton() -> dict[str, Any]:
 class RecordingEngine:
     def __init__(self, *, skeleton: dict[str, Any] | None = None) -> None:
         self.tasks: list[Any] = []
+        self.entity_tasks: list[Any] = []
         self.skeleton = skeleton or _skeleton()
         self.block_kind: str | None = None
         self.started = asyncio.Event()
@@ -99,10 +100,26 @@ class RecordingEngine:
 
     async def run(self, task, ctx, on_event=None):
         del ctx
-        self.tasks.append(task)
+        if task.output_path.stem.startswith("entity-"):
+            # §ENT-1 货 1：实体卡段与其余规划段分开记——既有用例按位置和条数断言
+            # 规划调用，实体卡是 goals 之前新插的一层，不该把那些下标顶掉。
+            self.entity_tasks.append(task)
+        else:
+            self.tasks.append(task)
         if task.agent_kind == "planning":
             task.output_path.parent.mkdir(parents=True, exist_ok=True)
-            if task.output_path.name == "skeleton.json":
+            if task.output_path.stem.startswith("entity-"):
+                # §ENT-1 货 1：goals 之前多一层实体卡段，每个 subject 一次短流。
+                index = int(task.output_path.stem.removeprefix("entity-"))
+                name = self.skeleton["subjects"][index - 1]
+                payload = {
+                    "canonical": name,
+                    "names": {"zh": name, "en": f"{name}-en", "aliases": []},
+                    "official_handles": {},
+                    "same_product": True,
+                    "note": f"{name} 的实体卡（替身引擎产出）",
+                }
+            elif task.output_path.name == "skeleton.json":
                 payload = {
                     "market_profile": self.skeleton["market_profile"],
                     "market_profile_justification": self.skeleton[

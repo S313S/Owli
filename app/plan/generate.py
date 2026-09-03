@@ -26,6 +26,7 @@ from app.plan.allocation import (
     per_goal_capacity,
 )
 from app.plan.chapters import generate_chapter_specs
+from app.plan.entities import resolve_entities
 from app.plan.lint import _SOURCE_MARKET_PROFILES, duplicate_collection_goal_ids, lint
 from app.plan.normalize import normalize_plan
 from app.plan.model import (
@@ -1334,6 +1335,7 @@ async def generate_plan(
     scale_config: ResearchScaleConfig | None = None,
     chapter_engine_config: ChapterEngineConfig | None = None,
     segment_retry_sleep: Any = None,
+    entity_search: Any = None,
 ) -> Plan:
     """按骨架、逐 goal、整计划 lint 三阶段生成并原子保存计划。"""
 
@@ -1367,6 +1369,7 @@ async def generate_plan(
     subjects: list[str] = []
     subjects_justification = ""
     collection_plan: dict[str, list[dict[str, str]]] = {}
+    entities: list[dict[str, Any]] = []
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
@@ -1426,6 +1429,23 @@ async def generate_plan(
             f"规划骨架连续 {config.plan_segment_retries} 次仍有 error：\n"
             + "\n".join(skeleton_errors)
         )
+
+    # §ENT-1 货 1：goals 之前先把「研究对象到底是哪个产品」定下来。整步降级安全——
+    # 查不动网、模型不配合，entities 就是空数组，计划照常生成，只是没有别名扩展。
+    # `entity_search` 由调用方注入（生产在 runtime 里给 web_search.search）：规划的
+    # 单元测试用替身适配器，不该因为多了一步就去打真实网络。
+    entities = await resolve_entities(
+        normalized_query,
+        subjects,
+        workspace,
+        adapter,
+        on_progress=lambda text: _emit(store, _progress_event(research_id, text)),
+        search=entity_search,
+    )
+    await _emit(
+        store,
+        _progress_event(research_id, f"研究对象实体卡就绪：{len(entities)} 张"),
+    )
 
     expansions: dict[str, dict[str, Any]] = {}
 
@@ -1513,6 +1533,7 @@ async def generate_plan(
                 market_profile_justification=market_profile_justification,
                 subjects=subjects,
                 subjects_justification=subjects_justification,
+                entities=entities,
                 repairs=repairs,
             )
             repairs.extend(normalize_plan(plan))

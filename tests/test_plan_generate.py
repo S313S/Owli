@@ -89,6 +89,9 @@ class FakeEngine:
         self.skeletons = [deepcopy(item) for item in skeletons]
         self.tasks = []
         self.chapter_tasks = []
+        # §ENT-1 货 1：实体卡段与 goal 段分开记——既有用例按位置断言 tasks[1]
+        # 是 goal-1，实体卡是 goals 之前新插的一层，不该把那些下标顶掉。
+        self.entity_tasks = []
         self._current = self.skeletons[0]
         self._goal_calls: dict[int, int] = {}
         self._chapter_outputs: list[str] = []
@@ -102,10 +105,22 @@ class FakeEngine:
         del ctx, on_event
         if "-ch-" in task.output_path.stem:
             self.chapter_tasks.append(task)
+        elif task.output_path.stem.startswith("entity-"):
+            self.entity_tasks.append(task)
         else:
             self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
-        if task.output_path.name == "skeleton.json":
+        if task.output_path.stem.startswith("entity-"):
+            index = int(task.output_path.stem.removeprefix("entity-"))
+            name = self._current["subjects"][index - 1]
+            payload = {
+                "canonical": name,
+                "names": {"zh": name, "en": f"{name}-en", "aliases": []},
+                "official_handles": {},
+                "same_product": True,
+                "note": f"{name} 的实体卡（替身引擎产出）",
+            }
+        elif task.output_path.name == "skeleton.json":
             payload = {
                 "market_profile": self._current["market_profile"],
                 "market_profile_justification": self._current[
@@ -251,6 +266,7 @@ def test_骨架由规划路由生成且系统补齐固定字段(tmp_path) -> Non
     assert sorted(path.name for path in segment_root.iterdir()) == [
         "allocation.json",
         "assembled.json",
+        "entity-1.json",
         "goal-1-ch-1.json",
         "goal-1.json",
         "goal-2-ch-1.json",

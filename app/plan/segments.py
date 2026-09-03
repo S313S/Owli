@@ -14,7 +14,8 @@ from app.config import ResilienceConfig
 
 
 _SEGMENT_NAME = re.compile(
-    r"(?:skeleton|goal-[1-9][0-9]*(?:-ch-[1-9][0-9]*)?)"
+    # §ENT-1 货 1：entity-<n> 是规划期实体卡段，与 skeleton 同层、在 goals 之前跑。
+    r"(?:skeleton|entity-[1-9][0-9]*|goal-[1-9][0-9]*(?:-ch-[1-9][0-9]*)?)"
 )
 
 

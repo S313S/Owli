@@ -55,6 +55,7 @@ from app.login_repair import (
 from app.plan.generate import generate_plan
 from app.sources_probe import SourceProbeBlocked, gate_report, probe_gate_mode
 from app.plan.editing import apply_edit, approve
+from app.sources import web_search
 from app.plan.model import (
     SECTIONED_CHAPTER_KINDS,
     Goal,
@@ -505,6 +506,8 @@ class RuntimeCoordinator:
             adapter,
             scale=scale,
             scale_config=self.scale_config,
+            # §ENT-1 货 1：实体卡那一步的网页线索源，由这里注入真实网页搜索。
+            entity_search=web_search.search,
         )
         if plan.research_id != research_id:
             raise RuntimeError(

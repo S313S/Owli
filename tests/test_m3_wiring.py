@@ -73,12 +73,28 @@ class PlanEngine:
     def __init__(self, skeleton: dict) -> None:
         self.skeleton = skeleton
         self.tasks = []
+        self.entity_tasks = []
 
     async def run(self, task, ctx, on_event=None):
         del ctx, on_event
-        self.tasks.append(task)
+        if task.output_path.stem.startswith("entity-"):
+            # §ENT-1 货 1：实体卡段与其余规划段分开记，见 test_plan_generate 同注。
+            self.entity_tasks.append(task)
+        else:
+            self.tasks.append(task)
         task.output_path.parent.mkdir(parents=True, exist_ok=True)
-        if task.output_path.name == "skeleton.json":
+        if task.output_path.stem.startswith("entity-"):
+            # §ENT-1 货 1：goals 之前多一层实体卡段，每个 subject 一次短流。
+            index = int(task.output_path.stem.removeprefix("entity-"))
+            name = self.skeleton["subjects"][index - 1]
+            payload = {
+                "canonical": name,
+                "names": {"zh": name, "en": f"{name}-en", "aliases": []},
+                "official_handles": {},
+                "same_product": True,
+                "note": f"{name} 的实体卡（替身引擎产出）",
+            }
+        elif task.output_path.name == "skeleton.json":
             payload = {
                 "market_profile": self.skeleton["market_profile"],
                 "market_profile_justification": self.skeleton[
