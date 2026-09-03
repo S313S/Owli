@@ -296,13 +296,14 @@ def test_只重跑选中的那一节_同名章不被连坐(tmp_path: Path) -> No
     _seed(database, runs, statuses={f"goal-{n}": "done" for n in (1, 2, 3)})
     store = Store(database)
     store.ensure_chapters(
-        SOURCE_ID, [{"goal_id": "goal-2", "chapter_id": "ch-1/sec-2"}],
+        SOURCE_ID,
+        [{"goal_id": "goal-2", "chapter_id": f"ch-1/sec-{n}"} for n in (1, 2, 3)],
         updated_at="2026-09-03T00:00:00+00:00",
     )
     connection = sqlite3.connect(database)
     connection.execute(
-        "UPDATE chapter_progress SET status='done' WHERE research_id=? AND chapter_id=?",
-        (SOURCE_ID, "ch-1/sec-2"),
+        "UPDATE chapter_progress SET status='done' WHERE research_id=? AND chapter_id LIKE 'ch-1/%'",
+        (SOURCE_ID,),
     )
     connection.commit()
     connection.close()
@@ -321,5 +322,21 @@ def test_只重跑选中的那一节_同名章不被连坐(tmp_path: Path) -> No
     assert set(imported.chapters_reset) == {"goal-2/ch-1", "goal-2/ch-1/sec-2"}
     assert rows["goal-2/ch-1/sec-2"]["status"] == "pending"
     assert rows["goal-2/ch-1"]["status"] == "pending", "父章不复位就压根走不到这一节"
+    assert rows["goal-2/ch-1/sec-1"]["status"] == "done", "同章其它节不该跟着重跑"
+    assert rows["goal-2/ch-1/sec-3"]["status"] == "done", "同章其它节不该跟着重跑"
     assert rows["goal-1/ch-1"]["status"] == "done"
     assert rows["goal-3/ch-1"]["status"] == "done", "同名章不许被连坐复位"
+
+
+def test_心跳按卡片认领而不是按片任务(tmp_path: Path) -> None:
+    """节/片任务的 agent_id 带 `-sec-N`/`-part-N` 后缀；角标要按卡片认。"""
+
+    from app.api.events import _step_hint, card_agent_id
+
+    assert card_agent_id("report-writing-3-sec-2-part-1") == "report-writing-3"
+    assert card_agent_id("data-collection-5") == "data-collection-5"
+    # Claude 的原始消息把工具名放在 content 块里（真机样本形状）。
+    assert _step_hint({"event": {"content": [{"id": "t1", "name": "Write"}]}}) == "Write"
+    assert _step_hint({"event": {"content": [{"tool_use_id": "t1"}]}}) == "工具返回"
+    assert _step_hint({"event": {"content": [{"thinking": ""}]}}) == "思考中"
+    assert _step_hint({"event": {"subtype": "init"}}) == "init"

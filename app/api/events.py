@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -229,11 +230,40 @@ def _step_hint(record: Mapping[str, Any]) -> str:
             value = item.get(key)
             if isinstance(value, str) and value:
                 return value[:80]
+    # Claude 走 SDK 消息：工具名在 content 块里（Write / StructuredOutput …）。
+    content = event.get("content")
+    if isinstance(content, list):
+        for block in reversed(content):
+            if not isinstance(block, Mapping):
+                continue
+            name = block.get("name")
+            if isinstance(name, str) and name:
+                return name[:80]
+            if block.get("tool_use_id"):
+                return "工具返回"
+            if block.get("thinking") is not None:
+                return "思考中"
+            if isinstance(block.get("text"), str):
+                return "输出正文"
     for key in ("subtype", "type"):
         value = event.get(key)
         if isinstance(value, str) and value:
             return value[:80]
     return ""
+
+
+_SHARD_SUFFIX = re.compile(r"-part-\d+$")
+_SECTION_SUFFIX = re.compile(r"-sec-\d+$")
+
+
+def card_agent_id(agent_id: str) -> str:
+    """节/片任务的 agent_id 是在卡片 agent_id 后缀出来的，剥回卡片那一个。
+
+    `report-writing-3-sec-2-part-1` → `report-writing-3`；工作板的卡片角标
+    要按卡片认领心跳，认不回去角标就永远不亮（真机第一轮就是这么红的）。
+    """
+
+    return _SECTION_SUFFIX.sub("", _SHARD_SUFFIX.sub("", agent_id or ""))
 
 
 @dataclass
@@ -326,7 +356,8 @@ class SectionHeartbeatPublisher:
             "data": {
                 "goal": goal_id,
                 "chapter": chapter,
-                "agent": str(record.get("agent") or ""),
+                "agent": card_agent_id(str(record.get("agent") or "")),
+                "task_agent": str(record.get("agent") or ""),
                 "engine": str(record.get("engine") or ""),
                 "step_hint": _step_hint(record),
                 "elapsed_s": round(max(0.0, now - beat.started_at), 1),

@@ -83,38 +83,43 @@ def _read_source(database: Path, research_id: str) -> dict[str, Any]:
         connection.close()
 
 
-def _replay_chapters(only_chapters: list[str] | None) -> set[str] | None:
-    """§OBS-2 货 6「重跑这节」：把选中的章展开成「它 + 它的父章」。
+def _replay_chapters(
+    only_chapters: list[str] | None,
+) -> tuple[set[str], set[str]] | None:
+    """§OBS-2 货 6「重跑这节」：把选中的章展开成 (要复位的行, 要连子孙一起复位的章)。
 
-    只复位 `ch-4/sec-2` 一行，父章 `ch-4` 还是 done，节化撰写压根不会被重新
-    走到；所以父章一并复位，同章其它 done 的节届时照旧跳过。
+    - 点名 `ch-4/sec-2`：复位它**和它的父章** `ch-4`——只复位 sec 行的话父章还是
+      done，节化撰写压根不会被走到；同章其它 done 的节届时照旧跳过。
+    - 点名 `ch-4`（整章）：连它下面的节一起复位。
     """
 
     if not only_chapters:
         return None
-    wanted: set[str] = set()
+    exact: set[str] = set()
+    with_children: set[str] = set()
     for chapter_id in only_chapters:
         chapter = str(chapter_id).strip()
         if not chapter:
             continue
-        wanted.add(chapter)
+        exact.add(chapter)
         if "/" in chapter:
-            wanted.add(chapter.split("/", 1)[0])
-    return wanted or None
+            exact.add(chapter.split("/", 1)[0])
+        else:
+            with_children.add(chapter)
+    return (exact, with_children) if exact else None
 
 
 def _is_replayed(
-    row: Mapping[str, Any], replay_goals: set[str], wanted: set[str] | None,
-    *, reset_done: bool,
+    row: Mapping[str, Any], replay_goals: set[str],
+    wanted: tuple[set[str], set[str]] | None, *, reset_done: bool,
 ) -> bool:
     if row["goal_id"] not in replay_goals:
         return False
     if wanted is not None:
+        exact, with_children = wanted
         chapter_id = str(row["chapter_id"])
         parent = chapter_id.split("/", 1)[0]
-        if chapter_id not in wanted and parent not in wanted:
-            return False
-        return True
+        return chapter_id in exact or (parent in with_children and parent != chapter_id)
     return reset_done or row["status"] != "done"
 
 

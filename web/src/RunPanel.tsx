@@ -54,15 +54,22 @@ type PanelTab = {
   status: string
 }
 
-/** 只有跑起来过的卡片才有原始流可看：queued 的还没产生任何事件。 */
+/** 只有跑起来过的卡片才有原始流可看：queued 的还没产生任何事件。
+ *
+ * 心跳（货 3）也算「跑起来了」：快照里的 agent 状态要等下一次全量刷新才变，
+ * 心跳是 SSE 实时来的，认它就不必刷新页面才看得到新 tab。
+ */
 export function panelTabs(snapshot: ResearchSnapshot): PanelTab[] {
+  const beating = new Set(Object.values(snapshot.heartbeats ?? {}).map((beat) => beat.agent))
   const tabs: PanelTab[] = []
   snapshot.goals.forEach((goal, index) => {
     goal.agents.forEach((agent) => {
-      if (agent.status === 'queued' || agent.status === 'skipped') return
+      const idle = agent.status === 'queued' || agent.status === 'skipped'
+      if (idle && !beating.has(agent.id)) return
       tabs.push({
         key: agent.id, goalIndex: index + 1, goalId: goal.id,
-        name: agent.name, engine: agent.engine, status: agent.status,
+        name: agent.name, engine: agent.engine,
+        status: idle ? 'running' : agent.status,
       })
     })
   })

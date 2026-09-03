@@ -86,7 +86,7 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
             <Badge status={statusColor[agent.status] as 'success' | 'processing' | 'warning' | 'error' | 'default'} text={agent.status} />
             {/* OBS-2 货 5：running 的卡片把「已用多久 · 最近在干什么」写在角标上，
                 来源是 section_heartbeat（货 3），拿不到心跳就什么都不显示。 */}
-            {(agent.status === 'running' || agent.status === 'retrying') && snapshot.heartbeats?.[agent.id]
+            {snapshot.heartbeats?.[agent.id] && agent.status !== 'done'
               ? <div className="agent-heartbeat" data-testid={`heartbeat-${agent.id}`}>
                 已用 {formatElapsed(snapshot.heartbeats[agent.id].elapsed_s)}
                 {snapshot.heartbeats[agent.id].step_hint ? ` · 最近：${snapshot.heartbeats[agent.id].step_hint}` : ''}
