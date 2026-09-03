@@ -280,3 +280,46 @@ def test_心跳进_SSE_事件流(tmp_path: Path) -> None:
     sse = asyncio.run(scenario())
     assert "event: section_heartbeat" in sse
     assert '"step_hint":"tool_use"' in sse
+
+
+def test_只重跑选中的那一节_同名章不被连坐(tmp_path: Path) -> None:
+    """§OBS-2 货 6：`only_chapters` 只复位那一节和它的父章。"""
+
+    import sqlite3
+
+    from app.replay.import_research import import_research
+    from app.store.dao import Store
+    from tests.test_rp1_stage_replay import SOURCE_ID, _seed
+
+    database = tmp_path / "owli.db"
+    runs = tmp_path / "runs"
+    _seed(database, runs, statuses={f"goal-{n}": "done" for n in (1, 2, 3)})
+    store = Store(database)
+    store.ensure_chapters(
+        SOURCE_ID, [{"goal_id": "goal-2", "chapter_id": "ch-1/sec-2"}],
+        updated_at="2026-09-03T00:00:00+00:00",
+    )
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "UPDATE chapter_progress SET status='done' WHERE research_id=? AND chapter_id=?",
+        (SOURCE_ID, "ch-1/sec-2"),
+    )
+    connection.commit()
+    connection.close()
+
+    imported = import_research(
+        store=store, source_database=database, source_runs=runs,
+        source_research_id=SOURCE_ID, runs_root=runs,
+        now_iso="2026-09-03T00:00:00+00:00",
+        from_goal="goal-2", only_chapters=["ch-1/sec-2"], reset_done=True,
+    )
+
+    rows = {
+        f"{row['goal_id']}/{row['chapter_id']}": row
+        for row in store.list_chapters(imported.research_id)
+    }
+    assert set(imported.chapters_reset) == {"goal-2/ch-1", "goal-2/ch-1/sec-2"}
+    assert rows["goal-2/ch-1/sec-2"]["status"] == "pending"
+    assert rows["goal-2/ch-1"]["status"] == "pending", "父章不复位就压根走不到这一节"
+    assert rows["goal-1/ch-1"]["status"] == "done"
+    assert rows["goal-3/ch-1"]["status"] == "done", "同名章不许被连坐复位"

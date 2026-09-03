@@ -100,6 +100,9 @@ class ReplayRequest(BaseModel):
     from_goal: str | None = None
     #: 连 done 的章一起复位（这一段整个重做）；默认只复位没做完的章。
     reset_done: bool = False
+    #: §OBS-2 货 6「用旧数据重跑这节」：只复位这些章（连它们的父章一起），
+    #: 同 goal 里其它章原样保留。不给就沿用 RP-1 的整段口径。
+    only_chapters: list[str] | None = None
     #: 底料在另一个库里时给绝对路径；不给就用本服务自己的库与 runs 目录。
     source_database: str | None = None
     source_runs: str | None = None
@@ -787,6 +790,7 @@ def create_app(
                 now_iso=runtime.now_iso(),
                 from_goal=request.from_goal,
                 reset_done=request.reset_done,
+                only_chapters=request.only_chapters,
             )
         except ReplayImportError as error:
             return remember(

@@ -19,7 +19,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from app.adapters.transcript import TRANSCRIPT_SUFFIX
 
@@ -83,6 +83,41 @@ def _read_source(database: Path, research_id: str) -> dict[str, Any]:
         connection.close()
 
 
+def _replay_chapters(only_chapters: list[str] | None) -> set[str] | None:
+    """§OBS-2 货 6「重跑这节」：把选中的章展开成「它 + 它的父章」。
+
+    只复位 `ch-4/sec-2` 一行，父章 `ch-4` 还是 done，节化撰写压根不会被重新
+    走到；所以父章一并复位，同章其它 done 的节届时照旧跳过。
+    """
+
+    if not only_chapters:
+        return None
+    wanted: set[str] = set()
+    for chapter_id in only_chapters:
+        chapter = str(chapter_id).strip()
+        if not chapter:
+            continue
+        wanted.add(chapter)
+        if "/" in chapter:
+            wanted.add(chapter.split("/", 1)[0])
+    return wanted or None
+
+
+def _is_replayed(
+    row: Mapping[str, Any], replay_goals: set[str], wanted: set[str] | None,
+    *, reset_done: bool,
+) -> bool:
+    if row["goal_id"] not in replay_goals:
+        return False
+    if wanted is not None:
+        chapter_id = str(row["chapter_id"])
+        parent = chapter_id.split("/", 1)[0]
+        if chapter_id not in wanted and parent not in wanted:
+            return False
+        return True
+    return reset_done or row["status"] != "done"
+
+
 def _goals_from(snapshot: dict[str, Any], from_goal: str | None) -> set[str]:
     """`from_goal` 及其之后的 goal（按计划顺序）——这些是要重跑的。"""
 
@@ -118,6 +153,7 @@ def import_research(
     from_goal: str | None = None,
     research_id: str | None = None,
     reset_done: bool = False,
+    only_chapters: list[str] | None = None,
 ) -> ImportedResearch:
     source = _read_source(Path(source_database), source_research_id)
     report = source["report"]
@@ -126,6 +162,10 @@ def import_research(
         str(report["plan_snapshot"]), source_research_id, research_id
     )
     replay_goals = _goals_from(snapshot, from_goal)
+    if only_chapters and from_goal:
+        # 章号只在 goal 内唯一（每个 goal 都有 ch-1）；点名重跑某章时
+        # 就把范围收到那一个 goal，免得同名章在后面的 goal 里跟着被复位。
+        replay_goals = {from_goal}
 
     source_dir = Path(source_runs) / source_research_id
     if not source_dir.is_dir():
@@ -150,6 +190,7 @@ def import_research(
             from_goal=from_goal,
             now_iso=now_iso,
             reset_done=reset_done,
+            only_chapters=only_chapters,
         )
     except Exception:
         # 半份研究比没有更糟：工作板上会多出一个跑不动也删不掉的条目。
@@ -192,6 +233,7 @@ def _write(
     from_goal: str | None,
     now_iso: str,
     reset_done: bool,
+    only_chapters: list[str] | None = None,
 ) -> ImportedResearch:
     store.create_report(
         id=research_id,
@@ -240,6 +282,7 @@ def _write(
         reset_done=reset_done,
         snapshot=snapshot,
         target_dir=target_dir,
+        only_chapters=only_chapters,
     )
     return ImportedResearch(
         research_id=research_id,
@@ -296,6 +339,7 @@ def _copy_chapters(
     reset_done: bool,
     snapshot: dict[str, Any],
     target_dir: Path,
+    only_chapters: list[str] | None = None,
 ) -> tuple[str, ...]:
     """章账本原样搬过去；要重跑的 goal 里，选中的章复位成 pending。
 
@@ -313,14 +357,13 @@ def _copy_chapters(
         reset_running=False,
     )
     paths = _chapter_paths(snapshot)
+    wanted = _replay_chapters(only_chapters)
     reset: list[str] = []
     connection = sqlite3.connect(_database_of(store))
     try:
         for row in rows:
             key = (row["goal_id"], row["chapter_id"])
-            replayed = row["goal_id"] in replay_goals and (
-                reset_done or row["status"] != "done"
-            )
+            replayed = _is_replayed(row, replay_goals, wanted, reset_done=reset_done)
             if replayed:
                 reset.append(f"{row['goal_id']}/{row['chapter_id']}")
                 relative = paths.get(key)

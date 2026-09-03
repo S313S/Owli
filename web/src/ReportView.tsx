@@ -2,7 +2,7 @@ import { Alert, Button, Collapse, Empty, Popover, Space, Spin, Table, Tag, Typog
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ApiEnvelope, EvidenceItem, EvidenceView, ReportView as ReportData } from './types'
+import type { ApiEnvelope, EvidenceItem, EvidenceView, ReportSection, ReportView as ReportData } from './types'
 
 // 五维顺序 = evidence 列序 = rating_notes 段序 = Excel G–K（四处同序，spec §5）
 export const SCORE_DIMS: Array<[keyof EvidenceItem, string]> = [
@@ -183,6 +183,7 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
       <ul>{report.conclusions.map((c, i) => <li key={i}>{withMarks(c, lookup)}</li>)}</ul>
     </section>}
     {report.sections.map((section, i) => <section key={section.section_id ?? i} data-testid="report-section" data-placeholder={section.placeholder}>
+      <ReplaySectionButton researchId={researchId} section={section} />
       {section.placeholder
         ? <div className="report-section-placeholder">
             <Typography.Text strong>{section.title ?? section.section_id}</Typography.Text>
@@ -193,6 +194,39 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
     <References report={report} evidence={evidence} />
     <MissingList report={report} />
   </div>
+}
+
+/** §OBS-2 货 6：拿这一节的旧证据旧产物重跑它自己，跑在一个新 research 上。 */
+function ReplaySectionButton({ researchId, section }: {
+  researchId: string
+  section: ReportSection
+}) {
+  const [busy, setBusy] = useState(false)
+  if (!section.section_id || !section.goal_id) return null
+  const replay = async () => {
+    setBusy(true)
+    try {
+      const response = await fetch('/api/researches/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Request-ID': `replay-${crypto.randomUUID()}` },
+        body: JSON.stringify({
+          source_research_id: researchId,
+          from_goal: section.goal_id,
+          only_chapters: [section.section_id],
+          reset_done: true,
+        }),
+      })
+      const body = await response.json() as ApiEnvelope<{ research_id: string }>
+      if (!response.ok || !body.ok) throw new Error(body.error?.message ?? `HTTP ${response.status}`)
+      window.location.assign(`/researches/${encodeURIComponent(body.data.research_id)}`)
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : String(error))
+    } finally { setBusy(false) }
+  }
+  return <Button size="small" type="link" loading={busy} className="replay-section"
+    data-testid={`replay-section-${section.section_id}`} onClick={() => void replay()}>
+    用旧数据重跑这节
+  </Button>
 }
 
 function ExportButtons({ researchId, report, onDone }: { researchId: string; report: ReportData; onDone: () => void }) {
