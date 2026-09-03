@@ -277,8 +277,6 @@ def build_claude_options(
                 agent_id=task.agent_id,
                 item_limit=getattr(task, "source_item_limit", None),
                 store_path=getattr(task, "source_store_path", None),
-                # §CMT-1 货 5：采集卡的评论二跳开关随 MCP 配置下发到子进程
-                comments=getattr(task.capability, "comments", "on"),
             )
         }
         values["strict_mcp_config"] = True

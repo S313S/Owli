@@ -243,8 +243,6 @@ def build_codex_command(
                     agent_id=task.agent_id,
                     item_limit=getattr(task, "source_item_limit", None),
                     store_path=getattr(task, "source_store_path", None),
-                    # §CMT-1 货 5：采集卡的评论二跳开关随 MCP 配置下发到子进程
-                    comments=getattr(task.capability, "comments", "on"),
                 )
             )
     if network:
