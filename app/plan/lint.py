@@ -934,12 +934,18 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
             "[规则23] plan.market_profile 必须取 cn_product/global_product，"
             "且 market_profile_justification 不能为空"
         ]
-    # §ENT-2：实体有英文名就允许排海外源、有中文名就允许排国内源，
-    # market_profile 只剩顺序与权重。无实体卡时闭集与旧行为逐字相同。
+    # §ENT-2：实体有英文名就允许排海外源、有中文名就允许排国内源，market_profile
+    # 只剩顺序与权重。**闭集按卡上的实体逐张算**，不是全计划一个大闭集——否则题面里
+    # 只要有一个实体带英文名，Reddit 就对所有卡开放，只有中文叫法的实体也会被排上去，
+    # 到了采集期 entity_queries 挑不出英文名、退回 canonical，等于拿中文名搜 Reddit。
+    # 卡上没写实体（规则 32 之外的历史形态）时退回全计划闭集，不制造假红。
     raw_entities = raw.get("entities")
-    applicable = applicable_sources(
-        profile, raw_entities if isinstance(raw_entities, list) else None,
-    )
+    entities = raw_entities if isinstance(raw_entities, list) else []
+    by_id = {
+        str(card.get("id") or card.get("canonical") or ""): card
+        for card in entities if isinstance(card, Mapping)
+    }
+    plan_wide = applicable_sources(profile, entities)
     messages: list[str] = []
     for goal, agent in _agents(goals):
         chapter = agent.get("chapter")
@@ -949,13 +955,19 @@ def _rule_23(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
         )
         if not _is_collection_agent(agent) and not chapter_is_collection:
             continue
+        card = by_id.get(str(agent.get("entity") or ""))
+        applicable = plan_wide if card is None else applicable_sources(profile, [card])
+        scope = (
+            f"题目市场属性 {profile}" if card is None else
+            f"实体 {agent.get('entity')} 的叫法（{profile}）"
+        )
         for source in agent.get("capability", {}).get("sources", []):
             source_id = str(source)
             if source_id not in applicable:
                 messages.append(
                     f"[规则23] {goal.get('goal_id')}/{agent.get('agent_id')} "
-                    f"采集章 source_id={source_id} 不适用于题目市场属性 "
-                    f"{profile}；可用源={','.join(sorted(applicable))}"
+                    f"采集章 source_id={source_id} 不适用于{scope}"
+                    f"；可用源={','.join(sorted(applicable))}"
                 )
     return messages
 

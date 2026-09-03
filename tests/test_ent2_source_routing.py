@@ -227,3 +227,29 @@ def test_货4_模型明确说不是实体时不再补问() -> None:
     assert cards == []
     assert len(engine.prompts) == 1, "这是合法的否定答案，不该拿补丁重试去磨它"
     assert any("不是实体" in text for text in progress)
+
+
+def test_规则23_闭集按卡上的实体逐张算_不是全计划一个大闭集() -> None:
+    """题面里有一个实体带英文名，不等于只有中文名的那个实体也能上 Reddit。"""
+    from tests.plan_factory import make_plan_dict
+
+    plan = make_plan_dict()
+    plan["market_profile"] = "cn_product"
+    plan["market_profile_justification"] = "题面问的是国内用户怎么看。"
+    plan["subjects"] = ["豆包", "小罐茶"]
+    plan["subjects_justification"] = "一个有外文名、一个没有。"
+    plan["entities"] = [
+        _entity("豆包", "豆包", "Doubao"), _entity("小罐茶", "小罐茶", None),
+    ]
+    agent = plan["goals"][0]["agents"][0]
+    agent["capability"]["profile"] = "web-collector"
+    agent["capability"]["sources"] = ["reddit"]
+
+    agent["entity"] = "豆包"
+    assert not [m for m in lint(plan)["errors"] if m.startswith("[规则23]")]
+
+    agent["entity"] = "小罐茶"
+    matches = [m for m in lint(plan)["errors"] if m.startswith("[规则23]")]
+    assert len(matches) == 1
+    assert "实体 小罐茶 的叫法" in matches[0]
+    assert "reddit" not in matches[0].split("可用源=")[1]
