@@ -1150,6 +1150,7 @@ def _write_object_document(
     *,
     plan: Any,
     agent: Any,
+    goal_id: str,
     output_path: Path,
     section_items: list[dict[str, Any]],
     missing_items: list[dict[str, Any]],
@@ -1163,7 +1164,9 @@ def _write_object_document(
     )
     entity_section = [{
         "section_id": f"{_chapter_id(agent)}/entities",
-        "goal_id": getattr(agent, "goal_id", None),
+        # goal_id 必须是真值：`sectioned_document_valid` 会逐节校验它
+        # （沙盒重放实证：填 None 时整章判 conclusion_invalid，白跑三节）。
+        "goal_id": goal_id,
         "title": "研究对象",
         "markdown": "\n".join(entity_lines).strip(),
     }] if entity_lines else []
@@ -1296,7 +1299,7 @@ def _assemble(
         if unparsed:
             # 整章的节都是叙述体（声明 json 只是产物后缀）：沿用对象文档，不硬拗数组。
             _write_object_document(
-                plan=plan, agent=agent, output_path=output_path,
+                plan=plan, agent=agent, goal_id=goal_id, output_path=output_path,
                 section_items=section_items, missing_items=missing_items,
             )
             return
@@ -1324,7 +1327,7 @@ def _assemble(
         return
     if output_format == "json":
         _write_object_document(
-            plan=plan, agent=agent, output_path=output_path,
+            plan=plan, agent=agent, goal_id=goal_id, output_path=output_path,
             section_items=section_items, missing_items=missing_items,
             claims=chapter_claims,
         )

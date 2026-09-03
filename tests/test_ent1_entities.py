@@ -247,7 +247,7 @@ def test_JSON_成稿也带研究对象节且排在最前() -> None:
     with tempfile.TemporaryDirectory() as raw:
         target = Path(raw) / "x.json"
         _write_object_document(
-            plan=plan, agent=agent, output_path=target,
+            plan=plan, agent=agent, goal_id="goal-1", output_path=target,
             section_items=[{
                 "section_id": "ch-6/sec-1", "goal_id": "goal-1", "title": "一节",
                 "markdown": "## 一节\n\n正文 [S01]", "done": True,
@@ -258,6 +258,54 @@ def test_JSON_成稿也带研究对象节且排在最前() -> None:
         view = parse_report(target.read_text(encoding="utf-8"))
     assert document["sections"][0]["title"] == "研究对象"
     assert document["sections"][0]["section_id"] == "ch-6/entities"
+    # goal_id 非空是 sectioned_document_valid 的硬要求（重放实证：填 None 整章作废）
+    assert document["sections"][0]["goal_id"] == "goal-1"
     assert "只并列不交叉" in document["sections"][0]["markdown"]
     assert [item["name"] for item in view["entities"]] == ["飞书"]
     assert view["entities"][0]["same_product"] is False
+
+
+def test_带研究对象节的_JSON_信封过得了_sectioned_document_valid() -> None:
+    """§ENT-1 货 6：系统自己插的那一节也得过生产校验器——沙盒重放曾被它整章打回。
+
+    校验器是禁区文件里的生产实现，这里直接调它，不另写一份判定。
+    """
+    import json as _json
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from app.adapters.validation import Ctx, Verdict, sectioned_document_valid
+    from app.orchestrator.sectioning import _write_object_document
+    from app.plan.model import Entity
+
+    plan = SimpleNamespace(title="国内大家对 workbuddy 的看法", entities=[
+        Entity.from_dict({
+            "id": "钉钉", "canonical": "钉钉",
+            "names": {"zh": "钉钉", "en": "DingTalk", "aliases": []},
+            "official_handles": {}, "same_product": True, "note": "阿里的协作平台",
+        }),
+    ])
+    agent = SimpleNamespace(
+        chapter={"chapter_id": "ch-6"},
+        output={"path": "goals/goal-1/x.json", "shape": "object"},
+    )
+    with tempfile.TemporaryDirectory() as raw:
+        target = Path(raw) / "x.json"
+        _write_object_document(
+            plan=plan, agent=agent, goal_id="goal-1", output_path=target,
+            section_items=[{
+                "section_id": "ch-6/sec-1", "goal_id": "goal-1", "title": "一节",
+                "markdown": "## 一节\n\n正文", "done": True,
+            }],
+            missing_items=[],
+        )
+        ctx = Ctx(
+            output_path=target, output_format="json", research_id="r-1",
+            goal_id="goal-1", agent_id="report-writing",
+            read_text=lambda: target.read_text(encoding="utf-8"),
+            read_json=lambda: _json.loads(target.read_text(encoding="utf-8")),
+            store=None, source_domains=frozenset(),
+        )
+        result = sectioned_document_valid(ctx, [])
+    assert result.verdict is Verdict.PASS, result.message
