@@ -6,8 +6,9 @@ import type {
 
 /** §OBS-2 货 4 + §OBS-3：底部运行面板——一张卡片一个 tab，tab 里并排两栏。
  *
- * 左「日志」= 引擎原始流原样倒出（OBS-2 的行为一字未改，只改了栏名）；
- * 右「进程」= 后端 `/progress` 译好的人话行，前端只渲染不解析。
+ * 面板头一行两个**互斥标签**（像终端软件那样）：「进程」= 后端 `/progress` 译好的
+ * 人话行（默认显示）、「日志」= 引擎原始流原样倒出（OBS-2 的行为一字未改）。
+ * 同一时刻只显示一个；选哪个记在 localStorage。下方节标签条不动。
  */
 
 const MIN_HEIGHT = 120
@@ -16,6 +17,7 @@ const TAIL_LINES = 200
 const POLL_MS = 3000
 const HEIGHT_KEY = 'owli:run-panel:height'
 const COLLAPSED_KEY = 'owli:run-panel:collapsed'
+const VIEW_KEY = 'owli:run-panel:view'
 
 /** localStorage 在无痕/禁站点数据下会直接抛，读写都得兜住。 */
 function readStored(key: string, fallback: string): string {
@@ -137,10 +139,9 @@ function useTail<T extends { seq: number }>(
   return lines
 }
 
-/** 进程栏：一行「时间 · 阶段 · 一句人话」。文本已由后端译好，这里只排版。 */
-function ProgressColumn({ tabKey, lines }: { tabKey: string; lines: ProgressLine[] }) {
+/** 进程视图：一行「时间 · 阶段 · 一句人话」。文本已由后端译好，这里只排版。 */
+function ProgressView({ tabKey, lines }: { tabKey: string; lines: ProgressLine[] }) {
   return <div className="run-panel-col" data-testid={`run-panel-progress-${tabKey}`}>
-    <div className="run-panel-col-head">进程</div>
     {lines.length ? <ol className="run-panel-progress">
       {lines.map((line) => <li key={`${line.seq}-${line.stage}-${line.text.slice(0, 12)}`}>
         <span className="progress-time">{stampOf(line.ts)}</span>
@@ -164,10 +165,23 @@ export default function RunPanel({ researchId, snapshot }: {
   const preferred = useMemo(() => defaultTabKey(tabs, snapshot.heartbeats), [tabs, snapshot.heartbeats])
   const current = tabs.find((tab) => tab.key === active) ?? tabs.find((tab) => tab.key === preferred)
   const live = current?.status === 'running' || current?.status === 'retrying'
+  const [view, setView] = useState<'progress' | 'transcript'>(
+    () => (readStored(VIEW_KEY, 'progress') === 'transcript' ? 'transcript' : 'progress'),
+  )
   const target = collapsed ? undefined : current
   const polling = live && !collapsed
-  const lines = useTail<TranscriptLine>(researchId, target, polling, 'transcript')
-  const progress = useTail<ProgressLine>(researchId, target, polling, 'progress')
+  // 两个视图互斥：只有正在显示的那个才拉流，另一个连请求都不发
+  const lines = useTail<TranscriptLine>(
+    researchId, view === 'transcript' ? target : undefined, polling, 'transcript',
+  )
+  const progress = useTail<ProgressLine>(
+    researchId, view === 'progress' ? target : undefined, polling, 'progress',
+  )
+
+  function pickView(next: 'progress' | 'transcript') {
+    writeStored(VIEW_KEY, next)
+    setView(next)
+  }
 
   useEffect(() => {
     const move = (event: MouseEvent) => {
@@ -201,16 +215,14 @@ export default function RunPanel({ researchId, snapshot }: {
       items={tabs.map((tab) => ({
         key: tab.key,
         label: `${tab.goalIndex} · ${tab.name} · ${tab.engine}`,
-        children: <div className="run-panel-split">
-          {/* 左栏「日志」：OBS-2 的原样倒出，行为一字未改，只是有了栏名 */}
-          <div className="run-panel-col" data-testid={`run-panel-log-${tab.key}`}>
-            <div className="run-panel-col-head">日志</div>
+        children: view === 'transcript'
+          // 「日志」：OBS-2 的原样倒出，行为一字未改
+          ? <div className="run-panel-col" data-testid={`run-panel-log-${tab.key}`}>
             <pre className="run-panel-lines" data-testid={`transcript-${tab.key}`}>
               {lines.length ? lines.map(renderLine).join('\n') : '这一节还没有引擎原始事件落盘'}
             </pre>
           </div>
-          <ProgressColumn tabKey={tab.key} lines={progress} />
-        </div>,
+          : <ProgressView tabKey={tab.key} lines={progress} />,
       }))} />
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卡片跑起来" />}
   </div>
@@ -224,6 +236,15 @@ export default function RunPanel({ researchId, snapshot }: {
       }} />
     <div className="run-panel-head">
       <b>运行面板</b>
+      {/* 货 10：两个互斥标签，像终端软件的 tab；默认「进程」 */}
+      <span className="run-panel-views" role="tablist">
+        <Button size="small" role="tab" data-testid="run-panel-progress"
+          aria-selected={view === 'progress'} type={view === 'progress' ? 'primary' : 'text'}
+          onClick={() => pickView('progress')}>进程</Button>
+        <Button size="small" role="tab" data-testid="run-panel-log"
+          aria-selected={view === 'transcript'} type={view === 'transcript' ? 'primary' : 'text'}
+          onClick={() => pickView('transcript')}>日志</Button>
+      </span>
       {current ? <Tag>{current.name}</Tag> : null}
       {beat ? <Typography.Text type="secondary" data-testid="run-panel-beat">
         已用 {formatElapsed(beat.elapsed_s)}{beat.step_hint ? ` · 最近：${beat.step_hint}` : ''}
