@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -96,13 +97,37 @@ class LarkCliTransport(FeishuTransport):
                 "--json", json.dumps({k: _cli_value(v) for k, v in record.items()}, ensure_ascii=False)]
         if existing:
             args += ["--record-id", existing]
-        # 真机取证：+record-upsert 的响应里没有 record_id（只有 record.update / updated），
-        # 新建行的 id 只能按锚点回查——直接 str(_dig(...)) 会把 None 写成字符串 "None"。
-        record_id = _dig(self._run(*args), "record_id") or existing \
-            or self._find(base_token, table_id, anchor_field, anchor)
+        # §FIX-2 货 2 真机取证（lark-cli 1.0.83，用户 09-03 拍板的一次「不改传输层」例外）：
+        # 响应形态**分两路**——新建（不带 --record-id）回
+        # `data.record.record_id_list=[新 id]` + `created`，更新（带 --record-id）才是
+        # `record.update/updated` 没有 id。此前只认 `record_id` 这个键名，首次推送必然
+        # 取不到，只能回退按锚点回查；而飞书按字段过滤有写后读延迟（实测写后 0.95 s
+        # 查不到、3.01 s 才可见），一次性回查正落在不可见窗口里 → 整单判 failed。
+        # 所以：新建路径直接读 record_id_list[0]；回退回查改成有限次短重试。
+        response = self._run(*args)
+        record_id = _dig(response, "record_id") or _first_id(_dig(response, "record_id_list")) \
+            or existing or self._find_with_retry(base_token, table_id, anchor_field, anchor)
         if not record_id:
             raise RuntimeError(f"写入「{anchor}」后按锚点回查不到 record_id")
         return str(record_id)
+
+    def _find_with_retry(
+        self, base_token: str, table_id: str, anchor_field: str, anchor: str,
+        attempts: int = 3, delay_seconds: float = 1.0,
+    ) -> str | None:
+        """按锚点回查，最多 attempts 次、每次隔 delay_seconds——够跨过飞书的写后读延迟。
+
+        有限次数、总等待 ≤ (attempts-1)×delay_seconds ≈ 2 s，绝不无限等：查不到就让
+        调用方抛错落 failed，而不是把收尾挂住。
+        """
+
+        for attempt in range(attempts):
+            found = self._find(base_token, table_id, anchor_field, anchor)
+            if found:
+                return found
+            if attempt < attempts - 1:
+                time.sleep(delay_seconds)
+        return None
 
     def _find(self, base_token: str, table_id: str, anchor_field: str, anchor: str) -> str | None:
         """按锚点查 record_id。lark-cli 的 filter 是 tuple 协议（{logic, conditions:[[字段,操作符,值]]}），
@@ -149,6 +174,14 @@ def _cli_value(value: Any) -> Any:
     """OpenAPI CellValue → lark-cli 快乐路径：超链接对象降为裸 URL。"""
     if isinstance(value, Mapping) and "link" in value:
         return str(value["link"])
+    return value
+
+
+def _first_id(value: Any) -> Any:
+    """lark-cli 新建路径回的是 record_id_list（列表）；只取第一个，非列表原样返回。"""
+
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else None
     return value
 
 

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.store.dao import Store
 from tests.test_dlv1_delivery import URL_A, _seed_evidence, _seed_history, _write_json_report
 
@@ -296,3 +298,70 @@ def test_autoexp_cli失败_授权类错误给人话提示(monkeypatch) -> None:
     monkeypatch.setattr(feishu.subprocess, "run", lambda argv, **k: broken)
     with pytest.raises(RuntimeError, match="lark-cli auth login"):
         feishu.LarkCliTransport(binary="lark-cli")._run("base", "+base-create")
+
+
+def test_fix2_upsert_新建路径直接读record_id_list_不回查(monkeypatch) -> None:
+    """§FIX-2 货 2：lark-cli 1.0.83 新建路径回 data.record.record_id_list=[id]。"""
+
+    from app.export import feishu as feishu_module
+
+    calls: list[str] = []
+
+    def fake_run(self, *args):
+        calls.append(args[1])
+        if args[1] == "+record-upsert":
+            return {"data": {"created": True, "record": {"record_id_list": ["recNEW"]}}}
+        return {"data": {"record_id_list": []}}  # 回查一律查不到：写后读延迟窗口
+
+    monkeypatch.setattr(feishu_module.LarkCliTransport, "_run", fake_run)
+    monkeypatch.setattr(feishu_module.time, "sleep", lambda _s: None)
+    transport = feishu_module.LarkCliTransport()
+
+    assert transport.upsert("bas1", "tbl1", "report_id", "r-1", {"report_id": "r-1"}) == "recNEW"
+    # 写前 _find 一次；新建路径拿到 id 后不再回查。
+    assert calls == ["+record-list", "+record-upsert"]
+
+
+def test_fix2_更新路径无id时回查有限次重试(monkeypatch) -> None:
+    """更新路径（record.update/updated）没有 id；回查在延迟窗口内重试到可见即止。"""
+
+    from app.export import feishu as feishu_module
+
+    seen: list[str] = []
+    slept: list[float] = []
+
+    def fake_run(self, *args):
+        seen.append(args[1])
+        if args[1] == "+record-upsert":
+            return {"data": {"record": {"update": {"report_id": "r-1"}}, "updated": True}}
+        # 第 1 次（写前）与第 2 次（写后立即）查不到，第 3 次才可见。
+        hits = [c for c in seen if c == "+record-list"]
+        return {"data": {"record_id_list": ["recLATE"] if len(hits) >= 3 else []}}
+
+    monkeypatch.setattr(feishu_module.LarkCliTransport, "_run", fake_run)
+    monkeypatch.setattr(feishu_module.time, "sleep", lambda s: slept.append(s))
+    transport = feishu_module.LarkCliTransport()
+
+    assert transport.upsert("bas1", "tbl1", "report_id", "r-1", {"report_id": "r-1"}) == "recLATE"
+    assert slept == [1.0]  # 只等了一轮就可见
+
+
+def test_fix2_回查始终查不到时有限次退出并报错(monkeypatch) -> None:
+    """guard：有限次数、绝不无限等——查不到就抛错落 failed，不把收尾挂住。"""
+
+    from app.export import feishu as feishu_module
+
+    slept: list[float] = []
+
+    def fake_run(self, *args):
+        if args[1] == "+record-upsert":
+            return {"data": {"record": {"update": {}}, "updated": True}}
+        return {"data": {"record_id_list": []}}
+
+    monkeypatch.setattr(feishu_module.LarkCliTransport, "_run", fake_run)
+    monkeypatch.setattr(feishu_module.time, "sleep", lambda s: slept.append(s))
+    transport = feishu_module.LarkCliTransport()
+
+    with pytest.raises(RuntimeError, match="按锚点回查不到 record_id"):
+        transport.upsert("bas1", "tbl1", "report_id", "r-1", {"report_id": "r-1"})
+    assert slept == [1.0, 1.0]  # 3 次回查、2 次间隔，总等待 ~2 s
