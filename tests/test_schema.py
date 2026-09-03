@@ -40,7 +40,7 @@ class SchemaSqlTest(unittest.TestCase):
         self.assertIn("recall_fts", tables)
         self.assertEqual(journal_mode, "wal")
 
-    def test_v6数据库迁移到_v9_且保留既有报告(self) -> None:
+    def test_v6数据库迁移到_v10_且保留既有报告(self) -> None:
         from app.store.schema import initialize_database_if_empty
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -70,7 +70,7 @@ class SchemaSqlTest(unittest.TestCase):
                     for row in connection.execute("PRAGMA table_xinfo(chapter_progress)")
                 }
 
-        self.assertEqual(version, 9)
+        self.assertEqual(version, 10)
         self.assertEqual(report, ("既有报告",))
         self.assertEqual(
             event_columns,

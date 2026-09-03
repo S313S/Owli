@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-_LATEST_SCHEMA_VERSION = 9
+_LATEST_SCHEMA_VERSION = 10
 
 
 def initialize_database_if_empty(
@@ -51,11 +51,19 @@ def _apply_migrations(
             connection.execute("PRAGMA user_version = 4")
         elif version == 8 and "extra" in chapter_columns:
             connection.execute("PRAGMA user_version = 8")
-        elif version == 9 and connection.execute(
+        elif version == 10 and "kind" in {
+            row[1] for row in connection.execute(
+                "PRAGMA table_xinfo(evidence)"
+            ).fetchall()
+        }:
+            # 由新 schema.sql 建库、user_version 却停在旧版的库（历史夹具会这么造）：
+            # 列已经在了，重跑 ALTER 会 duplicate column name。
+            connection.execute("PRAGMA user_version = 10")
+        elif version in {9, 10} and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'evidence'"
         ).fetchone() is None:
             # 历史单元测试会只造章账本的稀疏库；先完成既有章迁移，
-            # 但不能伪称 v9；停在 v8，完整结构仍由启动 selfcheck 拒绝缺表。
+            # 但不能伪称 v9/v10；停在上一版，完整结构仍由启动 selfcheck 拒绝缺表。
             return
         else:
             connection.executescript(matches[0].read_text(encoding="utf-8"))

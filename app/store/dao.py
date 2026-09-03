@@ -73,8 +73,11 @@ _EVIDENCE_DEFAULTS: dict[str, Any] = {
     "rated_by": None,
     "citation_no": None,
     "extra": None,
+    "kind": "post",
+    "parent_permalink": None,
 }
 _EVIDENCE_REQUIRED = {"id", "report_id", "platform", "permalink", "fetched_at"}
+_EVIDENCE_KINDS = {"post", "comment"}
 _EVIDENCE_FIELDS = _EVIDENCE_REQUIRED | set(_EVIDENCE_DEFAULTS)
 _CHAPTER_TERMINAL = {"done", "missing", "deferred"}
 _CHAPTER_REASONS = {
@@ -258,6 +261,17 @@ def _prepare_evidence(values: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"evidence 缺必填字段：{missing}")
     payload = {**_EVIDENCE_DEFAULTS, **{key: value for key, value in values.items() if key in _EVIDENCE_FIELDS}}
     payload["permalink"] = normalize_permalink(str(payload["permalink"]))
+    # §CMT-1 货 3：评论作独立证据行，kind 是闭集，父帖链接与 permalink 同口径归一。
+    if payload["kind"] not in _EVIDENCE_KINDS:
+        raise ValueError(f"kind 不在闭集：{payload['kind']!r}")
+    if payload["parent_permalink"]:
+        payload["parent_permalink"] = normalize_permalink(
+            str(payload["parent_permalink"])
+        )
+    else:
+        payload["parent_permalink"] = None
+    if payload["kind"] == "comment" and not payload["parent_permalink"]:
+        raise ValueError("kind=comment 必须带 parent_permalink")
     payload["extra"] = {} if payload["extra"] is None else payload["extra"]
     payload["raw_metrics"] = {} if payload["raw_metrics"] is None else payload["raw_metrics"]
     if not isinstance(payload["raw_metrics"], dict):
@@ -710,7 +724,40 @@ class Store:
                 "SELECT id FROM evidence WHERE report_id = ? AND permalink = ?",
                 (payload["report_id"], payload["permalink"]),
             ).fetchone()
+        if row is None:
+            row = self._comment_identity(connection, payload)
         return None if row is None else str(row["id"])
+
+    @staticmethod
+    def _comment_identity(
+        connection: sqlite3.Connection, payload: dict[str, Any]
+    ) -> sqlite3.Row | None:
+        """§CMT-1 货 3：评论没有自己的链接时，按父帖+作者+正文前 64 字认行。
+
+        小红书/抖音都不给单条评论的公开链接，入库的 permalink 是**合成**的，
+        随父帖链接上的签名参数漂移（小红书 permalink 带 xsec_token）。
+        只靠 permalink 认行，同一条评论会在下一轮重放里再插一遍。
+
+        这条只在**前两个键都认不出、且本行是没有原生 ID 的评论**时才查——
+        既有两个唯一键的覆盖范围一个字没改（[[upsert-covers-one-key-only]]）。
+        """
+        if payload["kind"] != "comment" or payload["platform_item_id"]:
+            return None
+        if not payload["parent_permalink"]:
+            return None
+        return connection.execute(
+            """
+            SELECT id FROM evidence
+            WHERE report_id = ? AND kind = 'comment' AND parent_permalink = ?
+              AND ifnull(author_name, '') = ?
+              AND substr(ifnull(content_excerpt, ''), 1, 64) = ?
+            """,
+            (
+                payload["report_id"], payload["parent_permalink"],
+                payload["author_name"] or "",
+                (payload["content_excerpt"] or "")[:64],
+            ),
+        ).fetchone()
 
     def _insert_evidence(
         self, connection: sqlite3.Connection, payload: dict[str, Any]
@@ -728,10 +775,10 @@ class Store:
               raw_metrics, normalized_score, norm_method, norm_context,
               score_authority, score_freshness, score_crossref,
               score_completeness, score_independence, rating_notes, rated_by,
-              citation_no, extra
+              citation_no, extra, kind, parent_permalink
             ) VALUES (
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -749,6 +796,7 @@ class Store:
                 payload["score_independence"], payload["rating_notes"],
                 payload["rated_by"], payload["citation_no"],
                 _extra_text(normalized_extra),
+                payload["kind"], payload["parent_permalink"],
             ),
         )
         self._register_extra(
@@ -1094,7 +1142,8 @@ class Store:
               raw_metrics = ?, normalized_score = ?, norm_method = ?, norm_context = ?,
               score_authority = ?, score_freshness = ?, score_crossref = ?,
               score_completeness = ?, score_independence = ?, rating_notes = ?,
-              rated_by = ?, citation_no = COALESCE(?, citation_no), extra = ?
+              rated_by = ?, citation_no = COALESCE(?, citation_no), extra = ?,
+              kind = ?, parent_permalink = ?
             WHERE id = ?
             """,
             (
@@ -1110,7 +1159,8 @@ class Store:
                 payload["score_freshness"], payload["score_crossref"],
                 payload["score_completeness"], payload["score_independence"],
                 payload["rating_notes"], payload["rated_by"],
-                payload["citation_no"], _extra_text(normalized_extra), existing_id,
+                payload["citation_no"], _extra_text(normalized_extra),
+                payload["kind"], payload["parent_permalink"], existing_id,
             ),
         )
         self._register_extra(

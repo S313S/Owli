@@ -1,6 +1,6 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 9;          -- schema 版本，升级机制见 §3.3
+PRAGMA user_version = 10;          -- schema 版本，升级机制见 §3.3
 
 -- ═══════════════════════════════════════════
 -- 报告表：一次调研的产物（一行 = 一次调研）
@@ -121,6 +121,13 @@ CREATE TABLE evidence (
   citation_no        INTEGER,                       -- 报告内角标编号；NULL = 采到但未被引用
   extra              TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(extra)),
 
+  -- ── 评论二跳（§CMT-1 货 3）──
+  kind               TEXT NOT NULL DEFAULT 'post'
+                     CHECK (kind IN ('post','comment')),
+                     -- 'comment' = 读者反应，不是帖子作者的说法；报告/Excel 按此列分「帖/评论」
+  parent_permalink   TEXT,                          -- kind='comment' 时指向父帖的 permalink，
+                                                    -- 必须能在同一 report 的 post 行里找到
+
   UNIQUE (report_id, permalink)                     -- 同一报告内同一来源只存一行，多处引用共用
 ) STRICT;
 
@@ -128,6 +135,8 @@ CREATE INDEX idx_evidence_report    ON evidence(report_id);
 CREATE INDEX idx_evidence_platform  ON evidence(platform, published_at);
 CREATE INDEX idx_evidence_grade     ON evidence(grade);
 CREATE INDEX idx_evidence_permalink ON evidence(permalink);
+CREATE INDEX idx_evidence_parent    ON evidence(report_id, parent_permalink)
+  WHERE parent_permalink IS NOT NULL;
 CREATE UNIQUE INDEX idx_evidence_native_identity
   ON evidence(report_id, platform, platform_item_id)
   WHERE platform_item_id IS NOT NULL AND platform_item_id <> '';
@@ -248,4 +257,4 @@ CREATE VIRTUAL TABLE recall_fts USING fts5(
   tokenize = 'trigram'
 );
 
-PRAGMA user_version = 9;
+PRAGMA user_version = 10;

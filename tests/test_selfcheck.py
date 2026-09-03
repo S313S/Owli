@@ -26,7 +26,7 @@ class SchemaSelfCheckTest(unittest.TestCase):
         result = initialize_and_check(self.database_path, SCHEMA_PATH)
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["schema_version"], 9)
+        self.assertEqual(result["schema_version"], 10)
         self.assertEqual(
             result["tables"],
             [
