@@ -15,13 +15,15 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from app.reliability.scoring import normalize_evidence_metrics
+from app.sources import comments as comment_shape
 from app.sources.spec import SourceSpec, WindowParam
 
 
-__all__ = ["SOURCE_SPEC", "search"]
+__all__ = ["SOURCE_SPEC", "fetch_comments", "search"]
 
 _API_BASE = "https://api.tikhub.io"
 _SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
+_COMMENTS_PATH = "/api/v1/xiaohongshu/app_v2/get_note_comments"
 _ENV_PATH = Path.home() / ".owli" / ".env"
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 _WINDOW_PARAM = WindowParam()
@@ -232,23 +234,25 @@ def _integer(item: Mapping[str, Any], *names: str) -> int:
     return 0
 
 
-def _response_data(response: HttpResponse) -> Mapping[str, Any]:
+def _response_data(
+    response: HttpResponse, *, endpoint: str = _SEARCH_PATH
+) -> Mapping[str, Any]:
     payload = response.payload
     upstream_code = payload.get("code")
     if response.status != 200 or upstream_code != 200:
         raise TikHubError(
-            "http", endpoint=_SEARCH_PATH, http_status=response.status,
+            "http", endpoint=endpoint, http_status=response.status,
             upstream_code=upstream_code, detail=_body_summary(payload),
         )
     data = payload.get("data")
     if not isinstance(data, Mapping):
         raise TikHubError(
-            "bad_response", endpoint=_SEARCH_PATH,
+            "bad_response", endpoint=endpoint,
             http_status=response.status, detail="响应缺少 data",
         )
     if data.get("success") is False or data.get("code") not in {None, 0, 200}:
         raise TikHubError(
-            "http", endpoint=_SEARCH_PATH, http_status=response.status,
+            "http", endpoint=endpoint, http_status=response.status,
             upstream_code=data.get("code"), detail="上游返回失败",
         )
     return data
@@ -326,6 +330,87 @@ def _to_evidence(
             "relative_publish_time_omitted": True,
         },
     }
+
+
+def _comment_page(
+    data: Mapping[str, Any],
+) -> tuple[list[Mapping[str, Any]], str, bool]:
+    """评论响应体是 data.data.{comments,cursor,has_more}（真机样本已核）。"""
+
+    nested = data.get("data") if isinstance(data.get("data"), Mapping) else data
+    values = nested.get("comments")
+    if not isinstance(values, list):
+        raise TikHubError(
+            "bad_response", endpoint=_COMMENTS_PATH, detail="评论响应缺少 comments",
+        )
+    items = [item for item in values if isinstance(item, Mapping)]
+    return items, str(nested.get("cursor") or ""), bool(nested.get("has_more"))
+
+
+def _to_comment(
+    item: Mapping[str, Any], *, parent_permalink: str
+) -> comment_shape.Comment:
+    user = item.get("user") if isinstance(item.get("user"), Mapping) else {}
+    return comment_shape.Comment(
+        parent_permalink=parent_permalink,
+        # 小红书没有公开的单条评论链接，入库时由调用方按父帖链接合成锚点。
+        permalink="",
+        author=str(user.get("nickname") or user.get("red_id") or "").strip(),
+        text=str(item.get("content") or "").strip(),
+        likes=comment_shape.integer(item, "like_count", "likedCount"),
+        published_at=comment_shape.published_at(item.get("time")),
+        platform="xhs",
+        comment_id=str(item.get("id") or "").strip(),
+    )
+
+
+def fetch_comments(
+    note_id: str,
+    *,
+    parent_permalink: str,
+    limit: int = 20,
+    token: str | None = None,
+    http_get: HttpGet = _default_http_get,
+    timeout_seconds: float = 45.0,
+    rate_gate: RateGate = _RATE_GATE,
+    max_pages: int = 4,
+) -> comment_shape.CommentBatch:
+    """拉一条笔记的一级评论；一页 10 条，翻页靠上一页回传的 cursor。"""
+
+    if not str(note_id).strip():
+        raise ValueError("note_id 必须是非空字符串")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError("limit 必须为 1-100 整数")
+    api_token = token or _load_token()
+    raw: list[Mapping[str, Any]] = []
+    cursor = ""
+    calls = 0
+    for _ in range(max_pages):
+        params: dict[str, Any] = {"note_id": str(note_id).strip()}
+        if cursor:
+            params["cursor"] = cursor
+        rate_gate.wait()
+        response = http_get(
+            f"{_API_BASE}{_COMMENTS_PATH}?{urlencode(params)}",
+            {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {api_token}",
+                "User-Agent": "Owli/0.1 XHS-source",
+            },
+            timeout_seconds,
+        )
+        calls += 1
+        page, cursor, has_more = _comment_page(
+            _response_data(response, endpoint=_COMMENTS_PATH)
+        )
+        raw.extend(page)
+        if not page or not has_more or not cursor or len(raw) >= limit:
+            break
+    kept, dropped = comment_shape.clean(
+        [_to_comment(item, parent_permalink=parent_permalink) for item in raw],
+        limit=limit,
+    )
+    return comment_shape.CommentBatch(comments=kept, dropped_short=dropped, calls=calls)
 
 
 def _unavailable(

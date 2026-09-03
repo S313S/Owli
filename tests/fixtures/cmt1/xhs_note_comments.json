@@ -1,0 +1,123 @@
+{
+ "code": 200,
+ "router": "/api/v1/xiaohongshu/app_v2/get_note_comments",
+ "data": {
+  "success": true,
+  "data": {
+   "cursor": "{\"cursor\":\"69d4809b0000000016016092\",\"index\":2,\"pageArea\":\"ALL\"}",
+   "has_more": true,
+   "comments": [
+    {
+     "id": "69ecef9e000000002100fac1",
+     "content": "创业需要有一个创业教练，训练自己能够夺取冠军。",
+     "like_count": 0,
+     "time": 1777135519,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "郁金香w7j",
+      "red_id": "95639395924"
+     }
+    },
+    {
+     "id": "69e57e610000000014013800",
+     "content": "[失望R]文案AI出的。。。看着有点难受",
+     "like_count": 1,
+     "time": 1776647777,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "小红薯697CB0F7",
+      "red_id": "95667488903"
+     }
+    },
+    {
+     "id": "69e1bb6e000000001401b01c",
+     "content": "能自建专家吗",
+     "like_count": 0,
+     "time": 1776401263,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "讲个鬼故事",
+      "red_id": "626121980"
+     }
+    },
+    {
+     "id": "69dccd71000000000103f5fd",
+     "content": "根本就不成熟，ai出来的工具",
+     "like_count": 0,
+     "time": 1776078194,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "豆豆",
+      "red_id": "245146437"
+     }
+    },
+    {
+     "id": "69dcb3dd000000003501517d",
+     "content": "运行速度很慢，不知道咋回事",
+     "like_count": 0,
+     "time": 1776071645,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "赛博西米露",
+      "red_id": "496546312"
+     }
+    },
+    {
+     "id": "69d8aa360000000035020f24",
+     "content": "这个东西能自动上传本地的 Excel 到 #爱企查[搜索高亮]# 进行查询，再自动导出和下载吗？",
+     "like_count": 0,
+     "time": 1775807030,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "回到森林",
+      "red_id": "497148058"
+     }
+    },
+    {
+     "id": "69d861a50000000015002cb7",
+     "content": "求助，我的电脑安装了以后巨卡，大家有遇到同样情况么",
+     "like_count": 0,
+     "time": 1775788453,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "Vesker Lian",
+      "red_id": "955644998"
+     }
+    },
+    {
+     "id": "69d5cbf7000000001803a4e7",
+     "content": "我就是信了你们吹牛逼，被老板骂死了",
+     "like_count": 2,
+     "time": 1775619063,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "胡球",
+      "red_id": "225835132"
+     }
+    },
+    {
+     "id": "69d4a22f0000000032001edd",
+     "content": "所以你最后觉得它最劝退的一点是啥啊，是真影响效率还是上手别扭？",
+     "like_count": 0,
+     "time": 1775542832,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "小红薯6A62B576",
+      "red_id": "94528866756"
+     }
+    },
+    {
+     "id": "69d4809b0000000016016092",
+     "content": "我感觉现在的ai，普通人想用好，就还是别带脑子，他给你啥你就稍微给点建议就差不多了。比如说做个页面，做个表格，文件。你想让他更细致专业，那你就要也最起码入门知识要懂，比如举个例子，你想要一个网页，他给你的页面容器里的东西是错，那你要知道这属于html语法里的哪一个容器，哪一个区块。这样比抽卡准确多了。",
+     "like_count": 3,
+     "time": 1775534236,
+     "note_id": "69d0e65b000000001f003cdc",
+     "user": {
+      "nickname": "橘子树",
+      "red_id": "linsdot"
+     }
+    }
+   ]
+  }
+ }
+}

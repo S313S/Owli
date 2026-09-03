@@ -14,10 +14,11 @@ from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 from app.reliability.scoring import normalize_evidence_metrics
+from app.sources import comments as comment_shape
 from app.sources.spec import SourceSpec
 
 
-__all__ = ["SOURCE_SPEC", "search"]
+__all__ = ["SOURCE_SPEC", "fetch_comments", "search"]
 
 _PROWLO_MCP_URL = "https://api.prowlo.com/mcp"
 _APIFY_API_URL = "https://api.apify.com/v2"
@@ -468,6 +469,81 @@ def _deduplicate(items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
         ):
             by_permalink[permalink] = item
     return list(by_permalink.values())
+
+
+def _comment_permalink(item: Mapping[str, Any], parent_permalink: str) -> str:
+    """Prowlo 每条评论回的 permalink 是父帖的；单条评论链接要用 t1 id 拼。"""
+
+    comment_id = str(item.get("id") or "").removeprefix("t1_").strip()
+    raw = str(item.get("permalink") or "").strip()
+    base = raw or parent_permalink
+    if not base:
+        return ""
+    if comment_id and not base.rstrip("/").endswith(comment_id):
+        return f"{base.rstrip('/')}/{quote(comment_id)}"
+    return base
+
+
+def _to_comment(
+    item: Mapping[str, Any], *, parent_permalink: str
+) -> comment_shape.Comment:
+    return comment_shape.Comment(
+        parent_permalink=parent_permalink,
+        permalink=_comment_permalink(item, parent_permalink),
+        author=str(item.get("author") or "").strip(),
+        text=str(item.get("body") or "").strip(),
+        likes=comment_shape.integer(item, "score", "upVotes", "ups"),
+        published_at=comment_shape.published_at(
+            item.get("createdUtc") or item.get("created_utc")
+            or item.get("redditCreatedAt")
+        ),
+        platform="reddit",
+        comment_id=str(item.get("id") or "").strip(),
+    )
+
+
+def fetch_comments(
+    post_id: str,
+    *,
+    parent_permalink: str,
+    limit: int = 20,
+    prowlo_token: str | None = None,
+    http_request: HttpRequest = _default_http_request,
+    timeout_seconds: float = 60.0,
+    client: ProwloClient | None = None,
+) -> comment_shape.CommentBatch:
+    """用 Prowlo social_get_post 取一帖的评论树顶层（每次算一次 live read）。"""
+
+    identifier = str(post_id).strip()
+    if not identifier:
+        raise ValueError("post_id 必须是非空字符串")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
+        raise ValueError("limit 必须为 1-20 整数")
+    if client is None:
+        token = prowlo_token or _load_token("PROWLO_API_KEY")
+        if not token:
+            raise RuntimeError("缺少 PROWLO_API_KEY")
+        client = ProwloClient(
+            token, http_request=http_request, timeout_seconds=timeout_seconds
+        )
+        client.initialize()
+    payload = client.call("social_get_post", {
+        "platform": "reddit", "id": identifier,
+        "includeComments": True, "commentLimit": limit,
+    })
+    values = payload.get("comments")
+    if not isinstance(values, list):
+        raise RuntimeError("Prowlo social_get_post 响应缺少 comments")
+    post = payload.get("post") if isinstance(payload.get("post"), Mapping) else {}
+    parent = parent_permalink or str(post.get("permalink") or "")
+    kept, dropped = comment_shape.clean(
+        [
+            _to_comment(item, parent_permalink=parent)
+            for item in values if isinstance(item, Mapping)
+        ],
+        limit=limit,
+    )
+    return comment_shape.CommentBatch(comments=kept, dropped_short=dropped, calls=1)
 
 
 def _emit(on_event: EventCallback | None, event_type: str, **data: Any) -> None:

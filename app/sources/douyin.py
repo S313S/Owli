@@ -15,10 +15,13 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.reliability.scoring import normalize_evidence_metrics
+from app.sources import comments as comment_shape
 from app.sources.spec import SourceSpec
 
 
-__all__ = ["FORBIDDEN_TIKHUB_PATHS", "SOURCE_SPEC", "search"]
+__all__ = [
+    "FORBIDDEN_TIKHUB_PATHS", "SOURCE_SPEC", "fetch_comments", "search",
+]
 
 _API_BASE = "https://api.tikhub.io"
 _SEARCH_PATH = "/api/v1/douyin/search/fetch_video_search_v5"
@@ -334,6 +337,58 @@ def _fetch_comments(
             break
         cursor = next_cursor
     return comments, complete, calls
+
+
+def _to_comment(
+    item: Mapping[str, Any], *, parent_permalink: str
+) -> comment_shape.Comment:
+    user = item.get("user") if isinstance(item.get("user"), Mapping) else {}
+    return comment_shape.Comment(
+        parent_permalink=parent_permalink,
+        # 抖音同样没有公开的单条评论链接，入库时由调用方合成锚点。
+        permalink="",
+        author=str(user.get("nickname") or item.get("nickname") or "").strip(),
+        text=str(item.get("text") or item.get("content") or "").strip(),
+        likes=comment_shape.integer(item, "digg_count", "like_count"),
+        published_at=comment_shape.published_at(item.get("create_time")),
+        platform="douyin",
+        comment_id=str(item.get("cid") or item.get("comment_id") or "").strip(),
+    )
+
+
+def fetch_comments(
+    aweme_id: str,
+    *,
+    parent_permalink: str,
+    limit: int = 20,
+    token: str | None = None,
+    http_request: HttpRequest = _default_http_request,
+    timeout_seconds: float = 45.0,
+    rate_gate: RateGate = _RATE_GATE,
+    max_pages: int = 4,
+) -> comment_shape.CommentBatch:
+    """把既有 `_fetch_comments` 的分页拉取包成三源统一形状对外暴露。"""
+
+    identifier = str(aweme_id).strip()
+    if not identifier:
+        raise ValueError("aweme_id 必须是非空字符串")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError("limit 必须为 1-100 整数")
+    api_token = token or _load_token()
+    raw, _complete, calls = _fetch_comments(
+        identifier,
+        declared_total=limit,
+        max_pages=max_pages,
+        token=api_token,
+        http_request=http_request,
+        timeout_seconds=timeout_seconds,
+        rate_gate=rate_gate,
+    )
+    kept, dropped = comment_shape.clean(
+        [_to_comment(item, parent_permalink=parent_permalink) for item in raw],
+        limit=limit,
+    )
+    return comment_shape.CommentBatch(comments=kept, dropped_short=dropped, calls=calls)
 
 
 def _comment_texts(comments: list[Mapping[str, Any]]) -> list[str]:
