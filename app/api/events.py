@@ -5,10 +5,17 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable, Deque, Mapping
+
+from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
+
+logger = logging.getLogger(__name__)
 
 
 Clock = Callable[[], datetime]
@@ -206,3 +213,123 @@ class ResearchEventBuffer:
             return tuple(
                 event for event in self._events[research_id] if event.sequence > sequence
             )
+
+
+def _step_hint(record: Mapping[str, Any]) -> str:
+    """从一条原始事件里挑出「此刻在干什么」：工具名 / 阶段名，挑不出就留空。"""
+
+    event = record.get("event")
+    if isinstance(event, str):
+        return event[:80]
+    if not isinstance(event, Mapping):
+        return ""
+    item = event.get("item")
+    if isinstance(item, Mapping):
+        for key in ("tool_name", "name", "type"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return value[:80]
+    for key in ("subtype", "type"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value[:80]
+    return ""
+
+
+@dataclass
+class _SectionBeat:
+    """一节的心跳状态：起跑时刻、上次发的时刻与那时的 seq。"""
+
+    started_at: float
+    last_emit_at: float = 0.0
+    last_seq: int = 0
+    emitted: bool = False
+
+
+class SectionHeartbeatPublisher:
+    """§OBS-2 货 3：每节每 15 s 或每 20 条原始事件发一条 `section_heartbeat`。
+
+    读的是货 1 落下的 `<chapter>.transcript.jsonl`，**不进适配器**——适配器只管
+    把原始流写出来，谁在看、多久看一次是观测侧的事。节跑完就不再发（文件不再长）。
+    """
+
+    def __init__(
+        self,
+        buffer: ResearchEventBuffer,
+        runs_root: Any,
+        active_researches: Callable[[], Any],
+        *,
+        interval_seconds: float = 3.0,
+        min_gap_seconds: float = 15.0,
+        event_step: int = 20,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._buffer = buffer
+        self._runs_root = Path(runs_root)
+        self._active = active_researches
+        self.interval_seconds = interval_seconds
+        self.min_gap_seconds = min_gap_seconds
+        self.event_step = event_step
+        self._clock = clock
+        self._beats: dict[tuple[str, str, str], _SectionBeat] = {}
+
+    async def run(self) -> None:
+        while True:
+            try:
+                await self.tick()
+            except Exception:  # 观测不许把服务拖死
+                logger.warning("section_heartbeat 一轮失败，跳过", exc_info=True)
+            await asyncio.sleep(self.interval_seconds)
+
+    async def tick(self) -> list[dict[str, Any]]:
+        """扫一遍所有在跑研究的 transcript，该发的发掉；返回本轮发出的心跳。"""
+
+        published: list[dict[str, Any]] = []
+        for research_id in list(self._active() or []):
+            root = self._runs_root / str(research_id) / "goals"
+            if not root.is_dir():
+                continue
+            for path in sorted(root.glob(f"*/*{TRANSCRIPT_SUFFIX}")):
+                payload = self._beat_for(str(research_id), path)
+                if payload is None:
+                    continue
+                await self._buffer.publish(str(research_id), payload)
+                published.append(payload)
+        return published
+
+    def _beat_for(self, research_id: str, path: Path) -> dict[str, Any] | None:
+        goal_id = path.parent.name
+        chapter = path.name[: -len(TRANSCRIPT_SUFFIX)]
+        key = (research_id, goal_id, chapter)
+        now = self._clock()
+        beat = self._beats.get(key)
+        if beat is None:
+            beat = self._beats.setdefault(key, _SectionBeat(started_at=now))
+        tail = read_transcript(path, tail=1)
+        last_seq = int(tail.get("last_seq") or 0)
+        if last_seq <= 0:
+            return None
+        due = (
+            not beat.emitted
+            or last_seq - beat.last_seq >= self.event_step
+            or now - beat.last_emit_at >= self.min_gap_seconds
+        )
+        if not due or (beat.emitted and last_seq == beat.last_seq):
+            return None
+        lines = tail.get("lines") or []
+        record = lines[-1] if lines else {}
+        beat.emitted = True
+        beat.last_emit_at = now
+        beat.last_seq = last_seq
+        return {
+            "type": "section_heartbeat",
+            "data": {
+                "goal": goal_id,
+                "chapter": chapter,
+                "agent": str(record.get("agent") or ""),
+                "engine": str(record.get("engine") or ""),
+                "step_hint": _step_hint(record),
+                "elapsed_s": round(max(0.0, now - beat.started_at), 1),
+                "last_seq": last_seq,
+            },
+        }

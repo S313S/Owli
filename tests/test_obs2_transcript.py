@@ -18,10 +18,10 @@ from app.adapters.transcript import (  # noqa: E402
 )
 
 
-def _task(runs_root: Path, output: Path) -> EngineTask:
+def _task(runs_root: Path, output: Path, goal_id: str = "goal-1") -> EngineTask:
     return EngineTask(
         body="写", output_path=output, output_format="markdown",
-        research_id="r-obs2", goal_id="goal-1", agent_id="report-writing",
+        research_id="r-obs2", goal_id=goal_id, agent_id="report-writing",
         agent_kind="report_writing", validators=["file_exists"],
         capability=Capability(
             tools=("fs.write",),
@@ -215,3 +215,68 @@ def test_transcript_接口_文件不存在返回空数组而非404(tmp_path: Pat
     assert body["ok"] and body["data"] == {"lines": [], "last_seq": 0, "size_bytes": 0}
     # 越界路径同样只回空，不许读到 runs 根之外。
     assert asyncio.run(call("..%2Fetc%2Fpasswd"))["data"]["lines"] == []
+
+
+def _publisher(runs_root: Path, clock):
+    from app.api.events import ResearchEventBuffer, SectionHeartbeatPublisher
+
+    buffer = ResearchEventBuffer()
+    publisher = SectionHeartbeatPublisher(
+        buffer, runs_root, lambda: ["r-obs2"], clock=clock,
+    )
+    return buffer, publisher
+
+
+def test_心跳_每20条或每15秒发一次且_elapsed_递增(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    goal = runs_root / "r-obs2" / "goals" / "goal-1"
+    writer = TranscriptWriter(_task(runs_root, goal / "ch-3.md"), engine="Codex")
+    ticks = [0.0]
+    _, publisher = _publisher(runs_root, lambda: ticks[0])
+
+    async def scenario() -> list[list[dict]]:
+        rounds: list[list[dict]] = []
+        writer.append({"type": "item.completed", "item": {"type": "web_search"}})
+        rounds.append(await publisher.tick())          # 首条必发
+        ticks[0] = 3.0
+        writer.append({"type": "item.completed", "item": {"type": "web_search"}})
+        rounds.append(await publisher.tick())          # 才多 1 条、才过 3 s：不发
+        for _ in range(20):
+            writer.append({"type": "item.completed", "item": {"type": "shell"}})
+        ticks[0] = 6.0
+        rounds.append(await publisher.tick())          # 多 20 条：发
+        ticks[0] = 30.0
+        writer.append({"type": "turn.completed"})
+        rounds.append(await publisher.tick())          # 过 15 s：发
+        ticks[0] = 33.0
+        rounds.append(await publisher.tick())          # 没新事件：不发
+        return rounds
+
+    rounds = asyncio.run(scenario())
+    assert [len(round_) for round_ in rounds] == [1, 0, 1, 1, 0]
+    beats = [round_[0]["data"] for round_ in rounds if round_]
+    assert [beat["elapsed_s"] for beat in beats] == [0.0, 6.0, 30.0]
+    assert [beat["last_seq"] for beat in beats] == [1, 22, 23]
+    assert [beat["step_hint"] for beat in beats] == ["web_search", "shell", "turn.completed"]
+    assert beats[0]["goal"] == "goal-1" and beats[0]["chapter"] == "ch-3"
+    assert beats[0]["engine"] == "Codex" and beats[0]["agent"] == "report-writing"
+
+
+def test_心跳进_SSE_事件流(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    goal = runs_root / "r-obs2" / "goals" / "goal-2"
+    writer = TranscriptWriter(
+        _task(runs_root, goal / "ch-1.md", "goal-2"), engine="Claude"
+    )
+    writer.append({"type": "assistant", "subtype": "tool_use"})
+    buffer, publisher = _publisher(runs_root, lambda: 1.0)
+
+    async def scenario() -> str:
+        buffer.bind_to_running_loop()
+        await publisher.tick()
+        batch = await buffer.replay_after("r-obs2", None)
+        return batch.events[-1].to_sse()
+
+    sse = asyncio.run(scenario())
+    assert "event: section_heartbeat" in sse
+    assert '"step_hint":"tool_use"' in sse

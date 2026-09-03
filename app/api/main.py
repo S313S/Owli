@@ -29,7 +29,7 @@ from app.adapters.selfcheck import (
 from app.adapters.recall import PrimaryEngineRecallJudge
 from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
 from app.api.delivery import register_delivery_routes
-from app.api.events import ResearchEventBuffer
+from app.api.events import ResearchEventBuffer, SectionHeartbeatPublisher
 from app.config import ResearchScaleConfig, load_research_scale_config
 from app.orchestrator.background import guard_task
 from app.orchestrator.runtime import RuntimeCoordinator
@@ -221,10 +221,24 @@ def create_app(
             application.state.rehydrated_researches = (
                 await runtime.rehydrate_running_researches()
             )
+            # §OBS-2 货 3：节心跳后台常驻，读 transcript 发 section_heartbeat。
+            heartbeats = SectionHeartbeatPublisher(
+                events, runtime.runs_root, lambda: list(researches)
+            )
+            application.state.section_heartbeats = heartbeats
+            heartbeat_task = asyncio.create_task(heartbeats.run())
+            application.state.heartbeat_task = heartbeat_task
+            background_tasks.add(heartbeat_task)
+            heartbeat_task.add_done_callback(background_tasks.discard)
         except (RuntimeConfigCheckError, SchemaCheckError) as error:
             print(str(error), file=sys.stderr)
             raise
-        yield
+        try:
+            yield
+        finally:
+            task = getattr(application.state, "heartbeat_task", None)
+            if task is not None:
+                task.cancel()
 
     application = FastAPI(title="Owli", lifespan=lifespan)
     application.state.event_buffer = events
