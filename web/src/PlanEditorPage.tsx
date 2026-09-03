@@ -412,6 +412,12 @@ function AgentEditor({
           onChange={(value) => onChange((item) => { item.capability.network = value })} />
         <Select disabled={disabled} value={agent.capability.shell} options={['none', 'readonly', 'workspace'].map((value) => ({ value, label: `Shell：${value}` }))}
           onChange={(value) => onChange((item) => { item.capability.shell = value })} />
+        {/* §CMT-1 货 5：只有采集卡才谈得上评论二跳 */}
+        {agent.capability.profile === 'web-collector' && <Select disabled={disabled}
+          data-testid="capability-comments"
+          value={agent.capability.comments ?? 'on'}
+          options={['on', 'off'].map((value) => ({ value, label: `评论二跳：${value === 'on' ? '开' : '关'}` }))}
+          onChange={(value) => onChange((item) => { item.capability.comments = value })} />}
       </Space>
 
       <label>引擎 <OriginTag agent={agent} field="engine" /></label>

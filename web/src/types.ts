@@ -65,6 +65,8 @@ export type PlanAgent = {
     network: string
     shell: string
     justification?: string
+    // §CMT-1 货 5：采集卡的评论二跳开关；老计划快照没有这一键，按开处理
+    comments?: string
   }
   prompt: { preamble_ref: string; body: string; assumptions_policy: string }
   output: { format: string; path: string; validators: string[] }
@@ -283,12 +285,19 @@ export type EvidenceItem = {
   score_total: number | null
   grade: string | null
   rating_notes?: string | null
+  // §CMT-1 货 5：帖/评论；旧库没有这一列的行按帖处理
+  kind?: 'post' | 'comment' | null
+  parent_permalink?: string | null
   rated_by?: string | null
   raw_metrics?: Record<string, unknown> | null
 }
 
 export type EvidenceView = {
   items: EvidenceItem[]
-  counts: { total: number; cited: number; by_platform: Record<string, number>; by_grade: Record<string, number> }
+  counts: {
+    total: number; cited: number
+    by_platform: Record<string, number>; by_grade: Record<string, number>
+    by_kind?: Record<string, number>
+  }
   score_fields: string[]
 }

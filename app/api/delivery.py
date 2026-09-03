@@ -21,6 +21,8 @@ EVIDENCE_FIELDS: tuple[str, ...] = (
     "source_type", "fetch_method", "author_name", "published_at", "fetched_at",
     "goal_id", *SCORE_FIELDS, "score_total", "grade", "rating_notes", "rated_by",
     "raw_metrics",
+    # §CMT-1 货 5：报告页要能按帖/评论筛选，父帖链接给评论行做溯源。
+    "kind", "parent_permalink",
 )
 
 
@@ -35,6 +37,7 @@ def evidence_view(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "cited": sum(item["citation_no"] is not None for item in items),
             "by_platform": dict(Counter(str(item["platform"]) for item in items)),
             "by_grade": dict(Counter(str(item["grade"] or "?") for item in items)),
+            "by_kind": dict(Counter(str(item["kind"] or "post") for item in items)),
         },
         "score_fields": list(SCORE_FIELDS),
     }

@@ -21,6 +21,8 @@ _PROFILES = {
 }
 _NETWORK_MODES = {"none", "sources_only", "open"}
 _SHELL_MODES = {"none", "readonly", "workspace"}
+#: §CMT-1 货 5：采集卡的评论二跳开关，默认开；计划编辑页可关。
+_COMMENT_MODES = {"on", "off"}
 _WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]{2})")
 
 
@@ -51,10 +53,15 @@ class Capability:
     network: str = "none"
     shell: str = "none"
     justification: str | None = None
+    #: 采集卡是否发评论二跳（§CMT-1 货 5）。只对有评论端点的源有意义，
+    #: 其余源忽略。老计划快照没有这一键 → 默认 "on"，与拍板口径一致。
+    comments: str = "on"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", _tuple(self.tools))
         object.__setattr__(self, "sources", _tuple(self.sources))
+        if self.comments not in _COMMENT_MODES:
+            raise ValueError(f"capability.comments 只能是 on/off：{self.comments!r}")
         if isinstance(self.fs, Mapping):
             object.__setattr__(
                 self,

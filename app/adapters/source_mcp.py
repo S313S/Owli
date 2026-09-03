@@ -736,6 +736,7 @@ def stdio_server_config(
     agent_id: str = "mcp",
     item_limit: int | None = None,
     store_path: str | Path | None = None,
+    comments: str = "on",
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Claude SDK 可直接消费的 stdio MCP 配置。"""
@@ -759,6 +760,9 @@ def stdio_server_config(
         args.extend(["--item-limit", str(item_limit)])
     if store_path is not None:
         args.extend(["--store-path", str(store_path)])
+    # 默认就是 on，只有关掉时才多带一个参数——不改既有配置的形状。
+    if str(comments) == "off":
+        args.append("--no-comments")
     parent_env = os.environ if environ is None else environ
     child_env = {"PYTHONPATH": str(PROJECT_ROOT)}
     child_env.update(
@@ -785,6 +789,7 @@ def codex_mcp_args(
     agent_id: str = "mcp",
     item_limit: int | None = None,
     store_path: str | Path | None = None,
+    comments: str = "on",
 ) -> list[str]:
     """Codex CLI 单次任务 MCP 配置，不写入隔离 CODEX_HOME。"""
 
@@ -796,6 +801,7 @@ def codex_mcp_args(
         agent_id=agent_id,
         item_limit=item_limit,
         store_path=store_path,
+        comments=comments,
     )
     env_toml = ",".join(
         f"{name}={json.dumps(value, ensure_ascii=False)}"
@@ -865,6 +871,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent-id", default="mcp")
     parser.add_argument("--item-limit", type=int)
     parser.add_argument("--store-path", type=Path)
+    parser.add_argument("--no-comments", action="store_true")
     return parser
 
 
@@ -877,6 +884,7 @@ async def _serve(
     agent_id: str = "mcp",
     item_limit: int | None = None,
     store_path: Path | None = None,
+    comments: str = "on",
 ) -> None:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -921,6 +929,7 @@ async def _serve(
                 ),
                 item_limit=item_limit,
                 on_event=events.append,
+                with_comments=comments,
             )
         except Exception as exc:
             error = exc
@@ -976,6 +985,7 @@ def main(argv: list[str] | None = None) -> None:
             agent_id=args.agent_id,
             item_limit=args.item_limit,
             store_path=args.store_path,
+            comments="off" if args.no_comments else "on",
         )
     )
 

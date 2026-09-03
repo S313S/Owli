@@ -24,10 +24,14 @@ from app.reliability.scoring import SCORE_FIELDS, grade_for_total
 
 SHEETS = ("01_结论摘要", "02_图表", "03_明细数据", "04_信息源", "05_标签", "90_图表数据")
 SOURCE_HEADER = (
-    "角标ID", "平台", "标题/摘要", "URL", "抓取时间", "总分与等级",
+    # §CMT-1 货 5：C 列「类型」区分帖/评论——读者反应和帖子作者的说法
+    # 权重不一样，人工复核第一眼要能分开。其后各列整体右移一位。
+    "角标ID", "平台", "类型", "标题/摘要", "URL", "抓取时间", "总分与等级",
     "权威性(0-2)", "时效性(0-2)", "交叉验证(0-2)", "完整度(0-2)", "利益无关性(0-2)",
     "评分理由与备注",
 )
+#: kind 列到中文表头的映射；旧库没有 kind 列的行按帖处理。
+KIND_LABELS = {"post": "帖", "comment": "评论"}
 C_DEEP, C_MID, C_DGRAY = "1F3864", "4472C4", "595959"
 F_TITLE = Font(name="微软雅黑", size=12, bold=True, color=C_DEEP)
 F_SUB = Font(name="微软雅黑", size=9, color=C_DGRAY)
@@ -86,6 +90,7 @@ def _sheet_sources(ws: Worksheet, cited: Sequence[Mapping[str, Any]]) -> None:
         summary = f"{total} / {grade_for_total(total)}" if complete else "? / ?"
         rows.append([
             _mark(int(item["citation_no"])), item.get("platform"),
+            KIND_LABELS.get(str(item.get("kind") or "post"), "帖"),
             item.get("title") or item.get("content_excerpt") or item.get("permalink"),
             item.get("permalink"), _fetched(item.get("fetched_at")), summary,
             *[s if isinstance(s, int) else None for s in scores],
@@ -93,16 +98,17 @@ def _sheet_sources(ws: Worksheet, cited: Sequence[Mapping[str, Any]]) -> None:
         ])
     last = _write_rows(ws, 1, rows)
     for r in range(2, last):
-        cell = ws.cell(row=r, column=4)
+        cell = ws.cell(row=r, column=5)
         cell.hyperlink = str(cell.value)
         cell.font = F_LINK
-        for c in range(7, 12):
+        ws.cell(row=r, column=3).alignment = Alignment(horizontal="center")
+        for c in range(8, 13):
             ws.cell(row=r, column=c).alignment = Alignment(horizontal="center")
     if last > 2:
-        span = f"G2:K{last - 1}"
+        span = f"H2:L{last - 1}"
         ws.conditional_formatting.add(span, CellIsRule(operator="equal", formula=["0"], fill=FILL_ZERO))
         ws.conditional_formatting.add(span, CellIsRule(operator="equal", formula=["2"], fill=FILL_TWO))
-    for col, width in zip("ABCDEFGHIJKL", (8, 12, 48, 40, 17, 12, 8, 8, 8, 8, 8, 60)):
+    for col, width in zip("ABCDEFGHIJKLM", (8, 12, 6, 48, 40, 17, 12, 8, 8, 8, 8, 8, 60)):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"
 

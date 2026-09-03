@@ -34,8 +34,11 @@ def test_导出六_sheet_且八项校验全过(tmp_path: Path) -> None:
     sources = wb["04_信息源"]
     assert [sources.cell(row=r, column=1).value for r in range(2, 4)] == ["S01", "S02"]
     assert sources.cell(row=4, column=1).value is None  # 只列 citation_no 非空的行
-    assert [sources.cell(row=2, column=c).value for c in range(6, 12)] == ["? / ?", 1, 2, None, 1, 1]
-    assert sources["D2"].hyperlink.target == "https://www.xiaohongshu.com/explore/a1"
+    # §CMT-1 货 5：C 列插入「类型」，其后整列右移一位
+    assert sources.cell(row=1, column=3).value == "类型"
+    assert sources.cell(row=2, column=3).value in {"帖", "评论"}
+    assert [sources.cell(row=2, column=c).value for c in range(7, 13)] == ["? / ?", 1, 2, None, 1, 1]
+    assert sources["E2"].hyperlink.target == "https://www.xiaohongshu.com/explore/a1"
     assert "图例" in str(wb["01_结论摘要"]["A3"].value) and "? / ?" in str(wb["01_结论摘要"]["A3"].value)
     assert wb["01_结论摘要"]["A4"].value == "1. 结论一 [S01][S02]"
     assert wb["03_明细数据"].max_row == 5 and wb["03_明细数据"]["J3"].value == 3  # 原始:digg_count
@@ -54,9 +57,9 @@ def test_校验器能抓出故意做坏的产物(tmp_path: Path) -> None:
     assert any(e.startswith("1 ") for e in check_workbook(tmp_path / "nosheet.xlsx"))
 
     wb = load_workbook(path)
-    wb["04_信息源"]["D2"].hyperlink = None
-    wb["04_信息源"]["G3"] = 5
-    wb["04_信息源"]["F2"] = "3 / D"
+    wb["04_信息源"]["E2"].hyperlink = None
+    wb["04_信息源"]["H3"] = 5
+    wb["04_信息源"]["G2"] = "3 / D"
     wb["01_结论摘要"]["A5"] = "2. 结论没角标"
     wb["90_图表数据"].sheet_state = "visible"
     wb.save(tmp_path / "cells.xlsx")

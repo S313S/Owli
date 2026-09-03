@@ -106,6 +106,8 @@ def test_json_成稿的结构化报告与证据清单(tmp_path: Path) -> None:
     assert data["counts"] == {
         "total": 3, "cited": 2,
         "by_platform": {"xhs": 1, "douyin": 1, "web_search": 1}, "by_grade": {"?": 3},
+        # §CMT-1 货 5：多一路帖/评论计数，报告页据此筛选
+        "by_kind": {"post": 3},
     }
     first = data["items"][0]
     assert first["permalink"] == URL_A and first["score_crossref"] is None

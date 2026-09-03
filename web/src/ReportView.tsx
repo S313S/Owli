@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Empty, Popover, Space, Spin, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Collapse, Empty, Popover, Segmented, Space, Spin, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +15,9 @@ const REASON_LABEL: Record<string, string> = {
   conclusion_invalid: '结论不合规', empty_result: '空结果', quota_exhausted: '额度耗尽',
 }
 const gradeColor: Record<string, string> = { A: 'green', B: 'blue', C: 'orange', D: 'red' }
+// §CMT-1 货 5：kind=comment 是读者反应，不是帖子作者的说法——列表里要一眼分得开。
+const KIND_LABEL: Record<string, string> = { post: '帖', comment: '评论' }
+const kindOf = (item: { kind?: string | null }) => (item.kind === 'comment' ? 'comment' : 'post')
 
 export function useReportData(researchId: string) {
   const [report, setReport] = useState<ReportData | null>(null)
@@ -53,9 +56,13 @@ function CitationCard({ item, no }: { item: EvidenceItem | { permalink: string; 
     <Space wrap>
       <Typography.Text strong>S{String(no).padStart(2, '0')}</Typography.Text>
       {full && <Tag>{full.platform}</Tag>}
+      {full && kindOf(full) === 'comment' && <Tag color="purple">评论</Tag>}
       {full && <Tag color={gradeColor[full.grade ?? ''] ?? 'default'}>等级 {full.grade ?? '?'}</Tag>}
     </Space>
     <div><a href={item.permalink} target="_blank" rel="noreferrer">{item.title || item.permalink}</a></div>
+    {full?.parent_permalink && <div className="dims">
+      父帖 <a href={full.parent_permalink} target="_blank" rel="noreferrer">{full.parent_permalink}</a>
+    </div>}
     {full && <div className="dims">五维 {scoreText(full)}{full.score_total != null ? ` · 总分 ${full.score_total}` : ''}</div>}
     {full?.rating_notes && <Typography.Paragraph type="secondary" style={{ marginBottom: 4 }}>理由：{full.rating_notes}</Typography.Paragraph>}
     {full?.content_excerpt && <Typography.Paragraph ellipsis={{ rows: 3 }} style={{ marginBottom: 0 }}>{full.content_excerpt}</Typography.Paragraph>}
@@ -105,13 +112,17 @@ function Markdown({ text, lookup }: { text: string; lookup: Lookup }) {
 }
 
 function References({ report, evidence }: { report: ReportData; evidence: EvidenceView | null }) {
+  const [kindFilter, setKindFilter] = useState<'all' | 'post' | 'comment'>('all')
   const listedTitle = new Map(report.sources.map((s) => [s.citation_no, s.title]))
+  const keep = (i: EvidenceItem) => kindFilter === 'all' || kindOf(i) === kindFilter
   const cited = evidence
-    ? evidence.items.filter((i) => i.citation_no != null)
+    ? evidence.items.filter((i) => i.citation_no != null).filter(keep)
         .map((i) => (i.title ? i : { ...i, title: listedTitle.get(i.citation_no!) ?? '' }))
     : []
-  const uncited = evidence ? evidence.items.filter((i) => i.citation_no == null) : []
-  const rows: EvidenceItem[] = cited.length ? cited : report.sources.map((s) => ({
+  const uncited = evidence ? evidence.items.filter((i) => i.citation_no == null).filter(keep) : []
+  const commentCount = evidence ? evidence.items.filter((i) => kindOf(i) === 'comment').length : 0
+  // 筛到「评论」时不能回落成稿信息源段——那份没有 kind，会把帖子当评论显示。
+  const rows: EvidenceItem[] = cited.length || kindFilter !== 'all' ? cited : report.sources.map((s) => ({
     id: `src-${s.citation_no}`, citation_no: s.citation_no, permalink: s.permalink, title: s.title, platform: '—',
     fetched_at: '', score_authority: null, score_freshness: null, score_crossref: null,
     score_completeness: null, score_independence: null, score_total: null, grade: null,
@@ -119,13 +130,27 @@ function References({ report, evidence }: { report: ReportData; evidence: Eviden
   const columns = [
     { title: '角标', dataIndex: 'citation_no', width: 64, render: (n: number) => `S${String(n).padStart(2, '0')}` },
     { title: '平台', dataIndex: 'platform', width: 90 },
+    { title: '类型', dataIndex: 'kind', width: 72, render: (_: unknown, r: EvidenceItem) =>
+      <Tag color={kindOf(r) === 'comment' ? 'purple' : 'default'} data-testid="evidence-kind">{KIND_LABEL[kindOf(r)]}</Tag> },
     { title: '标题', dataIndex: 'title', render: (t: string, r: EvidenceItem) => <a href={r.permalink} target="_blank" rel="noreferrer">{t || r.permalink}</a> },
     { title: '等级', dataIndex: 'grade', width: 64, render: (g: string | null) => <Tag color={gradeColor[g ?? ''] ?? 'default'}>{g ?? '?'}</Tag> },
     { title: '五维（权威/时效/交叉/完整/无关）', key: 'dims', width: 220, render: (_: unknown, r: EvidenceItem) => scoreText(r) },
     { title: '抓取时间', dataIndex: 'fetched_at', width: 170 },
   ]
   return <section data-testid="report-references">
-    <Typography.Title level={4}>参考文献（{rows.length}）</Typography.Title>
+    <Space align="center" wrap style={{ marginBottom: 8 }}>
+      <Typography.Title level={4} style={{ margin: 0 }}>参考文献（{rows.length}）</Typography.Title>
+      {commentCount > 0 && <Segmented
+        size="small"
+        data-testid="evidence-kind-filter"
+        value={kindFilter}
+        onChange={(value) => setKindFilter(value as 'all' | 'post' | 'comment')}
+        options={[
+          { label: '全部', value: 'all' },
+          { label: '帖', value: 'post' },
+          { label: `评论 ${commentCount}`, value: 'comment' },
+        ]} />}
+    </Space>
     {rows.length
       ? <Table size="small" rowKey="id" pagination={false} dataSource={rows} columns={columns} />
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="成稿没有引用任何信息源" />}

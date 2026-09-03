@@ -462,6 +462,9 @@ def _capability(
             "fs": {"read": upstream_paths, "write": [current]},
             "network": "sources_only",
             "shell": "none",
+            # §CMT-1 货 5：评论二跳默认开（有评论端点的源才生效），
+            # 用户可在计划编辑页把某张采集卡关掉。
+            "comments": "on",
         }
     if profile == "sandboxed-runner":
         return {
@@ -598,7 +601,8 @@ def render_source_handbook(scale: str = "standard") -> str:
     page = SOURCE_HANDBOOK_PATH.read_text(encoding="utf-8").rstrip("\n")
     limits = load_research_scale_config().profile(scale).source_item_limits
     parameters = source_limit_parameters()
-    rows = ["", "## 5. 当前可用的源", "",
+    # §CMT-1 货 5：手册正文插了「评论是自动带上的」一节，逐源表顺延为第 6 节。
+    rows = ["", "## 6. 当前可用的源", "",
             "| 工具 | 是什么 | 时间窗 | 本档名额 | 要点 |",
             "|---|---|---|---|---|"]
     for spec in planning_catalog():
