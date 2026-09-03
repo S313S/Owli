@@ -237,13 +237,14 @@ export default function RunPanel({ researchId, snapshot }: {
     <div className="run-panel-head">
       <b>运行面板</b>
       {/* 货 10：两个互斥标签，像终端软件的 tab；默认「进程」 */}
+      {/* 用原生 button 不用 antd Button：后者会在两个汉字之间自动塞一个空格（「进 程」） */}
       <span className="run-panel-views" role="tablist">
-        <Button size="small" role="tab" data-testid="run-panel-progress"
-          aria-selected={view === 'progress'} type={view === 'progress' ? 'primary' : 'text'}
-          onClick={() => pickView('progress')}>进程</Button>
-        <Button size="small" role="tab" data-testid="run-panel-log"
-          aria-selected={view === 'transcript'} type={view === 'transcript' ? 'primary' : 'text'}
-          onClick={() => pickView('transcript')}>日志</Button>
+        <button type="button" role="tab" data-testid="run-panel-progress"
+          className={`run-panel-view${view === 'progress' ? ' is-on' : ''}`}
+          aria-selected={view === 'progress'} onClick={() => pickView('progress')}>进程</button>
+        <button type="button" role="tab" data-testid="run-panel-log"
+          className={`run-panel-view${view === 'transcript' ? ' is-on' : ''}`}
+          aria-selected={view === 'transcript'} onClick={() => pickView('transcript')}>日志</button>
       </span>
       {current ? <Tag>{current.name}</Tag> : null}
       {beat ? <Typography.Text type="secondary" data-testid="run-panel-beat">

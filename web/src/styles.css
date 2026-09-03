@@ -188,7 +188,17 @@ body { margin: 0; background: #f5f5f5; }
   word-break: break-all;
 }
 /* §OBS-3 货 10：面板头两个互斥标签（进程 / 日志），同一时刻只显示一个 */
-.run-panel-views { display: inline-flex; gap: 2px; }
+.run-panel-views { display: inline-flex; gap: 4px; }
+.run-panel-view {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 12px;
+  font-size: 12px;
+  color: #475569;
+  background: #fff;
+  cursor: pointer;
+}
+.run-panel-view.is-on { background: #2563eb; border-color: #2563eb; color: #fff; }
 .run-panel-col {
   flex: 1 1 auto;
   min-width: 0;
