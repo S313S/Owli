@@ -263,11 +263,6 @@ def _codex_item(item: Mapping[str, Any], ts: float, seq: int) -> ProgressLine | 
             ts, seq, STAGE_FAIL, _clip(f"命令失败（{name}）：{item.get('aggregated_output') or ''}"),
             "error")
 
-
-def short(text: str, limit: int = 24) -> str:
-    """给角标用的短句：压平 + 截断（`_clip` 的公开出口）。"""
-
-    return _clip(text, limit)
     if "mcp_tool_call" in kind or "tool" in kind:
         name = str(item.get("tool") or item.get("name") or "工具")
         summary = _arg_summary(item.get("arguments") or item.get("input"))
@@ -361,10 +356,12 @@ def _dedupe(lines: list[ProgressLine]) -> list[ProgressLine]:
     「失败 这一节没跑成：API Error…」，人读三遍等于没读。
     """
 
+    sayish = {"say", "error", "done"}
     out: list[ProgressLine] = []
     for line in lines:
         head = line.text[:40]
-        while out and head and (head in out[-1].text or out[-1].text[:40] in line.text):
+        while (out and head and line.kind in sayish and out[-1].kind in sayish
+               and (head in out[-1].text or out[-1].text[:40] in line.text)):
             out.pop()
         out.append(line)
     return out
@@ -417,3 +414,9 @@ def unmatched_kinds(records: Iterable[Mapping[str, Any]]) -> dict[str, int]:
             key = type(event).__name__
         tally[key] = tally.get(key, 0) + 1
     return tally
+
+
+def short(text: str, limit: int = 24) -> str:
+    """给角标用的短句：压平 + 截断（`_clip` 的公开出口）。"""
+
+    return _clip(text, limit)
