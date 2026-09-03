@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ApiEnvelope, LlmUsage, NormalizedEvent, ResearchSnapshot } from './types'
+import type { ApiEnvelope, LlmUsage, NormalizedEvent, ResearchSnapshot, SectionHeartbeat } from './types'
 
 const EMPTY_LLM_USAGE: LlmUsage = {
   input_tokens: 0,
@@ -16,7 +16,7 @@ const EMPTY_LLM_USAGE: LlmUsage = {
 const eventTypes = [
   'stream_connected', 'research_snapshot', 'research_update', 'progress',
   'agent_update', 'card_update', 'artifact', 'error', 'replay_truncated',
-  'normalized_event',
+  'normalized_event', 'section_heartbeat',
 ]
 
 export function useResearchStream(researchId: string) {
@@ -77,6 +77,13 @@ function reduceEvent(current: ResearchSnapshot | null, event: NormalizedEvent): 
     } as unknown as ResearchSnapshot
   }
   if (!current) return current
+  // §OBS-2 货 3：心跳只更新运行面板与卡片角标，不进「事件流」时间线——
+  // 每节每 15 s 一条，塞进去会把关键事件冲没。
+  if (event.type === 'section_heartbeat') {
+    const beat = { ...data, received_at: Date.now() } as unknown as SectionHeartbeat
+    const key = String(data.agent || `${String(data.goal)}/${String(data.chapter)}`)
+    return { ...current, heartbeats: { ...(current.heartbeats ?? {}), [key]: beat } }
+  }
   const eventLine = { ...event }
   if (event.type === 'research_update') {
     return { ...current, ...data, events: [eventLine, ...current.events].slice(0, 200) } as ResearchSnapshot

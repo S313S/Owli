@@ -149,3 +149,42 @@ body { margin: 0; background: #f5f5f5; }
 .citation-card .dims { font-family: Calibri, monospace; }
 .report-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .report-missing-group { margin-bottom: 8px; }
+
+/* §OBS-2 货 4/5：底部运行面板与卡片心跳角标 */
+.run-panel {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.run-panel-grip {
+  height: 6px;
+  cursor: row-resize;
+  background: linear-gradient(#f1f5f9, #e2e8f0);
+}
+.run-panel[data-collapsed="1"] .run-panel-grip { display: none; }
+.run-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.run-panel-spacer { flex: 1; }
+.run-panel-body { overflow: hidden; display: flex; flex-direction: column; }
+.run-panel-lines {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  max-height: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.agent-heartbeat { margin-top: 4px; font-size: 12px; color: #6b7280; }

@@ -131,6 +131,28 @@ export type LlmUsage = {
   costed_calls: number
 }
 
+/** §OBS-2 货 3：节心跳，一节一条，按 goal/chapter 覆盖式更新。 */
+export type SectionHeartbeat = {
+  goal: string
+  chapter: string
+  agent: string
+  engine: string
+  step_hint: string
+  elapsed_s: number
+  last_seq: number
+  received_at: number
+}
+
+/** §OBS-2 货 2：transcript 一行 = 一条引擎原始事件。 */
+export type TranscriptLine = {
+  ts: number
+  seq: number
+  engine?: string
+  agent?: string
+  output?: string
+  event: unknown
+}
+
 export type ResearchSnapshot = {
   research_id: string
   title: string
@@ -149,6 +171,8 @@ export type ResearchSnapshot = {
   missing?: HistoricalMissing[]
   cards: ActionCard[]
   events: NormalizedEvent[]
+  /** 键是 agent_id；没有 agent 归属的心跳落 `goal/chapter`。 */
+  heartbeats?: Record<string, SectionHeartbeat>
 }
 
 export type ChapterProgress = {

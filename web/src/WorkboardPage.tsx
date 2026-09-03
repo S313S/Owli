@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import ActionButtons from './ActionButtons'
 import ActionCardView from './ActionCardView'
 import HistoricalResearchView from './HistoricalResearchView'
+import RunPanel, { formatElapsed } from './RunPanel'
 import { useResearchStream } from './useResearchStream'
 
 const statusColor: Record<string, string> = {
@@ -83,6 +84,14 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
             <Typography.Paragraph type="secondary">{agent.activity}</Typography.Paragraph>
             {agent.status === 'retrying' && <Typography.Text type="warning">重跑第 {agent.retry_attempt ?? '—'} / {agent.retry_max ?? 10} 次</Typography.Text>}
             <Badge status={statusColor[agent.status] as 'success' | 'processing' | 'warning' | 'error' | 'default'} text={agent.status} />
+            {/* OBS-2 货 5：running 的卡片把「已用多久 · 最近在干什么」写在角标上，
+                来源是 section_heartbeat（货 3），拿不到心跳就什么都不显示。 */}
+            {(agent.status === 'running' || agent.status === 'retrying') && snapshot.heartbeats?.[agent.id]
+              ? <div className="agent-heartbeat" data-testid={`heartbeat-${agent.id}`}>
+                已用 {formatElapsed(snapshot.heartbeats[agent.id].elapsed_s)}
+                {snapshot.heartbeats[agent.id].step_hint ? ` · 最近：${snapshot.heartbeats[agent.id].step_hint}` : ''}
+              </div>
+              : null}
           </Card>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={goal.summary} />,
         }))} />
       </section>
@@ -101,5 +110,8 @@ export default function WorkboardPage({ researchId }: { researchId: string }) {
         </Card>
       </aside>
     </div>
+
+    {/* OBS-2 货 4：底部运行面板（可拖高、可折叠、记忆到 localStorage）。 */}
+    <RunPanel researchId={researchId} snapshot={snapshot} />
   </main>
 }
