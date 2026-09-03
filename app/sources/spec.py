@@ -93,6 +93,12 @@ class SourceSpec:
     #: 此前它们各手抄一份，hacker_news 已漂成一边 hitsPerPage 一边 limit，
     #: 探活那份更把 x 写成 limit（x 只有 max_results）、每次探活必 TypeError。
     limit_parameter: str = "limit"
+    #: 本源的「评论二跳」入口（§CMT-1 货 2）。`None` = 这个源没有评论端点，
+    #: 采集工具就不会为它发第二跳。签名固定为
+    #: `(item_id, *, parent_permalink, limit) -> comments.CommentBatch`。
+    #: 和 limit_parameter 同一个道理：源清单只在源自己身上写一次，
+    #: 适配器不再手抄一份（[[add-source-needs-three-tables]]）。
+    comment_fetcher: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         if not _SOURCE_ID_PATTERN.fullmatch(self.source_id):
@@ -106,6 +112,8 @@ class SourceSpec:
             raise ValueError("collector_name 必须以‘数据抓取’结尾")
         if not self.limit_parameter.isidentifier():
             raise ValueError("limit_parameter 必须是合法形参名")
+        if self.comment_fetcher is not None and not callable(self.comment_fetcher):
+            raise TypeError("comment_fetcher 必须可调用")
 
 
 __all__ = ["SourceSpec", "WindowParam"]

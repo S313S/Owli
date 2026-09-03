@@ -325,6 +325,202 @@ def _persist_returned_evidence(
         store.upsert_evidence_batch(payloads)
 
 
+# §CMT-1 货 2：评论二跳的默认配额（用户 2026-09-03 午后拍板）。
+DEFAULT_COMMENT_PLAN: dict[str, int] = {"top_k": 5, "per_post": 20}
+
+
+def resolve_comment_plan(with_comments: Any) -> dict[str, int] | None:
+    """把采集卡/调用方给的 with_comments 折算成 {top_k, per_post} 或「不采」。
+
+    `None` = 没说 → 按默认开；`False`/`"off"`/空映射 = 明确关；
+    映射里给了几个就覆盖几个，`top_k` 或 `per_post` 落到 0 也算关。
+    """
+
+    if with_comments is None:
+        return dict(DEFAULT_COMMENT_PLAN)
+    if with_comments is False or with_comments == {}:
+        return None
+    if isinstance(with_comments, str):
+        text = with_comments.strip().casefold()
+        if text in {"off", "false", "no", "0"}:
+            return None
+        if text in {"on", "true", "yes", "1"}:
+            return dict(DEFAULT_COMMENT_PLAN)
+        raise ValueError(f"with_comments 不认这个写法：{with_comments!r}")
+    if with_comments is True:
+        return dict(DEFAULT_COMMENT_PLAN)
+    if not isinstance(with_comments, Mapping):
+        raise TypeError("with_comments 必须是映射、布尔或 on/off")
+    plan = dict(DEFAULT_COMMENT_PLAN)
+    for key in ("top_k", "per_post"):
+        if key not in with_comments:
+            continue
+        value = with_comments[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"with_comments.{key} 必须是非负整数")
+        plan[key] = value
+    if plan["top_k"] < 1 or plan["per_post"] < 1:
+        return None
+    return plan
+
+
+def _engagement(row: Mapping[str, Any]) -> tuple[float, int]:
+    """按一跳结果自己的互动量排序。
+
+    刻意不用上游的 `sort` 参数：提货单「已验事实」记着 Prowlo 的
+    `sort:"comments"` 会返回无关热帖（搜 Claude Code 命中 r/soccer 日经贴）。
+    """
+
+    metrics = row.get("raw_metrics")
+    total = 0
+    if isinstance(metrics, Mapping):
+        for value in metrics.values():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                total += int(value)
+    score = row.get("normalized_score")
+    return (float(score) if isinstance(score, (int, float)) else 0.0, total)
+
+
+def _comment_permalink(comment: Any, parent_permalink: str) -> str:
+    """评论有自己的链接就用自己的；没有就在父帖链接上挂一个评论锚点参数。
+
+    锚点走 query 而不是 fragment——`dao.normalize_permalink` 会把 fragment
+    抹掉，用 `#comment-x` 二十条评论会塌成同一个 permalink。
+    """
+
+    if comment.permalink:
+        return comment.permalink
+    if not parent_permalink:
+        return ""
+    marker = comment.comment_id or hashlib.sha256(
+        f"{comment.author}\0{comment.text[:64]}".encode("utf-8")
+    ).hexdigest()[:16]
+    separator = "&" if "?" in parent_permalink else "?"
+    return f"{parent_permalink}{separator}owli_comment={marker}"
+
+
+def _comment_row(
+    comment: Any,
+    *,
+    parent: Mapping[str, Any],
+    report_id: str,
+    goal_id: str,
+    agent_id: str,
+    fetched_at: str,
+) -> dict[str, Any] | None:
+    """把统一形状的评论折成一条独立证据行（kind='comment'）。
+
+    五维分刻意留空：评论行的评级由评级章回填（§CMT-1 货 4），
+    这里补一个假基线只会把「没评过」和「评了最低」混在一起。
+    """
+
+    parent_permalink = str(parent.get("permalink") or "").strip()
+    permalink = _comment_permalink(comment, parent_permalink)
+    if not permalink or not parent_permalink or not comment.text:
+        return None
+    digest = hashlib.sha256(
+        f"{report_id}\0{comment.platform}\0comment\0{permalink}".encode("utf-8")
+    ).hexdigest()[:24]
+    return {
+        "id": f"ev-{digest}",
+        "report_id": report_id,
+        "goal_id": goal_id,
+        "agent_name": agent_id,
+        "platform": comment.platform,
+        "source_type": "comment",
+        "kind": "comment",
+        "parent_permalink": parent_permalink,
+        "platform_item_id": comment.comment_id or None,
+        "permalink": permalink,
+        "title": f"评论 · {str(parent.get('title') or '')[:60]}".strip(),
+        "content_excerpt": comment.text[:4000],
+        "author_name": comment.author or None,
+        "source_keyword": parent.get("source_keyword"),
+        "fetch_method": parent.get("fetch_method") or "third_party_api",
+        "published_at": comment.published_at,
+        "fetched_at": fetched_at,
+        "raw_metrics": {"likes": comment.likes},
+        "extra": {
+            "content_kind": "user_opinion",
+            "comment_of": parent_permalink,
+            "parent_author": str(parent.get("author_name") or ""),
+        },
+    }
+
+
+def _second_hop(
+    fetcher: Any,
+    rows: list[Mapping[str, Any]],
+    plan: Mapping[str, int],
+    *,
+    report_id: str,
+    goal_id: str,
+    agent_id: str,
+    emit: Any,
+) -> list[dict[str, Any]]:
+    """一跳结果里按互动量取前 top_k 帖，逐条拉 per_post 条评论。
+
+    单帖失败不掐整节——评论是加料，不是这一节的产出本身。
+    """
+
+    from datetime import datetime, timezone
+
+    top_k = int(plan["top_k"])
+    per_post = int(plan["per_post"])
+    ranked = sorted(rows, key=_engagement, reverse=True)[:top_k]
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    built: list[dict[str, Any]] = []
+    calls = 0
+    dropped_short = 0
+    failed = 0
+    for parent in ranked:
+        identifier = str(
+            parent.get("platform_item_id") or parent.get("permalink") or ""
+        ).strip()
+        permalink = str(parent.get("permalink") or "").strip()
+        if not identifier or not permalink:
+            continue
+        try:
+            batch = fetcher(
+                identifier, parent_permalink=permalink, limit=per_post
+            )
+        except Exception as error:  # 单帖失败只记账
+            failed += 1
+            emit({
+                "type": "source_comment_partial",
+                "data": {
+                    "parent_permalink": permalink,
+                    "reason": type(error).__name__,
+                    "task_continues": True,
+                },
+            })
+            continue
+        calls += batch.calls
+        dropped_short += batch.dropped_short
+        for comment in batch.comments:
+            row = _comment_row(
+                comment, parent=parent, report_id=report_id,
+                goal_id=goal_id, agent_id=agent_id, fetched_at=fetched_at,
+            )
+            if row is not None:
+                built.append(row)
+    emit({
+        "type": "source_yield_summary",
+        "data": {
+            "stage": "comments",
+            "parents_requested": len(ranked),
+            "parents_failed": failed,
+            "comment_calls": calls,
+            "comments_kept": len(built),
+            "dropped_short": dropped_short,
+            "top_k": top_k,
+            "per_post": per_post,
+            "task_continues": True,
+        },
+    })
+    return built
+
+
 class SourceToolAdapter:
     """source.* 统一调用面；工具发现与实现细节只留在适配层。"""
 
@@ -336,6 +532,60 @@ class SourceToolAdapter:
     ) -> None:
         self._source_tools = dict(source_tools) if source_tools is not None else None
         self._store = store
+
+    def _attach_comments(
+        self,
+        source_id: str,
+        result: Any,
+        with_comments: Any,
+        research_id: str,
+        goal_id: str,
+        agent_id: str,
+        emit: Any,
+    ) -> Any:
+        """二跳：拉评论、入库、并入本节 rows。没评论端点或关了就原样返回。"""
+
+        plan = resolve_comment_plan(with_comments)
+        if plan is None:
+            return result
+        fetcher = self._comment_fetcher(source_id)
+        if fetcher is None:
+            return result
+        rows = [
+            row for row in _result_evidence(result)
+            if str(row.get("kind") or "post") == "post"
+        ]
+        if not rows:
+            return result
+        comments = _second_hop(
+            fetcher, rows, plan, report_id=research_id, goal_id=goal_id,
+            agent_id=agent_id, emit=emit,
+        )
+        if not comments:
+            return result
+        if self._store is not None:
+            self._store.upsert_evidence_batch(comments)
+        if isinstance(result, list):
+            return list(result) + comments
+        if isinstance(result, Mapping) and isinstance(result.get("evidence"), list):
+            merged = dict(result)
+            merged["evidence"] = list(result["evidence"]) + comments
+            return merged
+        return result
+
+    def _comment_fetcher(self, source_id: str) -> Any:
+        """本源的评论二跳入口；与 `_entrypoint` 同一套发现纪律。
+
+        注入了 source_tools 的调用方（测试替身、离线夹具）只认它自己给的
+        `source.<id>.comments`——不能因为真注册表里有 xhs.fetch_comments，
+        就替一个替身源发真网络请求。
+        """
+
+        if self._source_tools is not None:
+            return self._source_tools.get(f"source.{source_id}.comments")
+        from app.sources.registry import source_comment_fetchers
+
+        return source_comment_fetchers().get(source_id)
 
     def _entrypoint(self, tool_name: str) -> Any:
         if self._source_tools is None:
@@ -359,6 +609,7 @@ class SourceToolAdapter:
         capability: Any,
         item_limit: int | None = None,
         on_event: Any = None,
+        with_comments: Any = None,
         **kwargs: Any,
     ) -> Any:
         if not tool_name.startswith("source."):
@@ -454,6 +705,12 @@ class SourceToolAdapter:
                     goal_id=goal_id,
                     agent_id=agent_id,
                 )
+            # §CMT-1 货 2：一跳落定后再发第二跳，评论并入本节 rows。
+            result = await asyncio.to_thread(
+                self._attach_comments,
+                source_id, result, with_comments,
+                research_id, goal_id, agent_id, capture,
+            )
             return result
         finally:
             if on_event is not None:

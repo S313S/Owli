@@ -580,4 +580,5 @@ SOURCE_SPEC = SourceSpec(
     collector_name="小红书数据抓取",
     capability_description="TikHub App V2 笔记搜索；原生排序、类型与时间窗过滤",
     prompt_hint="相对发布时间不落 published_at；翻页回传双搜索会话 ID",
+    comment_fetcher=fetch_comments,
 )

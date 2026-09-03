@@ -680,4 +680,5 @@ SOURCE_SPEC = SourceSpec(
     prompt_hint="优先选择评论量可全取的视频，完整评论区可把完整度上探到 2",
     # 抖音搜索没有时间窗，别向模型要一个用不上的参数（§SRC-1 货 3）。
     window=None,
+    comment_fetcher=fetch_comments,
 )

@@ -517,6 +517,10 @@ def fetch_comments(
     identifier = str(post_id).strip()
     if not identifier:
         raise ValueError("post_id 必须是非空字符串")
+    # 证据行里的 platform_item_id 是剥了 t3_ 前缀的裸 ID（见 _platform_item_id），
+    # Prowlo 认的是 permalink 或 t3_xxx，这里补回去。
+    if not identifier.startswith(("t3_", "t1_", "http://", "https://")):
+        identifier = f"t3_{identifier}"
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
         raise ValueError("limit 必须为 1-20 整数")
     if client is None:
@@ -696,4 +700,5 @@ SOURCE_SPEC = SourceSpec(
     collector_name="Reddit 数据抓取",
     capability_description="全站社区帖子；Prowlo Dataset/live read 主路径，Apify 异步兜底",
     prompt_hint="先查免费 Dataset，再对不足样本做 relevance live search",
+    comment_fetcher=fetch_comments,
 )

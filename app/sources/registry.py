@@ -80,7 +80,17 @@ def source_limit_parameters() -> dict[str, str]:
     }
 
 
+def source_comment_fetchers() -> dict[str, Any]:
+    """各源的评论二跳入口——只有声明了的源才会被发第二跳（§CMT-1 货 2）。"""
+
+    return {
+        spec.source_id: spec.comment_fetcher
+        for spec in discover_sources().values()
+        if spec.comment_fetcher is not None
+    }
+
+
 __all__ = [
     "discover_sources", "get_source", "get_tool", "planning_catalog",
-    "source_limit_parameters",
+    "source_comment_fetchers", "source_limit_parameters",
 ]
