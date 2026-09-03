@@ -208,3 +208,74 @@ class TranscriptWriter:
                 oversized = False
             if oversized:
                 _trim_head(self.path, self._limit)
+
+
+#: 一次最多回多少行，防止 `tail=999999` 把 50 MB 全端出去。
+MAX_READ_LINES = 2000
+_READ_CHUNK = 262144
+
+
+def _tail_lines(path: Path, max_lines: int) -> list[str]:
+    """从文件尾往回读，最多取 max_lines 个完整行（顺序仍是正序）。"""
+
+    chunks: list[bytes] = []
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        position = handle.tell()
+        newlines = 0
+        while position > 0 and newlines <= max_lines:
+            step = min(_READ_CHUNK, position)
+            position -= step
+            handle.seek(position)
+            block = handle.read(step)
+            newlines += block.count(b"\n")
+            chunks.append(block)
+    data = b"".join(reversed(chunks))
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return lines[-max_lines:] if max_lines >= 0 else lines
+
+
+def read_transcript(
+    path: Path | None, *, tail: int = 200, after_seq: int | None = None
+) -> dict[str, Any]:
+    """读 transcript：尾 tail 行，或 seq > after_seq 的增量。
+
+    文件不存在返回空数组（**不 404**）——节还没开跑是常态，不是错。
+    """
+
+    empty: dict[str, Any] = {"lines": [], "last_seq": 0, "size_bytes": 0}
+    if path is None or not path.is_file():
+        return empty
+    limit = max(1, min(int(tail or 0) or 1, MAX_READ_LINES))
+    try:
+        size = path.stat().st_size
+        raw_lines = _tail_lines(path, limit if after_seq is None else MAX_READ_LINES)
+    except OSError as exc:
+        logger.warning("transcript 读取失败：%s", exc)
+        return empty
+    records: list[dict[str, Any]] = []
+    for line in raw_lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    last_seq = 0
+    for record in records:
+        try:
+            last_seq = max(last_seq, int(record.get("seq") or 0))
+        except (TypeError, ValueError):
+            continue
+    if after_seq is not None:
+        records = [
+            record for record in records
+            if isinstance(record.get("seq"), int) and record["seq"] > after_seq
+        ]
+    return {
+        "lines": records[-limit:],
+        "last_seq": last_seq,
+        "size_bytes": size,
+    }

@@ -155,3 +155,63 @@ def test_落盘失败不中断节_事件照常归一化(tmp_path: Path, monkeypa
     assert not (goal / "ch-3.transcript.jsonl").exists()
     assert events, "写盘失败不许吃掉归一化事件"
     assert any(event.text == "写完了" for event in events)
+
+
+def _transcript_endpoint(app):
+    return next(
+        route.endpoint for route in app.routes
+        if getattr(route, "path", None)
+        == "/api/researches/{research_id}/sections/{goal_id}/{chapter}/transcript"
+    )
+
+
+def _app_with_transcript(tmp_path: Path):
+    from app.api.main import create_app
+
+    runs_root = tmp_path / "runs"
+    goal = runs_root / "r-obs2" / "goals" / "goal-1"
+    writer = TranscriptWriter(_task(runs_root, goal / "ch-3.md"), engine="Codex")
+    for index in range(1, 6):
+        writer.append({"type": "item.completed", "n": index})
+    app = create_app(
+        tmp_path / "owli.db", ROOT / "app" / "store" / "schema.sql",
+        runs_root=runs_root,
+        engine_probe=lambda: {"claude": {"status": "available"}},
+    )
+    return app, goal
+
+
+def test_transcript_接口_尾行与增量(tmp_path: Path) -> None:
+    app, _ = _app_with_transcript(tmp_path)
+    endpoint = _transcript_endpoint(app)
+
+    async def call(**kwargs):
+        async with app.router.lifespan_context(app):
+            return await endpoint("r-obs2", "goal-1", "ch-3", **kwargs)
+
+    body = asyncio.run(call(tail=2, after_seq=None))
+    assert body["ok"] and body["data"]["last_seq"] == 5
+    assert [line["event"]["n"] for line in body["data"]["lines"]] == [4, 5]
+    assert body["data"]["size_bytes"] > 0
+
+    incremental = asyncio.run(call(tail=200, after_seq=3))
+    assert [line["seq"] for line in incremental["data"]["lines"]] == [4, 5]
+    assert incremental["data"]["last_seq"] == 5
+
+    caught_up = asyncio.run(call(tail=200, after_seq=5))
+    assert caught_up["data"]["lines"] == []
+    assert caught_up["data"]["last_seq"] == 5
+
+
+def test_transcript_接口_文件不存在返回空数组而非404(tmp_path: Path) -> None:
+    app, _ = _app_with_transcript(tmp_path)
+    endpoint = _transcript_endpoint(app)
+
+    async def call(chapter: str):
+        async with app.router.lifespan_context(app):
+            return await endpoint("r-obs2", "goal-1", chapter, tail=200, after_seq=None)
+
+    body = asyncio.run(call("ch-never-ran"))
+    assert body["ok"] and body["data"] == {"lines": [], "last_seq": 0, "size_bytes": 0}
+    # 越界路径同样只回空，不许读到 runs 根之外。
+    assert asyncio.run(call("..%2Fetc%2Fpasswd"))["data"]["lines"] == []

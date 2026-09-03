@@ -27,6 +27,7 @@ from app.adapters.selfcheck import (
     validate_runtime_config,
 )
 from app.adapters.recall import PrimaryEngineRecallJudge
+from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
 from app.api.delivery import register_delivery_routes
 from app.api.events import ResearchEventBuffer
 from app.config import ResearchScaleConfig, load_research_scale_config
@@ -823,6 +824,57 @@ def create_app(
         if research_id not in researches and store.get_report(research_id) is None:
             raise HTTPException(status_code=404, detail="调研任务不存在")
         return envelope({"chapters": store.list_chapters(research_id)})
+
+    def transcript_file(research_id: str, goal_id: str, chapter: str) -> Path | None:
+        """把 goal + 章（或 agent_id）解成 transcript 文件路径；越界一律 None。
+
+        §OBS-2 货 2：纯文件读，不进库。前端手里只有 agent_id，所以除了直接按
+        章名找，还按计划里该 agent 的产物路径去掉扩展名再找一次。
+        """
+
+        for segment in (research_id, goal_id, chapter):
+            if not segment or "/" in segment or "\\" in segment or ".." in segment:
+                return None
+        goal_root = runtime.runs_root / research_id / "goals" / goal_id
+        allowed_root = (runtime.runs_root / research_id).resolve()
+        keys = [chapter]
+        try:
+            plan = load_plan(store, research_id)
+        except KeyError:
+            plan = None
+        for goal in getattr(plan, "goals", []) or []:
+            if goal.goal_id != goal_id:
+                continue
+            for agent in goal.agents:
+                if agent.agent_id == chapter:
+                    keys.append(Path(str(agent.output["path"])).stem)
+        fallback: Path | None = None
+        for key in keys:
+            candidate = (goal_root / f"{key}{TRANSCRIPT_SUFFIX}").resolve()
+            if not candidate.is_relative_to(allowed_root):
+                continue
+            fallback = fallback or candidate
+            if candidate.is_file():
+                return candidate
+        return fallback
+
+    @application.get(
+        "/api/researches/{research_id}/sections/{goal_id}/{chapter}/transcript"
+    )
+    async def get_section_transcript(
+        research_id: str,
+        goal_id: str,
+        chapter: str,
+        tail: int = Query(200, ge=1, le=2000),
+        after_seq: int | None = Query(None, ge=0),
+    ) -> dict:
+        """节的引擎原始流：尾 tail 行，或 seq > after_seq 的增量。
+
+        文件不存在返回空数组而**不是 404**——节还没开跑是常态。
+        """
+
+        path = transcript_file(research_id, goal_id, chapter)
+        return envelope(read_transcript(path, tail=tail, after_seq=after_seq))
 
     def required_plan(research_id: str) -> Plan | JSONResponse:
         try:
