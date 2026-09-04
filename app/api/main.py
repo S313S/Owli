@@ -27,8 +27,9 @@ from app.adapters.selfcheck import (
     validate_runtime_config,
 )
 from app.adapters.recall import PrimaryEngineRecallJudge
-from app.adapters.transcript import TRANSCRIPT_SUFFIX, read_transcript
+from app.adapters.transcript import TRANSCRIPT_SUFFIX
 from app.observability.narrate import narrate_lines
+from app.observability import section_log
 from app.api.delivery import register_delivery_routes
 from app.api.events import ResearchEventBuffer, SectionHeartbeatPublisher
 from app.config import ResearchScaleConfig, load_research_scale_config
@@ -893,7 +894,8 @@ def create_app(
         """
 
         path = transcript_file(research_id, goal_id, chapter)
-        return envelope(read_transcript(path, tail=tail, after_seq=after_seq))
+        # §OBS-4 货 2：直连文件不在就找分批文件（评级章 RATE-3 一批一份）
+        return envelope(section_log.read_section(path, tail=tail, after_seq=after_seq))
 
     @application.get(
         "/api/researches/{research_id}/sections/{goal_id}/{chapter}/progress"
@@ -912,7 +914,7 @@ def create_app(
         """
 
         path = transcript_file(research_id, goal_id, chapter)
-        raw = read_transcript(path, tail=tail, after_seq=after_seq)
+        raw = section_log.read_section(path, tail=tail, after_seq=after_seq)
         lines = [line.as_dict() for line in narrate_lines(raw.get("lines") or [])]
         return envelope({"lines": lines, "last_seq": raw.get("last_seq", 0)})
 
