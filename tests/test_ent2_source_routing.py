@@ -71,9 +71,13 @@ def test_整条规划链_有中文名的海外产品会被排一张国内源采�
     from tests.test_plan_generate import _agent, _generate, _valid_skeleton
 
     skeleton = _valid_skeleton()          # global_product、主体「飞书」
-    skeleton["goals"][1]["agents"].insert(
-        0, _agent("小红书数据抓取·飞书", "采集研究主体的国内讨论"),
-    )
+    for name in (
+        "小红书数据抓取·飞书", "微博数据抓取·飞书",
+        "抖音数据抓取·飞书", "微信公众号数据抓取·飞书",
+    ):
+        skeleton["goals"][1]["agents"].insert(
+            0, _agent(name, "采集研究主体的国内讨论"),
+        )
     with tempfile.TemporaryDirectory() as raw:
         plan, _, _ = _generate(Path(raw), [skeleton], bilingual_entities=True)
         allocation = json.loads(
@@ -255,26 +259,28 @@ def test_规则23_闭集按卡上的实体逐张算_不是全计划一个大闭�
     assert "reddit" not in matches[0].split("可用源=")[1]
 
 
-# —— §ENT-2 裁决乙（用户 09-03 傍晚）：骨架名额留一位给同一产品的外文名 ——
+# —— §ENT-3 货 6：fast 给主角留三位跨语域来源 ——
 
 
-def test_乙_铺满型题面下留出的那一位真的落到主角的对面语域卡上() -> None:
-    """第一轮小跑 r-53d8dc3e0e03 红在这里：6 个竞品铺满 6 个采集位，补位无处可放。"""
+def test_ENT3_fast留三位都落到主角的对面语域卡上() -> None:
+    """ENT-3：6 个采集位由 3 个实体主位与主角的 3 个海外位平分。"""
     from app.config import load_research_scale_config
     from app.plan.allocation import allocate_collections, subjects_budget
 
     fast = load_research_scale_config().profile("fast")
     scaffolds = [{"depends_on": []}, {"depends_on": []}, {"depends_on": ["goal-1"]}]
-    assert subjects_budget(3, fast) == 5          # 采集位 6，留一位
+    assert subjects_budget(3, fast) == 3          # 采集位 6，留三位
     assert subjects_budget(3, load_research_scale_config().profile("standard")) is None
 
-    subjects = ["豆包", "字节跳动", "DeepSeek", "Kimi", "文心一言"]
+    subjects = ["豆包", "DeepSeek", "Kimi"]
     entities = [_entity("豆包", "豆包", "Doubao")] + [
         _entity(name, name, None) for name in subjects[1:]
     ]
     plan = allocate_collections(subjects, "cn_product", scaffolds, fast, entities)
     pairs = {(s.source_id, s.entity) for slots in plan.values() for s in slots}
     assert ("xhs", "豆包") in pairs
-    assert ("reddit", "豆包") in pairs, f"留出的那一位没给到主角：{sorted(pairs)}"
-    assert len(pairs) == 6                        # 5 个主位 + 1 个跨语域补位，正好装满
+    assert {source for source, entity in pairs if entity == "豆包"} == {
+        "xhs", "reddit", "x", "hacker_news",
+    }
+    assert len(pairs) == 6                        # 3 个主位 + 3 个跨语域位
     assert all(len(slots) <= 2 for slots in plan.values())

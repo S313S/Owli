@@ -64,23 +64,25 @@ def per_goal_capacity(profile: ResearchScaleProfile) -> int | None:
 
 
 def subjects_budget(goal_count: int, profile: ResearchScaleProfile) -> int | None:
-    """骨架能挑几个研究实体：采集位总数**留一位**给跨语域补位（§ENT-2，用户 09-03 拍板乙）。
+    """骨架能挑几个研究实体：fast 的 6 个采集位固定留 3 个给跨语域。
 
-    为什么留：`collection_capacity` 是采集位总数，骨架此前被允许挑满。挑满之后
-    「中外都有叫法的实体再补一张对面语域的卡」（`allocate_collections` 第二轮）
-    一个空位都不剩，快速档铺满型题面（一个主角 + 五个竞品）永远跨不了语域，
-    而那正是用户要的效果。
+    §ENT-3 把 ENT-2 的「只给主角留一张对面语域卡」改成分档留位：fast 留 3，
+    standard 因章数无上限不压 subjects，但分配阶段仍给主角排 4 个跨语域源。
 
-    为什么是留一位而不是按实体数留：跨语域补位是尽力而为，留一位就够让**主角**
-    （subjects 原序第一个）拿到对面那张卡；留更多会成比例地削竞品数。而且被让掉的
-    那个名额本来就领不到实体卡——实体卡上限是 5 张（`entities.MAX_ENTITIES`），
-    快速档第 6 个竞品既没有中外叫法也不会被跨语域路由。**两个上限就此对齐。**
+    为什么 fast 是 3：总位数仍为 3 goal × 2 采集位 = 6；一半给主角跨语域，
+    一半保留主体与竞品覆盖。扩位不靠增加 goal、章数或每 goal 源数。
 
-    章数无上限的档位（standard）不受影响，返回 None。
+    装不下的跨语域候选由 `allocate_collections` 尽力跳过，不反向挤掉实体主位。
     """
 
     capacity = collection_capacity(goal_count, profile)
-    return None if capacity is None else max(capacity - 1, 1)
+    return None if capacity is None else max(capacity - cross_locale_slots_budget(profile), 1)
+
+
+def cross_locale_slots_budget(profile: ResearchScaleProfile) -> int:
+    """当前两档的主角跨语域位：有章上限即 fast=3，无章上限即 standard=4。"""
+
+    return 3 if profile.max_chapters_per_goal is not None else 4
 
 
 def ordered_sources(
@@ -138,12 +140,14 @@ def allocate_collections(
     scaffolds: Sequence[Mapping[str, Any]],
     profile: ResearchScaleProfile,
     entities: Sequence[Mapping[str, Any]] | None = None,
+    *,
+    skipped: list[dict[str, str]] | None = None,
 ) -> dict[str, list[CollectionSlot]]:
     """每个 subject 至少一个采集位；无 depends_on 的 goal 先分，再按序号轮转。
 
-    §ENT-2 第二轮：中外都有叫法的实体再补一个**对面语域**的采集位（豆包既进
-    小红书也进 Reddit）。第二轮是尽力而为——章预算装不下就不补，绝不因此让
-    整份计划抛错；`entities` 为空时整个第二轮不发生，行为与 §PLAN-1 逐字相同。
+    §ENT-3 第二轮：中外都有叫法的主角按偏好序补对面语域，fast 3 位、standard
+    4 位。第二轮尽力而为——章预算或每 goal 源数装不下就记入 `skipped` 后跳过，
+    绝不因此让整份计划抛错；`entities` 为空时行为与 §PLAN-1 逐字相同。
 
     同 goal 内不同源数不超过 max_sources_per_goal，(source, entity) 对全计划唯一。
     第一轮放不下时抛 ValueError——这条错在骨架层就该拦住（见 _skeleton_scaffolds）。
@@ -176,11 +180,17 @@ def allocate_collections(
         plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
         goal_sources[chosen].add(source)
         taken.add((source, entity))
-    for entity, source in _cross_locale_slots(subjects, sources, entities, taken):
+    for entity, source in _cross_locale_slots(
+        subjects, sources, entities, taken, cross_locale_slots_budget(profile),
+    ):
         chosen, pointer = _place(
             source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
         )
         if chosen is None:
+            if skipped is not None:
+                skipped.append({
+                    "entity": entity, "source_id": source, "reason": "capacity",
+                })
             continue
         plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
         goal_sources[chosen].add(source)
@@ -193,31 +203,30 @@ def _cross_locale_slots(
     sources: Sequence[str],
     entities: Sequence[Mapping[str, Any]] | None,
     taken: set[tuple[str, str]],
+    limit: int,
 ) -> list[tuple[str, str]]:
-    """中外都有叫法的实体，各要一个对面语域的采集位（按 subjects 原序，先到先得）。"""
+    """双语主角按对面语域优先序取至多 `limit` 个不同源。"""
 
     by_id = {
         str(card.get("id") or card.get("canonical") or ""): card
         for card in entities or [] if isinstance(card, Mapping)
     }
-    wanted: list[tuple[str, str]] = []
-    for entity in subjects:
-        card = by_id.get(entity)
-        if card is None or entity_locales([card]) != {"zh", "en"}:
-            continue
-        covered = {
-            _SOURCE_LOCALES.get(source)
-            for source, name in taken if name == entity
-        }
-        for locale in ("zh", "en"):
-            if locale in covered:
-                continue
-            for source in _CROSS_LOCALE_PRIORITY[locale]:
-                if source in sources and (source, entity) not in taken:
-                    wanted.append((entity, source))
-                    break
-            break
-    return wanted
+    if not subjects:
+        return []
+    entity = str(subjects[0])
+    card = by_id.get(entity)
+    if card is None or entity_locales([card]) != {"zh", "en"}:
+        return []
+    covered = {
+        _SOURCE_LOCALES.get(source) for source, name in taken if name == entity
+    }
+    missing = next((locale for locale in ("zh", "en") if locale not in covered), None)
+    if missing is None:
+        return []
+    return [
+        (entity, source) for source in _CROSS_LOCALE_PRIORITY[missing]
+        if source in sources and (source, entity) not in taken
+    ][:max(0, limit)]
 
 
 def collection_plan_dict(

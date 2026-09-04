@@ -20,6 +20,7 @@ from tests.test_plan_generate import FakeEngine, FakeStore, ForbiddenEngine
 FAST = load_research_scale_config().profile("fast")
 STANDARD = load_research_scale_config().profile("standard")
 TEA = ["小罐茶", "八马茶业", "大益", "竹叶青", "澜沧古茶"]
+FAST_TEA = TEA[:3]
 SCAFFOLDS = [
     {"depends_on": []}, {"depends_on": []}, {"depends_on": ["goal-1", "goal-2"]},
 ]
@@ -67,19 +68,18 @@ def test_骨架层拦住超容量subjects_提示词写明上限() -> None:
             {"title": "三", "objective": "写", "depends_on": ["goal-1"]},
         ],
     }
-    # §ENT-2（用户 09-03 拍板乙）：上限从「采集位总数 6」改为「6 留一位 = 5」，
-    # 留下的那一位给同一产品的外文名（跨语域补位），与实体卡上限 5 对齐。
-    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 5"):
+    # §ENT-3：6 个采集位留 3 个给主角跨语域，实体上限随之收敛为 3。
+    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 3"):
         _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
-    assert "subjects 最多 5 个" in _skeleton_prompt("茶叶", [], scale="fast")
-    assert "留一位给同一产品的外文名" in _skeleton_prompt("茶叶", [], scale="fast")
+    assert "subjects 最多 3 个" in _skeleton_prompt("茶叶", [], scale="fast")
+    assert "留三位给主角的跨语域来源" in _skeleton_prompt("茶叶", [], scale="fast")
     assert "subjects 最多" not in _skeleton_prompt("茶叶", [], scale="standard")
 
-    # 恰好 5 个照过；第 6 个才拦
-    skeleton["subjects"] = [f"品牌{i}" for i in range(5)]
+    # 恰好 3 个照过；第 4 个才拦
+    skeleton["subjects"] = [f"品牌{i}" for i in range(3)]
     _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
-    skeleton["subjects"] = [f"品牌{i}" for i in range(6)]
-    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 5"):
+    skeleton["subjects"] = [f"品牌{i}" for i in range(4)]
+    with pytest.raises(ValueError, match="超出 fast 档研究实体上限 3"):
         _skeleton_scaffolds(skeleton, scale="fast", scale_config=load_research_scale_config())
 
 
@@ -122,9 +122,9 @@ CN_SOURCES = {
 def _tea_skeleton() -> dict:
     return {
         "market_profile": "cn_product", "market_profile_justification": "国内茶叶品牌。",
-        "subjects": list(TEA), "subjects_justification": "五个可采集的茶叶品牌。",
+        "subjects": list(FAST_TEA), "subjects_justification": "三个可采集的茶叶品牌。",
         "goals": [
-            {"title": "声量矩阵", "objective": "采集五品牌社媒声量。", "depends_on": [], "agents": []},
+            {"title": "声量矩阵", "objective": "采集三品牌社媒声量。", "depends_on": [], "agents": []},
             {"title": "内容效率", "objective": "采集内容互动表现。", "depends_on": [], "agents": []},
             {"title": "综合研判", "objective": "交叉验证并成稿。", "depends_on": ["goal-1", "goal-2"], "agents": []},
         ],
@@ -159,8 +159,9 @@ class ObedientEngine(FakeEngine):
         self._used |= {(s["source_id"], s["entity"]) for s in slots}
         goal_sources = {s["source_id"] for s in slots}
         if len(agents) < 2 and rng.random() < 0.5:
-            pool = sorted(goal_sources) if len(goal_sources) >= 2 else sorted(CN_SOURCES)
-            options = [(src, e) for src in pool for e in TEA if (src, e) not in self._used]
+            # 只在本 goal 已分配的源内加同源异实体，避免抢占后续 goal 的必采对。
+            pool = sorted(goal_sources)
+            options = [(src, e) for src in pool for e in FAST_TEA if (src, e) not in self._used]
             if options:
                 src, entity = rng.choice(options)
                 self._used.add((src, entity))
@@ -195,9 +196,9 @@ def test_听话引擎二十个种子全过段级lint零重试(tmp_path, seed) ->
     assert [e for e in store.events if e.outcome == "retrying"] == []
     assert not any(e.text.startswith("机械修正") for e in store.events)
     collected = {a.entity for g in plan.goals for a in g.agents if a.entity}
-    assert collected >= set(TEA)
+    assert collected >= set(FAST_TEA)
     allocation = json.loads((store.runs_root / plan.research_id / "plan-segments" / "allocation.json").read_text())
-    assert {s["entity"] for slots in allocation.values() for s in slots} == set(TEA)
+    assert {s["entity"] for slots in allocation.values() for s in slots} == set(FAST_TEA)
     assert any(e.text.startswith("采集分配表：goal-1=") for e in store.events)
 
 
@@ -208,9 +209,8 @@ def test_不听话引擎丢一对_只重生被分配的goal_且第二轮过(tmp_
     retries = [e for e in store.events if e.outcome == "retrying"]
     assert len(retries) == 1
     assert "[规则31] goal-2/collection-plan" in retries[0].text
-    assert "[规则25] goal-2/subjects" in retries[0].text
     assert "[规则31]" in engine.tasks[-1].body  # 错误原文回灌到被点名那段
-    assert {a.entity for g in plan.goals for a in g.agents if a.entity} >= set(TEA)
+    assert {a.entity for g in plan.goals for a in g.agents if a.entity} >= set(FAST_TEA)
 
 
 def test_骨架提示词给market_profile下定义_按面向市场判不按原产地() -> None:
@@ -273,17 +273,19 @@ def test_ent2_无实体时排源与分配表逐字退回旧行为() -> None:
         )
 
 
-def test_ent2_中外都有叫法的实体两侧各一个采集位() -> None:
+def test_ent3_中外都有叫法的主角按standard补四个跨语域位() -> None:
     plan = allocate_collections(
         ["豆包"], "cn_product", SCAFFOLDS, STANDARD, [DOUBAO],
     )
     got = {source for source, entity in _pairs(plan) if entity == "豆包"}
-    assert got == {"xhs", "reddit"}, got
+    assert got == {"xhs", "reddit", "x", "hacker_news", "product_hunt"}, got
     # 反过来：题面判成海外，中文名照样把小红书排进来
     plan = allocate_collections(
         ["豆包"], "global_product", SCAFFOLDS, STANDARD, [DOUBAO],
     )
-    assert {s for s, e in _pairs(plan) if e == "豆包"} == {"hacker_news", "xhs"}
+    assert {s for s, e in _pairs(plan) if e == "豆包"} == {
+        "hacker_news", "xhs", "weibo", "douyin", "wechat_mp",
+    }
 
 
 def test_ent2_只有单侧叫法的实体不补位_章预算不够时也不抛错() -> None:

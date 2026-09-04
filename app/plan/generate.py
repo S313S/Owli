@@ -203,7 +203,7 @@ def _subjects_cap_rule(profile: ResearchScaleProfile) -> str:
         return ""
     return (
         f"subjects 最多 {budget} 个（{profile.max_goals} 个 goal × 每 goal "
-        f"{per_goal_capacity(profile)} 个采集位，留一位给同一产品的外文名），"
+        f"{per_goal_capacity(profile)} 个采集位，留三位给主角的跨语域来源），"
         "超出会让骨架作废；"
     )
 
@@ -423,7 +423,7 @@ def _skeleton_scaffolds(
         raise ValueError(
             f"subjects 有 {len(subjects)} 个，超出 {scale} 档研究实体上限 {budget}"
             f"（{len(goals)} 个 goal × 每 goal {per_goal_capacity(profile)} 个采集位，"
-            "留一位给同一产品的外文名）；请合并或删减研究实体"
+            "留三位给主角的跨语域来源）；请合并或删减研究实体"
         )
     result: list[dict[str, Any]] = []
     for index, raw in enumerate(goals, start=1):
@@ -1541,15 +1541,18 @@ async def generate_plan(
     ))
 
     # §ENT-2 货 2：分配表在这里才定稿——实体的中外叫法决定排哪些源。
+    skipped_slots: list[dict[str, str]] = []
     collection_plan = collection_plan_dict(allocate_collections(
         subjects, market_profile, scaffolds,
-        product_scale_config.profile(scale), entities,
+        product_scale_config.profile(scale), entities, skipped=skipped_slots,
     ))
     (workspace.root / "allocation.json").write_text(
         json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     await _emit(store, _allocation_event(research_id, collection_plan))
+    if skipped_slots:
+        await _emit(store, _allocation_skipped_event(research_id, skipped_slots))
 
     expansions: dict[str, dict[str, Any]] = {}
 
