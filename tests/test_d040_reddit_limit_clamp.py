@@ -114,3 +114,20 @@ def test_评论二跳的per_post超上限同样封顶() -> None:
     )
 
     assert captured["arguments"]["commentLimit"] == 20
+
+
+def test_两档真实名额都能过reddit源自己的校验() -> None:
+    """把「档位名额」和「源上限」钉在一起：D-040 就是这两个数字各改各的漂出来的。
+
+    夹具里写死 25 只锁住今天的值；这条读真配置，将来谁把 fast 档 reddit
+    名额调成 40（或 standard 调成 0），这里当场红。
+    """
+
+    from app.config import load_research_scale_config
+
+    scales = load_research_scale_config()
+    for scale in ("fast", "standard"):
+        quota = scales.profile(scale).source_item_limits["reddit"]
+        sink: list[dict] = []
+        _search(quota, sink)
+        assert sink[0]["arguments"]["limit"] == min(quota, 20)
