@@ -627,9 +627,18 @@ class CodexAdapter:
         consumer = asyncio.create_task(
             self._consume_and_wait(process, events, on_event, transcript)
         )
-        done, _ = await asyncio.wait(
-            {consumer}, timeout=self._timeout_seconds
-        )
+        try:
+            done, _ = await asyncio.wait(
+                {consumer}, timeout=self._timeout_seconds
+            )
+        except asyncio.CancelledError:
+            # §D-041：墙钟到点 / stop 走的是 task.cancel()，CancelledError 属
+            # BaseException，下面的超时分支接不住。这里先杀子进程组再收读流任务，
+            # 然后原样上抛——取消语义（reason 由 scheduler 记）一个字不改。
+            await self._terminate_process(process)
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+            raise
         if consumer in done:
             return consumer.result()
         await self._terminate_process(process)
@@ -821,6 +830,12 @@ class CodexAdapter:
             infrastructure_error = _infrastructure_error(events)
             if infrastructure_error is not None:
                 raise RuntimeError(infrastructure_error)
+        except asyncio.CancelledError:
+            # §D-041：子进程组必须跟着取消一起死，否则章已判 missing、CLI 还在烧钱
+            # （D-039 实测存活 187 s / 273k input tokens）。杀完原样上抛。
+            if process is not None:
+                await self._terminate_process(process)
+            raise
         except asyncio.TimeoutError:
             if process is not None:
                 await self._terminate_process(process)
