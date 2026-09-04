@@ -5,6 +5,16 @@
 谁把重放读数当整跑读数写进关账，账就是假的。
 """
 
-from app.replay.sandbox import Fingerprint, ReplaySandbox, fingerprint
+from app.replay.sandbox import (
+    Fingerprint,
+    ReplaySandbox,
+    SandboxMigrationError,
+    fingerprint,
+)
 
-__all__ = ["Fingerprint", "ReplaySandbox", "fingerprint"]
+__all__ = [
+    "Fingerprint",
+    "ReplaySandbox",
+    "SandboxMigrationError",
+    "fingerprint",
+]

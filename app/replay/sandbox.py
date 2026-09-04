@@ -53,6 +53,10 @@ def fingerprint(database: Path, runs: Path) -> Fingerprint:
     return Fingerprint(database=_file_sha256(database), runs=_tree_sha256(runs))
 
 
+class SandboxMigrationError(RuntimeError):
+    """沙盒副本迁不到当前代码要求的 schema 版本。"""
+
+
 @dataclass(frozen=True)
 class ReplaySandbox:
     workspace: Path
@@ -61,6 +65,7 @@ class ReplaySandbox:
     source_database: Path
     source_runs: Path
     source_fingerprint: Fingerprint
+    schema_version: int = 0
 
     def verify_source_untouched(self) -> Fingerprint:
         """重放跑完再量一次原件；对不上就是污染了底料，调用方必须当红处理。"""
@@ -74,6 +79,7 @@ def open_sandbox(
     source_runs: Path,
     research_id: str,
     workspace: Path,
+    schema_path: Path | None = None,
 ) -> ReplaySandbox:
     """把底料复制进 workspace：库走 sqlite `.backup`（不是 `cp`），产物走整目录复制。
 
@@ -100,6 +106,8 @@ def open_sandbox(
     finally:
         origin.close()
 
+    schema_version = _migrate_sandbox_database(database, schema_path)
+
     runs_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source_runs / research_id, runs_root / research_id)
     _rebase_ledger_paths(database, research_id, runs_root)
@@ -110,7 +118,54 @@ def open_sandbox(
         source_database=source_database,
         source_runs=source_runs / research_id,
         source_fingerprint=before,
+        schema_version=schema_version,
     )
+
+
+def _default_schema_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "store" / "schema.sql"
+
+
+def _read_user_version(database: Path) -> int:
+    connection = sqlite3.connect(database)
+    try:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        connection.close()
+
+
+def _migrate_sandbox_database(database: Path, schema_path: Path | None) -> int:
+    """把沙盒副本迁到当前代码要求的 schema，底料原件不参与。
+
+    `.backup` 拿到的是底料的 `user_version` 原样；底料比代码旧（v9 库遇上 v10 代码）
+    时一写证据就 `no such column: kind`。这里走 store 自己那条迁移链
+    （`initialize_and_check` → `initialize_database_if_empty`），**不另写一份迁移**，
+    顺带做一次结构自检；迁不过去就抬头报清版本落差，不静默让重放带病往下跑。
+    """
+
+    from app.adapters.selfcheck import initialize_and_check  # 延迟导入：避免 replay 包一被 import 就拉起引擎适配器
+
+    resolved = Path(schema_path) if schema_path is not None else _default_schema_path()
+    before = _read_user_version(database)
+    try:
+        check = initialize_and_check(database, resolved)
+    except Exception as error:
+        after = _read_user_version(database)
+        raise SandboxMigrationError(
+            f"重放沙盒库迁移失败：底料 schema v{before}"
+            f"（迁到 v{after} 后停下）→ 代码要求 v{_expected_schema_version(resolved)}"
+            f"，迁不过去：{error}"
+        ) from error
+    return int(check.get("schema_version") or _read_user_version(database))
+
+
+def _expected_schema_version(schema_path: Path) -> int:
+    from app.store.schema import read_expected_snapshot
+
+    try:
+        return int(read_expected_snapshot(schema_path)["schema_version"])
+    except Exception:  # 连权威 schema 都读不出版本时不要掩盖原始错误
+        return -1
 
 
 def _rebase_ledger_paths(database: Path, research_id: str, runs_root: Path) -> int:
