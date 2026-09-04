@@ -51,3 +51,11 @@ def test_非_html_返回_none() -> None:
 
     assert fetch_page_text("https://example.com/file.pdf", http_get=getter) is None
 
+
+def test_抓取器任意失败都返回_none_不向搜索主路抛出() -> None:
+    from app.sources._page_text import fetch_page_text
+
+    def broken(url: str, timeout: float, max_bytes: int):
+        raise RuntimeError("站点断开")
+
+    assert fetch_page_text("https://example.com/broken", http_get=broken) is None

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
-from http.client import HTTPException
 from typing import Callable
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -85,7 +83,7 @@ def fetch_page_text(
             return None
         parser = _BodyParser()
         parser.feed(body.decode("utf-8", errors="replace"))
-    except (HTTPError, URLError, OSError, HTTPException, UnicodeError, ValueError):
+    except Exception:  # noqa: BLE001 —— 单页任何失败都必须退回搜索片段
         return None
     for tag in ("article", "main"):
         if parser.blocks.get(tag):
@@ -98,4 +96,3 @@ def fetch_page_text(
         return max(candidates, key=len)
     bodies = parser.blocks.get("body", [])
     return max(bodies, key=len) if bodies else None
-
