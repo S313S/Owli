@@ -148,12 +148,42 @@ def probe_kwargs(source: str) -> dict[str, Any]:
     }
 
 
-def _call(source: str, entrypoint: Callable[..., Any], has_window: bool, query: str) -> Any:
+def _google_probe_enabled() -> bool:
+    return os.environ.get("OWLI_WEB_SEARCH_GOOGLE") == "1"
+
+
+def _call(
+    source: str,
+    entrypoint: Callable[..., Any],
+    has_window: bool,
+    query: str,
+    env_path: Path,
+) -> Any:
     kwargs = probe_kwargs(source)
     query = PROBE_QUERIES.get(source, query)
+    google_events: list[Any] = []
+    if source == "web_search" and _google_probe_enabled():
+        # 探活只验证两家搜索供应商，禁用落地页 GET，守住每源两次请求上限。
+        kwargs.update({
+            "env_path": env_path,
+            "page_text_fetcher": lambda _: None,
+            "on_event": google_events.append,
+        })
     if has_window:
-        return entrypoint(query, DEFAULT_WINDOW, **kwargs)
-    return entrypoint(query, **kwargs)
+        result = entrypoint(query, DEFAULT_WINDOW, **kwargs)
+    else:
+        result = entrypoint(query, **kwargs)
+    if source == "web_search" and _google_probe_enabled():
+        google_ok = any(
+            isinstance(getattr(event, "raw", None), Mapping)
+            and event.raw.get("event") == "web_search_provider_result"
+            and event.raw.get("provider") == "google"
+            and int(event.raw.get("hits") or 0) > 0
+            for event in google_events
+        )
+        if not google_ok:
+            raise RuntimeError("google_probe_unavailable")
+    return result
 
 
 async def _probe_one(
@@ -161,11 +191,20 @@ async def _probe_one(
     timeout_seconds: float, env_path: Path,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    if (
+        source == "web_search"
+        and _google_probe_enabled()
+        and "SERPER_API_KEY" not in _env_keys(env_path)
+    ):
+        return {"ok": False, "items": 0, "elapsed_s": 0.0, "failure": "missing_credentials"}
     if missing_credentials(source, env_path=env_path):
         return {"ok": False, "items": 0, "elapsed_s": 0.0, "failure": "missing_credentials"}
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(_call, source, entrypoint, has_window, query), timeout_seconds,
+            asyncio.to_thread(
+                _call, source, entrypoint, has_window, query, env_path,
+            ),
+            timeout_seconds,
         )
         items = len(result) if isinstance(result, (list, tuple)) else 0
         failure = None if items > 0 else "empty"
