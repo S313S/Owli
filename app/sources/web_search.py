@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -11,12 +12,13 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable, Mapping, TypedDict
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from app.adapters.events import ItemKind, NormalizedEvent
 from app.adapters.logging import DEFAULT_LOG_ROOT, append_routing_event
 from app.reliability import normalize_evidence_metrics, score_evidence
+from app.sources._page_text import fetch_page_text
 from app.sources.spec import SourceSpec, WindowParam
 
 
@@ -25,6 +27,7 @@ __all__ = ["search", "collect_and_store"]
 DEFAULT_ENV_PATH = Path("~/.owli/.env").expanduser()
 _EXA_URL = "https://api.exa.ai/search"
 _TAVILY_URL = "https://api.tavily.com/search"
+_GOOGLE_URL = "https://google.serper.dev/search"
 _EXA_KEY_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -35,6 +38,7 @@ _REQUEST_TIMEOUT_SECONDS = 20.0
 
 HttpPost = Callable[[str, Mapping[str, str], Mapping[str, Any], float], Mapping[str, Any]]
 EventSink = Callable[[NormalizedEvent], Any]
+PageTextFetcher = Callable[[str], str | None]
 
 
 class CredentialError(RuntimeError):
@@ -55,6 +59,7 @@ class ProviderRequestError(RuntimeError):
 class Credentials:
     exa_api_key: str | None = field(repr=False)
     tavily_api_key: str | None = field(repr=False)
+    serper_api_key: str | None = field(default=None, repr=False)
 
 
 class Evidence(TypedDict):
@@ -99,7 +104,7 @@ def _load_credentials(path: str | Path) -> Credentials:
             continue
         name, value = line.split("=", 1)
         name = name.removeprefix("export ").strip()
-        if name in {"EXA_API_KEY", "TAVILY_API_KEY"}:
+        if name in {"EXA_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"}:
             values[name] = _unquote(value.strip())
 
     exa = values.get("EXA_API_KEY") or None
@@ -110,7 +115,7 @@ def _load_credentials(path: str | Path) -> Credentials:
         raise CredentialError("TAVILY_API_KEY 格式错误：应以 tvly- 开头")
     if exa is None and tavily is None:
         raise CredentialError("网页搜索不可用：~/.owli/.env 未配置 EXA_API_KEY 或 TAVILY_API_KEY")
-    return Credentials(exa, tavily)
+    return Credentials(exa, tavily, values.get("SERPER_API_KEY") or None)
 
 
 def _http_post(
@@ -119,7 +124,11 @@ def _http_post(
     payload: Mapping[str, Any],
     timeout: float,
 ) -> Mapping[str, Any]:
-    provider = "exa" if url == _EXA_URL else "tavily"
+    provider = {
+        _EXA_URL: "exa",
+        _TAVILY_URL: "tavily",
+        _GOOGLE_URL: "google",
+    }.get(url, "unknown")
     request = Request(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -212,6 +221,78 @@ def _tavily_evidence(item: Any, query: str, fetched_at: str) -> Evidence:
     }
 
 
+def _google_published_at(value: Any, fetched_at: str) -> str | None:
+    parsed = _iso(value)
+    if parsed is not None:
+        return parsed
+    if not isinstance(value, str):
+        return None
+    relative = re.fullmatch(
+        r"\s*(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago\s*",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if relative:
+        count = int(relative.group(1))
+        days = {"day": 1, "week": 7, "month": 30, "year": 365}
+        unit = relative.group(2).lower()
+        delta = (
+            timedelta(**{f"{unit}s": count})
+            if unit in {"minute", "hour"}
+            else timedelta(days=days[unit] * count)
+        )
+        return (datetime.fromisoformat(fetched_at) - delta).isoformat()
+    for pattern in ("%b %d, %Y", "%B %d, %Y", "%m/%d/%Y", "%Y年%m月%d日"):
+        try:
+            absolute = datetime.strptime(value.strip(), pattern).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        return absolute.isoformat()
+    return None
+
+
+def _google_evidence(
+    item: Any, query: str, fetched_at: str, page_text: str | None,
+) -> Evidence:
+    if not isinstance(item, Mapping):
+        raise RuntimeError("Google organic 命中项不是 JSON 对象")
+    permalink = _url(item.get("link"))
+    snippet = item.get("snippet")
+    body = page_text or (snippet if isinstance(snippet, str) else None)
+    hostname = urlsplit(permalink).hostname
+    return {
+        "platform": "web_search",
+        "source_type": "article",
+        "platform_item_id": permalink,
+        "permalink": permalink,
+        "title": item.get("title") if isinstance(item.get("title"), str) else None,
+        "content_excerpt": body[:1200] if body else None,
+        "author_name": hostname.removeprefix("www.") if hostname else None,
+        "source_keyword": query,
+        "fetch_method": "search_index",
+        "published_at": _google_published_at(item.get("date"), fetched_at),
+        "fetched_at": fetched_at,
+        "raw_metrics": {},
+        "extra": {"provider": "google"},
+    }
+
+
+def _url_signature(value: str) -> str:
+    parsed = urlsplit(value)
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if port and not (port == 80 and parsed.scheme == "http") and not (
+        port == 443 and parsed.scheme == "https"
+    ):
+        host = f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    query = sorted(
+        (key, item) for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() != "fbclid"
+    )
+    return f"{host}{path}?{urlencode(query)}" if query else f"{host}{path}"
+
+
 def _rate(items: list[Evidence]) -> list[Evidence]:
     """让工具层返回值也满足 HN 同构的五维证据契约。"""
 
@@ -298,6 +379,153 @@ def _emit_answer_lead(on_event: EventSink | None, answer: Any) -> None:
     ))
 
 
+def _emit_google_failure(
+    on_event: EventSink | None, *, error: BaseException, log_root: Path,
+) -> None:
+    status_code = error.status_code if isinstance(error, ProviderRequestError) else None
+    detail = f"HTTP {status_code}" if status_code is not None else type(error).__name__
+    event = NormalizedEvent(
+        engine="OwliSource",
+        thread_id=None,
+        turn_id=None,
+        item_kind=ItemKind.ERROR,
+        text=f"Google 补充查询失败（{detail}），保留既有网页搜索结果",
+        is_error=True,
+        raw={
+            "event": "web_search_provider_failover",
+            "source_id": "web_search",
+            "provider": "google",
+            "fallback_provider": "existing",
+            "status_code": status_code,
+            "reason": detail,
+        },
+        route_state="FAILOVER",
+        failover_target="existing",
+        scope="source.web_search",
+    )
+    append_routing_event(event, log_root=log_root)
+    if on_event is not None:
+        on_event(event)
+
+
+def _emit_page_text_fallback(on_event: EventSink | None, permalink: str) -> None:
+    if on_event is None:
+        return
+    on_event(NormalizedEvent(
+        engine="OwliSource",
+        thread_id=None,
+        turn_id=None,
+        item_kind=ItemKind.OUTPUT,
+        text="Google 落地页正文不可用，已退回搜索片段",
+        is_error=False,
+        raw={
+            "event": "web_search_page_text_fallback",
+            "source_id": "web_search",
+            "provider": "google",
+            "permalink": permalink,
+        },
+        outcome="fallback",
+    ))
+
+
+def _emit_provider_result(
+    on_event: EventSink | None, *, hits: int, deduped: int,
+    page_text_ok: int, page_text_fallback: int,
+) -> None:
+    if on_event is None:
+        return
+    raw = {
+        "event": "web_search_provider_result",
+        "source_id": "web_search",
+        "provider": "google",
+        "hits": hits,
+        "deduped": deduped,
+        "page_text_ok": page_text_ok,
+        "page_text_fallback": page_text_fallback,
+    }
+    on_event(NormalizedEvent(
+        engine="OwliSource",
+        thread_id=None,
+        turn_id=None,
+        item_kind=ItemKind.DONE,
+        text=(
+            f"Google organic 命中 {hits} 条，去重 {deduped} 条，"
+            f"正文 {page_text_ok} 条，片段降级 {page_text_fallback} 条"
+        ),
+        is_error=False,
+        raw=raw,
+        outcome="provider_result",
+    ))
+
+
+def _supplement_google(
+    existing: list[Evidence],
+    *,
+    query: str,
+    start: datetime,
+    fetched_at: str,
+    max_results: int,
+    api_key: str,
+    http_post: HttpPost,
+    page_text_fetcher: PageTextFetcher,
+    on_event: EventSink | None,
+    log_root: Path,
+) -> list[Evidence]:
+    payload = {
+        "q": query,
+        "num": max_results,
+        "tbs": (
+            f"cdr:1,cd_min:{start.strftime('%m/%d/%Y')},"
+            f"cd_max:{datetime.fromisoformat(fetched_at).strftime('%m/%d/%Y')}"
+        ),
+    }
+    try:
+        response = http_post(
+            _GOOGLE_URL,
+            {"Content-Type": "application/json", "X-API-KEY": api_key},
+            payload,
+            _REQUEST_TIMEOUT_SECONDS,
+        )
+        organic = response.get("organic")
+        if not isinstance(organic, list):
+            raise ProviderRequestError("google")
+        signatures = {_url_signature(item["permalink"]) for item in existing}
+        google_items: list[Evidence] = []
+        deduped = page_ok = page_fallback = 0
+        for raw_item in organic:
+            if not isinstance(raw_item, Mapping):
+                raise RuntimeError("Google organic 命中项不是 JSON 对象")
+            permalink = _url(raw_item.get("link"))
+            signature = _url_signature(permalink)
+            if signature in signatures:
+                deduped += 1
+                continue
+            signatures.add(signature)
+            try:
+                page_text = page_text_fetcher(permalink)
+            except Exception:  # noqa: BLE001 —— 正文失败必须无条件退回 snippet
+                page_text = None
+            if page_text:
+                page_ok += 1
+            else:
+                page_fallback += 1
+                _emit_page_text_fallback(on_event, permalink)
+            google_items.append(
+                _google_evidence(raw_item, query, fetched_at, page_text)
+            )
+        _emit_provider_result(
+            on_event,
+            hits=len(organic),
+            deduped=deduped,
+            page_text_ok=page_ok,
+            page_text_fallback=page_fallback,
+        )
+        return (existing + google_items)[:max_results]
+    except Exception as error:  # noqa: BLE001 —— 补充源失败不得影响主路
+        _emit_google_failure(on_event, error=error, log_root=log_root)
+        return existing
+
+
 def search(
     query: str,
     window: str,
@@ -305,11 +533,12 @@ def search(
     max_results: int = 10,
     env_path: str | Path = DEFAULT_ENV_PATH,
     http_post: HttpPost = _http_post,
+    page_text_fetcher: PageTextFetcher = fetch_page_text,
     on_event: EventSink | None = None,
     log_root: Path = DEFAULT_LOG_ROOT,
     clock: Callable[[], str] = lambda: datetime.now(timezone.utc).isoformat(),
 ) -> list[Evidence]:
-    """用 Exa 搜索网页；仅在主源报错或缺凭证时降级 Tavily。"""
+    """Exa 主、Tavily 错误降级；可选 Google organic 作补充。"""
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
@@ -332,6 +561,7 @@ def search(
         "contents": {"text": {"maxCharacters": 1200}},
     }
     primary_error: BaseException | None = None
+    evidence: list[Evidence] | None = None
     if credentials.exa_api_key is not None:
         try:
             response = http_post(
@@ -356,38 +586,51 @@ def search(
         else:
             if not evidence:
                 _emit_empty(on_event, "exa")
-            return _rate(evidence)
-
-    if credentials.tavily_api_key is None:
-        reason, _ = _failure_reason(primary_error)
-        raise CredentialError(f"{reason}；TAVILY_API_KEY 未配置，无法降级")
-    _emit_failover(on_event, error=primary_error, log_root=log_root)
-    tavily_payload = {
-        "query": query.strip(),
-        "search_depth": "advanced",
-        "include_answer": True,
-        "include_raw_content": "text",
-        "max_results": max_results,
-        "start_date": start.date().isoformat(),
-    }
-    response = http_post(
-        _TAVILY_URL,
-        {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {credentials.tavily_api_key}",
-        },
-        tavily_payload,
-        _REQUEST_TIMEOUT_SECONDS,
-    )
-    results = response.get("results")
-    if not isinstance(results, list):
-        raise ProviderRequestError("tavily")
-    _emit_answer_lead(on_event, response.get("answer"))
-    evidence = [
-        _tavily_evidence(item, query.strip(), fetched_at) for item in results
-    ]
-    if not evidence:
-        _emit_empty(on_event, "tavily")
+    if evidence is None:
+        if credentials.tavily_api_key is None:
+            reason, _ = _failure_reason(primary_error)
+            raise CredentialError(f"{reason}；TAVILY_API_KEY 未配置，无法降级")
+        _emit_failover(on_event, error=primary_error, log_root=log_root)
+        tavily_payload = {
+            "query": query.strip(),
+            "search_depth": "advanced",
+            "include_answer": True,
+            "include_raw_content": "text",
+            "max_results": max_results,
+            "start_date": start.date().isoformat(),
+        }
+        response = http_post(
+            _TAVILY_URL,
+            {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {credentials.tavily_api_key}",
+            },
+            tavily_payload,
+            _REQUEST_TIMEOUT_SECONDS,
+        )
+        results = response.get("results")
+        if not isinstance(results, list):
+            raise ProviderRequestError("tavily")
+        _emit_answer_lead(on_event, response.get("answer"))
+        evidence = [
+            _tavily_evidence(item, query.strip(), fetched_at) for item in results
+        ]
+        if not evidence:
+            _emit_empty(on_event, "tavily")
+    google_enabled = os.environ.get("OWLI_WEB_SEARCH_GOOGLE") == "1"
+    if google_enabled and credentials.serper_api_key is not None:
+        evidence = _supplement_google(
+            evidence,
+            query=query.strip(),
+            start=start,
+            fetched_at=fetched_at,
+            max_results=max_results,
+            api_key=credentials.serper_api_key,
+            http_post=http_post,
+            page_text_fetcher=page_text_fetcher,
+            on_event=on_event,
+            log_root=log_root,
+        )
     return _rate(evidence)
 
 
