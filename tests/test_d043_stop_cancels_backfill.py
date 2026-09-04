@@ -222,3 +222,45 @@ def test_取消回填时已付费的一手性审计照常结算落库(tmp_path: 
     claims = {claim["id"]: claim for claim in store.get_report("r-ledger")["extra"]["claims"]}
     assert claims["c-01"].get("firsthand_source") == "audited", "判完的那条要落库"
     assert claims["c-02"].get("firsthand_source") != "audited", "没判到的不许改口"
+
+
+def test_墙钟形态的取消者同样掐得到回填(tmp_path: Path, monkeypatch) -> None:
+    """判据 3：取消钩子不认「谁在掐」——定时器回调直接调它，效果与 /stop 一致。
+
+    说明：当下代码里**没有**研究级总墙钟（墙钟只有章级与 goal 级，且都在
+    scheduler 里，收尾期已经出了它的管辖），所以这条只能验到「钩子对任何
+    取消者都生效」。将来真加研究级墙钟，到点调这一个钩子即可。
+    """
+    from app.adapters import codex
+    from app.adapters import validation
+
+    monkeypatch.setattr(validation, "RUNS_ROOT", tmp_path / "runs")
+    pid_path = tmp_path / "child.pid"
+    executable = tmp_path / "fake-codex"
+    _write_sleepy_codex(executable, pid_path)
+    adapter = codex.CodexAdapter(
+        executable=str(executable), codex_home=tmp_path / "runtime-home"
+    )
+    events: list[dict] = []
+    coordinator, plan, _store_ = _coordinator(tmp_path, monkeypatch, events, adapter)
+
+    async def scenario() -> tuple[int, float, bool]:
+        finalize = asyncio.create_task(
+            coordinator._finalize_if_terminal(plan.research_id)
+        )
+        pid = await _await_pid(pid_path)
+        started = time.monotonic()
+        # 墙钟到点该做的事就是这一句（scheduler 的 expire() 也是同款同步回调风格）。
+        await coordinator._cancel_backfill_run(plan.research_id)
+        elapsed = time.monotonic() - started
+        still_alive = _alive(pid)
+        await asyncio.wait_for(finalize, timeout=20)
+        return pid, elapsed, still_alive
+
+    pid, elapsed, still_alive = asyncio.run(scenario())
+    try:
+        assert not still_alive, "墙钟形态的取消没掐到回填的引擎子进程"
+        assert elapsed <= KILL_DEADLINE_SECONDS, f"取消耗时 {elapsed:.2f}s"
+    finally:
+        if _alive(pid):
+            os.killpg(pid, 9)
