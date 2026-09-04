@@ -1,6 +1,7 @@
 import { Alert, Card, Empty, List, Space, Tag, Typography } from 'antd'
 import type { ResearchSnapshot } from './types'
 import ReportView from './ReportView'
+import RunPanel from './RunPanel'
 
 const statusColor: Record<string, string> = {
   completed: 'success', failed: 'error', archived: 'default',
@@ -129,5 +130,6 @@ export default function HistoricalResearchView({ snapshot }: { snapshot: Researc
           : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无缺失项" />}
       </Card>
     </section>
+    <RunPanel researchId={snapshot.research_id} snapshot={snapshot} />
   </main>
 }

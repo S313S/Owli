@@ -83,6 +83,17 @@ class WebContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, history)
         self.assertIn("loaded.snapshot_source === 'store'", stream)
 
+    def test_历史只读页不再绕过运行面板(self) -> None:
+        history = (WEB / "src" / "HistoricalResearchView.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("import RunPanel from './RunPanel'", history)
+        self.assertIn(
+            "<RunPanel researchId={snapshot.research_id} snapshot={snapshot} />",
+            history,
+        )
+
     def test_工作板与历史页都有报告页入口(self) -> None:
         # FE-1 货 4：路由补上了还得有人指过去，否则用户只能手敲 URL。
         board = (WEB / "src" / "WorkboardPage.tsx").read_text(encoding="utf-8")
