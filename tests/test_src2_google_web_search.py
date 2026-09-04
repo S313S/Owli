@@ -137,3 +137,44 @@ def test_google_失败只发供应商失败事件且保留_exa_结果(tmp_path, 
     assert failed.raw["status_code"] == 502
     assert failed.scope == "source.web_search"
 
+
+def test_google_证据走既有归一化与评级链再整批入库(tmp_path, monkeypatch) -> None:
+    from app.sources import web_search
+
+    monkeypatch.setenv("OWLI_WEB_SEARCH_GOOGLE", "1")
+    http = FakeHttp({"results": []}, {"organic": [{
+        "title": "Google 结果",
+        "link": "https://example.org/google",
+        "snippet": "搜索片段",
+        "date": "2026-09-03",
+    }]})
+
+    class Store:
+        items = None
+
+        def upsert_evidence_batch(self, items):
+            self.items = items
+
+    store = Store()
+    result = web_search.collect_and_store(
+        "OpenAI vs Claude Code", "30d", report_id="r-src2", goal_id="goal-1",
+        store=store, env_path=_env_file(tmp_path), http_post=http,
+        page_text_fetcher=lambda _: "落地页正文", id_factory=lambda: "ev-google-1",
+        clock=lambda: "2026-09-04T00:00:00+00:00",
+    )
+
+    assert store.items == result
+    assert result[0]["extra"]["provider"] == "google"
+    assert result[0]["raw_metrics"] == {}
+    assert result[0]["norm_method"] == "none"
+    assert result[0]["grade"] != "D"
+    assert result[0]["rated_by"] == "rule:reliability@v1"
+
+
+def test_信息源手册说明_google_默认关闭且不增加名额() -> None:
+    from app.sources import web_search
+
+    description = web_search.SOURCE_SPEC.capability_description
+    assert "Google organic" in description
+    assert "默认关闭" in description
+    assert "共用名额" in description

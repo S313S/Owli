@@ -648,6 +648,7 @@ def collect_and_store(
     agent_name: str | None = None,
     env_path: str | Path = DEFAULT_ENV_PATH,
     http_post: HttpPost = _http_post,
+    page_text_fetcher: PageTextFetcher = fetch_page_text,
     on_event: EventSink | None = None,
     log_root: Path = DEFAULT_LOG_ROOT,
     clock: Callable[[], str] = lambda: datetime.now(timezone.utc).isoformat(),
@@ -660,6 +661,7 @@ def collect_and_store(
         window,
         env_path=env_path,
         http_post=http_post,
+        page_text_fetcher=page_text_fetcher,
         on_event=on_event,
         log_root=log_root,
         clock=clock,
@@ -683,7 +685,7 @@ def collect_and_store(
         report_id=report_id,
         goal_id=goal_id,
         queries=[query],
-        filters="Exa neural；Tavily 仅错误降级",
+        filters="Exa neural；Tavily 仅错误降级；Google organic 可选补充",
     )
     for item in normalized:
         if item.get("extra", {}).get("provider") == "tavily":
@@ -704,7 +706,10 @@ SOURCE_SPEC = SourceSpec(
     entrypoint=search,
     display_name="网页搜索",
     collector_name="网页搜索数据抓取",
-    capability_description="跨站官方文档、评测与报道原文，Exa 主、Tavily 错误降级",
+    capability_description=(
+        "跨站官方文档、评测与报道原文；Exa 主、Tavily 错误降级；"
+        "Google organic 默认关闭，开启后抓正文并与主路共用名额"
+    ),
     prompt_hint="按时间窗检索并保留落地页 permalink，不把搜索摘要当原文",
     limit_parameter="max_results",
 )
