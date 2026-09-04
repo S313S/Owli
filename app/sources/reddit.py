@@ -26,6 +26,23 @@ _APIFY_ACTOR = "trudax~reddit-scraper-lite"
 _ENV_PATH = Path.home() / ".owli" / ".env"
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 _TERMINAL_RUN_STATES = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
+# Prowlo 一次调用能给的上限；两处入口都按它封顶（§D-040）。
+_LIMIT_CEILING = 20
+
+
+def _clamped_limit(limit: Any) -> int:
+    """把超过源上限的名额封顶，而不是把整次调用打回。
+
+    §D-040：fast 档 `source_item_limits.reddit = 25` 被 MCP 服务器覆盖进调用
+    参数（source_mcp.py:842），原先 `1 <= limit <= 20` 的校验让 fast 档 Reddit
+    每次 `ValueError`——09-04 夜跑 r-b10812f664d2 海外证据为 0 的真因，agent
+    自己改 20 也会被覆盖回 25。给 Prowlo 的请求本就 `min(limit, 20)`，封顶不
+    改上游语义。低于 1 或类型不对仍然报错：那是调用方写错了，不是名额问题。
+    """
+
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("limit 必须为不小于 1 的整数")
+    return min(limit, _LIMIT_CEILING)
 
 
 @dataclass(frozen=True)
@@ -521,8 +538,7 @@ def fetch_comments(
     # Prowlo 认的是 permalink 或 t3_xxx，这里补回去。
     if not identifier.startswith(("t3_", "t1_", "http://", "https://")):
         identifier = f"t3_{identifier}"
-    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
-        raise ValueError("limit 必须为 1-20 整数")
+    limit = _clamped_limit(limit)
     if client is None:
         token = prowlo_token or _load_token("PROWLO_API_KEY")
         if not token:
@@ -581,8 +597,7 @@ def search(
     matched = _WINDOW_PATTERN.fullmatch(window)
     if matched is None:
         raise ValueError('window 必须形如 "7d" 或 "90d"')
-    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
-        raise ValueError("limit 必须为 1–20 整数")
+    limit = _clamped_limit(limit)
     if store is not None and (not report_id or not goal_id):
         raise ValueError("入库时 report_id 与 goal_id 必填")
     if timeout_seconds <= 0 or poll_interval_seconds < 0:
