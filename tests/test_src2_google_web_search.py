@@ -118,6 +118,30 @@ def test_开关开启后只并入_organic_正文与片段降级并去重截断(t
     }
 
 
+def test_既有供应商占满名额时仍给_google_最多五个尾部席位(tmp_path, monkeypatch) -> None:
+    from app.sources import web_search
+
+    monkeypatch.setenv("OWLI_WEB_SEARCH_GOOGLE", "1")
+    exa = {"results": [{
+        "id": f"exa-{index}", "url": f"https://exa.example/{index}", "text": "正文",
+    } for index in range(10)]}
+    google = {"organic": [{
+        "title": f"Google {index}", "link": f"https://google.example/{index}",
+        "snippet": "片段",
+    } for index in range(10)]}
+
+    result = web_search.search(
+        "OpenAI vs Claude Code", "30d", max_results=10,
+        env_path=_env_file(tmp_path), http_post=FakeHttp(exa, google),
+        page_text_fetcher=lambda _: "正文",
+        clock=lambda: "2026-09-04T00:00:00+00:00",
+    )
+
+    assert [item["extra"]["provider"] for item in result] == [
+        *("exa" for _ in range(5)), *("google" for _ in range(5)),
+    ]
+
+
 def test_google_失败只发供应商失败事件且保留_exa_结果(tmp_path, monkeypatch) -> None:
     from app.sources import web_search
 

@@ -35,6 +35,7 @@ _EXA_KEY_PATTERN = re.compile(
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 _WINDOW_PARAM = WindowParam()
 _REQUEST_TIMEOUT_SECONDS = 20.0
+_GOOGLE_RESERVED_RESULTS = 5
 
 HttpPost = Callable[[str, Mapping[str, str], Mapping[str, Any], float], Mapping[str, Any]]
 EventSink = Callable[[NormalizedEvent], Any]
@@ -520,7 +521,18 @@ def _supplement_google(
             page_text_ok=page_ok,
             page_text_fallback=page_fallback,
         )
-        return (existing + google_items)[:max_results]
+        combined = existing + google_items
+        if len(combined) <= max_results:
+            return combined
+        google_slots = min(
+            _GOOGLE_RESERVED_RESULTS,
+            len(google_items),
+            max_results // 2,
+        )
+        return (
+            existing[:max_results - google_slots]
+            + google_items[:google_slots]
+        )
     except Exception as error:  # noqa: BLE001 —— 补充源失败不得影响主路
         _emit_google_failure(on_event, error=error, log_root=log_root)
         return existing
