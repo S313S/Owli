@@ -284,3 +284,32 @@ def test_两栏都要有一条不断的高度链才滚得动() -> None:
         block = css[css.index(block_start):]
         block = block[: block.index("}")]
         assert "min-height: 0;" in block, block_start
+
+
+def test_生产的片产物路径正是面板要去找的那个批次文件(tmp_path: Path) -> None:
+    """把「谁写」和「谁读」钉在一起，免得两边各改各的又对不上。
+
+    写侧：`rating_batch_output_path` 是 runtime 派发评级批次时算产物路径用的那一个
+    （`runtime._rating_batch_task` 就用它），产物路径进 `TranscriptWriter` 决定
+    transcript 文件名。读侧：`part_files` 按同样的形状去找。
+    """
+
+    from app.adapters.transcript import transcript_path
+    from app.plan.model import rating_batch_output_path
+
+    runs_root = tmp_path / "runs"
+    goal_root = runs_root / "r-obs4" / "goals" / "goal-1"
+    declared = "goals/goal-1/reliability-audit.json"
+    written = []
+    for index in (1, 2, 3):
+        piece = runs_root / "r-obs4" / rating_batch_output_path(declared, index)
+        assert piece.name == f"reliability-audit.part.{index}.json"
+        path = transcript_path(_Task(runs_root, piece))
+        assert path is not None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"ts": 1.0, "seq": 1, "event": index}) + "\n",
+                        encoding="utf-8")
+        written.append(path)
+    direct = goal_root / f"reliability-audit{TRANSCRIPT_SUFFIX}"
+    assert not direct.is_file()
+    assert part_files(direct) == written
