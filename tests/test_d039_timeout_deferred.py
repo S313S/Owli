@@ -196,3 +196,95 @@ def test_总墙钟不变量_章只挂一个定时器且不因超时加时(tmp_pa
 
     assert [delay for delay in armed if delay == 10] == [10], "章墙钟只准挂一次"
     assert store.list_chapters("r-d039")[0]["status"] == "missing"
+
+
+def test_stop取消路径不被timeout语义串到_resume后仍能跑成done(tmp_path: Path) -> None:
+    """货 3：墙钟与 /stop 共用 `_cancel_running_run`（D-008），改的只是 timeout 一支。
+
+    章墙钟定时器已挂上、但先被 /stop 掐掉时，cancel_reason 是 stopped，章复位
+    pending（不是 missing/timeout），resume 后照常再派活跑成 done。
+    """
+    from datetime import timedelta
+
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+
+    store = _store(tmp_path)
+    plan = _plan(deadline=600)
+    agent_id = plan.goals[0].agents[0].agent_id
+    current = [datetime(2026, 9, 4, tzinfo=timezone.utc)]
+    attempts: list[int] = []
+    started = asyncio.Event()
+
+    async def run_task(agent, context):
+        attempts.append(context.attempt)
+        current[0] = current[0] + timedelta(seconds=1)
+        if len(attempts) == 1:
+            started.set()
+            await asyncio.sleep(3600)  # 等 /stop 掐
+        return TaskRunResult(
+            True, context.engine,
+            actual_output_path=str(agent.output["path"]), actual_count=1,
+        )
+
+    async def scenario():
+        scheduler = Scheduler(
+            plan, run_task, lambda event: None, lambda: current[0],
+            lambda delay, callback: None, chapter_ledger=store,
+        )
+        driving = asyncio.create_task(scheduler.start())
+        await started.wait()
+        await scheduler.stop()
+        await driving
+        assert store.list_chapters("r-d039")[0]["status"] == "pending"
+        assert scheduler.agent_statuses[agent_id] == "queued"
+        await scheduler.resume()
+        return scheduler
+
+    scheduler = asyncio.run(scenario())
+    row = store.list_chapters("r-d039")[0]
+    assert attempts == [1, 2]
+    assert row["status"] == "done"
+    assert row["reason"] is None
+
+
+def test_配额型deferred仍留一次补轮(tmp_path: Path) -> None:
+    """货 3 反向守卫：D-039 只收窄 timeout 一支，非墙钟原因的补轮一次不少。
+
+    与 test_配额章_deferred_后仅补采一轮_仍不成则_missing 的差别：那条只看终态，
+    这条盯**状态轨迹**里 deferred 还在不在——甲改错成「一律不进 deferred」时，
+    只看终态的用例照样绿。
+    """
+    from datetime import timedelta
+
+    from app.orchestrator.scheduler import Scheduler, TaskRunResult
+
+    store = _store(tmp_path)
+    plan = _plan(deadline=600)
+    current = [datetime(2026, 9, 4, tzinfo=timezone.utc)]
+    events: list[dict] = []
+    calls: list[int] = []
+
+    def timer(delay, callback):
+        if delay <= 15:  # 章级重试间隔：假时钟里立刻到点
+            current[0] += timedelta(seconds=delay)
+            callback()
+        return object()
+
+    async def run_task(agent, context):
+        calls.append(context.attempt)
+        return TaskRunResult(
+            False, context.engine,
+            chapter_status="deferred", reason="quota_exhausted", actual_count=0,
+        )
+
+    scheduler = Scheduler(
+        plan, run_task, lambda event: events.append(event), lambda: current[0],
+        timer, chapter_ledger=store,
+    )
+    asyncio.run(scheduler.start())
+
+    row = store.list_chapters("r-d039")[0]
+    assert calls == [1, 2], "配额章必须真补采一轮"
+    assert "deferred" in _statuses(events, plan.goals[0].agents[0].agent_id)
+    assert row["status"] == "missing"
+    assert row["reason"] == "quota_exhausted"
