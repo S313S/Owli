@@ -712,24 +712,23 @@ class Scheduler:
         self._timer(float(deadline_seconds), expire)
 
     async def _finish_on_deadline(
-        self,
-        goal: Goal,
-        agent: Agent,
-        result: TaskRunResult | None,
-        *,
-        exhausted: bool = False,
+        self, goal: Goal, agent: Agent, result: TaskRunResult | None,
     ) -> None:
-        """墙钟到点定终态：reason 恒为 timeout（部分节已成功的章同样介入）。
+        """墙钟到点定终态：reason 恒为 timeout、状态恒为 missing（§D-039）。
 
-        还有轮次预算时先 deferred 留一次补轮；轮次已用尽就直接 missing，
-        不留一个永远排不上队的 deferred 幽灵。
+        章 deadline 是从**首次起跑**算的绝对墙钟，所以 timeout 型的补轮结构上
+        必空转：`_deadline_expired` 一置位，补轮一派活就被 `_cancel_running_run`
+        当场掐掉（`queued→running→missing` 同一秒），假时钟下则是派出去一次
+        deadline_at 早已过期的活白烧一次引擎。「留一次补轮」只对配额这类
+        **非墙钟**原因有意义，因此 timeout 不再进 deferred。
+
+        missing 只表示「这一章没跑完」，不表示这一轮的产出作废：已入库的
+        evidence 行留在库里（采集即入库），已落盘的产物由 goal 收尾的 salvage
+        捡回（missing 与 deferred 同样被捡），本次派活带回的
+        actual_output_path / actual_count 原样写进账本。
         """
 
-        status = (
-            "missing"
-            if exhausted or agent.agent_id in self._supplemented
-            else "deferred"
-        )
+        status = "missing"
         self._finish_ledger(
             goal,
             agent,
@@ -881,10 +880,7 @@ class Scheduler:
             if run_future.cancelled():
                 cancel_reason = self._cancel_reasons.pop(agent.agent_id, None)
                 if cancel_reason == "timeout":
-                    await self._finish_on_deadline(
-                        goal, agent, None,
-                        exhausted=self._attempts.get(agent.agent_id, 0) >= total,
-                    )
+                    await self._finish_on_deadline(goal, agent, None)
                 elif cancel_reason == "stopped" or self.status == "stopped":
                     # /stop 掐掉的这次派活没跑完，不该让 resume 再干等一次章级退避。
                     self._last_attempt_started_at.pop(
@@ -976,10 +972,7 @@ class Scheduler:
                 and result.chapter_status not in {"missing", "deferred"}
             ):
                 # 墙钟到点的章一律 timeout：errors 为空时不再退回 retry_exhausted（D-008 根因 1）。
-                await self._finish_on_deadline(
-                    goal, agent, result,
-                    exhausted=self._attempts.get(agent.agent_id, 0) >= total,
-                )
+                await self._finish_on_deadline(goal, agent, result)
                 return
             if result.succeeded:
                 self._finish_ledger(

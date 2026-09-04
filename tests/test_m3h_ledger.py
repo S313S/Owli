@@ -260,7 +260,13 @@ def test_scheduler_跳过_done_章并把重试耗尽写成_missing后仍_complet
     assert rows["ch-2"]["reason"] == "retry_exhausted"
 
 
-def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_path):
+def test_fast_章级墙钟超限直接转_missing_不留补轮(tmp_path):
+    """§D-039 改语义：原用例名为「先 deferred 补一轮仍超限转 missing」。
+
+    章 deadline 是从首次起跑算的绝对墙钟，补轮那次派活的 deadline_at 从起跑
+    就已过期，跑也是白跑——timeout 型不再进 deferred，一次落 missing。
+    D-008 期望 a（墙钟到点 reason 恒为 timeout）原样保留。
+    """
     from app.orchestrator.scheduler import Scheduler, TaskRunResult
     from app.plan.model import Plan
 
@@ -293,11 +299,11 @@ def test_fast_章级墙钟超限先_deferred_补一轮仍超限转_missing(tmp_p
     )
     asyncio.run(scheduler.start())
     row = store.list_chapters("r-ledger")[0]
-    assert calls == [1, 2]
+    assert calls == [1]
     assert row["status"] == "missing"
     # D-008 期望 a：墙钟到点的章 reason 恒为 timeout，不再退回 retry_exhausted
     assert row["reason"] == "timeout"
-    assert row["attempts"] == 2
+    assert row["attempts"] == 1
 
 
 def test_D003缺陷B_在跑章复位只动running且保留attempts(tmp_path):

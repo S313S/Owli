@@ -83,7 +83,9 @@ def test_E1_墙钟降级按最后结果真实死因落_timeout(tmp_path: Path) -
     row = store.list_chapters("r-ledger")[0]
     assert row["status"] == "missing"
     assert row["reason"] == "timeout"
-    assert row["attempts"] == 2
+    # §D-039：timeout 不再先 deferred 留一次注定空转的补轮，attempts 2 → 1。
+    # 本用例锁的是「墙钟降级按最后结果真实死因落 timeout」，那两条断言未变。
+    assert row["attempts"] == 1
 
 
 def test_E1_同因收敛也使用共享原因归类(tmp_path: Path) -> None:
