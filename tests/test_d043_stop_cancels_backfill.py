@@ -1,0 +1,159 @@
+"""§D-043：/stop 要掐得到 goal finalize 触发的可靠度回填引擎调用。
+
+D-041 真机重放（8963）撞出的第三条钱漏腿：`_finalize_if_terminal` 里的
+`backfill_report` 不在 `scheduler._running_runs` 里，`/stop` 的
+`_cancel_running_run` 遍历不到它——**没人 cancel**，D-041 那个「被取消就杀
+子进程」的修复也就无从触发，codex 子进程在 /stop 之后又活了 61 s。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import stat
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+#: 取消后允许引擎子进程存活的上限。
+KILL_DEADLINE_SECONDS = 1.0
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.killpg(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def _write_sleepy_codex(path: Path, pid_path: Path) -> None:
+    """假 codex：报出自己的 PID，吐一行事件，然后长睡不醒。"""
+
+    source = f'''#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import time
+
+print(json.dumps({{"type": "thread.started", "thread_id": "thread-d043"}}), flush=True)
+pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid()), encoding="utf-8")
+time.sleep(600)
+'''
+    path.write_text(source, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+async def _await_pid(pid_path: Path, timeout: float = 20.0) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pid_path.is_file():
+            text = pid_path.read_text(encoding="utf-8").strip()
+            if text:
+                return int(text)
+        await asyncio.sleep(0.02)
+    raise AssertionError("假 codex 子进程始终没报出 PID")
+
+
+def _coordinator(tmp_path: Path, monkeypatch, events: list, adapter):
+    """搭一个「goal 已全 done、正在收尾」的运行时：finalize 一进来就跑回填。"""
+
+    from app.orchestrator import runtime as runtime_module
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from tests.test_m3h_finalize import _plan, _write
+    from tests.test_m3h_ledger import _store
+    from tests.test_m4fork_followup import _evidence
+
+    plan = _plan(report_format="markdown")
+    _write(
+        tmp_path / "runs" / "r-ledger" / "goals" / "goal-3" / "report.md",
+        "# 结论\n\n- 收尾期。\n\n# 信息源\n\n- 无。\n",
+    )
+    store = _store(tmp_path)
+    # 只有源基线、没被 agent 评过的行才进得了回填的引擎批（RATE-1 货 5 的兜底口径）。
+    store.upsert_evidence_batch([
+        _evidence("r-ledger", f"b{index:03d}", rated_by="baseline:web_search@v1", extra={})
+        for index in range(3)
+    ])
+
+    async def publish(research_id, payload):
+        events.append(payload)
+
+    monkeypatch.setattr(runtime_module, "load_plan", lambda store_, rid: plan)
+    coordinator = RuntimeCoordinator(
+        store=store, event_buffer=SimpleNamespace(publish=publish), researches={}, cards={},
+        runs_root=tmp_path / "runs", auto_confirm=True,
+        routing_utc_clock=lambda: datetime(2026, 9, 4, tzinfo=timezone.utc),
+    )
+    coordinator.researches[plan.research_id] = coordinator._state_from_plan(plan)
+
+    async def scheduler_stop() -> None:
+        scheduler.status = "stopped"
+
+    scheduler = SimpleNamespace(
+        status="completed",
+        goal_statuses={"goal-1": "done", "goal-2": "done", "goal-3": "done"},
+        stop=scheduler_stop,
+    )
+    coordinator._schedulers[plan.research_id] = scheduler
+    coordinator._adapters[plan.research_id] = adapter
+    return coordinator, plan, store
+
+
+def test_收尾期_stop_掐得到回填的引擎子进程(tmp_path: Path, monkeypatch) -> None:
+    """货 1/2：finalize 正跑回填时 /stop → 引擎任务被取消、子进程 ≤1 s 退出。"""
+
+    from app.adapters import codex
+    from app.adapters import validation
+
+    monkeypatch.setattr(validation, "RUNS_ROOT", tmp_path / "runs")
+    pid_path = tmp_path / "child.pid"
+    executable = tmp_path / "fake-codex"
+    _write_sleepy_codex(executable, pid_path)
+    adapter = codex.CodexAdapter(
+        executable=str(executable), codex_home=tmp_path / "runtime-home"
+    )
+    events: list[dict] = []
+    coordinator, plan, _store_ = _coordinator(tmp_path, monkeypatch, events, adapter)
+
+    async def scenario() -> tuple[int, float, bool, bool]:
+        finalize = asyncio.create_task(
+            coordinator._finalize_if_terminal(plan.research_id)
+        )
+        pid = await _await_pid(pid_path)
+        assert _alive(pid), "假引擎子进程应当在跑"
+        started = time.monotonic()
+        await coordinator.stop(plan.research_id)
+        elapsed = time.monotonic() - started
+        still_alive = _alive(pid)
+        # 修好之后收尾自己就走完了；旧码里它会一直等假子进程睡满，所以给个上限。
+        try:
+            await asyncio.wait_for(asyncio.shield(finalize), timeout=20)
+            finished = True
+        except asyncio.TimeoutError:
+            finalize.cancel()
+            await asyncio.gather(finalize, return_exceptions=True)
+            finished = False
+        return pid, elapsed, still_alive, finished
+
+    pid, elapsed, still_alive, finished = asyncio.run(scenario())
+    try:
+        assert not still_alive, "/stop 之后回填的引擎子进程还在跑：D-043 复现"
+        assert elapsed <= KILL_DEADLINE_SECONDS, f"/stop 耗时 {elapsed:.2f}s"
+        assert finished, "取消回填不该把收尾卡死"
+        cancelled = [
+            event for event in events
+            if event.get("type") == "reliability_backfill_cancelled"
+        ]
+        assert cancelled, "取消要留痕（判据落库不落日志）"
+        # 收尾没被掐断的引擎任务连累：报告照常落盘。
+        assert _store_.get_report("r-ledger")["status"] == "completed"
+    finally:
+        if _alive(pid):
+            os.killpg(pid, 9)
