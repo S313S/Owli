@@ -305,3 +305,108 @@ def test_stop_掐断时调度器链路上的_codex_子进程同样被杀干净(t
     finally:
         if _alive(pid):
             os.killpg(pid, 9)
+
+
+def _fake_sdk(pid_path: Path):
+    """假 SDK：client 起一个真长睡子进程，`disconnect()` 像真 transport 那样收尸。
+
+    真 SDK（claude_agent_sdk 0.1.81）的 `disconnect() → query.close() →
+    ProcessTransport.close()` 会关 stdin、最多等 5 s、再 terminate、再 kill；
+    本用例锁的是**我方**这一半：取消时 `_run_once` 的 finally 必须真的走到
+    `await client.disconnect()` 并等它做完，子进程才有人收。
+    """
+
+    class FakeClient:
+        def __init__(self, options):
+            self.options = options
+            self.process = None
+
+        async def connect(self, prompt):
+            self.process = await asyncio.create_subprocess_exec(
+                sys.executable, "-c", "import time; time.sleep(600)",
+                start_new_session=True,
+            )
+            pid_path.write_text(str(self.process.pid), encoding="utf-8")
+
+        async def receive_response(self):
+            await asyncio.sleep(600)
+            yield None  # pragma: no cover - 取消先到
+
+        async def disconnect(self):
+            if self.process is not None and self.process.returncode is None:
+                os.killpg(self.process.pid, 9)
+                await self.process.wait()
+
+    class FakeOptions:
+        def __init__(self, **values):
+            self.values = values
+
+    class FakeSdk:
+        ClaudeSDKClient = FakeClient
+        ClaudeAgentOptions = FakeOptions
+        ResultMessage = type("ResultMessage", (), {})
+        AssistantMessage = type("AssistantMessage", (), {})
+        UserMessage = type("UserMessage", (), {})
+        SystemMessage = type("SystemMessage", (), {})
+        TextBlock = type("TextBlock", (), {})
+        ToolUseBlock = type("ToolUseBlock", (), {})
+        PermissionResultAllow = type("Allow", (), {})
+        PermissionResultDeny = type(
+            "Deny", (), {"__init__": lambda self, **values: None}
+        )
+        HookMatcher = type(
+            "HookMatcher", (),
+            {"__init__": lambda self, matcher=None, hooks=None: None},
+        )
+
+    return FakeSdk
+
+
+def test_取消_claude_任务时_SDK_子进程随_disconnect_一起收尸(tmp_path, monkeypatch):
+    """货 3：claude 侧取消路径靠 `_run_once` 的 finally → `client.disconnect()`。
+
+    结论（读 claude_agent_sdk 0.1.81 源码 + 本用例）：SDK 自带 kill 钩子，
+    我方无需另加 CancelledError 分支——只要 finally 里的 disconnect 在取消时
+    仍被 await 完（本用例锁的就是这一点）。
+    """
+    from app.adapters import validation
+    from app.adapters.capability import Capability, FileSystemScope
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.contracts import EngineTask
+
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(validation, "RUNS_ROOT", runs_root)
+    output_path = runs_root / "r-d041" / "goals" / "goal-1" / "result.md"
+    pid_path = tmp_path / "claude-child.pid"
+    task = EngineTask(
+        body="长跑任务", output_path=output_path, output_format="markdown",
+        research_id="r-d041", goal_id="goal-1", agent_id="agent-1",
+        agent_kind="report", validators=["file_exists"],
+        capability=Capability(
+            tools=("fs.write",),
+            fs=FileSystemScope(write=("goals/goal-1/**",)),
+        ),
+    )
+    adapter = ClaudeAdapter(sdk=_fake_sdk(pid_path), log_root=tmp_path / "logs")
+
+    async def scenario() -> tuple[int, float]:
+        run_task = asyncio.ensure_future(
+            adapter.run(task, _ctx(validation, output_path), run_token=object())
+        )
+        pid = await _await_pid(pid_path)
+        run_task.cancel()
+        started = time.monotonic()
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass
+        return pid, time.monotonic() - started
+
+    pid, elapsed = asyncio.run(scenario())
+    try:
+        assert not _alive(pid), "取消 claude 任务后 SDK 子进程还在跑"
+        assert elapsed <= KILL_DEADLINE_SECONDS, f"取消耗时 {elapsed:.2f}s"
+        assert not adapter._clients, "取消后 _clients 应清空"
+    finally:
+        if _alive(pid):
+            os.killpg(pid, 9)
