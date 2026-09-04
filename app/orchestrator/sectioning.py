@@ -2405,6 +2405,14 @@ async def run_sectioned_task(
                 pool_result is not None
                 and pool_result.verdict is not validation.Verdict.PASS
             )
+            merged_envelope = (
+                _shard_envelope(section_path)
+                if shard_count > 1 and pool_failed else None
+            )
+            merged_offpool = bool(
+                merged_envelope is not None
+                and _shard_stale_citations(merged_envelope[0], evidence_pool)
+            )
             succeeded = (
                 bool(getattr(result, "succeeded", False))
                 and not artifact_empty
@@ -2489,7 +2497,7 @@ async def run_sectioned_task(
                     reason = "timeout"
                 if (
                     shard_count > 1
-                    and not pool_failed
+                    and (not pool_failed or merged_offpool)
                     and section_attempt < attempt_budget
                     and _section_resume_within_deadline(
                         section_deadline,
@@ -2510,8 +2518,9 @@ async def run_sectioned_task(
                     # 成本下限，就只补坏片、已成片 `write_shard_skipped`。
                     # 闸沿用既有那一套、不新造，常量一个不动。
                     # 三处不动：① 不分片的节（shard_count == 1）逐字照旧；
-                    # ② pool_failed 是**合并后**节产物的校验失败（信封/角标），
-                    #    不是片级失败，仍走下面 D-025 那条定向重试；
+                    # ② pool_failed 通常是**合并后**节产物的格式/信封失败，仍走
+                    #    下面 D-025 定向重试；§D-045 只给其中角标越池这一种开门，
+                    #    让下一次节尝试借 D-042 守卫只删掉污染片再写；
                     # ③ attempts 用尽或余量不足时 reason / timeout_kind 原样落账，
                     #    这里只决定「要不要再来一次」，不改写失败原因。
                     # resume=True 指**片级** resume——不续引擎会话，靠盘上已成的片跳过。
