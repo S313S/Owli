@@ -26,8 +26,28 @@ def _seed_history(tmp_path: Path, *, status: str = "completed") -> tuple[Path, s
     plan_snapshot = {
         "research_id": research_id,
         "goals": [
-            {"goal_id": "goal-1", "title": "资料采集", "agents": []},
-            {"goal_id": "goal-2", "title": "报告成稿", "agents": []},
+            {
+                "goal_id": "goal-1",
+                "title": "资料采集",
+                "agents": [{
+                    "agent_id": "data-collection",
+                    "display_name": "资料采集",
+                    "engine": "codex",
+                    "task": "采集可复核资料",
+                    "chapter": {"chapter_id": "chapter-1"},
+                }],
+            },
+            {
+                "goal_id": "goal-2",
+                "title": "报告成稿",
+                "agents": [{
+                    "agent_id": "report-writing",
+                    "display_name": "报告撰写",
+                    "engine": "claude",
+                    "task": "按证据撰写报告",
+                    "chapter": {"chapter_id": "chapter-2"},
+                }],
+            },
         ],
     }
     store = Store(database)
@@ -112,6 +132,20 @@ def test_历史详情从_store_重建只读快照且不写回内存(tmp_path: Pa
     assert snapshot["cards"] == []
     assert snapshot["events"] == []
     assert [goal["status"] for goal in snapshot["goals"]] == ["done", "failed"]
+    assert snapshot["goals"][0]["agents"] == [{
+        "id": "data-collection",
+        "name": "资料采集",
+        "engine": "codex",
+        "status": "done",
+        "activity": "采集可复核资料",
+    }]
+    assert snapshot["goals"][1]["agents"] == [{
+        "id": "report-writing",
+        "name": "报告撰写",
+        "engine": "claude",
+        "status": "missing",
+        "activity": "按证据撰写报告",
+    }]
     assert [chapter["status"] for chapter in snapshot["chapters"]] == ["done", "missing"]
     assert snapshot["missing"] == [
         {

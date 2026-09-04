@@ -341,6 +341,9 @@ def create_app(
         goals: list[dict[str, Any]] = []
         for goal_id, title in goal_specs:
             rows = chapters_by_goal.get(goal_id, [])
+            rows_by_chapter = {
+                str(row.get("chapter_id") or ""): row for row in rows
+            }
             statuses = {str(row["status"]) for row in rows}
             if statuses & {"missing", "deferred"}:
                 status = "failed"
@@ -354,13 +357,44 @@ def create_app(
             else:
                 status = "queued"
                 summary = "章节账本尚未进入终态"
+            planned_goal = next(
+                (
+                    goal for goal in planned_goals
+                    if isinstance(goal, dict) and goal.get("goal_id") == goal_id
+                ),
+                {},
+            )
+            agents: list[dict[str, Any]] = []
+            for index, agent in enumerate(planned_goal.get("agents", []), start=1):
+                if not isinstance(agent, dict):
+                    continue
+                agent_id = str(agent.get("agent_id") or "").strip()
+                if not agent_id:
+                    continue
+                chapter_spec = agent.get("chapter")
+                chapter_id = (
+                    str(chapter_spec.get("chapter_id") or "")
+                    if isinstance(chapter_spec, dict)
+                    else ""
+                ) or f"ch-{index}"
+                row = rows_by_chapter.get(chapter_id)
+                agent_status = str((row or {}).get("status") or "queued")
+                if agent_status == "pending":
+                    agent_status = "queued"
+                agents.append({
+                    "id": agent_id,
+                    "name": str(agent.get("display_name") or agent_id),
+                    "engine": str(agent.get("engine") or ""),
+                    "status": agent_status,
+                    "activity": str(agent.get("task") or ""),
+                })
             goals.append(
                 {
                     "id": goal_id,
                     "title": title,
                     "status": status,
                     "summary": summary,
-                    "agents": [],
+                    "agents": agents,
                 }
             )
 
