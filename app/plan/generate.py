@@ -27,7 +27,7 @@ from app.plan.allocation import (
     subjects_budget,
 )
 from app.plan.chapters import generate_chapter_specs
-from app.plan.entities import resolve_entities
+from app.plan.entities import merge_entity_cards, resolve_entities
 from app.plan.lint import (
     _SOURCE_MARKET_PROFILES, applicable_sources, duplicate_collection_goal_ids,
     lint,
@@ -228,6 +228,9 @@ def _skeleton_prompt(
         "产物结构：只输出 JSON object，顶层只含 market_profile、"
         "market_profile_justification、subjects、subjects_justification、goals。"
         "subjects 必须是被研究实体的非空去重字符串数组，并包含主体自身——"
+        "同一产品的中外叫法只算一个实体，只保留 canonical，其他叫法写入别名；"
+        "不得把 canonical 与它的中文名、英文名或别名拆成两个 subject。"
+        "请按「canonical + 别名」理解实体边界，但 subjects 数组只写 canonical；"
         "只写能被逐个采集的**具体实体专名**（品牌、产品、机构、人物的名字）；"
         "题目本身、所属领域/行业/品类、平台名、以及「XX 社媒」「XX 矩阵」"
         "这类抽象概括词一律不得写进 subjects。下游段级校验会要求"
@@ -1344,6 +1347,33 @@ def _entities_event(
     )
 
 
+def _entities_merged_event(
+    research_id: str, merge: Mapping[str, Any],
+) -> NormalizedEvent:
+    """§ENT-3：一组重复实体卡合并成首项时留下可见、可机读事件。"""
+
+    source = [str(item) for item in merge.get("from", [])]
+    target = str(merge.get("to") or "")
+    return dataclasses.replace(
+        _progress_event(
+            research_id, f"重复实体已合并：{'、'.join(source)} → {target}",
+        ),
+        raw={"entities_merged": {"from": source, "to": target}},
+    )
+
+
+def _allocation_skipped_event(
+    research_id: str, skipped: list[dict[str, str]],
+) -> NormalizedEvent:
+    """§ENT-3：跨语域候选装不下时只记账，不把计划判死。"""
+
+    summary = "、".join(f"{item['source_id']}·{item['entity']}" for item in skipped)
+    return dataclasses.replace(
+        _progress_event(research_id, f"跨语域采集位尽力跳过：{summary}"),
+        raw={"cross_locale_slots_skipped": list(skipped)},
+    )
+
+
 def _allocation_event(
     research_id: str, collection_plan: Mapping[str, list[dict[str, str]]],
 ) -> NormalizedEvent:
@@ -1495,6 +1525,17 @@ async def generate_plan(
         on_progress=lambda text: _emit(store, _progress_event(research_id, text)),
         search=entity_search,
     )
+    entities, entity_merges = merge_entity_cards(entities)
+    if entity_merges:
+        remapped = {
+            source: str(merge["to"])
+            for merge in entity_merges for source in merge["from"]
+        }
+        subjects = list(dict.fromkeys(remapped.get(subject, subject) for subject in subjects))
+        for scaffold in scaffolds:
+            scaffold["subjects"] = list(subjects)
+        for merge in entity_merges:
+            await _emit(store, _entities_merged_event(research_id, merge))
     await _emit(store, _entities_event(
         research_id, entities, time.monotonic() - entities_started,
     ))

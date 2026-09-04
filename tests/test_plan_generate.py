@@ -85,13 +85,17 @@ class FakeStore:
 
 
 class FakeEngine:
-    def __init__(self, skeletons: list[dict], *, bilingual_entities: bool = False) -> None:
+    def __init__(
+        self, skeletons: list[dict], *, bilingual_entities: bool = False,
+        entity_payloads: list[dict] | None = None,
+    ) -> None:
         # §ENT-2：实体卡默认**只有中文叫法**。ENT-1 这里恒给 f"{name}-en"，在
         # 本包语义下等于宣告每个实体都该在海外源再排一张卡（分配表按叫法定有无），
         # 于是所有手写的 goal 产物都对不上规则 31 的必采清单——夹具卡的是旧分配表
         # 形状，不是判据本身。改的是**输入**（这个实体有没有外文名），断言原样保留；
         # 要双语的用例显式打开，并自己把对面语域那张采集卡写进骨架。
         self.bilingual_entities = bilingual_entities
+        self.entity_payloads = deepcopy(entity_payloads)
         self.skeletons = [deepcopy(item) for item in skeletons]
         self.tasks = []
         self.chapter_tasks = []
@@ -119,7 +123,7 @@ class FakeEngine:
         if task.output_path.stem.startswith("entity-"):
             index = int(task.output_path.stem.removeprefix("entity-"))
             name = self._current["subjects"][index - 1]
-            payload = {
+            payload = deepcopy(self.entity_payloads[index - 1]) if self.entity_payloads else {
                 "canonical": name,
                 "names": {
                     "zh": name,
@@ -218,11 +222,16 @@ class ForbiddenEngine:
         raise AssertionError("规划任务不得路由到 Codex")
 
 
-def _generate(tmp_path: Path, skeletons: list[dict], *, bilingual_entities: bool = False):
+def _generate(
+    tmp_path: Path, skeletons: list[dict], *, bilingual_entities: bool = False,
+    entity_payloads: list[dict] | None = None,
+):
     from app.adapters.routing import RoutedAdapter
     from app.plan.generate import generate_plan
 
-    engine = FakeEngine(skeletons, bilingual_entities=bilingual_entities)
+    engine = FakeEngine(
+        skeletons, bilingual_entities=bilingual_entities, entity_payloads=entity_payloads,
+    )
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
         adapters={"claude": engine, "codex": ForbiddenEngine()},

@@ -7,6 +7,7 @@ from collections import Counter, deque
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.plan.entities import duplicate_entity_groups
 from app.plan.model import (
     Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of, rated_collector_id,
 )
@@ -1415,6 +1416,23 @@ def _rule_32(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
+def _rule_33(raw: Mapping[str, Any]) -> list[str]:
+    """§ENT-3：同 canonical、同正式名或互为别名的 subject 只能占一个实体位。"""
+
+    entities = raw.get("entities")
+    if not isinstance(entities, list):
+        return []
+    cards = [card for card in entities if isinstance(card, Mapping)]
+    messages: list[str] = []
+    for group in duplicate_entity_groups(cards, aliases=True):
+        ids = [str(cards[index].get("id") or "") for index in group]
+        messages.append(
+            f"[规则33] plan/subjects 同一实体重复占位：{'、'.join(ids)}；"
+            "canonical 相同或互为别名的叫法只保留一个 subject"
+        )
+    return messages
+
+
 def lint(
     plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
     max_chapters_per_goal: int | None = None,
@@ -1462,4 +1480,5 @@ def lint(
     errors.extend(_rule_30(goals))
     errors.extend(_rule_31(goals, collection_plan))
     errors.extend(_rule_32(raw, goals))
+    errors.extend(_rule_33(raw))
     return {"errors": errors, "warnings": _warnings(goals)}

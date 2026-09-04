@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
 from app.plan.model import Entity
@@ -209,6 +210,110 @@ def clean_aliases(
     return kept
 
 
+def _card_names(card: Mapping[str, Any]) -> dict[str, Any]:
+    names = card.get("names")
+    return dict(names) if isinstance(names, Mapping) else {}
+
+
+def entity_cards_match(
+    left: Mapping[str, Any], right: Mapping[str, Any], *, aliases: bool = False,
+) -> bool:
+    """两张卡是否指向同一实体；正式名按字段逐项比较，别名只供 lint 加严。"""
+
+    left_names, right_names = _card_names(left), _card_names(right)
+    pairs = [(left.get("canonical"), right.get("canonical"))]
+    pairs.extend((left_names.get(key), right_names.get(key)) for key in ("zh", "en"))
+    if any(
+        _normalized(str(a or ""))
+        and _normalized(str(a or "")) == _normalized(str(b or ""))
+        for a, b in pairs
+    ):
+        return True
+    if not aliases:
+        return False
+    left_id = _normalized(str(left.get("id") or ""))
+    right_id = _normalized(str(right.get("id") or ""))
+    left_aliases = {_normalized(str(item)) for item in left_names.get("aliases") or []}
+    right_aliases = {_normalized(str(item)) for item in right_names.get("aliases") or []}
+    return bool((left_id and left_id in right_aliases) or (right_id and right_id in left_aliases))
+
+
+def duplicate_entity_groups(
+    cards: Sequence[Mapping[str, Any]], *, aliases: bool = False,
+) -> list[list[int]]:
+    """按输入顺序返回重复卡的连通分组，首项就是确定性保留项。"""
+
+    parent = list(range(len(cards)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for right in range(len(cards)):
+        for left in range(right):
+            if entity_cards_match(cards[left], cards[right], aliases=aliases):
+                parent[root(right)] = root(left)
+    grouped: dict[int, list[int]] = {}
+    for index in range(len(cards)):
+        grouped.setdefault(root(index), []).append(index)
+    return [indices for indices in grouped.values() if len(indices) > 1]
+
+
+def merge_entity_cards(
+    cards: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """合并同 canonical / 同语种正式名的卡；首张卡及其 id 稳定保留。"""
+
+    groups = duplicate_entity_groups(cards)
+    by_member = {member: group for group in groups for member in group}
+    merged_cards: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    for index, raw in enumerate(cards):
+        group = by_member.get(index, [index])
+        if index != group[0]:
+            continue
+        card = deepcopy(dict(raw))
+        names = _card_names(card)
+        names.setdefault("aliases", [])
+        card["names"] = names
+        for member in group[1:]:
+            other = cards[member]
+            other_names = _card_names(other)
+            for locale in ("zh", "en"):
+                if not str(names.get(locale) or "").strip():
+                    names[locale] = other_names.get(locale)
+            handles = card.setdefault("official_handles", {})
+            for platform, handle in dict(other.get("official_handles") or {}).items():
+                handles.setdefault(platform, handle)
+            candidates = [
+                *(names.get("aliases") or []), *(other_names.get("aliases") or []),
+                other.get("id"), other.get("canonical"),
+                other_names.get("zh"), other_names.get("en"),
+            ]
+            formal = {
+                _normalized(str(value or "")) for value in
+                (card.get("id"), card.get("canonical"), names.get("zh"), names.get("en"))
+            }
+            aliases_out: list[str] = []
+            for candidate in candidates:
+                text = str(candidate or "").strip()
+                key = _normalized(text)
+                if text and key not in formal and key not in {
+                    _normalized(item) for item in aliases_out
+                }:
+                    aliases_out.append(text)
+            names["aliases"] = aliases_out[:_MAX_ALIASES]
+        merged_cards.append(card)
+        if len(group) > 1:
+            records.append({
+                "from": [str(cards[item].get("id") or "") for item in group],
+                "to": str(card.get("id") or ""),
+            })
+    return merged_cards, records
+
+
 def entity_card(value: Any, *, entity_id: str) -> Entity | None:
     """把模型返回的 JSON 折成实体卡；折不动或模型自认不是实体时返回 None。
 
@@ -352,6 +457,7 @@ async def _progress(on_progress: Any, text: str) -> None:
 
 
 __all__ = [
-    "CARD_ATTEMPTS", "MAX_ENTITIES", "clean_aliases", "entity_card",
-    "entity_prompt", "resolve_entities",
+    "CARD_ATTEMPTS", "MAX_ENTITIES", "clean_aliases", "duplicate_entity_groups",
+    "entity_card", "entity_cards_match", "entity_prompt", "merge_entity_cards",
+    "resolve_entities",
 ]
