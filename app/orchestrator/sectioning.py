@@ -1629,8 +1629,11 @@ async def _run_section_shards(
         if shard_deadline is not None and section_deadline is not None:
             shard_deadline = min(shard_deadline, section_deadline)
         shard_attempt = 0
+        engine_attempts = 0
+        offpool_rewrites = 0
         while True:
             shard_attempt += 1
+            engine_attempts += 1
             try:
                 result = await _run_before_section_deadline(
                     adapter, shard_task,
@@ -1651,7 +1654,45 @@ async def _run_section_shards(
                 bool(getattr(result, "succeeded", False))
                 and _shard_envelope(shard_path) is not None
             )
-            if succeeded or shard_attempt >= SECTION_RETRY_MAX_ATTEMPTS:
+            if succeeded:
+                envelope = _shard_envelope(shard_path)
+                offpool_marks = (
+                    _shard_stale_citations(envelope[0], evidence_pool)
+                    if envelope is not None else set()
+                )
+                if offpool_marks and offpool_rewrites < 2:
+                    # §D-045 货 1：新写片也可能幻觉池外角标。不要等合并后把
+                    # 其余好片一起作废；只删这一片，用同一 prompt 定向重写。
+                    offpool_rewrites += 1
+                    await _emit(on_event, "write_shard_offpool", {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "shard": index, "shards": total,
+                        "citations": sorted(offpool_marks)[:10],
+                        "citations_total": len(offpool_marks),
+                        "attempt": offpool_rewrites,
+                    }, is_error=True)
+                    shard_path.unlink(missing_ok=True)
+                    pool_marks = [
+                        str(item.get("citation") or "").strip("[]")
+                        for item in evidence_pool.get("items", [])
+                        if isinstance(item, Mapping) and item.get("citation")
+                    ]
+                    pool_label = (
+                        f"{pool_marks[0]}–{pool_marks[-1]}" if pool_marks else ""
+                    )
+                    shard_task = replace(
+                        shard_task,
+                        body=(
+                            f"{body}\n\n【角标越池重写】上一稿引用了池外角标；"
+                            f"只能引用池内角标 {pool_label}，一个池外角标都不许出现。\n"
+                        ),
+                    )
+                    shard_attempt = 0
+                    resume_for = None
+                    continue
+                break
+            if shard_attempt >= SECTION_RETRY_MAX_ATTEMPTS:
                 break
             reason = section_failure_reason(result, shard_path)
             if not _is_transport_failure(result, reason):
@@ -1681,7 +1722,7 @@ async def _run_section_shards(
                 "timeout" if result is None
                 else section_failure_reason(result, shard_path)
             ),
-            "attempts": shard_attempt,
+            "attempts": engine_attempts,
             "elapsed_seconds": asyncio.get_running_loop().time() - started_at,
             "engine_error": getattr(result, "engine_error", None),
         }, is_error=not succeeded)
