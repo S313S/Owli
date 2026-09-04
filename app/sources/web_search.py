@@ -431,7 +431,7 @@ def _emit_page_text_fallback(on_event: EventSink | None, permalink: str) -> None
 
 def _emit_provider_result(
     on_event: EventSink | None, *, hits: int, deduped: int,
-    page_text_ok: int, page_text_fallback: int,
+    page_text_ok: int, page_text_fallback: int, content_nonempty: int,
 ) -> None:
     if on_event is None:
         return
@@ -443,6 +443,7 @@ def _emit_provider_result(
         "deduped": deduped,
         "page_text_ok": page_text_ok,
         "page_text_fallback": page_text_fallback,
+        "content_nonempty": content_nonempty,
     }
     on_event(NormalizedEvent(
         engine="OwliSource",
@@ -520,6 +521,9 @@ def _supplement_google(
             deduped=deduped,
             page_text_ok=page_ok,
             page_text_fallback=page_fallback,
+            content_nonempty=sum(
+                bool(item.get("content_excerpt")) for item in google_items
+            ),
         )
         combined = existing + google_items
         if len(combined) <= max_results:

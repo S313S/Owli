@@ -114,7 +114,7 @@ def test_开关开启后只并入_organic_正文与片段降级并去重截断(t
     assert summary.raw == {
         "event": "web_search_provider_result", "source_id": "web_search",
         "provider": "google", "hits": 3, "deduped": 1,
-        "page_text_ok": 1, "page_text_fallback": 1,
+        "page_text_ok": 1, "page_text_fallback": 1, "content_nonempty": 2,
     }
 
 
