@@ -164,7 +164,12 @@ def test_运行中研究仍走原有内存同步路径(tmp_path: Path) -> None:
 
     application = create_app(tmp_path / "owli.db", SCHEMA_PATH, engine_probe=lambda: {})
     research_id = "r-live"
-    expected = {"research_id": research_id, "status": "running", "marker": "runtime"}
+    expected = {
+        "research_id": research_id,
+        "status": "running",
+        "marker": "runtime",
+        "run_panel_sections": [],
+    }
     application.state.researches[research_id] = {"research_id": research_id}
     application.state.runtime.sync_state_with_scheduler = lambda value: (
         expected if value == research_id else None

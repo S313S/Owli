@@ -28,6 +28,15 @@ export type GoalState = {
   agents: AgentState[]
 }
 
+export type RunPanelSection = {
+  id: string
+  goal_id: string
+  chapter: string
+  name: string
+  engine: string
+  status: string
+}
+
 export type ActionCard = {
   card_id: string
   card_type: string
@@ -188,6 +197,7 @@ export type ResearchSnapshot = {
   summary_line?: string | null
   actions: ServerAction[]
   goals: GoalState[]
+  run_panel_sections?: RunPanelSection[]
   chapters?: ChapterProgress[]
   missing?: HistoricalMissing[]
   cards: ActionCard[]

@@ -82,7 +82,11 @@ function reduceEvent(current: ResearchSnapshot | null, event: NormalizedEvent): 
   if (event.type === 'section_heartbeat') {
     const beat = { ...data, received_at: Date.now() } as unknown as SectionHeartbeat
     const key = String(data.agent || `${String(data.goal)}/${String(data.chapter)}`)
-    return { ...current, heartbeats: { ...(current.heartbeats ?? {}), [key]: beat } }
+    const sectionKey = `${String(data.goal)}/${String(data.chapter)}`
+    return {
+      ...current,
+      heartbeats: { ...(current.heartbeats ?? {}), [key]: beat, [sectionKey]: beat },
+    }
   }
   const eventLine = { ...event }
   if (event.type === 'research_update') {

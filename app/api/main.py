@@ -70,6 +70,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = ROOT / "var" / "owli.db"
 DEFAULT_SCHEMA_PATH = ROOT / "app" / "store" / "schema.sql"
 DEFAULT_FRONTEND_DIST = ROOT / "web" / "dist"
+RUN_PANEL_EXTRA_SECTIONS = {
+    "firsthand-audit": "一手性审计",
+    "reliability-backfill": "可靠度回填",
+}
 
 
 class ResearchRequest(BaseModel):
@@ -310,6 +314,37 @@ def create_app(
                 return None
         return None
 
+    def run_panel_sections(research_id: str, *, live: bool) -> list[dict[str, str]]:
+        """列出不在计划树里的收尾审计 transcript；纯文件读。"""
+        if not research_id or any(
+            marker in research_id for marker in ("/", "\\", "..")
+        ):
+            return []
+        runs_root = runtime.runs_root.resolve()
+        goals_root = (runtime.runs_root / research_id / "goals").resolve()
+        if not goals_root.is_relative_to(runs_root) or not goals_root.is_dir():
+            return []
+        sections: list[dict[str, str]] = []
+        for goal_root in sorted(goals_root.iterdir()):
+            if not goal_root.is_dir() or goal_root.parent != goals_root:
+                continue
+            for chapter, name in RUN_PANEL_EXTRA_SECTIONS.items():
+                path = goal_root / f"{chapter}{TRANSCRIPT_SUFFIX}"
+                if not path.is_file():
+                    continue
+                raw = section_log.read_section(path, tail=1, after_seq=None)
+                lines = raw.get("lines") or []
+                engine = str(lines[-1].get("engine") or "") if lines else ""
+                sections.append({
+                    "id": f"{goal_root.name}/{chapter}",
+                    "goal_id": goal_root.name,
+                    "chapter": chapter,
+                    "name": name,
+                    "engine": engine,
+                    "status": "running" if live else "done",
+                })
+        return sections
+
     def historical_snapshot(research_id: str) -> dict[str, Any] | None:
         """从 Store 事实重建历史只读 DTO，不创建任何运行态对象。"""
         report = store.get_report(research_id)
@@ -443,6 +478,7 @@ def create_app(
             "missing": missing,
             "cards": [],
             "events": [],
+            "run_panel_sections": run_panel_sections(research_id, live=False),
         }
 
     def cached(scope: str, request_id: str) -> JSONResponse | None:
@@ -867,7 +903,14 @@ def create_app(
         if research_id in researches:
             # 状态以调度器为准：收尾之前也不得回报与调度器相反的状态
             state = runtime.sync_state_with_scheduler(research_id)
-            return {"ok": True, "data": state, "error": None}
+            live = str((state or {}).get("status") or "") not in {
+                "completed", "failed", "archived", "stopped",
+            }
+            data = {
+                **(state or {}),
+                "run_panel_sections": run_panel_sections(research_id, live=live),
+            }
+            return {"ok": True, "data": data, "error": None}
         state = historical_snapshot(research_id)
         if state is None:
             raise HTTPException(status_code=404, detail="调研任务不存在")

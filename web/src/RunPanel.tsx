@@ -64,9 +64,15 @@ type PanelTab = {
   key: string
   goalIndex: number
   goalId: string
+  section: string
   name: string
   engine: string
   status: string
+}
+
+const EXTRA_SECTION_NAMES: Record<string, string> = {
+  'firsthand-audit': '一手性审计',
+  'reliability-backfill': '可靠度回填',
 }
 
 /** 只有跑起来过的卡片才有原始流可看：queued 的还没产生任何事件。
@@ -77,15 +83,45 @@ type PanelTab = {
 export function panelTabs(snapshot: ResearchSnapshot): PanelTab[] {
   const beating = new Set(Object.values(snapshot.heartbeats ?? {}).map((beat) => beat.agent))
   const tabs: PanelTab[] = []
+  const seen = new Set<string>()
   snapshot.goals.forEach((goal, index) => {
     goal.agents.forEach((agent) => {
       const idle = agent.status === 'queued' || agent.status === 'skipped'
       if (idle && !beating.has(agent.id)) return
+      seen.add(`${goal.id}/${agent.id}`)
       tabs.push({
         key: agent.id, goalIndex: index + 1, goalId: goal.id,
+        section: agent.id,
         name: agent.name, engine: agent.engine,
         status: idle ? 'running' : agent.status,
       })
+    })
+  })
+  snapshot.run_panel_sections?.forEach((section) => {
+    if (seen.has(`${section.goal_id}/${section.chapter}`)) return
+    seen.add(`${section.goal_id}/${section.chapter}`)
+    tabs.push({
+      key: section.id,
+      goalIndex: snapshot.goals.findIndex((goal) => goal.id === section.goal_id) + 1,
+      goalId: section.goal_id,
+      section: section.chapter,
+      name: section.name,
+      engine: section.engine,
+      status: section.status,
+    })
+  })
+  Object.values(snapshot.heartbeats ?? {}).forEach((beat) => {
+    const name = EXTRA_SECTION_NAMES[beat.chapter]
+    if (!name || seen.has(`${beat.goal}/${beat.chapter}`)) return
+    seen.add(`${beat.goal}/${beat.chapter}`)
+    tabs.push({
+      key: `${beat.goal}/${beat.chapter}`,
+      goalIndex: snapshot.goals.findIndex((goal) => goal.id === beat.goal) + 1,
+      goalId: beat.goal,
+      section: beat.chapter,
+      name,
+      engine: beat.engine,
+      status: 'running',
     })
   })
   return tabs
@@ -97,11 +133,19 @@ export function defaultTabKey(
 ): string {
   let best: { key: string; at: number } | null = null
   tabs.forEach((tab) => {
-    const beat = heartbeats?.[tab.key]
+    const beat = heartbeatFor(tab, heartbeats)
     if (beat && (!best || beat.received_at > best.at)) best = { key: tab.key, at: beat.received_at }
   })
   if (best) return (best as { key: string }).key
   return (tabs.find((tab) => tab.status === 'running') ?? tabs[0])?.key ?? ''
+}
+
+function heartbeatFor(
+  tab: PanelTab, heartbeats: Record<string, SectionHeartbeat> | undefined,
+): SectionHeartbeat | undefined {
+  return heartbeats?.[tab.key] ?? Object.values(heartbeats ?? {}).find(
+    (beat) => beat.goal === tab.goalId && beat.chapter === tab.section,
+  )
 }
 
 /** 增量合并：老行在前、新行在后，同一个 seq 只留一份（后到的覆盖先到的）。 */
@@ -125,7 +169,7 @@ function useTail<T extends { seq: number }>(
     const query = incremental && seqRef.current
       ? `tail=${MAX_LINES}&after_seq=${seqRef.current}`
       : `tail=${MAX_LINES}`
-    const section = `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.key)}`
+    const section = `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.section)}`
     const response = await fetch(
       `/api/researches/${encodeURIComponent(researchId)}/sections/${section}/${view}?${query}`,
     )
@@ -232,7 +276,7 @@ export default function RunPanel({ researchId, snapshot }: {
     })
   }
 
-  const beat = current ? snapshot.heartbeats?.[current.key] : undefined
+  const beat = current ? heartbeatFor(current, snapshot.heartbeats) : undefined
   const body = collapsed ? null : <div className="run-panel-body" style={{ height: height - COLLAPSED_HEIGHT }}>
     {tabs.length ? <Tabs size="small" activeKey={current?.key} onChange={setActive}
       items={tabs.map((tab) => ({
