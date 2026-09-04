@@ -103,3 +103,13 @@ def test_面板按独立_section_取流且保留计划外章的心跳(tmp_path: 
     assert "snapshot.run_panel_sections" in panel
     assert "tab.section" in panel
     assert "sectionKey" in stream
+
+
+def test_面板只把当前标签的流内容挂进_DOM(tmp_path: Path) -> None:
+    panel = (
+        Path(__file__).resolve().parents[1] / "web" / "src" / "RunPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    # useTail 只持有当前标签的一份数据；若把它塞进每个 Tabs 子项，隐藏标签也会
+    # 暂时复制当前标签的日志，逐标签 DOM 验收会看到串页。
+    assert "tab.key === current?.key" in panel

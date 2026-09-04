@@ -282,7 +282,9 @@ export default function RunPanel({ researchId, snapshot }: {
       items={tabs.map((tab) => ({
         key: tab.key,
         label: `${tab.goalIndex} · ${tab.name} · ${tab.engine}`,
-        children: view === 'transcript'
+        // useTail 只持有当前标签的一份流。隐藏标签不挂内容，避免它们在 DOM
+        // 里复制当前标签的日志/进程，切换后再由当前 section 重新取数。
+        children: tab.key === current?.key ? (view === 'transcript'
           // 「日志」：OBS-2 的原样倒出，行为一字未改
           ? <div className="run-panel-col" data-testid={`run-panel-log-${tab.key}`}>
             <TruncationHint count={lines.length} />
@@ -290,7 +292,7 @@ export default function RunPanel({ researchId, snapshot }: {
               {lines.length ? lines.map(renderLine).join('\n') : '这一节还没有引擎原始事件落盘'}
             </pre>
           </div>
-          : <ProgressView tabKey={tab.key} lines={progress} />,
+          : <ProgressView tabKey={tab.key} lines={progress} />) : null,
       }))} />
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卡片跑起来" />}
   </div>
