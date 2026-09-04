@@ -176,11 +176,38 @@ body { margin: 0; background: #f5f5f5; }
 }
 .run-panel-spacer { flex: 1; }
 .run-panel-body { overflow: hidden; display: flex; flex-direction: column; }
+/* §OBS-4 货 4：栏内要能滚，就得有一条不断的高度链。原来 `.run-panel-lines`
+   写的是 `max-height: 100%`，但从 `.run-panel-body` 到它中间隔着 antd Tabs 的
+   三层 div，每一层高度都是 auto —— 100% 解析不出数，于是内容一路撑出去、
+   被 `.run-panel-body` 的 overflow:hidden 齐根切掉：没有滚轮，也看不到后面。
+   逐层 `flex:1 + min-height:0` 把高度传下去，滚动才落到真正装行的那一层。 */
+.run-panel-body > .ant-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* antd 各版本这层的类名不一样（本仓实测是 body-holder / body / content），
+   两套都写上，少写一层高度链就断在那里。 */
+.run-panel-body .ant-tabs-content-holder,
+.run-panel-body .ant-tabs-body-holder { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.run-panel-body .ant-tabs-body,
+.run-panel-body .ant-tabs-content,
+.run-panel-body .ant-tabs-tabpane { height: 100%; min-height: 0; }
+.run-panel-truncated {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #b45309;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+}
 .run-panel-lines {
   margin: 0;
   padding: 8px 10px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  max-height: 100%;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.5;
@@ -190,18 +217,29 @@ body { margin: 0; background: #f5f5f5; }
 /* §OBS-3 货 10：面板头两个互斥标签（进程 / 日志），同一时刻只显示一个 */
 .run-panel-views { display: inline-flex; gap: 4px; }
 .run-panel-view {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 2px 12px;
+  /* §OBS-4 货 5：原生 <button> **不继承页面字体**，浏览器给的是表单控件默认字体
+     （真机实测 computed font-family = Arial）。Arial 没有中日韩字形，「进程」「日志」
+     能不能显示全看浏览器的兜底字体链——用户那台就兜不住，标签渲染成空白按钮。
+     页面上只有这两个原生 button 没指定字体，其余（antd Tag/Button）都带 CJK 字面。 */
+  font-family: inherit;
   font-size: 12px;
-  color: #475569;
-  background: #fff;
+  line-height: 1.5;
+  color: #334155;
+  background: #f8fafc;
   cursor: pointer;
+  white-space: nowrap;
 }
+.run-panel-views { flex: 0 0 auto; }
+.run-panel-view:hover { border-color: #94a3b8; color: #0f172a; }
 .run-panel-view.is-on { background: #2563eb; border-color: #2563eb; color: #fff; }
 .run-panel-col {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -212,6 +250,8 @@ body { margin: 0; background: #f5f5f5; }
   margin: 0;
   padding: 6px 10px;
   list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   font-size: 13px;
   line-height: 1.7;

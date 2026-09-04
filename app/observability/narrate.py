@@ -199,7 +199,14 @@ def _plain_say(text: str) -> str:
     判据 1 要求进程栏零裸 JSON——正文里塞了整份信封的情形真机第一份底料就有。
     """
 
-    flat = _unfence(str(text or "").strip())
+    raw = str(text or "").strip()
+    # 「一句人话 + 一个 ```json owli-result 信封」是真机最常见的形态（评级章 20 批
+    # 里 22 行都是），`_unfence` 只认整串就是围栏的情形，认不出这种「前面有正文」的，
+    # 于是整份信封跟着人话一起漏进进程栏。有正文就只留正文，围栏留给日志栏。
+    head, fence, _ = raw.partition("```")
+    if fence and head.strip():
+        return _clip(" ".join(head.split()))
+    flat = _unfence(raw)
     if not flat:
         return ""
     if flat.startswith("Stop hook feedback:"):

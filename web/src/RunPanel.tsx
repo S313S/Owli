@@ -13,7 +13,10 @@ import type {
 
 const MIN_HEIGHT = 120
 const COLLAPSED_HEIGHT = 32
-const TAIL_LINES = 200
+/** §OBS-4 货 4：拉全量而不是只拉尾巴。2000 是接口上限（`tail` 的 `le=2000`，
+ *  也是 `read_transcript` 的 MAX_READ_LINES）；夜跑库最长的一章 348 行，够用有余。
+ *  真撞到上限时栏顶出一行提示，让人知道上面还有没显示的行。 */
+const MAX_LINES = 2000
 const POLL_MS = 3000
 const HEIGHT_KEY = 'owli:run-panel:height'
 const COLLAPSED_KEY = 'owli:run-panel:collapsed'
@@ -101,6 +104,15 @@ export function defaultTabKey(
   return (tabs.find((tab) => tab.status === 'running') ?? tabs[0])?.key ?? ''
 }
 
+/** 增量合并：老行在前、新行在后，同一个 seq 只留一份（后到的覆盖先到的）。 */
+export function mergeBySeq<T extends { seq: number }>(current: T[], fresh: T[]): T[] {
+  if (!fresh.length) return current
+  const seen = new Map<number, T>()
+  current.forEach((line) => seen.set(line.seq, line))
+  fresh.forEach((line) => seen.set(line.seq, line))
+  return [...seen.values()].sort((left, right) => left.seq - right.seq)
+}
+
 /** 一个 tab 两条流：`transcript`（日志栏）与 `progress`（进程栏），同参同源。 */
 function useTail<T extends { seq: number }>(
   researchId: string, tab: PanelTab | undefined, live: boolean, view: 'transcript' | 'progress',
@@ -111,8 +123,8 @@ function useTail<T extends { seq: number }>(
   const pull = useCallback(async (incremental: boolean) => {
     if (!tab) return
     const query = incremental && seqRef.current
-      ? `tail=${TAIL_LINES}&after_seq=${seqRef.current}`
-      : `tail=${TAIL_LINES}`
+      ? `tail=${MAX_LINES}&after_seq=${seqRef.current}`
+      : `tail=${MAX_LINES}`
     const section = `${encodeURIComponent(tab.goalId)}/${encodeURIComponent(tab.key)}`
     const response = await fetch(
       `/api/researches/${encodeURIComponent(researchId)}/sections/${section}/${view}?${query}`,
@@ -121,7 +133,9 @@ function useTail<T extends { seq: number }>(
     const body = await response.json() as ApiEnvelope<{ lines: T[]; last_seq: number }>
     const fresh = body.data?.lines ?? []
     seqRef.current = body.data?.last_seq ?? seqRef.current
-    setLines((current) => (incremental ? [...current, ...fresh].slice(-TAIL_LINES) : fresh))
+    // 全量保留、按 seq 去重：终态行（seq 在 2e9 号段）不计入 last_seq，
+    // 每次增量都会再回一遍，去重了才不会一轮一轮堆重复。
+    setLines((current) => (incremental ? mergeBySeq(current, fresh) : fresh))
   }, [researchId, tab, view])
 
   useEffect(() => {
@@ -139,9 +153,18 @@ function useTail<T extends { seq: number }>(
   return lines
 }
 
+/** 撞到接口上限时栏顶挂一条，让人知道上面还有没显示的行（货 4）。 */
+function TruncationHint({ count }: { count: number }) {
+  if (count < MAX_LINES) return null
+  return <div className="run-panel-truncated" data-testid="run-panel-truncated">
+    只显示最近 {MAX_LINES} 行，更早的行未加载
+  </div>
+}
+
 /** 进程视图：一行「时间 · 阶段 · 一句人话」。文本已由后端译好，这里只排版。 */
 function ProgressView({ tabKey, lines }: { tabKey: string; lines: ProgressLine[] }) {
   return <div className="run-panel-col" data-testid={`run-panel-progress-${tabKey}`}>
+    <TruncationHint count={lines.length} />
     {lines.length ? <ol className="run-panel-progress">
       {lines.map((line) => <li key={`${line.seq}-${line.stage}-${line.text.slice(0, 12)}`}>
         <span className="progress-time">{stampOf(line.ts)}</span>
@@ -218,6 +241,7 @@ export default function RunPanel({ researchId, snapshot }: {
         children: view === 'transcript'
           // 「日志」：OBS-2 的原样倒出，行为一字未改
           ? <div className="run-panel-col" data-testid={`run-panel-log-${tab.key}`}>
+            <TruncationHint count={lines.length} />
             <pre className="run-panel-lines" data-testid={`transcript-${tab.key}`}>
               {lines.length ? lines.map(renderLine).join('\n') : '这一节还没有引擎原始事件落盘'}
             </pre>
