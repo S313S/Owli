@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -524,6 +525,52 @@ async def _audit_firsthand(
         return stats
 
     verdicts: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def settle() -> None:
+        """把已判到的 (断言, 证据) 对结算进 claims；缺一对的断言原样不改口。"""
+        for claim in pending:
+            claim_id = str(claim.get("id"))
+            evidence_ids = [
+                str(value) for value in (claim.get("evidence_ids") or [])
+                if str(value) in rows_by_id
+            ]
+            keys = [(claim_id, evidence_id) for evidence_id in evidence_ids]
+            if not keys or any(key not in verdicts for key in keys):
+                continue          # 缺一对就整条不改口，撰写方声明原样留着。
+            audit = {key[1]: verdicts[key] for key in keys}
+            claim["firsthand_audit"] = audit
+            claim["firsthand"] = [
+                evidence_id for evidence_id in evidence_ids
+                if audit[evidence_id]["firsthand"]
+            ]
+            claim["firsthand_source"] = "audited"
+            stats["claims"] += 1
+        if stats["claims"]:
+            store.set_report_claims(report_id, claims)
+
+    try:
+        await _audit_firsthand_batches(
+            pairs, verdicts, stats, adapter=adapter, runs_root=runs_root,
+            batch_size=batch_size, engine_preference=engine_preference,
+            report_id=report_id, on_event=on_event,
+        )
+    except asyncio.CancelledError:
+        # §D-043：/stop 掐进来时，已经付过钱判完的批次照常结算落库——
+        # 「缺一对就整条不改口」那条规矩本来就守着一致性，丢掉才是白烧。
+        settle()
+        raise
+    settle()
+    return stats
+
+
+async def _audit_firsthand_batches(
+    pairs: Sequence[Mapping[str, Any]],
+    verdicts: dict[tuple[str, str], dict[str, Any]],
+    stats: dict[str, int],
+    *, adapter: Any, runs_root: Path, batch_size: int, engine_preference: str,
+    report_id: str, on_event: Any,
+) -> None:
+    """逐 goal 逐批把一手性判读灌进 `verdicts`（取消时上抛，结算交调用方）。"""
     for goal_id in sorted({str(pair["goal_id"]) for pair in pairs}):
         goal_pairs = [pair for pair in pairs if str(pair["goal_id"]) == goal_id]
         batch_total = (len(goal_pairs) + batch_size - 1) // batch_size
@@ -564,27 +611,6 @@ async def _audit_firsthand(
                 })
                 if inspect.isawaitable(event):
                     await event
-
-    for claim in pending:
-        claim_id = str(claim.get("id"))
-        evidence_ids = [
-            str(value) for value in (claim.get("evidence_ids") or [])
-            if str(value) in rows_by_id
-        ]
-        keys = [(claim_id, evidence_id) for evidence_id in evidence_ids]
-        if not keys or any(key not in verdicts for key in keys):
-            continue          # 缺一对就整条不改口，撰写方声明原样留着。
-        audit = {key[1]: verdicts[key] for key in keys}
-        claim["firsthand_audit"] = audit
-        claim["firsthand"] = [
-            evidence_id for evidence_id in evidence_ids
-            if audit[evidence_id]["firsthand"]
-        ]
-        claim["firsthand_source"] = "audited"
-        stats["claims"] += 1
-    if stats["claims"]:
-        store.set_report_claims(report_id, claims)
-    return stats
 
 
 async def _classify_batch(

@@ -212,6 +212,10 @@ class RuntimeCoordinator:
         self._login_repair = LoginRepairLedger()
         self._starting: set[str] = set()
         self._finalized: set[str] = set()
+        #: §D-043：收尾期在飞的评级回填任务。它跑在 scheduler 之后，进不了
+        #: `scheduler._running_runs`，`/stop` 遍历不到——没人 cancel，D-041 那个
+        #: 「被取消就杀引擎子进程」的修复也就无从触发（真机实测 /stop 后子进程还活 61 s）。
+        self._backfill_runs: dict[str, asyncio.Task[Any]] = {}
         self._auto_tasks: set[asyncio.Task[Any]] = set()
         self._drive_watchers: set[asyncio.Task[Any]] = set()
         setattr(self.store, "runs_root", self.runs_root)
@@ -2382,6 +2386,20 @@ class RuntimeCoordinator:
         if scheduler is None:
             raise RuntimeError("Scheduler 尚未启动")
         await scheduler.stop()
+        await self._cancel_backfill_run(research_id)
+
+    async def _cancel_backfill_run(self, research_id: str) -> None:
+        """§D-043：掐掉收尾期在飞的评级回填。
+
+        scheduler 停了不等于引擎停了——回填是 `_finalize_if_terminal` 里的独立
+        协程，`_cancel_running_run` 遍历不到。这里 cancel 它，adapter 的取消路径
+        （D-041）随即杀掉 codex/claude 子进程；已落库的批次原样留着。
+        """
+        run = self._backfill_runs.pop(research_id, None)
+        if run is None or run.done():
+            return
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
 
     def _report_agents(self, plan: Plan) -> list[Any]:
         """全卷的报告章，按计划顺序；**不按 output.format 过滤**。
@@ -2757,12 +2775,25 @@ class RuntimeCoordinator:
                 "data": {"research_id": research_id, "reason": "adapter_unavailable"},
             })
             return
+        # §D-043：包成可取消的任务并登记，`/stop`（以及任何别的取消者）才掐得到
+        # 它手里的引擎调用；杀子进程那半段由 D-041 的 adapter 取消路径完成。
+        run = asyncio.ensure_future(backfill_report(
+            self.store, research_id, adapter=adapter, runs_root=self.runs_root,
+            # §OBS-1 货 2：回填批次进度直通事件流，X-1「回填期间零事件」挂账收口。
+            on_event=lambda payload: self.events.publish(research_id, payload),
+        ))
+        self._backfill_runs[research_id] = run
         try:
-            result = await backfill_report(
-                self.store, research_id, adapter=adapter, runs_root=self.runs_root,
-                # §OBS-1 货 2：回填批次进度直通事件流，X-1「回填期间零事件」挂账收口。
-                on_event=lambda payload: self.events.publish(research_id, payload),
-            )
+            result = await run
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                raise      # 是收尾自己被掐，不是只掐回填：原样上抛。
+            await self.events.publish(research_id, {
+                "type": "reliability_backfill_cancelled",
+                "data": {"research_id": research_id, "reason": "stopped"},
+            })
+            return
         except Exception as exc:  # noqa: BLE001 —— 收尾不得因补评失败判 failed
             logger.warning("收尾评级回填失败，研究照常收尾：%s", exc)
             await self.events.publish(research_id, {
@@ -2774,6 +2805,9 @@ class RuntimeCoordinator:
                 },
             })
             return
+        finally:
+            if self._backfill_runs.get(research_id) is run:
+                self._backfill_runs.pop(research_id, None)
         await self._publish_backfill_done(research_id, result)
 
     async def _publish_backfill_done(self, research_id: str, result: Any) -> None:

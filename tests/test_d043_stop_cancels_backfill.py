@@ -157,3 +157,68 @@ def test_收尾期_stop_掐得到回填的引擎子进程(tmp_path: Path, monkey
     finally:
         if _alive(pid):
             os.killpg(pid, 9)
+
+
+def test_取消回填时已付费的一手性审计照常结算落库(tmp_path: Path) -> None:
+    """判据 5：取消后状态一致——判完的批次结算，没判到的断言原样不改口。
+
+    `_audit_firsthand` 原本把所有批次的判读攒在内存里、最后一次性写 claims，
+    中途被 /stop 掐掉等于把已经付过钱的引擎调用全丢了（不是半批写入，是全丢）。
+    """
+    from app.reliability.backfill import backfill_report
+    from app.reliability.claims import register_claims
+    from tests.test_m3h_ledger import _store
+    from tests.test_m4fork_followup import _evidence
+
+    store = _store(tmp_path)
+    urls = {key: f"https://e.example/{key}" for key in ("a", "b")}
+    store.upsert_evidence_batch([
+        _evidence("r-ledger", key, permalink=urls[key], extra={}) for key in urls
+    ])
+    register_claims(store, "r-ledger", [
+        {"id": f"c-{index:02d}", "text": f"断言 {index}",
+         "evidence": [{"permalink": urls[key], "stance": "supports", "firsthand": True}]}
+        for index, key in enumerate(urls, 1)
+    ], source="chapter")
+
+    seen: list[str] = []
+    gate = asyncio.Event()
+
+    class OneBatchThenBlockAdapter:
+        """第一批照常判完，第二批进去就长睡——模拟「掐在第二批」。"""
+
+        timeout_seconds = None
+
+        async def run(self, task, ctx, on_event=None):
+            body = task.body
+            seen.append(body)
+            if len(seen) > 1:
+                await gate.wait()
+            pairs = json.JSONDecoder().raw_decode(
+                body.split("输入 (断言, 证据) 对：", 1)[1]
+            )[0] if "输入 (断言, 证据) 对：" in body else []
+            payload = [
+                {"claim_id": pair["claim_id"], "evidence_id": pair["evidence_id"],
+                 "firsthand": True, "reason": "本人一手叙述"}
+                for pair in pairs
+            ]
+            Path(task.output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(task.output_path).write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            )
+            return SimpleNamespace(succeeded=True)
+
+    async def scenario() -> None:
+        run = asyncio.ensure_future(backfill_report(
+            store, "r-ledger", adapter=OneBatchThenBlockAdapter(),
+            runs_root=tmp_path / "runs", batch_size=1,
+        ))
+        while len(seen) < 2:
+            await asyncio.sleep(0.01)
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+
+    asyncio.run(scenario())
+    claims = {claim["id"]: claim for claim in store.get_report("r-ledger")["extra"]["claims"]}
+    assert claims["c-01"].get("firsthand_source") == "audited", "判完的那条要落库"
+    assert claims["c-02"].get("firsthand_source") != "audited", "没判到的不许改口"
