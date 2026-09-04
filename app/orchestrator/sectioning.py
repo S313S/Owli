@@ -1375,6 +1375,24 @@ def _shard_envelope(path: Path) -> tuple[str, list[Any]] | None:
     return markdown.strip(), list(claims) if isinstance(claims, list) else []
 
 
+def _shard_stale_citations(
+    markdown: str, pool: Mapping[str, Any]
+) -> set[str]:
+    """片正文里落在**当前池外**的角标；空集 = 这片和本轮池对得上。
+
+    §D-042。角标编号是按写这片时那一轮的证据池发的，池一换编号就作废：
+    池里没有的角标合进节正文就是 `evidence_pool_only` 的越界项。判定口径与
+    `_section_evidence_pool_result` 同源（都用节可见池的 `citation` 字段）。
+    """
+
+    marks = {
+        str(item.get("citation") or "")
+        for item in pool.get("items", [])
+        if isinstance(item, Mapping)
+    }
+    return set(validation._CITATION.findall(markdown)) - marks
+
+
 def _merge_shard_files(
     section_path: Path,
     shard_count: int,
@@ -1551,7 +1569,25 @@ async def _run_section_shards(
     ran_any = False
     for index, size in enumerate(shard_sizes, start=1):
         shard_path = write_shard_path(section_path, index)
-        if _shard_envelope(shard_path) is not None:
+        existing = _shard_envelope(shard_path)
+        if existing is not None:
+            stale_marks = _shard_stale_citations(existing[0], evidence_pool)
+            if stale_marks:
+                # §D-042 第二道闸：盘上这片是**上一轮**写的，角标按当时的池编号；
+                # 本轮池换了（重放复位、证据重采），跳过复用它合出来的节正文必撞
+                # 证据池唯一引用源契约 → conclusion_invalid。作废重写这一片，
+                # 并把越界角标报出来，别让它静默毒死整节。
+                await _emit(on_event, "write_shard_stale", {
+                    "goal_id": context.goal_id,
+                    "chapter_id": section["section_id"],
+                    "shard": index, "shards": total,
+                    "citations": sorted(stale_marks)[:10],
+                    "citations_total": len(stale_marks),
+                    "pool_items": len(evidence_pool.get("items", [])),
+                }, is_error=True)
+                shard_path.unlink(missing_ok=True)
+                existing = None
+        if existing is not None:
             # 上一次节尝试已经写成的片：不重跑、不重写，已写的字不白丢。
             await _emit(on_event, "write_shard_skipped", {
                 "goal_id": context.goal_id,

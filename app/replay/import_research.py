@@ -325,6 +325,15 @@ def _drop_artifact(target_dir: Path, relative: Path) -> None:
     (target_dir / relative).unlink(missing_ok=True)
     rejected = relative.with_suffix(f".rejected{relative.suffix}")
     (target_dir / rejected).unlink(missing_ok=True)
+    # §D-042：半截分片 `sec-N.part.K.md` 也是上一轮的产物，留着比留 `sec-N.md`
+    # 更坏——`_run_section_shards` 见到可解析的片信封就 `write_shard_skipped`
+    # 直接复用，而片里的角标是**上一轮证据池**的编号（S31…S85）。本轮池只有
+    # 30 条时，合并出的节正文必撞证据池唯一引用源契约 → conclusion_invalid
+    # （闭集 reason，章内不再重派）。凡「原跑留有半截分片」的 missing 节，
+    # 重放和 §OBS-2「重跑这节」都因此补不回来。
+    parent = (target_dir / relative).parent
+    for stale in parent.glob(f"{relative.stem}.part.*{relative.suffix}"):
+        stale.unlink(missing_ok=True)
     # §OBS-2 货 1：章级复位连它的 transcript 一起丢，重放新写一份，
     # 免得沙盒里带着底料那一轮的原始流冒充本轮读数。节级复位不动
     # （同章其它节的原始流还在这一份里）。
