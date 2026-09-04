@@ -107,11 +107,18 @@ def test_实体卡随计划落盘且规划期不因它变慢地打网络() -> No
     from pathlib import Path
 
     skeleton = _valid_skeleton()
-    # §ENT-2：夹具的实体卡默认只有中文名，本用例要验的正是 en 原样落盘，所以显式
-    # 打开双语——而带中文叫法的实体在 global_product 下会被分配表再排一张国内源卡，
-    # 骨架得把那张卡也写上，否则规则 31 打回（分配表按叫法定有无是本包的新语义）。
-    skeleton["goals"][1]["agents"].insert(
-        0, _agent("小红书数据抓取·飞书", "采集研究主体的国内讨论"),
+    # §ENT-3：夹具的实体卡默认只有中文名，本用例要验的正是 en 原样落盘，所以显式
+    # 打开双语。global_product 主角有中文叫法后会按 standard 档排满 4 张国内源卡；
+    # 骨架须逐张落实，否则规则 31 正确打回（本用例只测实体卡落盘，不锁旧的一位形状）。
+    skeleton["goals"][0]["agents"].insert(
+        0, _agent("抖音数据抓取·飞书", "采集研究主体的国内讨论"),
+    )
+    skeleton["goals"][1]["agents"][0:0] = [
+        _agent("小红书数据抓取·飞书", "采集研究主体的国内讨论"),
+        _agent("微信公众号数据抓取·飞书", "采集研究主体的国内讨论"),
+    ]
+    skeleton["goals"][2]["agents"].insert(
+        0, _agent("微博数据抓取·飞书", "采集研究主体的国内讨论"),
     )
     with tempfile.TemporaryDirectory() as raw:
         plan, _, engine = _generate(
