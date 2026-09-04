@@ -30,7 +30,7 @@ from app.plan.chapters import generate_chapter_specs
 from app.plan.entities import merge_entity_cards, resolve_entities
 from app.plan.lint import (
     _SOURCE_MARKET_PROFILES, applicable_sources, duplicate_collection_goal_ids,
-    lint,
+    duplicate_entity_errors, lint,
 )
 from app.plan.normalize import normalize_plan
 from app.plan.model import (
@@ -195,10 +195,10 @@ def _scale_profile(
     return (scale_config or load_research_scale_config()).profile(scale)
 
 
-def _subjects_cap_rule(profile: ResearchScaleProfile) -> str:
+def _subjects_cap_rule(profile: ResearchScaleProfile, *, scale: str) -> str:
     """§PLAN-1：有章数上限的档位把 subjects 上限讲在骨架这一步。"""
 
-    budget = subjects_budget(profile.max_goals, profile)
+    budget = subjects_budget(profile.max_goals, profile, scale=scale)
     if budget is None:
         return ""
     return (
@@ -237,7 +237,7 @@ def _skeleton_prompt(
         "**每一个 subject 都有一个同名实体的采集章**，写不出采集对象的词"
         "放进来会让整份计划作废；题目只给了领域没点名主体时，"
         "自己点出该领域里可采集的具体主体，不要把领域名当主体。"
-        f"{_subjects_cap_rule(profile)}"
+        f"{_subjects_cap_rule(profile, scale=scale)}"
         "subjects_justification 用一句可复核理由说明纳入边界；market_profile 只能取 "
         "cn_product/global_product，按**这份研究面向哪个市场的受众与舆论**判，"
         "与产品的原产地、公司归属、名字是不是英文都无关——题面点了国内 / 中国 / "
@@ -418,7 +418,7 @@ def _skeleton_scaffolds(
         raise ValueError(
             f"goal 数必须在 3–{profile.max_goals}，实际为 {len(goals)}"
         )
-    budget = subjects_budget(len(goals), profile)
+    budget = subjects_budget(len(goals), profile, scale=scale)
     if budget is not None and len(subjects) > budget:
         raise ValueError(
             f"subjects 有 {len(subjects)} 个，超出 {scale} 档研究实体上限 {budget}"
@@ -1453,6 +1453,10 @@ async def generate_plan(
     subjects_justification = ""
     collection_plan: dict[str, list[dict[str, str]]] = {}
     entities: list[dict[str, Any]] = []
+    entity_merges: list[dict[str, Any]] = []
+    original_subject_count = 0
+    skeleton_ready = False
+    entities_elapsed = 0.0
     for skeleton_attempt in range(1, config.plan_segment_retries + 1):
         try:
             skeleton = await workspace.generate(
@@ -1482,31 +1486,62 @@ async def generate_plan(
                 _skeleton_market_profile(skeleton)
             )
             subjects, subjects_justification = _skeleton_subjects(skeleton)
-            # §ENT-2：这一步只作**容量校验**——实体装不下章预算要当场触发骨架重试。
-            # 真正的分配表推迟到实体卡出来之后再算：排不排海外源看实体有没有英文
-            # 叫法，而实体卡在下面才解析。第二轮补位是尽力而为、不会新抛错，所以
-            # 这里校验通过就等于带实体也通过。
+            # §ENT-2：先作容量校验；分配表等实体卡确认语域后再定稿。
             allocate_collections(
                 subjects, market_profile, scaffolds,
-                product_scale_config.profile(scale),
+                product_scale_config.profile(scale), scale=scale,
             )
+            original_subject_count = len(subjects)
+            resolve_started = time.monotonic()
+            entities = await resolve_entities(
+                normalized_query,
+                subjects,
+                workspace,
+                adapter,
+                on_progress=lambda text: _emit(
+                    store, _progress_event(research_id, text),
+                ),
+                search=entity_search,
+            )
+            entities_elapsed += time.monotonic() - resolve_started
+            duplicate_errors = duplicate_entity_errors(entities)
+            if duplicate_errors and skeleton_attempt < config.plan_segment_retries:
+                skeleton_errors = duplicate_errors
+                await _emit(
+                    store,
+                    _retry_event(research_id, skeleton_attempt + 1, duplicate_errors),
+                )
+                continue
+            entities, entity_merges = merge_entity_cards(entities)
+            if entity_merges:
+                remapped = {
+                    source: str(merge["to"])
+                    for merge in entity_merges for source in merge["from"]
+                }
+                subjects = list(dict.fromkeys(
+                    remapped.get(subject, subject) for subject in subjects
+                ))
+                for scaffold in scaffolds:
+                    scaffold["subjects"] = list(subjects)
             await _emit(
                 store,
                 _progress_event(
                     research_id, f"规划骨架落盘：{len(scaffolds)} 个 goal"
                 ),
             )
+            skeleton_ready = True
             break
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            skeleton_ready = False
             skeleton_errors = [f"[结构] {type(exc).__name__}: {exc}"]
             if skeleton_attempt < config.plan_segment_retries:
                 await _emit(
                     store,
                     _retry_event(research_id, skeleton_attempt + 1, skeleton_errors),
                 )
-    if scaffolds is None:
+    if not skeleton_ready or scaffolds is None:
         raise PlanGenerationError(
             f"规划骨架连续 {config.plan_segment_retries} 次仍有 error：\n"
             + "\n".join(skeleton_errors)
@@ -1516,35 +1551,21 @@ async def generate_plan(
     # 查不动网、模型不配合，entities 就是空数组，计划照常生成，只是没有别名扩展。
     # `entity_search` 由调用方注入（生产在 runtime 里给 web_search.search）：规划的
     # 单元测试用替身适配器，不该因为多了一步就去打真实网络。
-    entities_started = time.monotonic()
-    entities = await resolve_entities(
-        normalized_query,
-        subjects,
-        workspace,
-        adapter,
-        on_progress=lambda text: _emit(store, _progress_event(research_id, text)),
-        search=entity_search,
-    )
-    entities, entity_merges = merge_entity_cards(entities)
     if entity_merges:
-        remapped = {
-            source: str(merge["to"])
-            for merge in entity_merges for source in merge["from"]
-        }
-        subjects = list(dict.fromkeys(remapped.get(subject, subject) for subject in subjects))
-        for scaffold in scaffolds:
-            scaffold["subjects"] = list(subjects)
         for merge in entity_merges:
             await _emit(store, _entities_merged_event(research_id, merge))
     await _emit(store, _entities_event(
-        research_id, entities, time.monotonic() - entities_started,
+        research_id, entities, entities_elapsed,
     ))
 
     # §ENT-2 货 2：分配表在这里才定稿——实体的中外叫法决定排哪些源。
     skipped_slots: list[dict[str, str]] = []
     collection_plan = collection_plan_dict(allocate_collections(
         subjects, market_profile, scaffolds,
-        product_scale_config.profile(scale), entities, skipped=skipped_slots,
+        product_scale_config.profile(scale), entities,
+        scale=scale,
+        entity_slot_target=original_subject_count,
+        skipped=skipped_slots,
     ))
     (workspace.root / "allocation.json").write_text(
         json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",

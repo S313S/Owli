@@ -231,11 +231,25 @@ def entity_cards_match(
         return True
     if not aliases:
         return False
-    left_id = _normalized(str(left.get("id") or ""))
-    right_id = _normalized(str(right.get("id") or ""))
+    left_formal = {
+        _normalized(str(value or ""))
+        for value in (
+            left.get("id"), left.get("canonical"),
+            left_names.get("zh"), left_names.get("en"),
+        )
+        if _normalized(str(value or ""))
+    }
+    right_formal = {
+        _normalized(str(value or ""))
+        for value in (
+            right.get("id"), right.get("canonical"),
+            right_names.get("zh"), right_names.get("en"),
+        )
+        if _normalized(str(value or ""))
+    }
     left_aliases = {_normalized(str(item)) for item in left_names.get("aliases") or []}
     right_aliases = {_normalized(str(item)) for item in right_names.get("aliases") or []}
-    return bool((left_id and left_id in right_aliases) or (right_id and right_id in left_aliases))
+    return bool(left_formal & right_aliases or right_formal & left_aliases)
 
 
 def duplicate_entity_groups(

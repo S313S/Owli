@@ -1416,10 +1416,9 @@ def _rule_32(raw: Mapping[str, Any], goals: list[dict[str, Any]]) -> list[str]:
     return messages
 
 
-def _rule_33(raw: Mapping[str, Any]) -> list[str]:
-    """§ENT-3：同 canonical、同正式名或互为别名的 subject 只能占一个实体位。"""
+def duplicate_entity_errors(entities: Any) -> list[str]:
+    """§ENT-3：给生成链与最终 plan lint 共用的重复实体错误。"""
 
-    entities = raw.get("entities")
     if not isinstance(entities, list):
         return []
     cards = [card for card in entities if isinstance(card, Mapping)]
@@ -1431,6 +1430,10 @@ def _rule_33(raw: Mapping[str, Any]) -> list[str]:
             "canonical 相同或互为别名的叫法只保留一个 subject"
         )
     return messages
+
+
+def _rule_33(raw: Mapping[str, Any]) -> list[str]:
+    return duplicate_entity_errors(raw.get("entities"))
 
 
 def lint(

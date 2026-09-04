@@ -63,7 +63,9 @@ def per_goal_capacity(profile: ResearchScaleProfile) -> int | None:
     return max(profile.max_chapters_per_goal - RESERVED_NON_COLLECTION_CHAPTERS, 0)
 
 
-def subjects_budget(goal_count: int, profile: ResearchScaleProfile) -> int | None:
+def subjects_budget(
+    goal_count: int, profile: ResearchScaleProfile, *, scale: str | None = None,
+) -> int | None:
     """骨架能挑几个研究实体：fast 的 6 个采集位固定留 3 个给跨语域。
 
     §ENT-3 把 ENT-2 的「只给主角留一张对面语域卡」改成分档留位：fast 留 3，
@@ -76,12 +78,20 @@ def subjects_budget(goal_count: int, profile: ResearchScaleProfile) -> int | Non
     """
 
     capacity = collection_capacity(goal_count, profile)
-    return None if capacity is None else max(capacity - cross_locale_slots_budget(profile), 1)
+    return None if capacity is None else max(
+        capacity - cross_locale_slots_budget(profile, scale=scale), 1,
+    )
 
 
-def cross_locale_slots_budget(profile: ResearchScaleProfile) -> int:
-    """当前两档的主角跨语域位：有章上限即 fast=3，无章上限即 standard=4。"""
+def cross_locale_slots_budget(
+    profile: ResearchScaleProfile, *, scale: str | None = None,
+) -> int:
+    """主角跨语域位；生产链显式传档位，旧调用才按默认配置形状兼容。"""
 
+    if scale is not None:
+        if scale not in {"fast", "standard"}:
+            raise ValueError(f"scale 只能取 fast 或 standard，实际为 {scale!r}")
+        return 3 if scale == "fast" else 4
     return 3 if profile.max_chapters_per_goal is not None else 4
 
 
@@ -141,6 +151,8 @@ def allocate_collections(
     profile: ResearchScaleProfile,
     entities: Sequence[Mapping[str, Any]] | None = None,
     *,
+    scale: str | None = None,
+    entity_slot_target: int | None = None,
     skipped: list[dict[str, str]] | None = None,
 ) -> dict[str, list[CollectionSlot]]:
     """每个 subject 至少一个采集位；无 depends_on 的 goal 先分，再按序号轮转。
@@ -148,6 +160,9 @@ def allocate_collections(
     §ENT-3 第二轮：中外都有叫法的主角按偏好序补对面语域，fast 3 位、standard
     4 位。第二轮尽力而为——章预算或每 goal 源数装不下就记入 `skipped` 后跳过，
     绝不因此让整份计划抛错；`entities` 为空时行为与 §PLAN-1 逐字相同。
+
+    `entity_slot_target` 只给最终兜底合并使用：重复 subject 被折叠后，用同语域的
+    额外来源补回原实体位数，避免合并让分配表缩水。
 
     同 goal 内不同源数不超过 max_sources_per_goal，(source, entity) 对全计划唯一。
     第一轮放不下时抛 ValueError——这条错在骨架层就该拦住（见 _skeleton_scaffolds）。
@@ -180,8 +195,31 @@ def allocate_collections(
         plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
         goal_sources[chosen].add(source)
         taken.add((source, entity))
+    target = max(len(subjects), int(entity_slot_target or 0))
+    main_sources = [
+        source for source in _SOURCE_PRIORITY[market_profile] if source in sources
+    ]
+    used_sources = {source for source, _entity in taken}
+    unused = [source for source in main_sources if source not in used_sources]
+    candidates = [*unused, *(source for source in main_sources if source not in unused)]
+    for source in candidates:
+        for entity in subjects:
+            if len(taken) >= target:
+                break
+            if (source, entity) in taken:
+                continue
+            chosen, pointer = _place(
+                source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
+            )
+            if chosen is not None:
+                plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
+                goal_sources[chosen].add(source)
+                taken.add((source, entity))
+        if len(taken) >= target:
+            break
     for entity, source in _cross_locale_slots(
-        subjects, sources, entities, taken, cross_locale_slots_budget(profile),
+        subjects, sources, entities, taken,
+        cross_locale_slots_budget(profile, scale=scale),
     ):
         chosen, pointer = _place(
             source, plan, goal_sources, goal_ids, per_goal, profile, pointer,

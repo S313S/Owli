@@ -88,6 +88,8 @@ class FakeEngine:
     def __init__(
         self, skeletons: list[dict], *, bilingual_entities: bool = False,
         entity_payloads: list[dict] | None = None,
+        skeleton_payloads: list[dict] | None = None,
+        entity_payloads_by_subject: dict[str, dict] | None = None,
     ) -> None:
         # §ENT-2：实体卡默认**只有中文叫法**。ENT-1 这里恒给 f"{name}-en"，在
         # 本包语义下等于宣告每个实体都该在海外源再排一张卡（分配表按叫法定有无），
@@ -96,7 +98,12 @@ class FakeEngine:
         # 要双语的用例显式打开，并自己把对面语域那张采集卡写进骨架。
         self.bilingual_entities = bilingual_entities
         self.entity_payloads = deepcopy(entity_payloads)
+        self.entity_payloads_by_subject = deepcopy(entity_payloads_by_subject)
         self.skeletons = [deepcopy(item) for item in skeletons]
+        self.skeleton_payloads = [
+            deepcopy(item) for item in (skeleton_payloads or [])
+        ]
+        self._skeleton_calls = 0
         self.tasks = []
         self.chapter_tasks = []
         # §ENT-1 货 1：实体卡段与 goal 段分开记——既有用例按位置断言 tasks[1]
@@ -123,18 +130,27 @@ class FakeEngine:
         if task.output_path.stem.startswith("entity-"):
             index = int(task.output_path.stem.removeprefix("entity-"))
             name = self._current["subjects"][index - 1]
-            payload = deepcopy(self.entity_payloads[index - 1]) if self.entity_payloads else {
-                "canonical": name,
-                "names": {
-                    "zh": name,
-                    "en": f"{name}-en" if self.bilingual_entities else None,
-                    "aliases": [],
-                },
-                "official_handles": {},
-                "same_product": True,
-                "note": f"{name} 的实体卡（替身引擎产出）",
-            }
+            if self.entity_payloads_by_subject:
+                payload = deepcopy(self.entity_payloads_by_subject[name])
+            elif self.entity_payloads:
+                payload = deepcopy(self.entity_payloads[index - 1])
+            else:
+                payload = {
+                    "canonical": name,
+                    "names": {
+                        "zh": name,
+                        "en": f"{name}-en" if self.bilingual_entities else None,
+                        "aliases": [],
+                    },
+                    "official_handles": {},
+                    "same_product": True,
+                    "note": f"{name} 的实体卡（替身引擎产出）",
+                }
         elif task.output_path.name == "skeleton.json":
+            if self.skeleton_payloads:
+                position = min(self._skeleton_calls, len(self.skeleton_payloads) - 1)
+                self._current = self.skeleton_payloads[position]
+                self._skeleton_calls += 1
             payload = {
                 "market_profile": self._current["market_profile"],
                 "market_profile_justification": self._current[
@@ -225,18 +241,23 @@ class ForbiddenEngine:
 def _generate(
     tmp_path: Path, skeletons: list[dict], *, bilingual_entities: bool = False,
     entity_payloads: list[dict] | None = None,
+    skeleton_payloads: list[dict] | None = None,
+    entity_payloads_by_subject: dict[str, dict] | None = None,
+    scale: str = "standard",
 ):
     from app.adapters.routing import RoutedAdapter
     from app.plan.generate import generate_plan
 
     engine = FakeEngine(
         skeletons, bilingual_entities=bilingual_entities, entity_payloads=entity_payloads,
+        skeleton_payloads=skeleton_payloads,
+        entity_payloads_by_subject=entity_payloads_by_subject,
     )
     store = FakeStore(tmp_path)
     adapter = RoutedAdapter(
         adapters={"claude": engine, "codex": ForbiddenEngine()},
     )
-    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
+    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter, scale=scale))
     return plan, store, engine
 
 

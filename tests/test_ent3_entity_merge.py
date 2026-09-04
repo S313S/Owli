@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from app.config import load_research_scale_config
-from app.plan.allocation import allocate_collections, subjects_budget
+from app.plan.allocation import (
+    allocate_collections, cross_locale_slots_budget, subjects_budget,
+)
 
 
 SCAFFOLDS = [
@@ -35,6 +37,12 @@ def test_货1_骨架提示词明确中英文名只占一个subject_规则33拦�
     plan["entities"] = [
         _entity("豆包", "豆包", "豆包", "Doubao"),
         _entity("Doubao", "豆包", "豆包", "Doubao"),
+    ]
+    assert any(error.startswith("[规则33]") for error in lint(plan)["errors"])
+
+    plan["entities"] = [
+        _entity("subject-a", "Foo", None, "Foo", ["Bar"]),
+        _entity("subject-b", "Bar", None, "Bar", ["Foo"]),
     ]
     assert any(error.startswith("[规则33]") for error in lint(plan)["errors"])
 
@@ -85,6 +93,9 @@ def test_货2至3_整条规划链先合并再重算分配并发事件(tmp_path) 
         _agent("HN 数据抓取·豆包", "采集 Doubao"),
         _agent("Product Hunt 数据抓取·豆包", "采集 Doubao"),
     ]
+    skeleton["goals"][2]["agents"].insert(
+        0, _agent("网页搜索数据抓取·豆包", "补回合并前的实体采集位"),
+    )
     payloads = [
         _entity("豆包", "豆包", "豆包", "Doubao"),
         _entity("Doubao", "豆包", "豆包", "Doubao"),
@@ -100,14 +111,80 @@ def test_货2至3_整条规划链先合并再重算分配并发事件(tmp_path) 
     assert merged == [{"from": ["豆包", "Doubao"], "to": "豆包"}]
     allocation = next(event.raw["collection_plan"] for event in store.events
                       if "collection_plan" in (event.raw or {}))
+    assert sum(map(len, allocation.values())) == 7
+    assert sum(event.outcome == "retrying" for event in store.events) == 2
+
+
+def test_货1_fast重复骨架由规则33打回并补回第三个独立实体(tmp_path) -> None:
+    from copy import deepcopy
+    from tests.test_plan_generate import _agent, _generate, _valid_skeleton
+
+    valid = _valid_skeleton()
+    valid["market_profile"] = "cn_product"
+    valid["subjects"] = ["豆包", "ChatGPT", "Kimi"]
+    valid["subjects_justification"] = "主体与两个独立竞品。"
+    valid["goals"][0]["agents"] = [
+        _agent("小红书数据抓取·豆包", "采集豆包"),
+        _agent("Reddit 数据抓取·豆包", "采集 Doubao"),
+    ]
+    valid["goals"][1]["agents"] = [
+        _agent("微博数据抓取·ChatGPT", "采集 ChatGPT"),
+        _agent("X 数据抓取·豆包", "采集 Doubao"),
+    ]
+    valid["goals"][2]["agents"] = [
+        _agent("网页搜索数据抓取·Kimi", "采集 Kimi"),
+        _agent("HN 数据抓取·豆包", "采集 Doubao"),
+    ]
+    duplicate = deepcopy(valid)
+    duplicate["subjects"] = ["豆包", "Doubao", "ChatGPT"]
+    cards = {
+        "豆包": _entity("豆包", "豆包", "豆包", "Doubao"),
+        "Doubao": _entity("Doubao", "豆包", "豆包", "Doubao"),
+        "ChatGPT": _entity("ChatGPT", "ChatGPT", None, "ChatGPT"),
+        "Kimi": _entity("Kimi", "Kimi", "Kimi", None),
+    }
+
+    plan, store, engine = _generate(
+        tmp_path, [valid], scale="fast",
+        skeleton_payloads=[duplicate, valid],
+        entity_payloads_by_subject=cards,
+    )
+
+    assert plan.subjects == ["豆包", "ChatGPT", "Kimi"]
+    assert engine._skeleton_calls == 2
+    retries = [event for event in store.events if event.outcome == "retrying"]
+    assert any("[规则33]" in event.text for event in retries)
+    allocation = next(event.raw["collection_plan"] for event in store.events
+                      if "collection_plan" in (event.raw or {}))
     assert sum(map(len, allocation.values())) == 6
+
+
+def test_货2_fast最终兜底合并也不减少采集位() -> None:
+    fast = load_research_scale_config().profile("fast")
+    skipped: list[dict[str, str]] = []
+    plan = allocate_collections(
+        ["豆包", "ChatGPT"], "cn_product", SCAFFOLDS, fast,
+        [
+            _entity("豆包", "豆包", "豆包", "Doubao"),
+            _entity("ChatGPT", "ChatGPT", None, "ChatGPT"),
+        ],
+        scale="fast", entity_slot_target=3, skipped=skipped,
+    )
+    pairs = {(slot.source_id, slot.entity) for slots in plan.values() for slot in slots}
+    assert len(pairs) == 6
+    assert len({source for source, entity in pairs if entity == "豆包" and source in {
+        "reddit", "x", "hacker_news", "product_hunt",
+    }}) == 3
+    assert skipped == []
 
 
 def test_货6_fast留三位_standard主角留四位() -> None:
     config = load_research_scale_config()
     fast, standard = config.profile("fast"), config.profile("standard")
-    assert subjects_budget(3, fast) == 3
-    assert subjects_budget(3, standard) is None
+    assert subjects_budget(3, fast, scale="fast") == 3
+    assert subjects_budget(3, standard, scale="standard") is None
+    assert cross_locale_slots_budget(standard, scale="fast") == 3
+    assert cross_locale_slots_budget(fast, scale="standard") == 4
 
     subjects = ["豆包", "DeepSeek", "Kimi"]
     entities = [
@@ -116,7 +193,7 @@ def test_货6_fast留三位_standard主角留四位() -> None:
         _entity("Kimi", "Kimi", "Kimi", None),
     ]
     fast_plan = allocate_collections(
-        subjects, "cn_product", SCAFFOLDS, fast, entities,
+        subjects, "cn_product", SCAFFOLDS, fast, entities, scale="fast",
     )
     fast_pairs = {(slot.source_id, slot.entity) for slots in fast_plan.values() for slot in slots}
     assert len(fast_pairs) == 6
@@ -126,6 +203,7 @@ def test_货6_fast留三位_standard主角留四位() -> None:
 
     standard_plan = allocate_collections(
         ["豆包"], "cn_product", SCAFFOLDS, standard, entities[:1],
+        scale="standard",
     )
     assert {slot.source_id for slots in standard_plan.values() for slot in slots} == {
         "xhs", "reddit", "x", "hacker_news", "product_hunt",
@@ -137,7 +215,8 @@ def test_货6_装不下的跨语域位尽力跳过并留下诊断() -> None:
     skipped: list[dict[str, str]] = []
     allocate_collections(
         ["豆包", "DeepSeek", "Kimi", "文心一言"], "cn_product", SCAFFOLDS,
-        fast, [_entity("豆包", "豆包", "豆包", "Doubao")], skipped=skipped,
+        fast, [_entity("豆包", "豆包", "豆包", "Doubao")],
+        scale="fast", skipped=skipped,
     )
     assert skipped == [{
         "entity": "豆包", "source_id": "hacker_news", "reason": "capacity",
