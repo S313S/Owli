@@ -77,4 +77,3 @@ def test_开关开启但缺_key_或无_google_事件时探活失败(tmp_path, mo
 
     assert missing_key["web_search"]["failure"] == "missing_credentials"
     assert "google_probe_unavailable" in no_event["web_search"]["failure"]
-
