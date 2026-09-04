@@ -159,6 +159,16 @@ class WebContractTest(unittest.TestCase):
         # 只在跑的时候拉，跑完必须停。
         self.assertIn("if (!live || !tab) return", source)
 
+    def test_计划外评级章使用独立节标识且不污染_agent_计数(self) -> None:
+        panel = (WEB / "src" / "RunPanel.tsx").read_text(encoding="utf-8")
+        types = (WEB / "src" / "types.ts").read_text(encoding="utf-8")
+        stream = (WEB / "src" / "useResearchStream.ts").read_text(encoding="utf-8")
+
+        self.assertIn("run_panel_sections?: RunPanelSection[]", types)
+        self.assertIn("snapshot.run_panel_sections", panel)
+        self.assertIn("encodeURIComponent(tab.section)", panel)
+        self.assertIn("sectionKey", stream)
+
     def test_操作按钮由后端_actions_数组渲染(self) -> None:
         board = WEB / "src" / "WorkboardPage.tsx"
         self.assertTrue(board.is_file(), "工作板页面尚未创建")
