@@ -869,6 +869,7 @@ def create_app(
                 if agent.agent_id == chapter:
                     keys.append(Path(str(agent.output["path"])).stem)
         fallback: Path | None = None
+        sharded: Path | None = None
         for key in keys:
             candidate = (goal_root / f"{key}{TRANSCRIPT_SUFFIX}").resolve()
             if not candidate.is_relative_to(allowed_root):
@@ -876,7 +877,36 @@ def create_app(
             fallback = fallback or candidate
             if candidate.is_file():
                 return candidate
-        return fallback
+            # §OBS-4 货 2：直连文件没有，但这个 key 有分批文件也算命中
+            if sharded is None and section_log.part_files(candidate):
+                sharded = candidate
+        return sharded or fallback
+
+    def terminal_rows_of(research_id: str, goal_id: str, chapter: str) -> list[dict]:
+        """本章（含章下各节）终态是 missing/deferred 的库行；§OBS-4 货 3。
+
+        面板手里是 agent_id，`chapter_progress` 的键是 `ch-<n>`——计划里每个 agent
+        自带 `chapter.chapter_id`，按它对齐；对不上就按 agent 在 goal 里的序号兜底。
+        """
+
+        try:
+            plan = load_plan(store, research_id)
+        except KeyError:
+            return []
+        chapter_id = ""
+        for goal in getattr(plan, "goals", []) or []:
+            if goal.goal_id != goal_id:
+                continue
+            for index, agent in enumerate(goal.agents, start=1):
+                if agent.agent_id != chapter:
+                    continue
+                spec = agent.chapter if isinstance(agent.chapter, dict) else {}
+                chapter_id = str(spec.get("chapter_id") or "") or f"ch-{index}"
+        if not chapter_id:
+            return []
+        return section_log.terminal_rows(
+            store.list_chapters(research_id), goal_id=goal_id, chapter_id=chapter_id
+        )
 
     @application.get(
         "/api/researches/{research_id}/sections/{goal_id}/{chapter}/transcript"
@@ -895,7 +925,11 @@ def create_app(
 
         path = transcript_file(research_id, goal_id, chapter)
         # §OBS-4 货 2：直连文件不在就找分批文件（评级章 RATE-3 一批一份）
-        return envelope(section_log.read_section(path, tail=tail, after_seq=after_seq))
+        raw = section_log.read_section(path, tail=tail, after_seq=after_seq)
+        # §OBS-4 货 3：死因只在 chapter_progress 库行里，transcript 一个字都没有
+        rows = terminal_rows_of(research_id, goal_id, chapter)
+        raw["lines"] = list(raw.get("lines") or []) + section_log.terminal_records(rows)
+        return envelope(raw)
 
     @application.get(
         "/api/researches/{research_id}/sections/{goal_id}/{chapter}/progress"
@@ -916,6 +950,8 @@ def create_app(
         path = transcript_file(research_id, goal_id, chapter)
         raw = section_log.read_section(path, tail=tail, after_seq=after_seq)
         lines = [line.as_dict() for line in narrate_lines(raw.get("lines") or [])]
+        rows = terminal_rows_of(research_id, goal_id, chapter)
+        lines += [line.as_dict() for line in section_log.terminal_progress(rows)]
         return envelope({"lines": lines, "last_seq": raw.get("last_seq", 0)})
 
     def required_plan(research_id: str) -> Plan | JSONResponse:
