@@ -3,7 +3,7 @@
 
     python3 scripts/acceptance/rpt1/check_polished.py <正式稿.md> <tables.json> <工作稿>
 
-五条判据（全过才 PASS）：
+八条判据（全过才 PASS）：
   ① 正文零内部词（goal- / sec- / ch- / 本片 / 本节样本 …）
   ② 一级标题 ⊇ 模板 SKILL.md 声明的 sections
   ③ 角标 ⊆ 工作稿信息源池
@@ -156,14 +156,23 @@ def check_numbers(markdown: str, allowed: set[str]) -> list[str]:
     return problems
 
 
+#: 话题式标题：短名词短语 + 「分析/说明/概况…」这类壳子词收尾。
+#: 早先靠「有没有命中程度词」反着判，连着冤枉了五个真结论句
+#: （「豆包的口碑呈…双面结构」「Kimi 押…豆包押…」之类），
+#: 于是改成**正面认话题式标题**——要抓的本来就是「XX 分析」这一种，
+#: 不是去穷举结论句的所有写法。
+TOPIC_TITLE = re.compile(
+    r"^[^，。：；、,;!?—…]{2,14}(分析|说明|概况|情况|对比|介绍|综述|汇总|一览|数据|结果|概述)$")
+
+
 def check_action_titles(markdown: str, template) -> list[str]:
     problems = []
     for title in _body_subheadings(markdown):
         if title in template.sections:
             continue
-        if any(char.isdigit() for char in title) or any(w in title for w in DEGREE_WORDS):
-            continue
-        problems.append(f"二级标题 {title!r} 不是行动式标题：既没量级也没程度词")
+        stripped = re.sub(r"^[一二三四五六七八九十\d]+[、.．]\s*", "", title).strip()
+        if TOPIC_TITLE.match(stripped):
+            problems.append(f"二级标题 {title!r} 是话题式标题，不是一句结论")
     return problems
 
 
@@ -219,17 +228,27 @@ def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list
     advice = next((name for name in template.sections if name in ADVICE_SECTIONS), None)
     if advice is None or advice not in bodies:
         return []
-    problems = []
+    # 一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把
+    # 只引孤证的那半行单独判红（09-05 九格实测两格误报）。按「条」聚合才对。
+    problems, entries, current = [], [], []
     for line in bodies[advice]:
         if line.strip().startswith("#"):
             if DOWNGRADE_HEADING in line:
                 break          # 降级区之后的都不受门禁管
             continue
-        marks = [int(n) for n in MARK_ANY.findall(line)]
+        if re.match(r"^\s*\d+[.)、]\s", line) and current:
+            entries.append(current)
+            current = []
+        current.append(line)
+    if current:
+        entries.append(current)
+    for entry in entries:
+        text = "\n".join(entry)
+        marks = [int(n) for n in MARK_ANY.findall(text)]
         verdicts = {crossref.get(n) for n in marks if crossref.get(n)}
         if marks and verdicts and verdicts == {"SINGLE"}:
             problems.append(
-                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{line.strip()[:46]}")
+                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{text.strip()[:46]}")
     return problems
 
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
@@ -281,7 +300,7 @@ def main(argv: list[str]) -> int:
         if len(problems) > 12:
             print(f"        · …另有 {len(problems) - 12} 处")
     failed = [name for name in CHECKS if findings[name]]
-    print(("× 未过：" + "、".join(failed)) if failed else "√ 五条判据全过")
+    print(("× 未过：" + "、".join(failed)) if failed else f"√ {len(CHECKS)} 条判据全过")
     return 1 if failed else 0
 
 

@@ -429,3 +429,39 @@ def test_assemble_without_sources_is_unchanged(tmp_path):
     parts[0][1].parent.mkdir(parents=True)
     parts[0][1].write_text("正文。", encoding="utf-8")
     assert assemble(parts) == "# 附录\n\n正文。\n"
+
+
+# ── ⑤ 改成正面认话题式标题；⑧ 按「条」而非按行聚合 ──────────────────────
+@pytest.mark.parametrize("title", [
+    '豆包的口碑呈"能力被认可、交互与深度被吐槽"的双面结构',
+    "产品定位：Kimi 押「技术学霸」、豆包押「字节入口」",
+    "小红书贡献了 296 条证据，却一条都没被引用",
+    "一、豆包的负向印象聚焦在交付质检，不在能力本身",
+])
+def test_ruler_accepts_real_conclusion_titles(tmp_path, title):
+    """靠「有没有程度词」反着判，连着冤枉了五个真结论句——改成正面认话题式标题。"""
+    markdown = GOOD_V2.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    assert not _run_v2(tmp_path, markdown)["⑤ 行动式标题"]
+
+
+@pytest.mark.parametrize("title", ["平台情况说明", "小红书数据分析", "二、竞品对比", "样本概况"])
+def test_ruler_still_catches_topic_style_titles(tmp_path, title):
+    markdown = GOOD_V2.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    assert any(title in p for p in _run_v2(tmp_path, markdown)["⑤ 行动式标题"])
+
+
+def test_advice_gate_reads_the_whole_entry_not_one_line(tmp_path):
+    """一条建议横跨「建议行 + 依据行」，角标分散两行；依据行单独看会被误判成全孤证。"""
+    advice = ("1. **补一轮小红书精读**[S02]\n"
+              "   依据：回指第 1 条发现[S01]；把握度：中。")
+    markdown = GOOD_V2.replace("1. 补一轮小红书精读[S02]", advice)
+    findings = _run_v2(tmp_path, markdown, {"S01": "PASS", "S02": "SINGLE"})
+    assert not findings["⑧ 建议门禁"]          # 整条里有 PASS，就不该判红
+
+
+def test_advice_gate_still_fires_when_the_whole_entry_is_single_source(tmp_path):
+    advice = ("1. **补一轮小红书精读**[S02]\n"
+              "   依据：回指第 1 条发现[S02]；把握度：低。")
+    markdown = GOOD_V2.replace("1. 补一轮小红书精读[S02]", advice)
+    findings = _run_v2(tmp_path, markdown, {"S01": "PASS", "S02": "SINGLE"})
+    assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
