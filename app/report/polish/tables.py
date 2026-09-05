@@ -280,6 +280,7 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     if timeline is not None:
         tables["timeline"] = timeline
     cited = [r for r in rows if r.get("citation_no") is not None]
+    grade_by_mark = {int(r["citation_no"]): r.get("grade") for r in cited}
     return {
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
@@ -290,8 +291,11 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "lexicon_version": LEXICON_VERSION,
         "counts": {"evidence": len(rows), "cited": len(cited), "claims": len(claims),
                    "sources": len(view.get("sources") or [])},
+        # 工作稿的信息源行不带 grade（等级藏在 raw_line 里），按角标号回查证据补上——
+        # 写手的「C 级只作旁证」规则要靠每条源的等级才执行得了。
         "sources": [{"mark": _mark(int(s["citation_no"])), "title": s.get("title"),
-                     "url": s.get("url") or s.get("permalink"), "grade": s.get("grade")}
+                     "url": s.get("url") or s.get("permalink"),
+                     "grade": grade_by_mark.get(int(s["citation_no"])) or s.get("grade")}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

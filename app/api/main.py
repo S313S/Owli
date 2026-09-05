@@ -1715,6 +1715,7 @@ def create_app(
         read_report=read_historical_report,
         envelope=envelope,
         runs_root=runtime.runs_root,
+        publish=events.publish,
     )
 
     application.mount(

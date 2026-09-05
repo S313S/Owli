@@ -6,15 +6,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from app.reliability.scoring import SCORE_FIELDS
 from app.report.render import parse_report
+
+logger = logging.getLogger(__name__)
 
 EVIDENCE_FIELDS: tuple[str, ...] = (
     "id", "citation_no", "permalink", "title", "content_excerpt", "platform",
@@ -50,6 +55,8 @@ def register_delivery_routes(
     read_report: Callable[[str, str | None], str | None],
     envelope: Callable[[Any], dict[str, Any]],
     runs_root: Path,
+    #: §RPT-1：正式稿整理是后台活，进度靠它往 SSE 上推；不给就静默不推（测试用）。
+    publish: Callable[[str, Mapping[str, Any]], Awaitable[Any]] | None = None,
 ) -> None:
     def require_report(research_id: str) -> dict[str, Any]:
         report = store.get_report(research_id)
@@ -93,6 +100,62 @@ def register_delivery_routes(
     def export_dir(research_id: str) -> Path:
         return (runs_root / research_id / "exports").resolve()
 
+    async def _emit(research_id: str, payload: dict[str, Any]) -> None:
+        """推事件；推不出去不能连累整理本身（失败只落日志）。"""
+        if publish is None:
+            return
+        try:
+            await publish(research_id, payload)
+        except Exception:  # noqa: BLE001 — SSE 推送失败不该让后台任务炸掉
+            logger.warning("正式稿进度事件推送失败：%s", research_id, exc_info=True)
+
+    async def _polish_in_background(research_id: str, template: str, text: str) -> None:
+        """后台整理一次正式稿。失败只发 export_failed + 落一条无 url 的登记，研究状态一个字不改。"""
+        from app.export.registry import record_export
+        from app.report.polish.run import artifact_paths, polish
+
+        def record_failure(reason: str) -> None:
+            # 同 kind 同 path 只留最新一条，所以下一次整理成功会把这条失败记录顶掉。
+            # url=None 就是「这条没有可下载的产物」，前端据此不给链接。
+            record_export(store, research_id, kind="polished",
+                          path=str(artifact_paths(runs_root, research_id, template)[0]),
+                          url=None, desc=f"正式稿整理失败（模板 {template}）：{reason}")
+
+        await _emit(research_id, {"type": "progress", "data": {
+            "stage": "polish", "template": template, "status": "running",
+            "summary": f"正在整理正式稿（{template}）"}})
+        try:
+            outcome = await polish(store, research_id, runs_root, text, template=template)
+        except Exception as exc:  # noqa: BLE001 — 整理失败不改研究状态
+            logger.exception("正式稿整理失败：%s/%s", research_id, template)
+            reason = f"{type(exc).__name__}: {exc}"
+            record_failure(reason)
+            await _emit(research_id, {"type": "export_failed", "data": {
+                "kind": "polished", "template": template, "error": reason}})
+            return
+        if outcome["status"] != "ok":
+            offpool = outcome.get("offpool") or []
+            reason = ("角标越出信息源池：" + "、".join(offpool)) if offpool else \
+                "；".join(outcome.get("errors") or ["未知原因"])
+            record_failure(reason)
+            await _emit(research_id, {"type": "export_failed", "data": {
+                "kind": "polished", "template": template, "error": reason, "offpool": offpool}})
+            return
+        path = Path(outcome["path"])
+        record_export(store, research_id, kind="polished", path=str(path),
+                      url=f"/api/researches/{research_id}/exports/{path.name}",
+                      desc=f"正式稿（模板 {template}）")
+        await _emit(research_id, {"type": "progress", "data": {
+            "stage": "polish", "template": template, "status": "done",
+            "summary": f"正式稿已整理完成（{template}）"}})
+
+    @application.get("/api/report-templates")
+    async def list_report_templates() -> dict[str, Any]:
+        """前端模板下拉的数据源；加模板只加目录，这里不用改。"""
+        from app.report.polish.skills import load_templates
+
+        return envelope({"templates": [t.as_listing() for t in load_templates()]})
+
     @application.post("/api/researches/{research_id}/export")
     async def export_research(research_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:
         from app.export.excel import export_excel
@@ -113,7 +176,47 @@ def register_delivery_routes(
             from app.export.feishu import push_to_feishu
 
             return envelope(push_to_feishu(store, research_id, text))
-        raise HTTPException(status_code=400, detail="kind 只能是 excel 或 feishu")
+        if kind == "polished":
+            from app.orchestrator.background import guard_task
+            from app.report.polish.skills import get_template
+
+            try:
+                skill = get_template(payload.get("template"))
+            except KeyError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            task = asyncio.create_task(
+                _polish_in_background(research_id, skill.name, text))
+            guard_task(task, logger=logger, context="正式稿整理")
+            return envelope({"kind": "polished", "template": skill.name, "status": "started",
+                             "title": skill.title})
+        raise HTTPException(status_code=400, detail="kind 只能是 excel、feishu 或 polished")
+
+    @application.get("/api/researches/{research_id}/polished")
+    async def get_polished_report(research_id: str,
+                                  template: str | None = Query(default=None)) -> dict[str, Any]:
+        """正式稿正文 + 确定性表 + 与工作稿同形的 sources（前端角标卡零改动）。"""
+        from app.report.polish.run import artifact_paths
+        from app.report.polish.skills import get_template
+
+        report = require_report(research_id)
+        try:
+            skill = get_template(template)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        md_path, tables_path = artifact_paths(runs_root, research_id, skill.name)
+        if not md_path.is_file():
+            raise HTTPException(status_code=404, detail="这份研究还没整理过该模板的正式稿")
+        work_text = read_report(research_id, report.get("report_path"))
+        tables = json.loads(tables_path.read_text(encoding="utf-8")) if tables_path.is_file() else {}
+        return envelope({
+            "research_id": research_id, "template": skill.name, "title": skill.title,
+            "markdown": md_path.read_text(encoding="utf-8"),
+            "tables": tables.get("tables") or {},
+            # 角标卡的料还是工作稿那一份：正式稿不新增信息源，只从池里挑。
+            "sources": (parse_report(work_text)["sources"] if work_text else []),
+            "generated_at": md_path.stat().st_mtime,
+            "url": f"/api/researches/{research_id}/exports/{md_path.name}",
+        })
 
     @application.get("/api/researches/{research_id}/exports/{file_name}")
     async def download_export(research_id: str, file_name: str) -> FileResponse:

@@ -21,6 +21,8 @@ AGENT_ID = "report-polisher"
 AGENT_KIND = "report_writing"
 #: 角标越池允许整稿重写一次；再越即 failed（提货单货 2）。
 MAX_ATTEMPTS = 2
+#: 低于这个字节数的产物按「没写成」算——D-045 那轮的占位节只有 124 B。
+MIN_DRAFT_BYTES = 2000
 _MARK = re.compile(r"\[S(\d{2,})\]")
 
 
@@ -58,7 +60,9 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                          if name in data["tables"]}, ensure_ascii=False, indent=1)
     parts = [
         f"# 任务\n把下面这份工作稿整理成一份《{template.title}》正式稿，写成 Markdown，"
-        f"落到 `{output_path.name}`。只重新组织与解读，不做新的调研，不编造任何事实与数字。",
+        f"落到 `{output_path.name}`。只重新组织与解读，不做新的调研，不编造任何事实与数字。\n\n"
+        "**分节落盘，不要在一条回复里输出整篇。** 先 Write 出第一节，然后一节一节 Edit 追加到同一个文件末尾，每次只追加一个一级标题及其内容。整篇一次性吐出来会被传输层掐断，"
+        "这一条不是建议是硬要求。全部节写完后再回结论。",
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
@@ -96,9 +100,10 @@ def _task(body: str, output_path: Path, research_id: str, model: str) -> EngineT
         agent_kind=AGENT_KIND, validators=["file_exists"], model=model,
         runs_root=output_path.parents[2],
         capability=Capability(
-            profile="readonly-analyst", tools=("fs.write",),
-            # 相对本次调研产物根（runs/<id>/）：只准写 exports/，工作稿产物碰不到。
-            fs=FileSystemScope(write=("exports/**",)),
+            # 分节落盘要 Edit 追加，Edit 得先 Read 回自己刚写的那一段，故 read 也开在 exports/。
+            profile="readonly-analyst", tools=("fs.write", "fs.read"),
+            # 相对本次调研产物根（runs/<id>/）：只准动 exports/，工作稿产物碰不到。
+            fs=FileSystemScope(read=("exports/**",), write=("exports/**",)),
         ),
     )
 
@@ -123,7 +128,11 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         body = build_prompt(skill, data, report_text, md_path, errors)
         result = await adapter.run(_task(body, md_path, research_id, skill.model),
                                    _ctx(md_path, research_id), on_event=on_event)
-        if not bool(getattr(result, "succeeded", False)) or not md_path.is_file():
+        # 双腿判定的第二条腿：传输层报错但正文已经落盘就认（照 backfill 的
+        # `_recover_transport_completion` 同思路）。本机代理掐长响应是常态，
+        # 因为它把一份写完的稿判死，等于白付一次调用。
+        landed = md_path.is_file() and md_path.stat().st_size >= MIN_DRAFT_BYTES
+        if not bool(getattr(result, "succeeded", False)) and not landed:
             errors = (str(getattr(result, "engine_error", None) or "适配器双腿判定未通过"),)
             continue
         offpool = offpool_marks(md_path.read_text(encoding="utf-8"), pool)
