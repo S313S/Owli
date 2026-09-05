@@ -6,9 +6,10 @@ import asyncio
 import inspect
 import json
 import re
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.adapters import validation
 from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
@@ -840,6 +841,63 @@ def _numbered_evidence_rows(
         *_rating_sort_key(row),
     ))
     return selected, quotas, actual, floor_degraded
+
+
+#: §CODE-1 货 3：本节 UGC 聚合摘要至少要有这么多条已编码证据才值得前置——
+#: 三五条的「聚合」不是聚合，是把散点换个说法摆一遍。
+UGC_DIGEST_MIN_ROWS = 5
+#: 每个态度格最多给几条代表原声。多了会把提示词撑长，写手反而挑不动。
+UGC_DIGEST_QUOTES_PER_ATTITUDE = 2
+
+
+def _ugc_coding_digest(
+    items: Sequence[Mapping[str, Any]], rows_by_id: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    """把本片池里已编码的 UGC 聚成一段条数摘要；不够 `UGC_DIGEST_MIN_ROWS` 条返回 None。
+
+    写手此前拿到的是 30 条散点，只能一条证据撑一条结论。这一段给的是**条数**，
+    让它能写「本节 N 条 UGC 里 M 条编码为正向」——这正是用户 09-05 拍的甲口径：
+    编码是模型判断，正式稿只能写条数，不能写「用户 X% 认为」。池位一条不动。
+    """
+
+    coded: list[tuple[str, Mapping[str, Any]]] = []
+    for item in items:
+        row = rows_by_id.get(str(item.get("evidence_id")))
+        extra = row.get("extra") if isinstance(row, Mapping) else None
+        coding = extra.get("coding") if isinstance(extra, Mapping) else None
+        if isinstance(coding, Mapping) and coding.get("coding_version"):
+            coded.append((str(item.get("citation") or ""), coding))
+    if len(coded) < UGC_DIGEST_MIN_ROWS:
+        return None
+
+    def tally(values: Iterable[str]) -> str:
+        counts = Counter(value for value in values if value)
+        return "、".join(f"{name} {count} 条" for name, count in counts.most_common())
+
+    lines = [
+        f"【本节 UGC 聚合摘要】本节可见池里 {len(coded)} 条已逐条编码"
+        "（模型判断，不是统计抽样）：",
+        "- 态度：" + tally(coding["attitude"] for _, coding in coded),
+        "- 场景：" + tally(coding["scenario"] for _, coding in coded),
+        "- 人群：" + tally(coding["audience"] for _, coding in coded),
+        "- 主题：" + tally(
+            topic for _, coding in coded for topic in (coding.get("topics") or [])
+        ),
+    ]
+    for attitude in ("正", "负", "混合"):
+        quotes = [
+            f"{citation}「{coding['quote']}」"
+            for citation, coding in coded
+            if coding.get("attitude") == attitude and coding.get("quote")
+        ][:UGC_DIGEST_QUOTES_PER_ATTITUDE]
+        if quotes:
+            lines.append(f"- {attitude}向代表原声：" + "；".join(quotes))
+    lines.append(
+        "用法：可以写「本节 N 条 UGC 里 M 条编码为正向」这类**条数**表述，"
+        "并挂上对应角标；不得写「用户 X% 认为」「多数用户」这类推及全网的比例句式，"
+        "也不得把这段摘要本身当证据——引用仍只能引池里的条目。"
+    )
+    return "\n".join(lines)
 
 
 def _evidence_index(
@@ -2296,6 +2354,11 @@ async def run_sectioned_task(
     # source_mcp 可在并发 goal 中直写 evidence，因此证据行也必须与
     # input_rows 同时冻结；合并编号和每节证据池共用这一份快照。
     evidence_rows = store.list_evidence(plan.research_id)
+    # §CODE-1 货 3：按 id 索一份，供口碑节的 UGC 聚合摘要取 extra.coding。
+    # 与上面那份快照同源，不另读库——池子和摘要必须看同一份数据。
+    evidence_rows_by_id = {
+        str(row.get("id")): row for row in evidence_rows if row.get("id")
+    }
     all_evidence_urls = {
         str(row.get("permalink") or "")
         for row in evidence_rows
@@ -2545,6 +2608,15 @@ async def run_sectioned_task(
                     "本节可引用证据池 JSON（唯一引用源）：\n"
                     f"{json.dumps(prompt_pool, ensure_ascii=False, indent=2)}"
                 )
+                # §CODE-1 货 3：口碑类节把本片池里已编码 UGC 的条数摘要前置。
+                # 判断「是不是口碑节」不看节标题，看池里有没有够数的已编码 UGC——
+                # 标题分类会误判，池子不会：没有 UGC 的节自然拿不到这一段。
+                # 只加提示词，池位与角标编号一条不动。
+                digest = _ugc_coding_digest(
+                    prompt_pool.get("items") or [], evidence_rows_by_id,
+                )
+                if digest:
+                    body = f"{digest}\n\n{body}"
                 if (
                     base_task.agent_kind in SECTIONED_KINDS
                     and _declared_shape(agent) != "array"
