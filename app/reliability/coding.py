@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.adapters import validation
@@ -363,5 +365,142 @@ async def code_report(
 
 __all__ = [
     "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
-    "TOPICS", "code_report", "coding_errors", "coding_targets", "is_coded",
+    "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
+    "coding_tables", "coding_targets", "is_coded", "ratio_phrase_offenders",
 ]
+
+
+#: §CODE-1 货 2 备料：正式稿禁的比例句式（用户 09-05 拍甲——编码是模型判断，
+#: 只能写「N 条里 M 条编码为正向」，不能推及全网）。闸词按**去掉引用原文与链接
+#: 之后**的正文匹配：小红书话题名里就有「人类对豆包的开发不足百分之一」，
+#: 拿它打红写手是冤枉——本包一轮重放实测踩过。
+FORBIDDEN_RATIO_PATTERN = re.compile(
+    r"\d+\s*(?:%|％)|百分之[零一二三四五六七八九十百千万\d]+"
+    r"|多数用户|大多数用户|用户普遍|绝大多数用户"
+)
+_QUOTED = re.compile(r"[「『“\"][^」』”\"]{0,120}[」』”\"]")
+_LINKED = re.compile(r"https?://\S+|\[[^\]]{0,120}\]\([^)]{0,300}\)")
+
+
+def ratio_phrase_offenders(markdown: str) -> list[str]:
+    """回正文里自己写的比例句式；引用原文与链接里的不算。"""
+
+    stripped = _QUOTED.sub("", _LINKED.sub("", str(markdown)))
+    return [match.group(0) for match in FORBIDDEN_RATIO_PATTERN.finditer(stripped)]
+
+
+def coded_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """挑出已编码的行，并把 `extra.coding` 提到顶层，省得每处都解一遍。"""
+
+    result: list[dict[str, Any]] = []
+    for item in rows:
+        coding = _extra(item).get("coding")
+        if isinstance(coding, Mapping) and coding.get("coding_version"):
+            result.append({**dict(item), "coding": dict(coding)})
+    return result
+
+
+#: 没命中任何主题的行归到这一格。不设它，四成条目会从主表里凭空消失，
+#: 「表里 n 与已编码条数对账」也就永远对不上（底料实测 287 条里 118 条无主题）。
+TOPIC_NONE = "未归主题"
+#: `quotes` 表每个主题每种态度取几条原声。
+QUOTES_PER_CELL = 3
+
+
+def _quote_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
+    """原声按互动量降序；取不到互动量的排在后面，同分按 id 稳定。"""
+
+    from app.reliability.scoring import engagement_value
+
+    value = engagement_value(row)
+    return (-(value if isinstance(value, (int, float)) else -1.0), str(row.get("id")))
+
+
+def coding_tables(
+    rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    """把已编码的行聚成正式稿要的确定性表（用户 09-05 拍乙的表型）。
+
+    主表是「主题 × 态度」，另加一张场景条数表；`audience` 不出表——底料实测
+    287 条里 260 条「不明」，摆出来是一格独大的空表，只在附录写一句。
+    `citations` 是 证据 id → 角标序号，没给就不填角标（表本身不依赖它）。
+    """
+
+    from app.reliability.scoring import engagement_value
+
+    coded = coded_rows(rows)
+    marks = dict(citations or {})
+    attitude_by_topic: list[dict[str, Any]] = []
+    cells: dict[tuple[str, str], int] = {}
+    for item in coded:
+        topics = list(item["coding"].get("topics") or []) or [TOPIC_NONE]
+        for topic in topics:
+            key = (topic, item["coding"]["attitude"])
+            cells[key] = cells.get(key, 0) + 1
+    order = {name: index for index, name in enumerate((*TOPICS, TOPIC_NONE))}
+    for (topic, attitude), count in sorted(
+        cells.items(), key=lambda pair: (order.get(pair[0][0], 99), pair[0][1])
+    ):
+        attitude_by_topic.append(
+            {"topic": topic, "attitude": attitude, "count": count}
+        )
+
+    scenario_counts = [
+        {"scenario": name, "count": count}
+        for name, count in sorted(
+            Counter(item["coding"]["scenario"] for item in coded).items(),
+            key=lambda pair: (-pair[1], pair[0]),
+        )
+    ]
+
+    quotes: list[dict[str, Any]] = []
+    for topic in (*TOPICS, TOPIC_NONE):
+        for attitude in ("正", "负"):
+            picked = sorted(
+                (
+                    item for item in coded
+                    if item["coding"]["quote"]
+                    and item["coding"]["attitude"] == attitude
+                    and topic in (item["coding"].get("topics") or [TOPIC_NONE])
+                ),
+                key=_quote_sort_key,
+            )[:QUOTES_PER_CELL]
+            for item in picked:
+                quotes.append({
+                    "topic": topic,
+                    "attitude": attitude,
+                    "quote": item["coding"]["quote"],
+                    "evidence_id": str(item.get("id")),
+                    "citation": (
+                        f"[S{marks[str(item.get('id'))]:02d}]"
+                        if str(item.get("id")) in marks else None
+                    ),
+                    "platform": item.get("platform"),
+                    "engagement": engagement_value(item),
+                })
+
+    audience = Counter(item["coding"]["audience"] for item in coded)
+    unknown = audience.get("不明", 0)
+    return {
+        "coding_version": CODING_VERSION,
+        "coded_rows": len(coded),
+        "attitude_by_topic": attitude_by_topic,
+        "scenario_counts": scenario_counts,
+        "quotes": quotes,
+        # 对账口径写在数据里，别让读表的人自己猜：场景表一行一条、加起来等于条数；
+        # 主题表一条可命中多个主题，加起来是**命中次数**，天然大于条数。
+        "reconciliation": {
+            "scenario_sum": sum(row["count"] for row in scenario_counts),
+            "topic_hit_sum": sum(row["count"] for row in attitude_by_topic),
+            "distinct_rows": len(coded),
+        },
+        # 用户 09-05 拍乙：audience 不出表，附录一句话。
+        "audience_note": (
+            f"{len(coded)} 条编码里 {unknown} 条看不出发帖人身份"
+            f"（{unknown * 100 // len(coded)}%）" if coded else "无已编码证据"
+        ),
+        "method_note": (
+            f"模型编码（{CODING_VERSION}），包终端复核 30 条一致 28 条；"
+            "表内均为条数，不是全网比例。"
+        ),
+    }
