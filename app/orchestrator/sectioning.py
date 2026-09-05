@@ -1022,6 +1022,106 @@ def _section_evidence_pool_result(
     )
 
 
+def _written_section_result(
+    section_path: Path,
+    allowed_urls: set[str],
+) -> validation.Result:
+    """判一个**已经写完的** done 节还算不算数——只看它自带的东西。
+
+    §D-046：别拿本轮重算的角标编号去判已经写完的字。每节可见池是「写的时候
+    的预算」，不是「写完之后的有效性契约」：
+    - 池是本轮按账本 done 集合重算的，点名补一节必须先复位父章，父章一掉出
+      done 集合，邻节的跨 goal 那一截就够不着了（真机：sec-2 底料池 30 条
+      weibo+web_search+reddit，补节轮只剩 15 条 weibo）；
+    - 全报告编号本身也会漂——评级回填改 `_rating_sort_key` 就重排，底料
+      sec-2 的 20 个角标在今天的编号下有 14 个映到了别的 permalink。
+    拿这两样任意一个当尺子，好稿都会被判死、复位、连片产物一起删、从头重写。
+    补一节因此等于让整章 N 节重新抽签——两次现场都是这么把好稿写砸的。
+
+    所以这里只留两条**不随本轮重算漂移**的判据：① 正文与 claims 引用的链接
+    必须还在本轮研究的证据库里（引用了库外链接的稿子该重写，D-031 那一支）；
+    ② 节自带的撰写格式契约（结论/信息源齐、角标在本节信息源里解析得了、
+    没有孤儿角标）。角标↔来源的对应关系写在节自己的「信息源」块里，下游章级
+    组装本来就按那一块解析，与本轮池编号无关。
+    """
+
+    try:
+        raw_text = section_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return validation.Result(
+            validation.Verdict.UNAVAILABLE,
+            "written_section_intact",
+            f"无法读取节产物：{type(exc).__name__}: {exc}",
+            [],
+        )
+    try:
+        payload = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+    if (
+        not isinstance(payload, Mapping)
+        or not isinstance(payload.get("markdown"), str)
+        or not isinstance(payload.get("claims"), list)
+    ):
+        return validation.Result(
+            validation.Verdict.FAIL,
+            "written_section_intact",
+            "节产物不是 JSON 信封（markdown 正文 + claims 数组）",
+            ["json_envelope"],
+        )
+    markdown = payload["markdown"]
+    offenders = sorted(_raw_urls(markdown) - allowed_urls)
+    for claim in payload["claims"]:
+        if not isinstance(claim, Mapping):
+            continue
+        links = claim.get("evidence", [])
+        if not isinstance(links, list):
+            continue
+        for link in links:
+            if not isinstance(link, Mapping):
+                continue
+            permalink = str(link.get("permalink") or "")
+            if permalink not in allowed_urls:
+                offenders.append(permalink)
+    inner_ctx = validation.Ctx(
+        output_path=section_path,
+        output_format="markdown",
+        research_id="",
+        goal_id="",
+        agent_id="report-writing",
+        read_text=lambda: markdown,
+        read_json=lambda: {},
+        store=None,
+        source_domains=frozenset(),
+    )
+    rules: list[str] = []
+    for failure in (
+        validation.sections_exist(inner_ctx, ["结论", "信息源"]),
+        validation.citation_marks_resolvable(inner_ctx, []),
+        validation.no_orphan_citation(inner_ctx, []),
+    ):
+        if failure.verdict is not validation.Verdict.PASS:
+            rules.append(failure.name)
+            offenders.extend(
+                f"{failure.name}: {offender}"
+                for offender in (failure.offenders or [failure.message])
+            )
+    if offenders:
+        return validation.Result(
+            validation.Verdict.FAIL,
+            "written_section_intact",
+            f"已写完的节不再成立，共 {len(offenders)} 处"
+            + (f"（规则：{', '.join(rules)}）" if rules else ""),
+            offenders,
+        )
+    return validation.Result(
+        validation.Verdict.PASS,
+        "written_section_intact",
+        f"已写完的节仍成立，{len(markdown)} 字正文原样保留",
+        [],
+    )
+
+
 def _ctx(
     task: EngineTask,
     runs_root: Path,
@@ -1866,24 +1966,6 @@ async def run_sectioned_task(
             row = existing.get(section["section_id"])
             if row is None or row["status"] != "done":
                 continue
-            frozen_inputs = _merge_declared_done_inputs(
-                _ledger_inputs(input_rows, section["goal_id"]),
-                input_rows,
-                declared_inputs,
-                research_root=runs_root / plan.research_id,
-            )
-            allowed_goal_ids = _allowed_evidence_goal_ids(
-                plan,
-                input_rows,
-                frozen_inputs,
-                str(section["goal_id"]),
-                research_root=runs_root / plan.research_id,
-            )
-            frozen_pool, _ = _evidence_index(
-                evidence_rows,
-                allowed_goal_ids,
-                section_goal_id=str(section["goal_id"]),
-            )
             section_path = section_root / section["filename"]
             reentry_note = _coerce_section_envelope(section_path)
             if reentry_note:
@@ -1898,8 +1980,9 @@ async def run_sectioned_task(
                 })
                 if inspect.isawaitable(reentry_event):
                     await reentry_event
-            if _section_evidence_pool_result(
-                section_path, frozen_pool, all_evidence_urls,
+            # §D-046：按「已写完的节」判，不拿本轮重算的每节可见池当尺子。
+            if _written_section_result(
+                section_path, all_evidence_urls,
             ).verdict is not validation.Verdict.PASS:
                 stale_done_ids.append(section["section_id"])
         if stale_done_ids:
@@ -1929,6 +2012,26 @@ async def run_sectioned_task(
     for section_number, section in enumerate(sections, start=1):
         row = existing.get(section["section_id"])
         if row and row["status"] in {"done", "missing"}:
+            if row["status"] == "done":
+                # §D-046：已写完的节一个字都不重写、不调引擎。点名补一节必须先
+                # 复位父章（否则节化撰写压根不会被走到），复位之后同章的好稿就
+                # 全靠这一支保住——不然补一节 = 整章 N 节重新抽签，每签都有违
+                # 契约的概率，两次现场就是这么把 19 637 B / 24 142 B 的好稿写成
+                # 一百多字节占位的。跳过要发事件，判据才落得到库上。
+                done_path = section_root / section["filename"]
+                skipped = on_event({
+                    "type": "write_section_skipped",
+                    "data": {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "bytes": (
+                            done_path.stat().st_size if done_path.is_file() else 0
+                        ),
+                    },
+                    "is_error": False,
+                })
+                if inspect.isawaitable(skipped):
+                    await skipped
             continue
         section_attempt = 0
         section_deadline = (
