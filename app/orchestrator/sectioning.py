@@ -1600,6 +1600,21 @@ def _shard_envelope(path: Path) -> tuple[str, list[Any]] | None:
     return markdown.strip(), list(claims) if isinstance(claims, list) else []
 
 
+def _shard_unparseable_note(path: Path) -> tuple[int, str]:
+    """坏片产物的字节数与解析报错原文（§D-051 货 2 的事件载荷）。"""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return 0, str(exc)
+    size = len(text.encode("utf-8"))
+    try:
+        json.loads(text.strip())
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        return size, str(exc)
+    return size, "不是非空 {markdown, claims} 信封"
+
+
 def _shard_stale_citations(
     markdown: str, pool: Mapping[str, Any]
 ) -> set[str]:
@@ -1857,6 +1872,7 @@ async def _run_section_shards(
         shard_attempt = 0
         engine_attempts = 0
         offpool_rewrites = 0
+        unparseable_rewrites = 0
         while True:
             shard_attempt += 1
             engine_attempts += 1
@@ -1918,6 +1934,39 @@ async def _run_section_shards(
                     resume_for = None
                     continue
                 break
+            if (
+                bool(getattr(result, "succeeded", False))
+                and unparseable_rewrites < 1
+            ):
+                # §D-051 货 2：引擎自认跑成、产物却不是可解析的信封（真机
+                # sec-1.part.1.md 6 388 B，第 224 字符引号未转义）。这既不是传输
+                # 断连也不是超时，`_is_transport_failure` 认不出，下面那道闸一次都
+                # 不补就跳去下一片（真机 attempts=1 即证）。套 §D-045 池外角标那条
+                # 路：删掉这一片、同 prompt 加一句定向要求重写一次，重写还坏才记
+                # 失败交给货 1。上限 1 次——坏 JSON 多半是转义写错，一次改不回来
+                # 再付一次也是白付，把时间留给后面的片。
+                unparseable_rewrites += 1
+                bad_bytes, parse_error = _shard_unparseable_note(shard_path)
+                await _emit(on_event, "write_shard_unparseable", {
+                    "goal_id": context.goal_id,
+                    "chapter_id": section["section_id"],
+                    "shard": index, "shards": total,
+                    "bytes": bad_bytes, "error": parse_error,
+                    "attempt": unparseable_rewrites,
+                }, is_error=True)
+                shard_path.unlink(missing_ok=True)
+                shard_task = replace(
+                    shard_task,
+                    body=(
+                        f"{body}\n\n【产物不可解析重写】上一稿写出的不是可解析的"
+                        f"JSON 信封（{parse_error}）；本次整份产物只输出一个 JSON "
+                        "对象：`markdown` 放正文、`claims` 放断言数组，正文里的"
+                        "引号与反斜杠一律按 JSON 规则转义，别在 JSON 外面写任何字。\n"
+                    ),
+                )
+                shard_attempt = 0
+                resume_for = None
+                continue
             if shard_attempt >= SECTION_RETRY_MAX_ATTEMPTS:
                 break
             reason = section_failure_reason(result, shard_path)

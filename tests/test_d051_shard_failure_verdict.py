@@ -122,3 +122,59 @@ def test_d051_四片全成行为不变(tmp_path):
     assert result.succeeded is True
     row = store.list_chapters("r-ledger")[0]
     assert (row["status"], row["reason"]) == ("done", None)
+
+
+def test_d051_坏片当场重写一次就写成(tmp_path, monkeypatch):
+    """货 2 单元 b 前半：第一次坏 JSON、第二次好 → 片成，事件 1 条。
+
+    旧码在这里一次都不补（`_is_transport_failure` 认不出「产物不可解析」），
+    直接跳下一片，真机 attempts=1 即证。
+    """
+    _bad_json_shard(monkeypatch, ".part.1.", times=1)
+    result, store, bodies, events, _ = _shard_run(
+        tmp_path, evidence=30, wall_clock=330.0,
+    )
+
+    unparseable = [
+        e["data"] for e in events if e["type"] == "write_shard_unparseable"
+    ]
+    assert [(i["shard"], i["attempt"]) for i in unparseable] == [(1, 1)]
+    assert unparseable[0]["bytes"] > 0 and unparseable[0]["error"]
+    # 重写用的是同一份片 prompt，只多一句定向要求。
+    assert "【产物不可解析重写】" in bodies["sec-1.part.1.md"]
+    assert "你现在写第 1/3 片" in bodies["sec-1.part.1.md"]
+    finished = [e["data"] for e in events if e["type"] == "write_shard_finished"]
+    assert [(i["shard"], i["succeeded"]) for i in finished] == [
+        (1, True), (2, True), (3, True),
+    ]
+    # 补的是这一片，不是整节：没惊动节级重试。
+    assert [e for e in events if e["type"] == "section_retry"] == []
+    assert [e for e in events if e["type"] == "section_shards_incomplete"] == []
+    merged = [e["data"] for e in events if e["type"] == "write_shards_merged"]
+    assert merged[0]["done"] == 3
+    assert result.succeeded is True
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_d051_坏片重写还坏就记失败(tmp_path, monkeypatch):
+    """货 2 单元 b 后半：两次都坏 → 这片记失败，交给货 1 那条路。"""
+    _bad_json_shard(monkeypatch, ".part.1.")
+    result, store, _, events, _ = _shard_run(
+        tmp_path, evidence=30, wall_clock=330.0,
+    )
+
+    unparseable = [
+        e["data"] for e in events if e["type"] == "write_shard_unparseable"
+    ]
+    # 上限 1 次：每次节尝试只多付一次引擎，不是无限重写。
+    assert unparseable and all(
+        item["shard"] == 1 and item["attempt"] == 1 for item in unparseable
+    )
+    finished = [e["data"] for e in events if e["type"] == "write_shard_finished"]
+    first = [item for item in finished if item["shard"] == 1]
+    assert first and all(item["succeeded"] is False for item in first)
+    assert first[0]["attempts"] == 2
+    # 货 1 接手：这一节不判 done。
+    assert [e for e in events if e["type"] == "section_shards_incomplete"]
+    assert result.succeeded is False
+    assert store.list_chapters("r-ledger")[0]["status"] != "done"
