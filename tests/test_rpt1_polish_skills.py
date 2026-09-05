@@ -384,3 +384,13 @@ def test_a_crashing_engine_call_costs_one_attempt_not_the_whole_report(tmp_path)
     # 第一次崩掉只赔了一次尝试，五节全部写出来了。
     assert calls["n"] == len(skill.sections) + 1
     assert all(path.is_file() for _, path in parts)
+
+
+def test_polish_widens_only_its_own_wall_clock_and_touches_no_adapter_file():
+    """撰写墙钟走 ClaudeAdapter 的公开构造参数放宽，禁区里一个文件都不动。"""
+    from app.adapters.claude import DEFAULT_CLAUDE_TIMEOUT_SECONDS
+    from app.report.polish.run import SECTION_TIMEOUT_SECONDS, default_adapter
+
+    assert DEFAULT_CLAUDE_TIMEOUT_SECONDS == 300.0        # 全局默认没被改
+    assert SECTION_TIMEOUT_SECONDS >= 480                 # 提货单 §3.4 估的是 3–8 分钟
+    assert default_adapter().timeout_seconds == SECTION_TIMEOUT_SECONDS

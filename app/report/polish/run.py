@@ -178,6 +178,24 @@ def _task(body: str, output_path: Path, research_id: str, model: str) -> EngineT
     )
 
 
+#: 正式稿单节撰写的墙钟。适配器默认 300 s（`DEFAULT_CLAUDE_TIMEOUT_SECONDS`），
+#: 而提货单 §3.4 自己估的就是「3–8 分钟」——默认值本来就低于本包的预估工时。
+#: 09-05 实测：补了用户裁决四条之后内容变厚，单节两次都卡在 300 s 整。
+#: 这里只用 `ClaudeAdapter` 的公开构造参数把这一类任务放宽，**不改 `app/adapters/`
+#: 里任何文件**（那是本包禁区）；口径变更已报调度。
+SECTION_TIMEOUT_SECONDS = 900.0
+
+
+def default_adapter() -> Any:
+    """本包自用的适配器：撰写墙钟放宽到 `SECTION_TIMEOUT_SECONDS`，其余照默认。"""
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.codex import CodexAdapter
+    from app.adapters.routing import RoutedAdapter
+
+    return RoutedAdapter(adapters={"claude": ClaudeAdapter(timeout_seconds=SECTION_TIMEOUT_SECONDS),
+                                   "codex": CodexAdapter()})
+
+
 async def polish(store: Any, research_id: str, runs_root: Path, report_text: str, *,
                  template: str | None = None, adapter: Any = None,
                  on_event: Callable[[Any], Awaitable[None]] | None = None) -> dict[str, Any]:
@@ -191,9 +209,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     tables_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     pool = frozenset(int(s["mark"][1:]) for s in data.get("sources") or [])
     if adapter is None:
-        from app.adapters.routing import RoutedAdapter
-
-        adapter = RoutedAdapter()
+        adapter = default_adapter()
     parts = section_paths(runs_root, research_id, skill.name, skill.sections)
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
     attempts = 0
