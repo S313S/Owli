@@ -15,7 +15,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-EXPECTED_SHEETS = ["01_结论摘要", "02_图表", "03_明细数据", "04_信息源", "05_标签", "90_图表数据"]
+EXPECTED_SHEETS = ["00_正式稿", "01_结论摘要", "02_图表", "03_明细数据", "04_信息源",
+                   "05_标签", "90_图表数据"]
 MARK = re.compile(r"\[S\d{2}\]")
 MARK_ID = re.compile(r"\bS\d{2}\b")
 # §RATE-4 货 1：UGC 行第一维叫「代表性」，尺子跟着放宽（口径的唯一定义在

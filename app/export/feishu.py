@@ -351,7 +351,8 @@ def source_record(item: Mapping[str, Any]) -> dict[str, Any]:
     return record
 
 
-def doc_markdown(view: Mapping[str, Any], sources: Sequence[Mapping[str, Any]]) -> str:
+def doc_markdown(view: Mapping[str, Any], sources: Sequence[Mapping[str, Any]],
+                 polished: Mapping[str, Any] | None = None) -> str:
     """云文档正文：角标降级为 `[n]`，文末信息源清单（R6 云文档形态）。"""
     import re
 
@@ -359,6 +360,18 @@ def doc_markdown(view: Mapping[str, Any], sources: Sequence[Mapping[str, Any]]) 
         return re.sub(r"\[S(\d{2})\]", lambda m: f"\\[{int(m.group(1))}\\]", text)
 
     lines = [f"# {view.get('title') or '报告'}", "", f"> {OVERWRITE_NOTICE}", ""]
+    # §RPT-1 货 5：整理过正式稿就推正式稿（首段即执行摘要），没整理过照旧推工作稿。
+    # 信息源清单跟着走——云文档是给人看的，每句话的出处不能丢。
+    if polished and polished.get("markdown"):
+        body = str(polished["markdown"])
+        lines += [degrade(body), ""]
+        # 咨询体模板的附录自带「信息源清单」，再贴一份就是重复（09-05 真机撞到）；
+        # 模板没写信息源的（将来新加的模板）才补一份，出处不能丢。
+        if "信息源" not in body:
+            lines += ["## 信息源", ""]
+            lines += [f"{int(s['citation_no'])}. [{s.get('title') or s['permalink']}]({s['permalink']})"
+                      for s in sources]
+        return "\n".join(lines) + "\n"
     if view.get("conclusions"):
         lines += ["## 结论", "", *[f"- {degrade(c)}" for c in view["conclusions"]], ""]
     for section in view.get("sections") or []:
@@ -399,7 +412,8 @@ def select_transport(env: Mapping[str, str] | None = None) -> FeishuTransport | 
 
 
 def push_to_feishu(store: Any, research_id: str, report_text: str, *,
-                   transport: FeishuTransport | None = None, base_token: str | None = None) -> dict[str, Any]:
+                   transport: FeishuTransport | None = None, base_token: str | None = None,
+                   runs_root: Any = None) -> dict[str, Any]:
     """推一份报告：总览 1 行 + 被引证据 N 行 + 云文档；状态落 extra.feishu。"""
     from app.export.registry import record_feishu
     from app.report.render import parse_report
@@ -412,6 +426,14 @@ def push_to_feishu(store: Any, research_id: str, report_text: str, *,
     evidence = store.list_evidence(research_id)
     cited = sorted((e for e in evidence if e.get("citation_no") is not None), key=lambda e: int(e["citation_no"]))
     view = parse_report(report_text)
+    # runs_root 拿不到（老调用点）就退回工作稿，不改既有行为。
+    polished = None
+    if runs_root is not None:
+        from pathlib import Path as _Path
+
+        from app.export.polished_sheet import load_polished
+
+        polished = load_polished(_Path(runs_root), research_id)
     # §AUTO-EXP 货 1：有 doc_token 就 update 不新建；create_doc 挪到两次 upsert 成功之后
     # （08-30 拍板：失败推送各留一篇孤儿文档的根因是它排在 ensure_table/upsert 前）。
     doc_id = str(report.get("feishu_doc_token") or "") or None
@@ -428,9 +450,9 @@ def push_to_feishu(store: Any, research_id: str, report_text: str, *,
             chosen.upsert(base, sources, "evidence_id", str(item["id"]), source_record(item))
         title = str(view.get("title") or report["title"])
         if doc_id:
-            doc_id, doc_url = chosen.update_doc(doc_id, title, doc_markdown(view, cited))
+            doc_id, doc_url = chosen.update_doc(doc_id, title, doc_markdown(view, cited, polished))
         else:
-            doc_id, doc_url = chosen.create_doc(title, doc_markdown(view, cited))
+            doc_id, doc_url = chosen.create_doc(title, doc_markdown(view, cited, polished))
         # 云文档落定后按同锚点再写一次总览，把「报告云文档」链接补上（幂等覆盖）。
         chosen.upsert(base, overview, "report_id", research_id,
                       overview_record(report, evidence, tags, doc_url))

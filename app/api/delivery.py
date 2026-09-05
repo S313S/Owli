@@ -175,7 +175,7 @@ def register_delivery_routes(
         if kind == "feishu":
             from app.export.feishu import push_to_feishu
 
-            return envelope(push_to_feishu(store, research_id, text))
+            return envelope(push_to_feishu(store, research_id, text, runs_root=runs_root))
         if kind == "polished":
             from app.orchestrator.background import guard_task
             from app.report.polish.skills import get_template

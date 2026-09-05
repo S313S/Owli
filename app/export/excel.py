@@ -20,9 +20,13 @@ from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.export import polished_sheet
 from app.reliability.scoring import SCORE_FIELDS, grade_for_total
 
-SHEETS = ("01_结论摘要", "02_图表", "03_明细数据", "04_信息源", "05_标签", "90_图表数据")
+#: §RPT-1 货 5：`00_正式稿` 排在最前——打开工作簿第一眼就该是给人读的那一份。
+#: sheet 清单是死契约，所以它**始终存在**；没整理过正式稿时里面只有一行说明。
+SHEETS = ("00_正式稿", "01_结论摘要", "02_图表", "03_明细数据", "04_信息源", "05_标签",
+          "90_图表数据")
 SOURCE_HEADER = (
     # §CMT-1 货 5：C 列「类型」区分帖/评论——读者反应和帖子作者的说法
     # 权重不一样，人工复核第一眼要能分开。其后各列整体右移一位。
@@ -233,8 +237,9 @@ def _sheet_charts(ws: Worksheet, ws_stage: Worksheet, evidence: Sequence[Mapping
 
 
 def build_workbook(report: Mapping[str, Any], view: Mapping[str, Any],
-                   evidence: Sequence[Mapping[str, Any]], tags: Sequence[str]) -> Workbook:
-    """报告行 + 结构化视图 + 证据 + 标签 → 6 sheet 工作簿（纯内存，确定性）。"""
+                   evidence: Sequence[Mapping[str, Any]], tags: Sequence[str],
+                   polished: Mapping[str, Any] | None = None) -> Workbook:
+    """报告行 + 结构化视图 + 证据 + 标签（+ 正式稿）→ 7 sheet 工作簿（纯内存，确定性）。"""
     wb = Workbook()
     wb.remove(wb.active)
     sheets = {name: wb.create_sheet(name) for name in SHEETS}
@@ -245,6 +250,10 @@ def build_workbook(report: Mapping[str, Any], view: Mapping[str, Any],
     )
     cited_marks = ", ".join(_mark(int(item["citation_no"])) for item in cited)
     bracketed = "".join(f"[{_mark(int(item['citation_no']))}]" for item in cited)
+    fonts = {"title": F_TITLE, "sub": F_SUB, "head": F_HEAD, "body": F_BODY, "tldr": F_TLDR}
+    row = polished_sheet.write_sheet(sheets[polished_sheet.SHEET_NAME], polished, fonts)
+    polished_sheet.add_charts(sheets[polished_sheet.SHEET_NAME], sheets["90_图表数据"],
+                              polished, row, fonts)
     _sheet_summary(sheets["01_结论摘要"], str(report.get("research_question") or ""),
                    list(view.get("conclusions") or []), str(view.get("title") or report.get("title") or ""),
                    list(view.get("entities") or []))
@@ -267,5 +276,6 @@ def export_excel(store: Any, research_id: str, runs_root: Path, report_text: str
     tags = store.read_validation_path("report_tags", research_id)
     target = Path(runs_root) / research_id / "exports" / f"{research_id}.xlsx"
     target.parent.mkdir(parents=True, exist_ok=True)
-    build_workbook(report, view, evidence, tags).save(target)
+    polished = polished_sheet.load_polished(Path(runs_root), research_id)
+    build_workbook(report, view, evidence, tags, polished).save(target)
     return target
