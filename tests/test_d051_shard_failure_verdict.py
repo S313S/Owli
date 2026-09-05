@@ -95,13 +95,19 @@ def test_d051_有片失败不产done级合并稿(tmp_path, monkeypatch):
         tmp_path, evidence=30, fail_shards=(3,), wall_clock=330.0,
     )
 
+    import app.orchestrator.sectioning as sectioning
+
     section_dir = output.parent / output.stem
     merged = [e["data"] for e in events if e["type"] == "write_shards_merged"]
-    assert all(item["done"] < item["shards"] for item in merged)
-    # 半份合并稿被挪进 .rejected.md，节产物位上留的是占位，不是 2/4 片的正文。
-    assert (section_dir / "sec-1.rejected.md").is_file()
+    # 不变量：有片没写成，合并稿就一定不满片——合得出 done 级稿的只有全片都在。
+    assert merged and all(item["done"] < item["shards"] for item in merged)
+    # 半份合并稿被挪进 .rejected.md（第 2 片的字确实在里面），节产物位上留的是
+    # 占位；conclusion 与证据池两道闸再读 sec-1.md 读到的不是那半份稿。
+    rejected = (section_dir / "sec-1.rejected.md").read_text(encoding="utf-8")
+    assert "第 2 片判断" in rejected
     placeholder = (section_dir / "sec-1.md").read_text(encoding="utf-8")
     assert "第 2 片判断" not in placeholder
+    assert sectioning._shard_envelope(section_dir / "sec-1.md") is None
     assert store.list_chapters("r-ledger")[0]["status"] != "done"
 
 
