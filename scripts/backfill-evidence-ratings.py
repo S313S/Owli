@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from app.adapters.routing import RoutedAdapter  # noqa: E402
 from app.reliability.backfill import backfill_report  # noqa: E402
+from app.reliability.coding import CODING_BATCH_MAX, code_report  # noqa: E402
 from app.store.dao import Store  # noqa: E402
 
 
@@ -36,6 +37,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--batch-size", type=int, default=25, help="单次审计条数（1–50）")
     parser.add_argument("--force", action="store_true", help="已完成五维的证据也重新补评")
+    parser.add_argument(
+        "--code-only",
+        action="store_true",
+        help="只跑 UGC 编码（§CODE-1 货 1），不碰五维分",
+    )
     parser.add_argument(
         "--rescore-only",
         action="store_true",
@@ -58,6 +64,16 @@ async def _run(args: argparse.Namespace) -> dict:
     adapter = RoutedAdapter()
     results = []
     for report_id in dict.fromkeys(args.report_id):
+        if args.code_only:
+            # §CODE-1 货 1：编码与评分是两道工序，共用入口但互不掺和——
+            # 同一次调用里既重算分又打编码，出了问题分不清是谁改的。
+            results.append(asdict(await code_report(
+                store, report_id, adapter=adapter,
+                runs_root=args.runs_root.resolve(),
+                batch_size=min(args.batch_size, CODING_BATCH_MAX),
+                force=args.force, engine_preference=args.engine,
+            )))
+            continue
         result = await backfill_report(
             store,
             report_id,
@@ -70,7 +86,8 @@ async def _run(args: argparse.Namespace) -> dict:
         )
         results.append(asdict(result))
     ok = all(
-        item["before_rows"] == item["after_rows"] and item["failed"] == 0
+        item["failed"] == 0
+        and (args.code_only or item["before_rows"] == item["after_rows"])
         for item in results
     )
     return {"ok": ok, "results": results}
