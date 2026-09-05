@@ -394,3 +394,38 @@ def test_polish_widens_only_its_own_wall_clock_and_touches_no_adapter_file():
     assert DEFAULT_CLAUDE_TIMEOUT_SECONDS == 300.0        # 全局默认没被改
     assert SECTION_TIMEOUT_SECONDS >= 480                 # 提货单 §3.4 估的是 3–8 分钟
     assert default_adapter().timeout_seconds == SECTION_TIMEOUT_SECONDS
+
+
+# ── 信息源清单由代码生成 ──────────────────────────────────────────────────
+def test_sources_table_is_generated_from_the_pool_not_retyped():
+    """三格里两格死在「附录」誊抄几十条链接（socket closed）；清单改由代码出。"""
+    from app.report.polish.run import sources_table
+
+    table = sources_table([
+        {"mark": "S01", "grade": "A", "title": "帖 | 带竖线", "url": "https://e.com/a"},
+        {"mark": "S02", "grade": None, "title": "", "url": "https://e.com/b"},
+    ])
+    assert "| S01 | A | 可独立支撑结论 | 帖 ｜ 带竖线 | https://e.com/a |" in table
+    assert "| S02 | ? | 未评级 | （无标题） | https://e.com/b |" in table
+    assert table.count("\n|") >= 3          # 表头 + 分隔 + 两行
+
+
+def test_assemble_appends_the_source_table_to_the_last_section(tmp_path):
+    from app.report.polish.run import assemble, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["执行摘要", "附录"])
+    parts[0][1].parent.mkdir(parents=True)
+    parts[0][1].write_text("摘要[S01]。", encoding="utf-8")
+    parts[1][1].write_text("方法与样本说明。", encoding="utf-8")
+    out = assemble(parts, [{"mark": "S01", "grade": "B", "title": "帖", "url": "u"}])
+    assert out.index("## 信息源清单") > out.index("# 附录")      # 挂在末节里
+    assert "摘要[S01]。" in out and "方法与样本说明。" in out
+
+
+def test_assemble_without_sources_is_unchanged(tmp_path):
+    from app.report.polish.run import assemble, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["附录"])
+    parts[0][1].parent.mkdir(parents=True)
+    parts[0][1].write_text("正文。", encoding="utf-8")
+    assert assemble(parts) == "# 附录\n\n正文。\n"

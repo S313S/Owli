@@ -52,7 +52,30 @@ def section_paths(runs_root: Path, research_id: str, template: str,
     return [(name, root / f"{index:02d}-{name}.md") for index, name in enumerate(sections, 1)]
 
 
-def assemble(parts: Sequence[tuple[str, Path]]) -> str:
+def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
+    """信息源清单：由代码生成，不让写手誊抄。
+
+    09-05 实测：三格里两格死在「附录」，报错都是
+    `API Error: The socket connection was closed unexpectedly`——本机代理掐长响应。
+    附录之所以最长，就是因为它要逐条重打几十条角标/标题/链接/等级，而这些数据本就在
+    `tables.json` 里。让模型重打一遍既贵、又正好落在唯一会断的地方，且可能抄错。
+    """
+    grade_note = {"A": "可独立支撑结论", "B": "较可靠，宜与他源同现",
+                  "C": "只作旁证", "D": "线索级"}
+    lines = ["## 信息源清单", "",
+             "（本节由程序按证据库直接生成，未经改写。）", "",
+             "| 角标 | 等级 | 说明 | 标题 | 链接 |", "|---|---|---|---|---|"]
+    for item in sources:
+        grade = str(item.get("grade") or "?")
+        title = str(item.get("title") or "").replace("|", "｜").strip() or "（无标题）"
+        url = str(item.get("url") or "")
+        lines.append(f"| {item['mark']} | {grade} | {grade_note.get(grade, '未评级')} "
+                     f"| {title} | {url} |")
+    return "\n".join(lines) + "\n"
+
+
+def assemble(parts: Sequence[tuple[str, Path]],
+             sources: Sequence[Mapping[str, Any]] = ()) -> str:
     """把各节拼成成稿：一级标题由代码写，写手只交正文。"""
     chunks = []
     for name, path in parts:
@@ -64,6 +87,9 @@ def assemble(parts: Sequence[tuple[str, Path]]) -> str:
         if first.strip() in (f"# {name}", f"## {name}", name):
             body = rest.lstrip("\n")
         chunks.append(f"# {name}\n\n{body}")
+    if sources:
+        # 清单挂在最后一节（三个模板的末节都是附录）末尾。
+        chunks[-1] = chunks[-1].rstrip() + "\n\n" + sources_table(sources)
     return "\n\n".join(chunks) + "\n"
 _MARK = re.compile(r"\[S(\d{2,})\]")
 
@@ -280,7 +306,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                     "missing_sections": [n for n, p in parts if not p.is_file()],
                     "offpool": offpool_marks(path.read_text(encoding="utf-8"), pool)
                     if path.is_file() else [], "errors": list(errors)}
-    markdown = assemble(parts)
+    markdown = assemble(parts, data.get("sources") or [])
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
     md_path.write_text(markdown, encoding="utf-8")
