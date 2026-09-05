@@ -24,6 +24,7 @@ from app.reliability.scoring import (
     SCORE_FIELDS,
     normalize_evidence_metrics,
     claim_support_is_valid,
+    engagement_percentiles,
     is_comment_row,
     score_evidence_partial,
 )
@@ -691,8 +692,15 @@ def _crossref_verdict(extra: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _scoring_view(item: Mapping[str, Any], label: Mapping[str, Any]) -> dict[str, Any]:
+def _scoring_view(
+    item: Mapping[str, Any], label: Mapping[str, Any],
+    *, engagement_percentile: float | None = None,
+) -> dict[str, Any]:
     result = dict(item)
+    # §RATE-4 货 1：批内互动量分位只在打分时用，不进回写载荷（`evidence` 没有
+    # 这一列）；载荷是从 `item` 起的，所以挂在这份视图上就够。
+    if engagement_percentile is not None:
+        result["engagement_percentile"] = engagement_percentile
     extra = dict(result.get("extra") or {})
     for key in ("authority_kind", "content_kind", "interest_relation"):
         if label.get(key) is not None:
@@ -1084,12 +1092,16 @@ def _sync_report_artifact(
 def _scored_payloads(
     pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any], bool]],
     engine_preference: str,
+    *, percentiles: Mapping[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """(证据, 标签, 是否本轮引擎判定) → 五维回写载荷；口径与拆分前逐字相同。"""
 
+    pool = dict(percentiles or {})
     payloads: list[dict[str, Any]] = []
     for item, label, used_engine in pairs:
-        scoring_view = _scoring_view(item, label)
+        scoring_view = _scoring_view(
+            item, label, engagement_percentile=pool.get(str(item.get("id"))),
+        )
         missing_dimensions = dict(label.get("missing_dimensions") or {})
         crossref_verdict = _crossref_verdict(scoring_view["extra"])
         cluster_stats = None
@@ -1113,6 +1125,17 @@ def _scored_payloads(
         )
         payloads.append(payload)
     return payloads
+
+
+def _wants_representativeness(item: Mapping[str, Any]) -> bool:
+    """这一行该用「代表性」尺子，但库里那条理由还是「权威」写法。"""
+
+    extra = item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
+    if extra.get("content_kind") != "user_opinion":
+        return False
+    if extra.get("authority_kind") == "content_farm":
+        return False
+    return not str(item.get("rating_notes") or "").startswith("代表性")
 
 
 def _already_agent_rated(item: Mapping[str, Any]) -> bool:
@@ -1168,6 +1191,13 @@ async def backfill_report(
         (str(item.get("fetched_at") or "") for item in rows), default=""
     ))
     normalized = _normalize_report(rows, computed_at) if rows else {}
+    # §RATE-4 货 1：分位要按**整份研究**的平台池算，不能按 25 条一批算——
+    # 同一条证据在不同批里会得到不同分位，两次补评就对不上（D-013 判据）。
+    percentiles = engagement_percentiles(normalized.values())
+    restale = {
+        str(item["id"]) for item in rows
+        if str(item["id"]) in percentiles and _wants_representativeness(item)
+    }
     targets = [
         item for item in rows
         if force or (
@@ -1178,6 +1208,9 @@ async def backfill_report(
                 or _crossref_verdict(
                     item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
                 ) is None
+                # 评级章按闭集打过的 UGC 行五维是齐的，`_already_agent_rated`
+                # 会把它们挡在外面——那样代表性尺子在真跑里永远落不到库上。
+                or str(item["id"]) in restale
             )
         )
     ]
@@ -1201,7 +1234,9 @@ async def backfill_report(
             else:
                 reusable.append((item, stored[0], False))
         if reusable:
-            payloads = _scored_payloads(reusable, engine_preference)
+            payloads = _scored_payloads(
+                reusable, engine_preference, percentiles=percentiles,
+            )
             store.upsert_evidence_batch(payloads)
             rated += len(payloads)
         batch_total = (len(pending) + batch_size - 1) // batch_size
@@ -1219,7 +1254,7 @@ async def backfill_report(
             else:
                 payloads = _scored_payloads(
                     [(item, label, True) for item, label in zip(batch, engine_labels)],
-                    engine_preference,
+                    engine_preference, percentiles=percentiles,
                 )
                 store.upsert_evidence_batch(payloads)
                 rated += len(payloads)
@@ -1263,7 +1298,7 @@ async def backfill_report(
                     (item, label, False)
                     for item, label in zip(resettle, settled_labels)
                 ],
-                engine_preference,
+                engine_preference, percentiles=percentiles,
             ))
 
     refreshed_report = store.get_report(report_id) or report

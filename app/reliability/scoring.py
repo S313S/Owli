@@ -45,6 +45,29 @@ AUTHORITY_REASONS = {
     "content_farm": "内容农场",
 }
 
+#: §RATE-4 货 1：「代表性」维的互动量口径——平台 → 要相加的 `raw_metrics` 键。
+#: 研究对象就是匿名普通人时，权威闭集对他们恒 0（283/296 条小红书判
+#: `anonymous_or_unverifiable`），尺子把研究对象本身当缺陷扣分。UGC 行改问
+#: 「这条在本平台本批里有多少人认同」，答案本地算得出、不用过引擎。
+#: 键名与各 source 写入 `raw_metrics` 的字段逐字对应；没登记的平台回退原闭集。
+ENGAGEMENT_METRICS: dict[str, tuple[str, ...]] = {
+    "xhs": ("liked_count", "comments_count", "collected_count"),
+    "douyin": ("digg_count", "comments_count", "collect_count"),
+    "weibo": ("liked_count", "comments_count"),
+    "reddit": ("score", "num_comments"),
+    "x": ("like_count", "retweet_count", "reply_count"),
+    "hacker_news": ("points", "num_comments"),
+    "product_hunt": ("votes_count", "comments_count"),
+}
+#: 评论行（§CMT-1）自带统一的 `likes`，与帖子的指标不同名也不同量纲，
+#: 所以按 (平台, 是不是评论) 分池，别把评论和帖子放进同一条分位线。
+COMMENT_ENGAGEMENT_METRICS = ("likes",)
+#: 池小于这个数就不算分位——与 `normalize_evidence_metrics` 的
+#: `percentile_in_batch` 同一道门槛，两处别各定一个数。
+REPRESENTATIVENESS_MIN_POOL = 20
+#: 分位 → 代表性分。P90 以上 2、P60–P90 1、其余 0。
+REPRESENTATIVENESS_BANDS = ((0.90, 2), (0.60, 1))
+
 INTEREST_SCORES = {
     "arms_length": 2,
     "disclosed_interest": 1,
@@ -71,8 +94,10 @@ CROSSREF_REASONS = {
     "CONFLICT": "存在未说明反证",
 }
 
+#: §RATE-4 货 1：UGC 行的第一维不再叫「权威」而叫「代表性」，正则同步放宽。
+#: 两种写法共用同一组捕获组（非捕获组前缀），下游按组号取值的代码一行不用改。
 RATING_NOTES_PATTERN = re.compile(
-    r"^权威([0-2?]):(.{1,14}) · 时效([0-2?]):(.{1,14}) · "
+    r"^(?:权威|代表性)([0-2?]):(.{1,14}) · 时效([0-2?]):(.{1,14}) · "
     r"交叉([0-2?]):(.{1,14}) · 完整([0-2?]):(.{1,14}) · "
     r"无关([0-2?]):(.{1,14})( ⚠️.{1,30})?$"
 )
@@ -247,10 +272,85 @@ def is_comment_row(evidence: Mapping[str, Any]) -> bool:
     return str(evidence.get("source_type") or "") == "comment"
 
 
+def engagement_value(evidence: Mapping[str, Any]) -> float | None:
+    """这条证据的互动量（点赞+评论+收藏一类之和）；算不出返回 None。"""
+
+    metrics = evidence.get("raw_metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    keys = (
+        COMMENT_ENGAGEMENT_METRICS
+        if is_comment_row(evidence)
+        else ENGAGEMENT_METRICS.get(str(evidence.get("platform") or ""), ())
+    )
+    values = [
+        float(metrics[key]) for key in keys
+        if isinstance(metrics.get(key), (int, float))
+        and not isinstance(metrics.get(key), bool)
+    ]
+    return float(sum(values)) if values else None
+
+
+def engagement_percentiles(
+    evidence_items: Iterable[Mapping[str, Any]],
+    *, min_pool: int = REPRESENTATIVENESS_MIN_POOL,
+) -> dict[str, float]:
+    """按「平台 × 帖子/评论」分池，回 {证据 id: 批内互动量分位}。
+
+    池不足 `min_pool` 条就整池不出分位——分位在小池里是噪音，让调用方
+    退回原权威闭集，而不是拿一条 2 分的「代表性」去骗人。
+    公式与 `normalize_evidence_metrics` 同：count(x<v)/(n-1)。
+    """
+
+    pools: dict[tuple[str, bool], list[tuple[str, float]]] = defaultdict(list)
+    for item in evidence_items:
+        identity = str(item.get("id") or "")
+        value = engagement_value(item)
+        if not identity or value is None:
+            continue
+        pools[(str(item.get("platform") or ""), is_comment_row(item))].append(
+            (identity, value)
+        )
+    percentiles: dict[str, float] = {}
+    for entries in pools.values():
+        if len(entries) < min_pool:
+            continue
+        values = [value for _, value in entries]
+        for identity, value in entries:
+            percentiles[identity] = sum(
+                candidate < value for candidate in values
+            ) / (len(values) - 1)
+    return percentiles
+
+
+def _representativeness(
+    evidence: Mapping[str, Any], extra: Mapping[str, Any]
+) -> tuple[int, str] | None:
+    """UGC 行的第一维：按批内互动量分位给分；不适用时返回 None。"""
+
+    if extra.get("content_kind") != "user_opinion":
+        return None
+    # 内容农场闭集优先级高于分位：营销号买量买得动分位，买不动这条标签。
+    if extra.get("authority_kind") == "content_farm":
+        return None
+    percentile = evidence.get("engagement_percentile")
+    if not isinstance(percentile, (int, float)) or isinstance(percentile, bool):
+        return None
+    if not 0.0 <= float(percentile) <= 1.0:
+        raise ValueError("engagement_percentile 必须落在 0–1")
+    score = next(
+        (value for threshold, value in REPRESENTATIVENESS_BANDS
+         if float(percentile) >= threshold),
+        0,
+    )
+    return score, f"P{round(float(percentile) * 100)}"
+
+
 def _rating_notes(
-    scores: Mapping[str, int | None], reasons: Sequence[str], warning: str | None
+    scores: Mapping[str, int | None], reasons: Sequence[str], warning: str | None,
+    *, first_label: str = "权威",
 ) -> str:
-    labels = ("权威", "时效", "交叉", "完整", "无关")
+    labels = (first_label, "时效", "交叉", "完整", "无关")
     main = " · ".join(
         f"{label}{'?' if scores[field] is None else scores[field]}:{reason[:14]}"
         for label, field, reason in zip(labels, SCORE_FIELDS, reasons)
@@ -318,6 +418,19 @@ def score_evidence(
         authority = 0
         authority_reason = "未达P75且无历史"
 
+    # §RATE-4 货 1：UGC 行的第一维换尺子——「这条在本平台本批里有多少人认同」，
+    # 而不是「作者是不是可核验的机构」。权威闭集对匿名普通人恒 0，而题目问的
+    # 就是普通人的看法，等于把研究对象本身当缺陷扣分（记忆
+    # report-methodology-gap-ugc-scored-out）。分位由调用方按批算好放进
+    # `engagement_percentile`；没有它（`raw_metrics` 缺失或池太小）就照旧走闭集。
+    authority_label = "权威"
+    representativeness = _representativeness(evidence, extra)
+    if representativeness is not None:
+        authority, authority_reason = representativeness
+        if is_comment_row(evidence):
+            authority_reason = f"评论·{authority_reason}"[:14]
+        authority_label = "代表性"
+
     content_kind = extra.get("content_kind")
     freshness, freshness_reason, freshness_warning = _freshness(evidence, content_kind)
     stats = dict(cluster_stats or {})
@@ -349,6 +462,7 @@ def score_evidence(
             completeness_reason, independence_reason,
         ),
         warning,
+        first_label=authority_label,
     )
     problem = rating_notes_problem(notes, scores)
     if problem is not None:
@@ -374,6 +488,9 @@ def score_evidence_partial(
     matched = RATING_NOTES_PATTERN.fullmatch(result["rating_notes"])
     if matched is None:
         raise AssertionError("既有评分理由无法解析")
+    # §RATE-4 货 1：第一维叫「权威」还是「代表性」由上面那次完整打分定了，
+    # 诚实缺失只换某一维的理由，不该把标签换回去。
+    first_label = "代表性" if result["rating_notes"].startswith("代表性") else "权威"
     reasons = [matched.group(index) for index in (2, 4, 6, 8, 10)]
     scores: dict[str, int | None] = {
         field: int(result[field]) for field in SCORE_FIELDS
@@ -387,7 +504,7 @@ def score_evidence_partial(
     # 诚实缺失会把权威那段整段换掉，「评论」标记不能跟着丢（§CMT-1 货 4）。
     if is_comment_row(evidence) and not any("评论" in reason for reason in reasons):
         reasons[0] = f"评论·{reasons[0]}"[:14]
-    notes = _rating_notes(scores, reasons, None)
+    notes = _rating_notes(scores, reasons, None, first_label=first_label)
     problem = rating_notes_problem(notes, scores)
     if problem is not None:
         raise AssertionError(problem)
