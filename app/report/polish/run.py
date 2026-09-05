@@ -28,6 +28,8 @@ MAX_ATTEMPTS = 2
 #: 09-05 撞到过引擎写到一半 SDK `Stream closed`，落盘 4 805 B、只写到第一节，
 #: 光看字节数就成了假绿。
 MIN_DRAFT_BYTES = 2000
+#: 单节低于这个字节数按「这一节没写」算。附录最短，但也远不止 200 B。
+MIN_SECTION_BYTES = 200
 _H1 = re.compile(r"^# +(.+)$", re.MULTILINE)
 
 
@@ -35,6 +37,33 @@ def missing_sections(markdown: str, sections: Sequence[str]) -> list[str]:
     """SKILL 声明的一级标题里，成稿还缺哪些。写手把标题降成二级也算缺。"""
     found = {line.strip() for line in _H1.findall(markdown)}
     return [name for name in sections if name not in found]
+
+
+def section_paths(runs_root: Path, research_id: str, template: str,
+                  sections: Sequence[str]) -> list[tuple[str, Path]]:
+    """每节各一个文件。
+
+    09-05 实测：让写手用 Edit 往同一个文件里一节节追加，文件越长每次追加越贵，
+    稳定写到第四五节就断（两轮都缺「建议、附录」）。改成一节一个文件、各写一次，
+    骨架由本模块按声明顺序拼——顺带把「标题写错/降级/漏节」这一类失败整个根除。
+    """
+    root = (Path(runs_root) / research_id / "goals" / GOAL_ID / f"{template}-parts")
+    return [(name, root / f"{index:02d}-{name}.md") for index, name in enumerate(sections, 1)]
+
+
+def assemble(parts: Sequence[tuple[str, Path]]) -> str:
+    """把各节拼成成稿：一级标题由代码写，写手只交正文。"""
+    chunks = []
+    for name, path in parts:
+        body = path.read_text(encoding="utf-8").strip()
+        # 写手偶尔仍会把标题写进正文，重复的那一行去掉，免得出现两个同名一级标题。
+        # 只认「整第一行就是标题」，不能按前缀剥——正文第一句常以节名开头
+        # （「建议正文……」会被剥成「正文……」，用例抓到过）。
+        first, _, rest = body.partition("\n")
+        if first.strip() in (f"# {name}", f"## {name}", name):
+            body = rest.lstrip("\n")
+        chunks.append(f"# {name}\n\n{body}")
+    return "\n\n".join(chunks) + "\n"
 _MARK = re.compile(r"\[S(\d{2,})\]")
 
 
@@ -74,7 +103,8 @@ def _work_view(data: Mapping[str, Any], report_text: str) -> str:
 
 
 def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
-                 output_path: Path, errors: tuple[str, ...] = ()) -> str:
+                 output_path: Path, errors: tuple[str, ...] = (),
+                 parts: Sequence[tuple[str, Path]] = ()) -> str:
     """共用硬规则 + 模板正文 + 输入区；重写轮把上一轮的错误原样附在最后。"""
     objectives = "\n".join(f"- {g.get('objective')}" for g in data.get("objectives") or []
                            if g.get("objective"))
@@ -91,16 +121,15 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                         ensure_ascii=False, indent=1)
     parts = [
         # 必须给绝对路径：只给文件名时引擎会拿工作区根去猜，两次都被 capability 判越界。
-        f"# 任务\n把下面这份工作稿整理成一份《{template.title}》正式稿，写成 Markdown，"
-        f"用 Write/Edit 落到这个**绝对路径**（照抄，别改目录）：\n\n`{output_path}`\n\n"
-        "这是你唯一能写的目录，写别处一定被拒。"
-        "只重新组织与解读，不做新的调研，不编造任何事实与数字。\n\n"
-        # 09-05 实测：写手会自作主张加一个文档标题当 H1、把骨架全降成 H2，
-        # 骨架校验直接判红。所以把一级标题清单在任务段就钉死。
-        f"**文件的一级标题只能是这 {len(template.sections)} 个，原样各写一个 `# 标题`，"
-        f"顺序不变、不加文档标题、不改字**：{' / '.join(template.sections)}。\n\n"
-        "**分节落盘，不要在一条回复里输出整篇。** 先 Write 出第一节，然后一节一节 Edit 追加到同一个文件末尾，每次只追加一个一级标题及其内容。整篇一次性吐出来会被传输层掐断，"
-        "这一条不是建议是硬要求。全部节写完后再回结论。",
+        # 一节一个文件、各 Write 一次：往同一个文件里 Edit 追加，写到第四五节必断（09-05 实测）。
+        f"# 任务\n把下面这份工作稿整理成一份《{template.title}》正式稿，写成 Markdown。\n\n"
+        f"**一共 {len(parts)} 节，每节各写一个文件，用 Write 各写一次，写完一节再写下一节。**\n"
+        + "\n".join(f"{index}. 「{name}」→ `{path}`"
+                     for index, (name, path) in enumerate(parts, 1))
+        + "\n\n这些是你唯一能写的路径，写别处一定被拒；一个都不能少，少一个整轮作废。\n"
+        "**每个文件里只写这一节的正文，不要写标题行**——一级标题由程序统一加，"
+        "你写了反而会重复。也不要在文件之间互相引用节号。\n"
+        "只重新组织与解读，不做新的调研，不编造任何事实与数字。全部写完后再回结论。",
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
@@ -163,29 +192,30 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         from app.adapters.routing import RoutedAdapter
 
         adapter = RoutedAdapter()
+    parts = section_paths(runs_root, research_id, skill.name, skill.sections)
+    parts[0][1].parent.mkdir(parents=True, exist_ok=True)
     errors: tuple[str, ...] = ()
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        for _, path in parts:
+            path.unlink(missing_ok=True)
         draft_path.unlink(missing_ok=True)
-        body = build_prompt(skill, data, report_text, draft_path, errors)
+        body = build_prompt(skill, data, report_text, draft_path, errors, parts)
         result = await adapter.run(_task(body, draft_path, research_id, skill.model),
                                    _ctx(draft_path, research_id), on_event=on_event)
-        # 双腿判定的第二条腿：传输层报错但正文已经落盘就认（照 backfill 的
-        # `_recover_transport_completion` 同思路）。本机代理掐长响应是常态，
-        # 因为它把一份写完的稿判死，等于白付一次调用。
-        landed = draft_path.is_file() and draft_path.stat().st_size >= MIN_DRAFT_BYTES
-        if not bool(getattr(result, "succeeded", False)) and not landed:
-            errors = (str(getattr(result, "engine_error", None)
-                          or getattr(result, "conclusion_error", None)
-                          or "适配器双腿判定未通过"),)
-            continue
-        markdown = draft_path.read_text(encoding="utf-8")
-        # 骨架不齐 = 没写完（引擎中途断流就是这样），当失败重来，别当成稿。
-        lacking = missing_sections(markdown, skill.sections)
+        # 判据落在产物上不落在返回码上：传输层报错但节文件齐了就认（照 backfill 的
+        # `_recover_transport_completion` 同思路）；反过来，返回 succeeded 但节没写全，
+        # 一样判没写完——09-05 就是靠这条抓到自己的假绿。
+        lacking = [name for name, path in parts
+                   if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES]
         if lacking:
-            errors = (f"成稿缺一级标题：{'、'.join(lacking)}。"
-                      f"这 {len(skill.sections)} 个词必须原样各作一个一级标题（`# 词`），"
-                      "不许加文档标题、不许降成二级标题、不许改字。",)
+            engine_error = (getattr(result, "engine_error", None)
+                            or getattr(result, "conclusion_error", None))
+            errors = (f"这几节没写出来（或写得过短）：{'、'.join(lacking)}。"
+                      "每节各写一个文件、各 Write 一次，一个都不能少。"
+                      + (f"\n上一轮引擎报错：{engine_error}" if engine_error else ""),)
             continue
+        markdown = assemble(parts)
+        draft_path.write_text(markdown, encoding="utf-8")
         offpool = offpool_marks(markdown, pool)
         if not offpool:
             # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
@@ -198,7 +228,6 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     return {"status": "failed", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
             "attempts": MAX_ATTEMPTS,
-            "missing_sections": missing_sections(draft_path.read_text(encoding="utf-8"),
-                                                 skill.sections) if draft_path.is_file() else [],
+            "missing_sections": [name for name, path in parts if not path.is_file()],
             "offpool": offpool_marks(draft_path.read_text(encoding="utf-8"), pool)
             if draft_path.is_file() else [], "errors": list(errors)}

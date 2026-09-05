@@ -307,3 +307,39 @@ def test_a_document_title_that_demotes_the_skeleton_is_rejected():
 
     demoted = "# 国内大家对豆包的看法\n\n## 执行摘要\n\n正文\n\n## 建议\n\n正文\n"
     assert missing_sections(demoted, ["执行摘要", "建议"]) == ["执行摘要", "建议"]
+
+
+# ── 一节一个文件：骨架由代码拼，不再靠写手写对 ────────────────────────────
+def test_assemble_writes_the_skeleton_itself(tmp_path):
+    from app.report.polish.run import assemble, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["执行摘要", "建议"])
+    parts[0][1].parent.mkdir(parents=True)
+    parts[0][1].write_text("摘要正文[S01]。\n", encoding="utf-8")
+    parts[1][1].write_text("建议正文[S01]。\n", encoding="utf-8")
+    assert assemble(parts) == "# 执行摘要\n\n摘要正文[S01]。\n\n# 建议\n\n建议正文[S01]。\n"
+
+
+@pytest.mark.parametrize("written", ["# 执行摘要\n\n正文。", "## 执行摘要\n\n正文。", "执行摘要\n正文。"])
+def test_assemble_drops_a_title_the_writer_wrote_anyway(tmp_path, written):
+    """提示词说别写标题，写手偶尔还是会写；重复那行去掉，不许出现两个同名一级标题。"""
+    from app.report.polish.run import assemble, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["执行摘要"])
+    parts[0][1].parent.mkdir(parents=True)
+    parts[0][1].write_text(written, encoding="utf-8")
+    assembled = assemble(parts)
+    assert assembled.count("执行摘要") == 1 and assembled.startswith("# 执行摘要\n\n正文。")
+
+
+def test_prompt_lists_every_section_file_as_an_absolute_path(tmp_path):
+    from app.report.polish.run import build_prompt, section_paths
+
+    skill = get_template("consulting")
+    parts = section_paths(tmp_path, "r-t", skill.name, skill.sections)
+    data = {"title": "T", "research_question": "q", "objectives": [], "entities": [],
+            "counts": {}, "sources": [], "tables": {}}
+    prompt = build_prompt(skill, data, "# 工作稿", Path("/tmp/x.md"), (), parts)
+    for name, path in parts:
+        assert f"「{name}」→ `{path}`" in prompt
+    assert "不要写标题行" in prompt
