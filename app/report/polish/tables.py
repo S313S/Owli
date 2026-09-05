@@ -309,8 +309,13 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                        for g in (plan.get("goals") or []) if isinstance(g, Mapping)],
         "entities": sorted(_entity_aliases(plan)),
         "lexicon_version": LEXICON_VERSION,
+        # 附录要交底「为什么不给百分比」，用的就是后两个数——它们必须是算出来的，
+        # 不能写死在规则文本里，否则写手照抄就成了没出处的数字（尺子 ④ 会判红，且判得对）。
         "counts": {"evidence": len(rows), "cited": len(cited), "claims": len(claims),
-                   "sources": len(view.get("sources") or [])},
+                   "sources": len(view.get("sources") or []),
+                   "带情感标注的证据": sum(1 for r in rows
+                                    if (r.get("_extra") or {}).get("sentiment_hint")),
+                   "带立场标注的主张": sum(1 for c in claims if c.get("stance"))},
         # 工作稿的信息源行不带 grade（等级藏在 raw_line 里），按角标号回查证据补上——
         # 写手的「C 级只作旁证」规则要靠每条源的等级才执行得了。
         "sources": [{"mark": _mark(int(s["citation_no"])), "title": s.get("title"),
