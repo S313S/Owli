@@ -104,7 +104,7 @@ def _work_view(data: Mapping[str, Any], report_text: str) -> str:
 
 def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                  output_path: Path, errors: tuple[str, ...] = (),
-                 parts: Sequence[tuple[str, Path]] = ()) -> str:
+                 parts: Sequence[tuple[str, Path]] = (), current: str | None = None) -> str:
     """共用硬规则 + 模板正文 + 输入区；重写轮把上一轮的错误原样附在最后。"""
     objectives = "\n".join(f"- {g.get('objective')}" for g in data.get("objectives") or []
                            if g.get("objective"))
@@ -121,15 +121,16 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                         ensure_ascii=False, indent=1)
     parts = [
         # 必须给绝对路径：只给文件名时引擎会拿工作区根去猜，两次都被 capability 判越界。
-        # 一节一个文件、各 Write 一次：往同一个文件里 Edit 追加，写到第四五节必断（09-05 实测）。
-        f"# 任务\n把下面这份工作稿整理成一份《{template.title}》正式稿，写成 Markdown。\n\n"
-        f"**一共 {len(parts)} 节，每节各写一个文件，用 Write 各写一次，写完一节再写下一节。**\n"
-        + "\n".join(f"{index}. 「{name}」→ `{path}`"
-                     for index, (name, path) in enumerate(parts, 1))
-        + "\n\n这些是你唯一能写的路径，写别处一定被拒；一个都不能少，少一个整轮作废。\n"
-        "**每个文件里只写这一节的正文，不要写标题行**——一级标题由程序统一加，"
-        "你写了反而会重复。也不要在文件之间互相引用节号。\n"
-        "只重新组织与解读，不做新的调研，不编造任何事实与数字。全部写完后再回结论。",
+        # 一次只写一节：适配器每次任务硬墙钟 300 秒（`DEFAULT_CLAUDE_TIMEOUT_SECONDS`，
+        # 在本包禁区里改不得），整份五节塞不进去，09-05 实测每轮都写到第三节被掐。
+        f"# 任务\n这是一份《{template.title}》正式稿，一共 {len(parts)} 节，"
+        f"由多轮分头写。**本轮你只写「{current}」这一节**，用 Write 写到：\n\n"
+        f"`{output_path}`\n\n"
+        "这是你本轮唯一能写的路径，写别处一定被拒。**别的节这轮不要碰、不要写。**\n"
+        f"全篇骨架（给你看上下文，不是让你都写）：{' / '.join(name for name, _ in parts)}\n"
+        f"**文件里只写「{current}」这一节的正文，不要写标题行**——一级标题由程序统一加，"
+        "你写了反而会重复。\n"
+        "只重新组织与解读，不做新的调研，不编造任何事实与数字。",
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
@@ -194,40 +195,39 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         adapter = RoutedAdapter()
     parts = section_paths(runs_root, research_id, skill.name, skill.sections)
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
-    errors: tuple[str, ...] = ()
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        for _, path in parts:
+    attempts = 0
+    for name, path in parts:
+        errors: tuple[str, ...] = ()
+        for _ in range(MAX_ATTEMPTS):
+            attempts += 1
             path.unlink(missing_ok=True)
-        draft_path.unlink(missing_ok=True)
-        body = build_prompt(skill, data, report_text, draft_path, errors, parts)
-        result = await adapter.run(_task(body, draft_path, research_id, skill.model),
-                                   _ctx(draft_path, research_id), on_event=on_event)
-        # 判据落在产物上不落在返回码上：传输层报错但节文件齐了就认（照 backfill 的
-        # `_recover_transport_completion` 同思路）；反过来，返回 succeeded 但节没写全，
-        # 一样判没写完——09-05 就是靠这条抓到自己的假绿。
-        lacking = [name for name, path in parts
-                   if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES]
-        if lacking:
-            engine_error = (getattr(result, "engine_error", None)
-                            or getattr(result, "conclusion_error", None))
-            errors = (f"这几节没写出来（或写得过短）：{'、'.join(lacking)}。"
-                      "每节各写一个文件、各 Write 一次，一个都不能少。"
-                      + (f"\n上一轮引擎报错：{engine_error}" if engine_error else ""),)
-            continue
-        markdown = assemble(parts)
-        draft_path.write_text(markdown, encoding="utf-8")
-        offpool = offpool_marks(markdown, pool)
-        if not offpool:
-            # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
-            md_path.write_text(markdown, encoding="utf-8")
-            return {"status": "ok", "template": skill.name, "path": str(md_path),
+            body = build_prompt(skill, data, report_text, path, errors, parts, name)
+            result = await adapter.run(_task(body, path, research_id, skill.model),
+                                       _ctx(path, research_id), on_event=on_event)
+            # 判据落在产物上不落在返回码上：传输层报错但这一节落盘了就认（照 backfill 的
+            # `_recover_transport_completion` 同思路）；返回 succeeded 但没落盘一样判没写。
+            if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:
+                engine_error = (getattr(result, "engine_error", None)
+                                or getattr(result, "conclusion_error", None))
+                errors = (f"「{name}」这一节没写出来或写得过短。"
+                          + (f"上一轮引擎报错：{engine_error}" if engine_error else ""),)
+                continue
+            offpool = offpool_marks(path.read_text(encoding="utf-8"), pool)
+            if not offpool:
+                break
+            errors = (f"这一节引用了信息源池里没有的角标：{'、'.join(offpool)}。"
+                      f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
+        else:
+            return {"status": "failed", "template": skill.name, "path": str(md_path),
                     "draft_path": str(draft_path), "tables_path": str(tables_path),
-                    "attempts": attempt, "offpool": []}
-        errors = (f"正文引用了信息源池里没有的角标：{'、'.join(offpool)}。"
-                  f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
-    return {"status": "failed", "template": skill.name, "path": str(md_path),
+                    "attempts": attempts, "failed_section": name,
+                    "missing_sections": [n for n, p in parts if not p.is_file()],
+                    "offpool": offpool_marks(path.read_text(encoding="utf-8"), pool)
+                    if path.is_file() else [], "errors": list(errors)}
+    markdown = assemble(parts)
+    draft_path.write_text(markdown, encoding="utf-8")
+    # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
+    md_path.write_text(markdown, encoding="utf-8")
+    return {"status": "ok", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
-            "attempts": MAX_ATTEMPTS,
-            "missing_sections": [name for name, path in parts if not path.is_file()],
-            "offpool": offpool_marks(draft_path.read_text(encoding="utf-8"), pool)
-            if draft_path.is_file() else [], "errors": list(errors)}
+            "attempts": attempts, "offpool": []}

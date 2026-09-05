@@ -332,14 +332,18 @@ def test_assemble_drops_a_title_the_writer_wrote_anyway(tmp_path, written):
     assert assembled.count("执行摘要") == 1 and assembled.startswith("# 执行摘要\n\n正文。")
 
 
-def test_prompt_lists_every_section_file_as_an_absolute_path(tmp_path):
+def test_prompt_scopes_the_writer_to_exactly_one_section(tmp_path):
+    """适配器每次任务硬墙钟 300 秒，整份五节塞不进去 —— 一轮只写一节。"""
     from app.report.polish.run import build_prompt, section_paths
 
     skill = get_template("consulting")
     parts = section_paths(tmp_path, "r-t", skill.name, skill.sections)
     data = {"title": "T", "research_question": "q", "objectives": [], "entities": [],
             "counts": {}, "sources": [], "tables": {}}
-    prompt = build_prompt(skill, data, "# 工作稿", Path("/tmp/x.md"), (), parts)
-    for name, path in parts:
-        assert f"「{name}」→ `{path}`" in prompt
-    assert "不要写标题行" in prompt
+    name, path = parts[1]
+    prompt = build_prompt(skill, data, "# 工作稿", path, (), parts, name)
+    assert f"**本轮你只写「{name}」这一节**" in prompt and str(path) in prompt
+    assert "别的节这轮不要碰" in prompt and "不要写标题行" in prompt
+    # 别的节的路径不许出现，免得写手顺手把整份都写了又超时。
+    assert all(str(other) not in prompt for other_name, other in parts if other_name != name)
+    assert " / ".join(n for n, _ in parts) in prompt          # 骨架仍给它看，只是不让写
