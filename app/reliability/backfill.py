@@ -19,13 +19,14 @@ from app.reliability.audit import AUTHORITY_KINDS, INTEREST_RELATIONS, MAX_ATTEM
 from app.reliability.scoring import (
     CROSSREF_SCORES,
     FRESHNESS_WINDOWS,
-    PLATFORM_BASELINES,
     PRIMARY_METRICS,
     RATING_NOTES_PATTERN,
     SCORE_FIELDS,
     normalize_evidence_metrics,
     claim_support_is_valid,
     engagement_percentiles,
+    grade_for_total,
+    rating_notes_problem,
     is_comment_row,
     score_evidence_partial,
 )
@@ -1094,7 +1095,7 @@ def _scored_payloads(
     pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any], bool]],
     engine_preference: str,
     *, percentiles: Mapping[str, float] | None = None,
-    keep_crossref: bool = False,
+    freeze_others: bool = False,
 ) -> list[dict[str, Any]]:
     """(证据, 标签, 是否本轮引擎判定) → 五维回写载荷；口径与拆分前逐字相同。"""
 
@@ -1107,29 +1108,19 @@ def _scored_payloads(
         missing_dimensions = dict(label.get("missing_dimensions") or {})
         crossref_verdict = _crossref_verdict(scoring_view["extra"])
         cluster_stats = None
-        baseline = None
         if crossref_verdict in CROSSREF_SCORES:
             cluster_stats = {"verdict": crossref_verdict}
-        elif keep_crossref and isinstance(item.get("score_crossref"), int):
-            # §RATE-4 货 2：换尺子那一轮只改第一维。这些行的交叉维是写作前评级章
-            # 按平台基线填的（全库 477 行 extra 里根本没有 crossref_verdict），
-            # 补评口径会把它们诚实改成 NULL——那不是重算分，那是替另一维重下判断，
-            # 而 grade 一旦变 NULL，D 闸和池排序就跟着塌。原值原样留着。
-            baseline = {
-                **PLATFORM_BASELINES.get(
-                    str(item.get("platform") or ""),
-                    PLATFORM_BASELINES["web_search"],
-                ),
-                "score_crossref": int(item["score_crossref"]),
-            }
         else:
             missing_dimensions["score_crossref"] = "缺断言血缘簇"
         scored = score_evidence_partial(
             scoring_view,
             missing_dimensions=missing_dimensions,
-            baseline=baseline,
             cluster_stats=cluster_stats,
         )
+        if freeze_others:
+            scored = _first_dimension_only(item, scored)
+            if scored is None:
+                continue
         payload = {
             key: value for key, value in item.items()
             if key not in {"score_total", "grade"}
@@ -1141,6 +1132,47 @@ def _scored_payloads(
         )
         payloads.append(payload)
     return payloads
+
+
+def _first_dimension_only(
+    item: Mapping[str, Any], scored: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """只留第一维的新分，其余四维连分带理由回到库里原样（用户 09-05 拍甲）。
+
+    换尺子那一轮只该改第一维。整轮按补评口径重算会顺手改掉另外三维——底料上
+    实测完整度 447 行、时效 219 行、独立性 75 行——那不是重算分，那是替别的维
+    重下判断；grade 跟着变，D 闸和池排序当场塌（跨 goal 的 UGC 池位 15 → 8）。
+    两条打分路给分不一致是既有缺口，由调度另立卡，不在本包顺手做掉。
+
+    返回 None = 这一行本轮什么都不该改（尺子没落到它头上，或旧理由解析不了）。
+    """
+
+    if not str(scored.get("rating_notes") or "").startswith("代表性"):
+        return None
+    stored = RATING_NOTES_PATTERN.fullmatch(str(item.get("rating_notes") or ""))
+    fresh = RATING_NOTES_PATTERN.fullmatch(str(scored["rating_notes"]))
+    if stored is None or fresh is None:
+        return None
+    labels = ("时效", "交叉", "完整", "无关")
+    payload: dict[str, Any] = {
+        "score_authority": scored["score_authority"],
+        "rating_notes": f"代表性{fresh.group(1)}:{fresh.group(2)}",
+    }
+    for offset, (label, field) in enumerate(zip(labels, SCORE_FIELDS[1:])):
+        payload[field] = item.get(field)
+        digit = "?" if item.get(field) is None else str(item[field])
+        if digit != stored.group(3 + offset * 2):
+            return None  # 库里五维列与旧理由对不上，别在这一轮悄悄改口径
+        payload["rating_notes"] += f" · {label}{digit}:{stored.group(4 + offset * 2)}"
+    payload["rating_notes"] += stored.group(11) or ""
+    complete = all(payload[field] is not None for field in SCORE_FIELDS)
+    total = sum(payload[field] for field in SCORE_FIELDS if payload[field] is not None)
+    payload["score_total"] = total if complete else None
+    payload["grade"] = grade_for_total(total) if complete else None
+    problem = rating_notes_problem(payload["rating_notes"], payload)
+    if problem is not None:
+        raise AssertionError(problem)
+    return payload
 
 
 def _wants_representativeness(item: Mapping[str, Any]) -> bool:
@@ -1213,7 +1245,11 @@ async def backfill_report(
     )
     if firsthand_audit["claims"]:
         report = store.get_report(report_id) or report
-    rows, clustered_ids = _backfill_claim_clusters(store, report, rows)
+    rows, clustered_ids = (
+        ([dict(row) for row in rows], set())
+        if rescore_only
+        else _backfill_claim_clusters(store, report, rows)
+    )
     report = store.get_report(report_id) or report
     computed_at = str(report.get("completed_at") or max(
         (str(item.get("fetched_at") or "") for item in rows), default=""
@@ -1270,7 +1306,7 @@ async def backfill_report(
         if reusable:
             payloads = _scored_payloads(
                 reusable, engine_preference, percentiles=percentiles,
-                keep_crossref=rescore_only,
+                freeze_others=rescore_only,
             )
             store.upsert_evidence_batch(payloads)
             rated += len(payloads)
@@ -1290,7 +1326,7 @@ async def backfill_report(
                 payloads = _scored_payloads(
                     [(item, label, True) for item, label in zip(batch, engine_labels)],
                     engine_preference, percentiles=percentiles,
-                    keep_crossref=rescore_only,
+                    freeze_others=rescore_only,
                 )
                 store.upsert_evidence_batch(payloads)
                 rated += len(payloads)
@@ -1335,7 +1371,7 @@ async def backfill_report(
                     for item, label in zip(resettle, settled_labels)
                 ],
                 engine_preference, percentiles=percentiles,
-                keep_crossref=rescore_only,
+                freeze_others=rescore_only,
             ))
 
     refreshed_report = store.get_report(report_id) or report

@@ -97,3 +97,20 @@ def test_rescore_only_与_force_互斥(tmp_path: Path) -> None:
     store = _store(tmp_path)
     with pytest.raises(ValueError):
         _run(store, tmp_path, rescore_only=True, force=True)
+
+
+def test_只动第一维_其余四维连分带理由原样(tmp_path: Path) -> None:
+    """用户 09-05 拍甲：换尺子那一轮不替别的维重下判断。"""
+
+    store = _store(tmp_path)
+    before = {row["id"]: dict(row) for row in store.list_evidence("r-rs")}
+    _run(store, tmp_path, rescore_only=True)
+    after = {row["id"]: dict(row) for row in store.list_evidence("r-rs")}
+    fields = ("score_freshness", "score_crossref",
+              "score_completeness", "score_independence")
+    for identity, row in after.items():
+        for field in fields:
+            assert row[field] == before[identity][field], (identity, field)
+        # 后四段理由逐字不变（没评过的行 rating_notes 是 None，一并原样）
+        assert str(row["rating_notes"] or "").split(" · ", 1)[1:] == \
+            str(before[identity]["rating_notes"] or "").split(" · ", 1)[1:]
