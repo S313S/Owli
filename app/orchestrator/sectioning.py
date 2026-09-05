@@ -48,6 +48,15 @@ SECTION_RETRY_MAX_ATTEMPTS = 3
 #: 改这个数必须带新的实测来源，优先等一个 done 的 resume 样本。
 SECTION_RESUME_COST_FLOOR_SECONDS = 136.0
 
+#: §D-047 续写轮预算。单片引擎硬顶 300 s（`app/adapters/claude.py`
+#: `DEFAULT_CLAUDE_TIMEOUT_SECONDS`，禁区不动，这里只是照抄它做预算口径）
+#: + 30 s 合并余量。真机 `r-8532b5c2c026`：第二轮 resume 跳过前两片、
+#: 第 3 片 181 s 写成，轮到第 4 片时节预算只剩 80 s 被 wall_clock 判死，
+#: 已写好的 3 片 19 075 B 整节作废——resume 省下了前几片的钱，却没把
+#: 时间还回来。所以续写轮按**未落盘片数**重新给时间。
+SHARD_ENGINE_CAP_SECONDS = 300.0
+SHARD_MERGE_MARGIN_SECONDS = 30.0
+
 EVIDENCE_POOL_LIMIT = 99
 #: 四个对比主体分在两个采集 goal 里；每个非空 goal 至少要拿到足以支撑
 #: 一节论证的 20 个号。空 goal 不占保底额，保底总量超过 S01-S99 时按比例退化。
@@ -313,8 +322,17 @@ def _section_resume_within_deadline(
     wall_clock_seconds: float | None,
     wall_clock_started_at: Any,
     now: Any,
+    shards_left: int = 1,
+    shard_count: int = 1,
+    section_wall_clock: float | None = None,
 ) -> bool:
-    """退避照常吃节墙钟；退避后至少还剩一次 resume 的实测成本下限。"""
+    """退避照常吃节墙钟；退避后至少还剩每个未落盘片一次 resume 的成本下限。
+
+    §D-047：门槛与本轮预算同一口径——先按未落盘片数把本轮可用时间给足
+    （`_section_resume_budget`），再问它够不够 `未落盘片数 × 136 s`。
+    默认参数（`shards_left=1`/`shard_count=1`）下预算不放大、门槛仍是
+    一次 136 s，与 D-047 之前逐字相同。
+    """
 
     remaining = _section_remaining_seconds(
         deadline, wall_clock_seconds=wall_clock_seconds,
@@ -322,7 +340,60 @@ def _section_resume_within_deadline(
     )
     if remaining is None:
         return True
-    return remaining - retry_delay >= SECTION_RESUME_COST_FLOOR_SECONDS
+    budget = _section_resume_budget(
+        remaining, shards_left=shards_left, shard_count=shard_count,
+        section_wall_clock=section_wall_clock,
+    )
+    floor = max(1, shards_left) * SECTION_RESUME_COST_FLOOR_SECONDS
+    return budget - retry_delay >= floor
+
+
+def _pending_shard_count(section_path: Path, shard_count: int) -> int:
+    """盘上还没落盘的片数（§D-047）。不分片的节恒为 1，口径不变。"""
+
+    if shard_count <= 1:
+        return 1
+    return sum(
+        1 for index in range(1, shard_count + 1)
+        if _shard_envelope(write_shard_path(section_path, index)) is None
+    )
+
+
+def _section_resume_budget(
+    remaining: float | None,
+    *,
+    shards_left: int,
+    shard_count: int,
+    section_wall_clock: float | None,
+) -> float | None:
+    """续写轮本轮可用时间：按未落盘片数给，封顶一个节墙钟（§D-047）。
+
+    只在**真有片已落盘**时放大：那时 resume 省下的正是那几片的钱，
+    把时间还回来才跑得完剩下的片（真机 `r-8532b5c2c026`：3/4 片已写成、
+    轮到第 4 片只剩 80 s，19 075 B 好稿被整节判死）。零片落盘、不分片的节
+    一秒不多给，行为与 D-047 之前逐字相同。
+
+    封顶：**本轮加出来的时间不超过一个节墙钟**（fast 330 / standard 1800）。
+    D-033 那条注释担心的「单节最坏耗时翻倍」由此封住：一轮最多 +1 个节墙钟、
+    节级 attempts 上限 3，最坏是 330×(片数+2) 而不是无限长。封在增量上而不是
+    封在总量上——封总量的话 fast 档 `片数 × 300 + 30` 永远被剪回 330，
+    多片与单片给的时间一样多，等于这一货白做。
+    """
+
+    if (
+        remaining is None
+        or section_wall_clock is None
+        or shard_count <= 1
+        or shards_left <= 0
+        or shards_left >= shard_count
+    ):
+        return remaining
+    # 一片值多少时间：`_run_section_shards` 给每片发的是一份**节墙钟**，
+    # 引擎那头 300 s 硬顶（禁区常量，这里只照抄口径）——两者取小才是这一片
+    # 真能用掉的上限。节墙钟本身很小时（用例里的 40 s）也就不会凭空放大。
+    per_shard = min(SHARD_ENGINE_CAP_SECONDS, section_wall_clock)
+    want = shards_left * per_shard + SHARD_MERGE_MARGIN_SECONDS
+    return max(remaining, min(want, remaining + section_wall_clock))
 
 
 def _section_remaining_seconds(
@@ -345,6 +416,60 @@ def _section_remaining_seconds(
     if remaining is None and deadline is not None:
         remaining = deadline - asyncio.get_running_loop().time()
     return remaining
+
+
+async def _grant_section_resume_budget(
+    on_event: Any,
+    *,
+    context: Any,
+    section: Mapping[str, Any],
+    section_deadline: float | None,
+    section_wall_clock_effective: float | None,
+    section_wall_clock_started_at: Any,
+    now: Any,
+    shards_left: int,
+    shard_count: int,
+    section_wall_clock: float | None,
+) -> tuple[float | None, float | None]:
+    """进续写轮前把时间按未落盘片数还回来，并发 `section_resume_budget` 供核。
+
+    §D-047。两个时钟一起抬同一个增量：`section_deadline` 是 loop 时刻、
+    `section_wall_clock_effective` 是 `_section_remaining_seconds` 优先用的
+    那份秒数，只抬一个会让两把尺子对不上。零片落盘时增量为 0，事件照发
+    （`extended: false`），判据落得到库上。
+    """
+
+    remaining = _section_remaining_seconds(
+        section_deadline,
+        wall_clock_seconds=section_wall_clock_effective,
+        wall_clock_started_at=section_wall_clock_started_at,
+        now=now,
+    )
+    budget = _section_resume_budget(
+        remaining, shards_left=shards_left, shard_count=shard_count,
+        section_wall_clock=section_wall_clock,
+    )
+    extra = 0.0
+    if remaining is not None and budget is not None and budget > remaining:
+        extra = budget - remaining
+        if section_deadline is not None:
+            section_deadline += extra
+        if section_wall_clock_effective is not None:
+            section_wall_clock_effective += extra
+    if shard_count <= 1:
+        # 不分片的节没有「已落盘的片」可省，预算恒等于原剩余：不发事件，
+        # 事件流与 D-047 之前逐字相同（m3h-fix6 那两条协议用例锁的就是它）。
+        return section_deadline, section_wall_clock_effective
+    await _emit(on_event, "section_resume_budget", {
+        "goal_id": context.goal_id,
+        "chapter_id": section["section_id"],
+        "shards_left": shards_left,
+        "shards": shard_count,
+        "remaining_seconds": remaining,
+        "budget_s": budget,
+        "extended": extra > 0,
+    })
+    return section_deadline, section_wall_clock_effective
 
 
 def _chapter_id(agent: Any) -> str:
@@ -2337,6 +2462,9 @@ async def run_sectioned_task(
                 # （shard_count == 1）走的仍是原路：那时异常本就意味着节墙钟到点，
                 # 这道闸必然关着。resume=True 指**片级** resume——不续引擎会话，
                 # 靠盘上已成的片跳过。
+                # §D-047：闸与预算都按**盘上还没落盘的片数**算——resume 省下的
+                # 是已落盘那几片的钱，时间也要照着还回来。
+                shards_left = _pending_shard_count(section_path, shard_count)
                 if (
                     shard_count > 1
                     and section_attempt < attempt_budget
@@ -2346,8 +2474,26 @@ async def run_sectioned_task(
                         wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
+                        shards_left=shards_left,
+                        shard_count=shard_count,
+                        section_wall_clock=section_wall_clock,
                     )
                 ):
+                    (
+                        section_deadline,
+                        section_wall_clock_effective,
+                    ) = await _grant_section_resume_budget(
+                        on_event,
+                        context=context,
+                        section=section,
+                        section_deadline=section_deadline,
+                        section_wall_clock_effective=section_wall_clock_effective,
+                        section_wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                        shards_left=shards_left,
+                        shard_count=shard_count,
+                        section_wall_clock=section_wall_clock,
+                    )
                     await _emit_section_retry(
                         on_event,
                         context=context,
@@ -2547,6 +2693,9 @@ async def run_sectioned_task(
                 # §X-1 货 2：timeout 分三种——引擎单次超时 / 136s 门槛 / 节墙钟到点。
                 original_reason = reason
                 timeout_kind = "engine_timeout" if reason == "timeout" else None
+                # §D-047：闸与预算都按**盘上还没落盘的片数**算——resume 省下的
+                # 是已落盘那几片的钱，时间也要照着还回来。
+                shards_left = _pending_shard_count(section_path, shard_count)
                 if section_attempt < attempt_budget and transport_failure:
                     # 传输断连不是「这一节问不出来」，只是链路断了：原地退避重试，
                     # 不落 missing、不发 section_error、不换引擎（引擎选择归适配层）。
@@ -2556,7 +2705,25 @@ async def run_sectioned_task(
                         wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
+                        shards_left=shards_left,
+                        shard_count=shard_count,
+                        section_wall_clock=section_wall_clock,
                     ):
+                        (
+                            section_deadline,
+                            section_wall_clock_effective,
+                        ) = await _grant_section_resume_budget(
+                            on_event,
+                            context=context,
+                            section=section,
+                            section_deadline=section_deadline,
+                            section_wall_clock_effective=section_wall_clock_effective,
+                            section_wall_clock_started_at=section_wall_clock_started_at,
+                            now=now,
+                            shards_left=shards_left,
+                            shard_count=shard_count,
+                            section_wall_clock=section_wall_clock,
+                        )
                         next_session_id = str(
                             getattr(result, "session_id", None) or ""
                         ) or None
@@ -2608,8 +2775,26 @@ async def run_sectioned_task(
                         wall_clock_seconds=section_wall_clock_effective,
                         wall_clock_started_at=section_wall_clock_started_at,
                         now=now,
+                        shards_left=shards_left,
+                        shard_count=shard_count,
+                        section_wall_clock=section_wall_clock,
                     )
                 ):
+                    (
+                        section_deadline,
+                        section_wall_clock_effective,
+                    ) = await _grant_section_resume_budget(
+                        on_event,
+                        context=context,
+                        section=section,
+                        section_deadline=section_deadline,
+                        section_wall_clock_effective=section_wall_clock_effective,
+                        section_wall_clock_started_at=section_wall_clock_started_at,
+                        now=now,
+                        shards_left=shards_left,
+                        shard_count=shard_count,
+                        section_wall_clock=section_wall_clock,
+                    )
                     # §D-036：分片节里 result 是**第一个失败片**的结果，它的失败
                     # 不等于整节问不出来——其余片的字已经合并落盘了。D-033 只给
                     # 片墙钟到点（`SectionWallClockExpired`）开了这条补坏片的路，

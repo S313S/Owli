@@ -105,9 +105,16 @@ def _shift_loop_clock(monkeypatch, sectioning, offset: dict) -> None:
     monkeypatch.setattr(sectioning, "asyncio", _AsyncioProxy())
 
 
-def test_d033_节级重试放行的坏片_片墙钟夹在节剩余时间内(tmp_path, monkeypatch):
-    """D-033 放开节级重试后，最后一次重试可能在只剩 136 s 时放行；片墙钟
-    若还按整份 330 s 发，单节最坏耗时要翻一倍。夹到节绝对时刻上就封回去。"""
+def test_d033_节级重试放行的坏片_按D047续写预算放大且仍封顶(tmp_path, monkeypatch):
+    """§D-047 语义更替（原名 `..._片墙钟夹在节剩余时间内`）。
+
+    D-033 原来把重试轮的片墙钟一路夹到「第一轮设下的节绝对时刻」上，理由是
+    防止单节最坏耗时翻倍。真机 `r-8532b5c2c026` 证明这把夹子会掐死本该救回来的
+    节：3/4 片已写成，最后一片只分到 80 s，19 075 B 好稿整节作废。D-047 改成
+    「续写轮按未落盘片数把时间还回来」——本用例锁的因此换成两条：
+    ① 未落盘的那一片拿得到**一整片**的时长（而不是被原剩余截断）；
+    ② 放大仍有封顶：一轮最多加一个节墙钟，重试前的每次调用照旧夹在原预算内。
+    """
     import app.orchestrator.sectioning as sectioning
 
     offset = {"s": 0.0}
@@ -134,13 +141,17 @@ def test_d033_节级重试放行的坏片_片墙钟夹在节剩余时间内(tmp_
 
     assert [e["data"]["attempt"] for e in events if e["type"] == "section_retry"] == [2]
     section_start, _ = calls[0]
-    # 节预算 = 330 × 3 片；重试放行时只剩 190 s。
+    # 节预算 = 330 × 3 片；重试放行时原剩余只有 190 s（不够一整片）。
     budget_end = section_start + 330.0 * 3
     retry_now, retry_deadline = calls[-1]
     assert retry_now - section_start == pytest.approx(800.0, abs=2.0)
-    # 夹住了：不是「起点 + 整份 330 s」，而是节那个绝对时刻。
-    assert retry_deadline <= budget_end + 1.0
-    assert retry_deadline < retry_now + 330.0 - 100.0
-    assert all(deadline <= budget_end + 1.0 for _, deadline in calls)
+    # §D-047：只剩 1 片未落盘 → 本轮预算抬到 300+30 s，这一片拿到整片时长。
+    assert retry_deadline - retry_now == pytest.approx(330.0, abs=2.0)
+    budget = [e["data"] for e in events if e["type"] == "section_resume_budget"]
+    assert [(b["shards_left"], b["extended"]) for b in budget] == [(1, True)]
+    assert budget[0]["budget_s"] == pytest.approx(330.0, abs=2.0)
+    # 封顶还在：一轮最多加一个节墙钟；重试**之前**的调用一律夹在原预算内。
+    assert retry_deadline <= budget_end + 330.0 + 1.0
+    assert all(deadline <= budget_end + 1.0 for _, deadline in calls[:-1])
     assert result.succeeded is True
     assert store.list_chapters("r-ledger")[0]["status"] == "done"

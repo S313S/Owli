@@ -508,12 +508,17 @@ def test_d031_节级重试的墙钟闸按片数放大(tmp_path, monkeypatch):
     seen: list[float | None] = []
     original = sectioning._section_resume_within_deadline
 
-    def spy(deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at, now):
+    def spy(
+        deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at,
+        now, **shard_args,
+    ):
+        # §D-047 给这道闸加了 shards_left / shard_count / section_wall_clock
+        # 三个入参；本用例锁的仍是 wall_clock_seconds 按片数放大，原样透传。
         seen.append(wall_clock_seconds)
         return original(
             deadline, retry_delay=retry_delay,
             wall_clock_seconds=wall_clock_seconds,
-            wall_clock_started_at=wall_clock_started_at, now=now,
+            wall_clock_started_at=wall_clock_started_at, now=now, **shard_args,
         )
 
     monkeypatch.setattr(sectioning, "_section_resume_within_deadline", spy)
@@ -530,12 +535,17 @@ def test_d031_不分片的节墙钟一秒不多给(tmp_path, monkeypatch):
     seen: list[float | None] = []
     original = sectioning._section_resume_within_deadline
 
-    def spy(deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at, now):
+    def spy(
+        deadline, *, retry_delay, wall_clock_seconds, wall_clock_started_at,
+        now, **shard_args,
+    ):
+        # §D-047 给这道闸加了 shards_left / shard_count / section_wall_clock
+        # 三个入参；本用例锁的仍是 wall_clock_seconds 按片数放大，原样透传。
         seen.append(wall_clock_seconds)
         return original(
             deadline, retry_delay=retry_delay,
             wall_clock_seconds=wall_clock_seconds,
-            wall_clock_started_at=wall_clock_started_at, now=now,
+            wall_clock_started_at=wall_clock_started_at, now=now, **shard_args,
         )
 
     monkeypatch.setattr(sectioning, "_section_resume_within_deadline", spy)
