@@ -125,3 +125,63 @@ def test_详情串号不认_失败不阻塞整轮搜索() -> None:
     # 计费如实：两次详情请求都发出去了，失败那次照样算钱。
     assert usage["data"]["calls"]["get_image_note_detail"] == 2
     assert (usage["data"]["detail_filled"], usage["data"]["detail_failed"]) == (1, 1)
+
+
+def _probe_spec(fn):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(entrypoint=fn, window=object(), limit_parameter="limit")
+
+
+def _probe_env(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("TIKHUB_API_KEY=secret\n", encoding="utf-8")
+    return path
+
+
+def _probe_row(*, detail_hop: bool, content: str = "全文") -> dict[str, Any]:
+    return {
+        "platform": "xhs", "platform_item_id": "note-1",
+        "content_excerpt": content,
+        "extra": {"detail_hop": detail_hop, "provider": "tikhub"},
+    }
+
+
+def test_探活只补一条详情_且必须真拿到正文才算活着(tmp_path) -> None:
+    import asyncio
+
+    from app.sources_probe import probe_sources
+
+    kwargs_seen: list[dict[str, Any]] = []
+
+    def search(query, window, **kwargs):
+        kwargs_seen.append(kwargs)
+        return [_probe_row(detail_hop=True), _probe_row(detail_hop=False)]
+
+    result = asyncio.run(probe_sources(
+        ["xhs"], registry={"xhs": _probe_spec(search)},
+        env_path=_probe_env(tmp_path),
+    ))
+
+    assert result["xhs"]["ok"] is True
+    # 守住「每源两次请求」：1 次搜索 + 1 条详情。
+    assert kwargs_seen[0]["detail_top_n"] == 1
+    assert kwargs_seen[0]["limit"] == 2
+
+
+def test_搜索还活着但详情端点哑了_探活必须判红(tmp_path) -> None:
+    import asyncio
+
+    from app.sources_probe import probe_sources
+
+    def search(query, window, **kwargs):
+        # 搜索照常回 2 条 —— 只是没有一条补上了详情。
+        return [_probe_row(detail_hop=False), _probe_row(detail_hop=False)]
+
+    result = asyncio.run(probe_sources(
+        ["xhs"], registry={"xhs": _probe_spec(search)},
+        env_path=_probe_env(tmp_path),
+    ))
+
+    assert result["xhs"]["ok"] is False
+    assert "xhs_note_detail_unavailable" in result["xhs"]["failure"]

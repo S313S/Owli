@@ -54,6 +54,9 @@ DEFAULT_PROBE_ITEM_LIMIT = 2
 #: 条数以外的源特有探活参数。
 PROBE_EXTRA_KWARGS: dict[str, dict[str, Any]] = {
     "douyin": {"comment_video_limit": 1},
+    # §SRC-3：小红书是两跳（搜索 + 笔记详情）。探活只补 1 条详情，
+    # 守住「每源两次请求」上限，同时把新端点也探到。
+    "xhs": {"detail_top_n": 1},
 }
 
 
@@ -152,6 +155,21 @@ def _google_probe_enabled() -> bool:
     return os.environ.get("OWLI_WEB_SEARCH_GOOGLE") == "1"
 
 
+def _xhs_detail_ok(result: Any) -> bool:
+    """详情二跳真取到东西了吗——`detail_hop` 只有在返回 id 对得上、
+    `desc` 解析出来时才为真，所以它比 HTTP 200 硬。"""
+
+    if not isinstance(result, (list, tuple)):
+        return False
+    return any(
+        isinstance(item, Mapping)
+        and isinstance(item.get("extra"), Mapping)
+        and item["extra"].get("detail_hop")
+        and str(item.get("content_excerpt") or "").strip()
+        for item in result
+    )
+
+
 def _call(
     source: str,
     entrypoint: Callable[..., Any],
@@ -183,6 +201,10 @@ def _call(
         )
         if not google_ok:
             raise RuntimeError("google_probe_unavailable")
+    if source == "xhs" and not _xhs_detail_ok(result):
+        # 「搜索还活着」不等于「详情端点还活着」：正文与绝对发布时间全靠二跳，
+        # 二跳哑了这个源只剩标题，评级的完整性/时效两维当场归零。
+        raise RuntimeError("xhs_note_detail_unavailable")
     return result
 
 

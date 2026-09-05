@@ -24,7 +24,11 @@ def test_三态与超时与缺凭证各自落到failure字段(tmp_path: Path) ->
     calls: dict[str, tuple] = {}
 
     def ok(query, window, **kw):
-        calls["xhs"] = (query, window, kw); return [{"id": 1}, {"id": 2}]
+        # §SRC-3：小红书探活除了看条数，还看详情二跳有没有真取到正文，
+        # 所以「活着」的样例行要长成真行的样子。
+        calls["xhs"] = (query, window, kw)
+        return [{"id": 1, "content_excerpt": "全文", "extra": {"detail_hop": True}},
+                {"id": 2, "content_excerpt": "全文", "extra": {"detail_hop": True}}]
 
     def empty(query, **kw):
         calls["douyin"] = (query, kw); return []
@@ -44,7 +48,8 @@ def test_三态与超时与缺凭证各自落到failure字段(tmp_path: Path) ->
         registry=registry, env_path=env, timeout_seconds=0.1,
     ))
     assert result["xhs"]["ok"] is True and result["xhs"]["items"] == 2
-    assert calls["xhs"][1] == "30d" and calls["xhs"][2] == {"limit": 2}
+    assert calls["xhs"][1] == "30d"
+    assert calls["xhs"][2] == {"limit": 2, "detail_top_n": 1}
     assert calls["douyin"][1] == {"limit": 1, "comment_video_limit": 1}
     assert result["douyin"] == {"ok": False, "items": 0, "elapsed_s": result["douyin"]["elapsed_s"], "failure": "empty"}
     assert result["web_search"]["ok"] is False and "RuntimeError: TikHub 401" == result["web_search"]["failure"]
