@@ -1790,6 +1790,7 @@ async def _run_section_shards(
     resume_for = resume_session_id
     last: tuple[Any, EngineTask] | None = None
     first_failure: tuple[Any, EngineTask] | None = None
+    failed_shards: list[int] = []
     wall_clock_expired: SectionWallClockExpired | None = None
     ran_any = False
     for index, size in enumerate(shard_sizes, start=1):
@@ -1951,6 +1952,8 @@ async def _run_section_shards(
             "elapsed_seconds": asyncio.get_running_loop().time() - started_at,
             "engine_error": getattr(result, "engine_error", None),
         }, is_error=not succeeded)
+        if not succeeded:
+            failed_shards.append(index)
         if result is not None:
             last = (result, shard_task)
             if not succeeded and first_failure is None:
@@ -1979,6 +1982,33 @@ async def _run_section_shards(
         # 盘上有完整合并稿 = 本次尝试的产物已经具备，按成功出口交回节循环，
         # 由它照旧跑 conclusion / 证据池格式契约那两道闸。
         return _merged_shard_result(section_task, runs_root, store), section_task
+    if failed_shards and first_failure is not None:
+        # §D-051：片的死活要带进节的判定。`first_failure` 存的是**引擎原始
+        # result**，而「引擎自认跑成、产物却不可解析」那种片（坏 JSON）的
+        # `result.succeeded` 仍是 True（conclusion.status=done、engine_error 空），
+        # 原样交回节循环就是 `status=done attempts=1` 拿半份稿交差（真机
+        # r-7e498778d36b：4 片坏 2 片，池 30 条只进报告 15 条，账上全绿）。
+        # 交回一个 `.succeeded=False` 的结果，节循环就照旧走 §D-036 那道闸：
+        # attempts 未满且剩余节墙钟够，只补坏片、已成片 `write_shard_skipped`；
+        # 续写轮预算（§D-047）按 `_pending_shard_count` 数未落盘片数，口径已对。
+        note = (
+            f"节分片未写全：{total} 片里第 "
+            f"{'、'.join(str(item) for item in failed_shards)} 片没写成，"
+            f"只合上 {merged}/{total} 片"
+        )
+        await _emit(on_event, "section_shards_incomplete", {
+            "goal_id": context.goal_id,
+            "chapter_id": section["section_id"],
+            "shards": total, "done": merged,
+            "failed": list(failed_shards),
+            "attempt": section_attempt,
+        }, is_error=True)
+        result, failed_task = first_failure
+        if bool(getattr(result, "succeeded", False)):
+            # 只给「引擎自认成功」那种补一刀；真失败片的死因（socket 断连
+            # → retry_exhausted、引擎硬顶 → timeout）原样留着，别改写它们的路。
+            result = replace(result, conclusion_error=note)
+        return result, failed_task
     return first_failure or last or (None, section_task)
 
 
