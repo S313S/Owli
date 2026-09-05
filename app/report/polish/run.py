@@ -187,7 +187,10 @@ def _task(body: str, output_path: Path, research_id: str, model: str,
 #: 09-05 实测：补了用户裁决四条之后内容变厚，单节两次都卡在 300 s 整。
 #: 这里只用 `ClaudeAdapter` 的公开构造参数把这一类任务放宽，**不改 `app/adapters/`
 #: 里任何文件**（那是本包禁区）；口径变更已报调度。
-SECTION_TIMEOUT_SECONDS = 900.0
+#: 900 → 1800：实测单节耗时分布是 2–22 分钟，「关键发现」（五条发现各带表+解读+限定）
+#: 是长尾。900 s 正好切在尾巴上——**一次超时白烧 15 分钟再重来，比一次给足更贵**，
+#: 所以放宽反而更省。r-b10812f664d2 那格就是「关键发现」连撞两次 900 s 才判红的。
+SECTION_TIMEOUT_SECONDS = 1800.0
 
 
 def default_adapter() -> Any:
@@ -259,8 +262,11 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                 # 只报 engine_error / conclusion_error 是不够的：09-05 撞到的那次
                 # 两者都是 None，真话写在 permission_denials 与 validation 里，
                 # 少打这两样让我多绕了两轮。
-                errors = (f"「{name}」这一节没写出来或写得过短。"
-                          + _failure_detail(result),)
+                detail = _failure_detail(result)
+                hint = ("\n上一轮是**超时**被掐的：这一轮把每条的解读压到三句以内、"
+                        "该引的角标照引，先把这一节写完整比写满更重要。"
+                        if "超时" in detail else "")
+                errors = (f"「{name}」这一节没写出来或写得过短。" + detail + hint,)
                 continue
             offpool = offpool_marks(path.read_text(encoding="utf-8"), pool)
             if not offpool:
