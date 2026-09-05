@@ -37,6 +37,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=25, help="单次审计条数（1–50）")
     parser.add_argument("--force", action="store_true", help="已完成五维的证据也重新补评")
     parser.add_argument(
+        "--rescore-only",
+        action="store_true",
+        help="只拿库里已有的闭集标签重算五维分，一次引擎都不过（§RATE-4 货 2）",
+    )
+    parser.add_argument(
         "--engine",
         choices=("claude", "codex"),
         default="claude",
@@ -61,6 +66,7 @@ async def _run(args: argparse.Namespace) -> dict:
             batch_size=args.batch_size,
             force=args.force,
             engine_preference=args.engine,
+            rescore_only=args.rescore_only,
         )
         results.append(asdict(result))
     ok = all(

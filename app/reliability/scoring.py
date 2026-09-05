@@ -272,45 +272,62 @@ def is_comment_row(evidence: Mapping[str, Any]) -> bool:
     return str(evidence.get("source_type") or "") == "comment"
 
 
-def engagement_value(evidence: Mapping[str, Any]) -> float | None:
-    """这条证据的互动量（点赞+评论+收藏一类之和）；算不出返回 None。"""
+def _engagement(evidence: Mapping[str, Any]) -> tuple[float, str] | None:
+    """回 (互动量, 池标签)；池标签 = 这个数是按哪套指标算出来的。
+
+    分池必须按**指标形状**分，不能按 `kind` 列分：底料里 128 条小红书、
+    60 条抖音评论的 `kind` 是 `post`、只有 `source_type` 是 `comment`
+    （`is_comment_row` 先看 `kind`，看不出来），而它们的 `raw_metrics`
+    只有一个 `likes`。拿一个 `likes` 去和帖子的「赞+评+藏」比分位，
+    等于把评论整体压到池底。按实际取到的指标分池，这类行自成一池。
+    """
 
     metrics = evidence.get("raw_metrics")
     if not isinstance(metrics, Mapping):
         return None
-    keys = (
-        COMMENT_ENGAGEMENT_METRICS
+    platform_keys = ENGAGEMENT_METRICS.get(str(evidence.get("platform") or ""), ())
+    candidates: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (("comment", COMMENT_ENGAGEMENT_METRICS),)
         if is_comment_row(evidence)
-        else ENGAGEMENT_METRICS.get(str(evidence.get("platform") or ""), ())
+        else (("post", platform_keys), ("comment", COMMENT_ENGAGEMENT_METRICS))
     )
-    values = [
-        float(metrics[key]) for key in keys
-        if isinstance(metrics.get(key), (int, float))
-        and not isinstance(metrics.get(key), bool)
-    ]
-    return float(sum(values)) if values else None
+    for tag, keys in candidates:
+        values = [
+            float(metrics[key]) for key in keys
+            if isinstance(metrics.get(key), (int, float))
+            and not isinstance(metrics.get(key), bool)
+        ]
+        if values:
+            return float(sum(values)), tag
+    return None
+
+
+def engagement_value(evidence: Mapping[str, Any]) -> float | None:
+    """这条证据的互动量（点赞+评论+收藏一类之和）；算不出返回 None。"""
+
+    measured = _engagement(evidence)
+    return None if measured is None else measured[0]
 
 
 def engagement_percentiles(
     evidence_items: Iterable[Mapping[str, Any]],
     *, min_pool: int = REPRESENTATIVENESS_MIN_POOL,
 ) -> dict[str, float]:
-    """按「平台 × 帖子/评论」分池，回 {证据 id: 批内互动量分位}。
+    """按「平台 × 指标形状」分池，回 {证据 id: 批内互动量分位}。
 
     池不足 `min_pool` 条就整池不出分位——分位在小池里是噪音，让调用方
     退回原权威闭集，而不是拿一条 2 分的「代表性」去骗人。
     公式与 `normalize_evidence_metrics` 同：count(x<v)/(n-1)。
     """
 
-    pools: dict[tuple[str, bool], list[tuple[str, float]]] = defaultdict(list)
+    pools: dict[tuple[str, str], list[tuple[str, float]]] = defaultdict(list)
     for item in evidence_items:
         identity = str(item.get("id") or "")
-        value = engagement_value(item)
-        if not identity or value is None:
+        measured = _engagement(item)
+        if not identity or measured is None:
             continue
-        pools[(str(item.get("platform") or ""), is_comment_row(item))].append(
-            (identity, value)
-        )
+        value, tag = measured
+        pools[(str(item.get("platform") or ""), tag)].append((identity, value))
     percentiles: dict[str, float] = {}
     for entries in pools.values():
         if len(entries) < min_pool:

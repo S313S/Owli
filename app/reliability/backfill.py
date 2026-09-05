@@ -19,6 +19,7 @@ from app.reliability.audit import AUTHORITY_KINDS, INTEREST_RELATIONS, MAX_ATTEM
 from app.reliability.scoring import (
     CROSSREF_SCORES,
     FRESHNESS_WINDOWS,
+    PLATFORM_BASELINES,
     PRIMARY_METRICS,
     RATING_NOTES_PATTERN,
     SCORE_FIELDS,
@@ -1093,6 +1094,7 @@ def _scored_payloads(
     pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any], bool]],
     engine_preference: str,
     *, percentiles: Mapping[str, float] | None = None,
+    keep_crossref: bool = False,
 ) -> list[dict[str, Any]]:
     """(证据, 标签, 是否本轮引擎判定) → 五维回写载荷；口径与拆分前逐字相同。"""
 
@@ -1105,13 +1107,27 @@ def _scored_payloads(
         missing_dimensions = dict(label.get("missing_dimensions") or {})
         crossref_verdict = _crossref_verdict(scoring_view["extra"])
         cluster_stats = None
+        baseline = None
         if crossref_verdict in CROSSREF_SCORES:
             cluster_stats = {"verdict": crossref_verdict}
+        elif keep_crossref and isinstance(item.get("score_crossref"), int):
+            # §RATE-4 货 2：换尺子那一轮只改第一维。这些行的交叉维是写作前评级章
+            # 按平台基线填的（全库 477 行 extra 里根本没有 crossref_verdict），
+            # 补评口径会把它们诚实改成 NULL——那不是重算分，那是替另一维重下判断，
+            # 而 grade 一旦变 NULL，D 闸和池排序就跟着塌。原值原样留着。
+            baseline = {
+                **PLATFORM_BASELINES.get(
+                    str(item.get("platform") or ""),
+                    PLATFORM_BASELINES["web_search"],
+                ),
+                "score_crossref": int(item["score_crossref"]),
+            }
         else:
             missing_dimensions["score_crossref"] = "缺断言血缘簇"
         scored = score_evidence_partial(
             scoring_view,
             missing_dimensions=missing_dimensions,
+            baseline=baseline,
             cluster_stats=cluster_stats,
         )
         payload = {
@@ -1162,11 +1178,19 @@ async def backfill_report(
     force: bool = False,
     engine_preference: str = "claude",
     on_event: Any = None,
+    rescore_only: bool = False,
 ) -> BackfillResult:
-    """对单报告做可重复补评；引擎失败的批次保持原 NULL，不写平台基线。"""
+    """对单报告做可重复补评；引擎失败的批次保持原 NULL，不写平台基线。
+
+    `rescore_only`：只拿库里已有的闭集标签把五维重算一遍，一次引擎都不过
+    （§RATE-4 货 2）。评分口径改了之后要给既有语料换尺子，标签本身没变，
+    没有理由再付一遍判定的钱。没有可复用标签的行本轮不动，也不进 attempted。
+    """
 
     if not 1 <= batch_size <= 50:
         raise ValueError("补评 batch_size 必须在 1–50 之间")
+    if rescore_only and force:
+        raise ValueError("rescore_only 与 force 互斥：只重算分就不会过引擎")
     if engine_preference not in {"claude", "codex"}:
         raise ValueError("补评 engine_preference 只能是 claude 或 codex")
     _safe_component(report_id, "report_id")
@@ -1178,10 +1202,14 @@ async def backfill_report(
     # §XSEM-1 条 1：一手性审计必须排在簇计算之前——它是 §3.2 五项里唯一的闸门，
     # 而 §3.2 又明说同两条证据在不同断言上结论可以不同，所以只能逐 (证据, 断言)
     # 对判，也就只能等断言登记之后（评级章跑在断言产生之前，放不下这一步）。
-    firsthand_audit = await _audit_firsthand(
-        store, report, rows, adapter=adapter, runs_root=Path(runs_root),
-        batch_size=batch_size, engine_preference=engine_preference,
-        force=force, on_event=on_event,
+    firsthand_audit = (
+        {"pairs": 0, "audited": 0, "failed": 0, "claims": 0}
+        if rescore_only
+        else await _audit_firsthand(
+            store, report, rows, adapter=adapter, runs_root=Path(runs_root),
+            batch_size=batch_size, engine_preference=engine_preference,
+            force=force, on_event=on_event,
+        )
     )
     if firsthand_audit["claims"]:
         report = store.get_report(report_id) or report
@@ -1199,6 +1227,11 @@ async def backfill_report(
         if str(item["id"]) in percentiles and _wants_representativeness(item)
     }
     targets = [
+        item for item in rows
+        # §RATE-4 货 2：只重算分的一轮，凡是库里有闭集标签的行都要重算——
+        # 换尺子改的是分不是标签，没标签的行本轮不动（它们要过引擎，另说）。
+        if _stored_labels([item]) is not None
+    ] if rescore_only else [
         item for item in rows
         if force or (
             not _already_agent_rated(item)
@@ -1229,6 +1262,7 @@ async def backfill_report(
         pending: list[dict[str, Any]] = []
         for item in goal_targets:
             stored = None if force else _stored_labels([item])
+            assert not (rescore_only and stored is None), "只重算分的一轮不该有待判行"
             if stored is None:
                 pending.append(item)
             else:
@@ -1236,6 +1270,7 @@ async def backfill_report(
         if reusable:
             payloads = _scored_payloads(
                 reusable, engine_preference, percentiles=percentiles,
+                keep_crossref=rescore_only,
             )
             store.upsert_evidence_batch(payloads)
             rated += len(payloads)
@@ -1255,6 +1290,7 @@ async def backfill_report(
                 payloads = _scored_payloads(
                     [(item, label, True) for item, label in zip(batch, engine_labels)],
                     engine_preference, percentiles=percentiles,
+                    keep_crossref=rescore_only,
                 )
                 store.upsert_evidence_batch(payloads)
                 rated += len(payloads)
@@ -1299,6 +1335,7 @@ async def backfill_report(
                     for item, label in zip(resettle, settled_labels)
                 ],
                 engine_preference, percentiles=percentiles,
+                keep_crossref=rescore_only,
             ))
 
     refreshed_report = store.get_report(report_id) or report
