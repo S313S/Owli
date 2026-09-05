@@ -99,7 +99,18 @@ def test_小红书同章重复_permalink_只入库一次且按实采条数_done(
     }
 
     def http_get(url, headers, timeout):
-        del url, headers, timeout
+        # §SRC-3：小红书现在是两跳（搜索 + 笔记详情），夹具要分端点应答，
+        # 否则详情跳吃到搜索响应体、整轮多出一条 source_partial_failure 事件。
+        del headers, timeout
+        if "get_image_note_detail" in url:
+            return xhs.HttpResponse(200, {
+                "code": 200,
+                "data": {"code": 200, "success": True, "data": [{"note_list": [{
+                    "id": "note-shared", "type": "normal",
+                    "desc": "真实正文的全文版本", "time": 1787799195,
+                    "ip_location": "Shanghai",
+                }]}]},
+            })
         return xhs.HttpResponse(200, {
             "code": 200,
             "data": {"code": 200, "success": True,

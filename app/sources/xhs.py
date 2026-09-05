@@ -19,11 +19,23 @@ from app.sources import comments as comment_shape
 from app.sources.spec import SourceSpec, WindowParam
 
 
-__all__ = ["SOURCE_SPEC", "fetch_comments", "search"]
+__all__ = ["SOURCE_SPEC", "fetch_comments", "fetch_note_detail", "search"]
 
 _API_BASE = "https://api.tikhub.io"
 _SEARCH_PATH = "/api/v1/xiaohongshu/app_v2/search_notes"
 _COMMENTS_PATH = "/api/v1/xiaohongshu/app_v2/get_note_comments"
+# §SRC-3：笔记详情二跳。TikHub 有 get_image_note_detail 与 get_video_note_detail
+# 两个端点，但真机实测（09-05，6 条混合样本）**图文端点两种笔记都取得对**、返回体
+# 统一是 data.data[0].note_list[0]；而视频端点喂图文 id 会 HTTP 200 + code 200 地
+# 回**另一条毫不相干的笔记**（请求 6a98d609… 回 6a9528c6…）。所以只用图文端点，
+# 并在解析时强制核对返回 id——「HTTP 200 不等于取到数据」在这里是字面意义上的。
+_DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"
+#: 每次搜索按互动量给前 N 条补详情（fast 档名额 25、standard 20，二跳只补前 10）。
+_DETAIL_TOP_N = 10
+#: 全文入库上限：截 2000 字，别把长笔记整条塞进上下文。
+_CONTENT_LIMIT = 2000
+#: 详情正文里话题写成 `#飞书[话题]#`，搜索摘要写成 `#飞书`；统一成后者。
+_TOPIC_TAG = re.compile(r"\[话题\]#")
 _ENV_PATH = Path.home() / ".owli" / ".env"
 _WINDOW_PATTERN = re.compile(r"^([1-9]\d*)d$")
 _WINDOW_PARAM = WindowParam()
@@ -275,8 +287,64 @@ def _notes(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return notes
 
 
+def _engagement(note: Mapping[str, Any]) -> int:
+    """互动量：点赞 + 评论 + 收藏 + 转发，用来排「先给谁补详情」。"""
+
+    return (
+        _integer(note, "liked_count", "likedCount")
+        + _integer(note, "comments_count", "commentsCount")
+        + _integer(note, "collected_count", "collectedCount")
+        + _integer(note, "share_count", "shareCount")
+    )
+
+
+def _detail_published_at(value: Any) -> str | None:
+    """详情里的 `time` 转 UTC ISO；秒/毫秒按量级判（同 douyin `_published_at`）。"""
+
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    seconds = value / 1000 if value >= 1e11 else value
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
+
+
+def _detail_note(
+    data: Mapping[str, Any], note_id: str
+) -> Mapping[str, Any]:
+    """详情响应体是 data.data[0].note_list[0]（真机样本已核）。
+
+    返回 id 与请求 id 不一致就当没取到——见 `_DETAIL_PATH` 注释里的串号实测。
+    """
+
+    nested = data.get("data") if isinstance(data.get("data"), list) else None
+    first = nested[0] if nested and isinstance(nested[0], Mapping) else None
+    if first is None:
+        raise TikHubError(
+            "bad_response", endpoint=_DETAIL_PATH, detail="详情响应缺少 data.data",
+        )
+    note_list = first.get("note_list")
+    node = (
+        note_list[0]
+        if isinstance(note_list, list) and note_list and isinstance(note_list[0], Mapping)
+        else first
+    )
+    returned = str(node.get("id") or "")
+    if returned != note_id:
+        raise TikHubError(
+            "bad_response", endpoint=_DETAIL_PATH,
+            detail=f"详情串号：请求 {note_id} 返回 {returned or '空'}",
+        )
+    return node
+
+
 def _to_evidence(
-    note: Mapping[str, Any], *, query: str, fetched_at: str, time_filter: str
+    note: Mapping[str, Any],
+    *,
+    query: str,
+    fetched_at: str,
+    time_filter: str,
+    detail: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     user = note.get("user") if isinstance(note.get("user"), Mapping) else {}
     note_id = str(note.get("id") or "")
@@ -293,7 +361,10 @@ def _to_evidence(
         "platform_item_id": note_id,
         "permalink": build_xhs_permalink(note_id, token),
         "title": title or description[:80] or f"小红书笔记 {note_id}",
-        "content_excerpt": description or title or None,
+        # §SRC-3：详情二跳取到全文就用全文；没取到（失败/不在前 N）保留搜索摘要。
+        "content_excerpt": (
+            (detail or {}).get("content") or description or title or None
+        ),
         "author_name": author or None,
         "author_meta": {
             "user_id": str(user.get("userid") or ""),
@@ -303,7 +374,8 @@ def _to_evidence(
         "source_keyword": query,
         "fetch_method": "third_party_api",
         # 搜索只给“3天前”等相对文本；时间窗在请求端限定，不伪造绝对时间。
-        "published_at": None,
+        # §SRC-3：详情二跳取到 `time` 才落绝对时间，取不到仍然留 None。
+        "published_at": (detail or {}).get("published_at"),
         "fetched_at": fetched_at,
         "raw_metrics": {
             "liked_count": _integer(note, "liked_count", "likedCount"),
@@ -327,7 +399,9 @@ def _to_evidence(
             "interest_relation": "disclosed_interest",
             "provider": "tikhub",
             "native_time_filter": time_filter,
-            "relative_publish_time_omitted": True,
+            "relative_publish_time_omitted": not (detail or {}).get("published_at"),
+            "detail_hop": bool(detail),
+            "ip_location": (detail or {}).get("ip_location"),
         },
     }
 
@@ -413,6 +487,45 @@ def fetch_comments(
     return comment_shape.CommentBatch(comments=kept, dropped_short=dropped, calls=calls)
 
 
+def fetch_note_detail(
+    note_id: str,
+    *,
+    token: str | None = None,
+    http_get: HttpGet = _default_http_get,
+    timeout_seconds: float = 45.0,
+    rate_gate: RateGate = _RATE_GATE,
+) -> dict[str, Any]:
+    """拉一条笔记的详情：全文正文与绝对发布时间。
+
+    §SRC-3：搜索端点只回一段短 `desc`（底料 296 条平均 42 字），且没有任何绝对
+    时间，评级里「完整性」「时效」两维等于给标题打分。这一跳把全文与 `time` 补上。
+    """
+
+    normalized_id = str(note_id).strip()
+    if not normalized_id:
+        raise ValueError("note_id 必须是非空字符串")
+    api_token = token or _load_token()
+    rate_gate.wait()
+    response = http_get(
+        f"{_API_BASE}{_DETAIL_PATH}?{urlencode({'note_id': normalized_id})}",
+        {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_token}",
+            "User-Agent": "Owli/0.1 XHS-source",
+        },
+        timeout_seconds,
+    )
+    node = _detail_note(
+        _response_data(response, endpoint=_DETAIL_PATH), normalized_id
+    )
+    content = _TOPIC_TAG.sub("", str(node.get("desc") or "")).strip()
+    return {
+        "content": content[:_CONTENT_LIMIT] or None,
+        "published_at": _detail_published_at(node.get("time")),
+        "ip_location": str(node.get("ip_location") or "").strip() or None,
+    }
+
+
 def _unavailable(
     on_event: EventCallback | None,
     *,
@@ -434,6 +547,47 @@ def _unavailable(
     return []
 
 
+def _collect_details(
+    notes: list[Mapping[str, Any]],
+    *,
+    top_n: int,
+    token: str,
+    http_get: HttpGet,
+    timeout_seconds: float,
+    rate_gate: RateGate,
+    on_event: EventCallback | None,
+) -> tuple[dict[str, dict[str, Any]], int, int]:
+    """给互动量最高的前 N 条补详情。
+
+    **失败不阻塞**：某条详情挂了就把那条留在搜索行形态（短摘要 + 无时间），
+    整轮搜索照常返回——一条二跳挂掉不该让 20 条证据全丢。
+    """
+
+    ranked = sorted(notes, key=_engagement, reverse=True)[: max(top_n, 0)]
+    details: dict[str, dict[str, Any]] = {}
+    calls = 0
+    failures = 0
+    for note in ranked:
+        note_id = str(note.get("id") or "")
+        if not note_id:
+            continue
+        try:
+            calls += 1
+            details[note_id] = fetch_note_detail(
+                note_id, token=token, http_get=http_get,
+                timeout_seconds=timeout_seconds, rate_gate=rate_gate,
+            )
+        except TikHubError as error:
+            failures += 1
+            _emit(
+                on_event, "source_partial_failure",
+                stage="note_detail", platform_item_id=note_id,
+                closed_reason=error.closed_reason, task_continues=True,
+                **error.event_fields(),
+            )
+    return details, calls, failures
+
+
 def search(
     query: str,
     window: str,
@@ -452,8 +606,9 @@ def search(
     timeout_seconds: float = 45.0,
     rate_gate: RateGate = _RATE_GATE,
     now: Callable[[], datetime] = _utc_now,
+    detail_top_n: int = _DETAIL_TOP_N,
 ) -> list[dict[str, Any]]:
-    """按 TikHub 原生排序、类型和时间窗搜索小红书笔记。"""
+    """按 TikHub 原生排序、类型和时间窗搜索小红书笔记，并给前 N 条补详情。"""
 
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query 必须是非空字符串")
@@ -528,13 +683,20 @@ def search(
             on_event, reason=error.closed_reason, forced=False, error=error,
         )
 
+    kept = collected[:limit]
+    details, detail_calls, detail_failures = _collect_details(
+        kept, top_n=min(detail_top_n, len(kept)), token=api_token,
+        http_get=http_get, timeout_seconds=timeout_seconds,
+        rate_gate=rate_gate, on_event=on_event,
+    )
     fetched_at = now().astimezone(timezone.utc).isoformat()
     evidence = [
         _to_evidence(
             note, query=query.strip(), fetched_at=fetched_at,
             time_filter=requested_filter,
+            detail=details.get(str(note.get("id") or "")),
         )
-        for note in collected[:limit]
+        for note in kept
     ]
     normalized = normalize_evidence_metrics(
         evidence,
@@ -565,8 +727,13 @@ def search(
         on_event,
         "source_usage_reconciled",
         provider="tikhub",
-        calls={"search_notes": request_count},
+        calls={
+            "search_notes": request_count,
+            "get_image_note_detail": detail_calls,
+        },
         returned=len(normalized),
+        detail_filled=len(details),
+        detail_failed=detail_failures,
         task_continues=True,
     )
     return normalized
@@ -579,6 +746,9 @@ SOURCE_SPEC = SourceSpec(
     display_name="小红书",
     collector_name="小红书数据抓取",
     capability_description="TikHub App V2 笔记搜索；原生排序、类型与时间窗过滤",
-    prompt_hint="相对发布时间不落 published_at；翻页回传双搜索会话 ID",
+    prompt_hint=(
+        "按互动量给前 10 条补笔记详情（全文截 2000 字 + 绝对发布时间）；"
+        "补不到详情的行仍是短摘要且 published_at 为空；翻页回传双搜索会话 ID"
+    ),
     comment_fetcher=fetch_comments,
 )

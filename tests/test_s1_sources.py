@@ -194,6 +194,9 @@ def test_小红书原生过滤_双会话翻页_签名链接与相对时间不落
         http_get=http_get,
         rate_gate=ImmediateGate(),
         now=lambda: datetime(2026, 8, 27, tzinfo=timezone.utc),
+        # 本用例量的是搜索跳本身（原生过滤 / 双会话翻页 / 签名链接 / 不伪造时间），
+        # 关掉 §SRC-3 详情二跳，这几条断言才还量在原来的东西上。
+        detail_top_n=0,
     )
 
     assert len(result) == 2
