@@ -1119,7 +1119,18 @@ def test_父章写节期间直写新证据不改变已冻结_S_编号(tmp_path):
     ]
 
 
-def test_恢复时新证据使旧_S_号失效则复位_done_节重写(tmp_path):
+def test_恢复时新证据使旧_S_号失效_不重写节_合并期按permalink重排(tmp_path):
+    """§D-046 语义替换：原用例（`..._则复位_done_节重写`）要求整节复位重写。
+
+    那条判据在 §D-031 把「合并期按 permalink 查全局编号重排角标」做进
+    `_merge_shard_structures` 之后就失去了理由：节内部的 [SNN] 只是局部别名，
+    成稿里的编号是按 permalink 现查现排的，旧号根本传不到成稿。为这点编号
+    漂移重写整节，代价是把一节好稿推倒重来——真机两次现场（D-044 / D-046）
+    正是这么把 19 637 B 与 24 142 B 的好稿写成一百多字节占位的。
+
+    W-1 真正要保的产品性质原样保留并在下面断得更硬：**ev-z 在成稿里必须拿到
+    全局正确的 [S02]**。区别只是这个正确编号现在由合并期给出，不必付一轮引擎。
+    """
     store = _store(tmp_path)
     runs_root = tmp_path / "runs"
     section_path = runs_root / "r-ledger/goals/goal-1/report/sec-1.md"
@@ -1208,8 +1219,12 @@ def test_恢复时新证据使旧_S_号失效则复位_done_节重写(tmp_path):
     ))
 
     assert result.succeeded is True
-    assert calls == ["sec-1.md"]
-    assert "新编号 [S02]" in output.read_text(encoding="utf-8")
+    assert calls == [], "已写完的节不该为了编号漂移被重写一遍"
+    merged = output.read_text(encoding="utf-8")
+    # 节里写的是旧号 [S01]，成稿按 permalink 重排成全局正确的 [S02]。
+    assert "旧编号 [S02]" in merged, merged
+    assert "[S02] [旧证据](https://evidence.example/z)" in merged, merged
+    assert "[S01]" not in merged, merged
 
 
 def test_恢复态全部节已_done_仍按证据池全局编号拼装(tmp_path):
