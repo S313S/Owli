@@ -251,7 +251,28 @@ async def _code_batch(
         errors = coding_errors(value, compact, sources)
         if not errors:
             return [dict(item) for item in value]
+    # 三次都没过就把最后一轮的原因落盘：不落的话失败批只剩「产物不存在」，
+    # 死因得回头翻引擎日志才看得到（本轮实测两批死于传输层 socket 断开，
+    # 查了一圈日志才认出来）。判死因要读原文，别让它静默。
+    _write_failure(output_path, items=compact, errors=errors)
     return None
+
+
+def _write_failure(
+    output_path: Path, *, items: Sequence[Mapping[str, Any]], errors: Sequence[str],
+) -> None:
+    payload = {
+        "coding_version": CODING_VERSION,
+        "attempts": MAX_ATTEMPTS,
+        "ids": [str(item.get("id")) for item in items],
+        "errors": list(errors),
+    }
+    try:
+        output_path.with_suffix(".errors.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except OSError:  # 诊断落盘失败不该把整轮编码带下水
+        pass
 
 
 def _coding_payload(item: Mapping[str, Any], label: Mapping[str, Any]) -> dict[str, Any]:

@@ -205,3 +205,18 @@ def test_批量上限不超过四十(tmp_path: Path) -> None:
     assert engine.batch_sizes == [40, 5]
     with pytest.raises(ValueError):
         _run(store, tmp_path, _CodingEngine(), batch_size=41)
+
+
+def test_失败批把死因落盘(tmp_path: Path) -> None:
+    """失败批不留痕的话，死因得回头翻引擎日志——本轮实测踩过。"""
+
+    store = _store(tmp_path)
+    _run(store, tmp_path, _CodingEngine(fail_all=True))
+    failures = list((tmp_path / "runs").rglob("*.errors.json"))
+    assert len(failures) == 1
+    import json as _json
+
+    payload = _json.loads(failures[0].read_text(encoding="utf-8"))
+    assert payload["attempts"] == 3
+    assert len(payload["ids"]) == 3
+    assert any("不是原文子串" in error for error in payload["errors"])
