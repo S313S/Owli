@@ -34,6 +34,12 @@ _DETAIL_PATH = "/api/v1/xiaohongshu/app_v2/get_image_note_detail"
 _DETAIL_TOP_N = 10
 #: 全文入库上限：截 2000 字，别把长笔记整条塞进上下文。
 _CONTENT_LIMIT = 2000
+#: 详情二跳的尝试次数。真机小采（09-05，20 条）里 3 条详情失败、**原样重试全部成功**
+#: ——是 TikHub 侧的偶发抖动，不是笔记形态问题。一次重试把 85% 补到 100%，
+#: 每条多付 $0.001 只在失败时发生。
+_DETAIL_ATTEMPTS = 2
+#: 这两类重试没有意义，只会白花钱：凭证不对、以及已经被限流。
+_DETAIL_NO_RETRY = frozenset({"tikhub_auth", "tikhub_http_429"})
 #: 详情正文里话题写成 `#飞书[话题]#`，搜索摘要写成 `#飞书`；统一成后者。
 _TOPIC_TAG = re.compile(r"\[话题\]#")
 _ENV_PATH = Path.home() / ".owli" / ".env"
@@ -571,19 +577,34 @@ def _collect_details(
         note_id = str(note.get("id") or "")
         if not note_id:
             continue
-        try:
-            calls += 1
-            details[note_id] = fetch_note_detail(
-                note_id, token=token, http_get=http_get,
-                timeout_seconds=timeout_seconds, rate_gate=rate_gate,
-            )
-        except TikHubError as error:
+        last_error: TikHubError | None = None
+        for attempt in range(_DETAIL_ATTEMPTS):
+            try:
+                calls += 1
+                details[note_id] = fetch_note_detail(
+                    note_id, token=token, http_get=http_get,
+                    timeout_seconds=timeout_seconds, rate_gate=rate_gate,
+                )
+                last_error = None
+                break
+            except TikHubError as error:
+                last_error = error
+                if error.closed_reason in _DETAIL_NO_RETRY:
+                    break
+                if attempt + 1 < _DETAIL_ATTEMPTS:
+                    _emit(
+                        on_event, "source_retry", stage="note_detail",
+                        platform_item_id=note_id,
+                        closed_reason=error.closed_reason, attempt=attempt + 1,
+                        task_continues=True,
+                    )
+        if last_error is not None:
             failures += 1
             _emit(
                 on_event, "source_partial_failure",
                 stage="note_detail", platform_item_id=note_id,
-                closed_reason=error.closed_reason, task_continues=True,
-                **error.event_fields(),
+                closed_reason=last_error.closed_reason, task_continues=True,
+                **last_error.event_fields(),
             )
     return details, calls, failures
 

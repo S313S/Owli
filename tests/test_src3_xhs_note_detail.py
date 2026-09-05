@@ -122,9 +122,58 @@ def test_详情串号不认_失败不阻塞整轮搜索() -> None:
     assert failure["data"]["stage"] == "note_detail"
     assert failure["data"]["task_continues"] is True
     usage = next(e for e in events if e["type"] == "source_usage_reconciled")
-    # 计费如实：两次详情请求都发出去了，失败那次照样算钱。
-    assert usage["data"]["calls"]["get_image_note_detail"] == 2
+    # 计费如实：串号那条重试了一次（2 次）+ 正常那条 1 次 = 3 次，都算钱。
+    assert usage["data"]["calls"]["get_image_note_detail"] == 3
     assert (usage["data"]["detail_filled"], usage["data"]["detail_failed"]) == (1, 1)
+
+
+def test_详情抖动重试一次即恢复() -> None:
+    """真机小采实测：3 条详情失败、原样重试全部成功，是 TikHub 侧偶发抖动。"""
+
+    notes = [_note(1, liked=900)]
+    attempts: list[str] = []
+
+    def http_get(url, headers, timeout):
+        del headers, timeout
+        if "get_image_note_detail" in url:
+            attempts.append(url)
+            if len(attempts) == 1:
+                raise xhs.TikHubError("transport", endpoint=url, detail="URLError")
+            return xhs.HttpResponse(200, _detail_payload(
+                "note-1", desc="重试拿到的全文", time_value=1788401161,
+            ))
+        return xhs.HttpResponse(200, _search_payload(notes))
+
+    events: list[dict[str, Any]] = []
+    result = _run(http_get, detail_top_n=1, on_event=events.append)
+
+    assert result[0]["content_excerpt"] == "重试拿到的全文"
+    assert result[0]["published_at"] == "2026-09-03T02:06:01+00:00"
+    assert len(attempts) == 2
+    retry = next(e for e in events if e["type"] == "source_retry")
+    assert (retry["data"]["stage"], retry["data"]["attempt"]) == ("note_detail", 1)
+    assert not [e for e in events if e["type"] == "source_partial_failure"]
+    usage = next(e for e in events if e["type"] == "source_usage_reconciled")
+    assert (usage["data"]["detail_filled"], usage["data"]["detail_failed"]) == (1, 0)
+
+
+def test_凭证错与限流不重试_不白花钱() -> None:
+    notes = [_note(1, liked=900)]
+    attempts: list[str] = []
+
+    def http_get(url, headers, timeout):
+        del headers, timeout
+        if "get_image_note_detail" in url:
+            attempts.append(url)
+            return xhs.HttpResponse(429, {"code": 429, "message": "rate limited"})
+        return xhs.HttpResponse(200, _search_payload(notes))
+
+    events: list[dict[str, Any]] = []
+    _run(http_get, detail_top_n=1, on_event=events.append)
+
+    assert len(attempts) == 1
+    failure = next(e for e in events if e["type"] == "source_partial_failure")
+    assert failure["data"]["closed_reason"] == "tikhub_http_429"
 
 
 def _probe_spec(fn):
