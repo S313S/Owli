@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -202,8 +203,18 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
             attempts += 1
             path.unlink(missing_ok=True)
             body = build_prompt(skill, data, report_text, path, errors, parts, name)
-            result = await adapter.run(_task(body, path, research_id, skill.model),
-                                       _ctx(path, research_id), on_event=on_event)
+            try:
+                result = await adapter.run(_task(body, path, research_id, skill.model),
+                                           _ctx(path, research_id), on_event=on_event)
+            except asyncio.CancelledError:
+                raise                       # 取消要往上传，别当成一次失败尝试吞掉
+            except Exception as exc:        # noqa: BLE001
+                # SDK 子进程整个崩掉时（09-05 实测「Error in hook callback」→
+                # 「Stream closed」）异常会冲出 adapter，把整份整理带走。一节崩了
+                # 只算这一节一次失败，换下一次尝试——环境问题归环境侧，这里只保证
+                # 不因为一次崩溃丢掉已经写好的其它节。
+                errors = (f"「{name}」这一轮引擎进程异常退出：{type(exc).__name__}: {exc}"[:400],)
+                continue
             # 判据落在产物上不落在返回码上：传输层报错但这一节落盘了就认（照 backfill 的
             # `_recover_transport_completion` 同思路）；返回 succeeded 但没落盘一样判没写。
             if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:

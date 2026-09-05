@@ -347,3 +347,40 @@ def test_prompt_scopes_the_writer_to_exactly_one_section(tmp_path):
     # 别的节的路径不许出现，免得写手顺手把整份都写了又超时。
     assert all(str(other) not in prompt for other_name, other in parts if other_name != name)
     assert " / ".join(n for n, _ in parts) in prompt          # 骨架仍给它看，只是不让写
+
+
+def test_a_crashing_engine_call_costs_one_attempt_not_the_whole_report(tmp_path):
+    """SDK 子进程整个崩掉时异常会冲出 adapter；一节崩了只算这一节一次失败。"""
+    import asyncio
+
+    from app.report.polish.run import polish, section_paths
+
+    skill = get_template("consulting")
+    parts = section_paths(tmp_path / "runs", "r-t", skill.name, skill.sections)
+    calls = {"n": 0}
+
+    class _Adapter:
+        async def run(self, task, ctx, on_event=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Stream closed")     # 第一次崩
+            task.output_path.write_text("正文[S01]。" * 40, encoding="utf-8")
+            return type("R", (), {"succeeded": True, "engine_error": None})()
+
+    class _Store:
+        def get_report(self, rid):
+            return {"id": rid, "title": "T", "research_question": "q", "plan_snapshot": {},
+                    "extra": {"claims": []}}
+
+        def list_evidence(self, rid):
+            return [{"id": "ev-1", "platform": "xhs", "kind": "post", "citation_no": 1,
+                     "title": "帖", "content_excerpt": "豆包好用", "grade": "A",
+                     "published_at": None, "extra": "{}"}]
+
+    work = "# 工作稿\n\n## 信息源\n\n- [S01] [帖](https://e.com/a)\n"
+    outcome = asyncio.run(polish(_Store(), "r-t", tmp_path / "runs", work,
+                                 template="consulting", adapter=_Adapter()))
+    assert outcome["status"] == "ok"
+    # 第一次崩掉只赔了一次尝试，五节全部写出来了。
+    assert calls["n"] == len(skill.sections) + 1
+    assert all(path.is_file() for _, path in parts)
