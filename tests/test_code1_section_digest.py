@@ -61,10 +61,13 @@ def test_一格角标过多时截断并标省略():
     assert attitude_line.count("[S") == marks * 2, "两格各截到上限"
 
 
-def test_明确要求写聚合断言():
+def test_聚合断言按片要求不按节要求():
+    """按节要求 3 条会被四片各做一遍，实测把每片推过 fast 档 330 s 节墙钟。"""
+
     digest = _ugc_coding_digest(_pool(10), _rows(10))
-    assert "至少写 3 条**聚合断言**" in digest
+    assert "本片至少写 1 条**聚合断言**" in digest
     assert "挂满 3 个以上" in digest
+    assert "别为了凑数把整片" in digest
 
 
 def test_摘要写死了条数口径_禁百分比句式():

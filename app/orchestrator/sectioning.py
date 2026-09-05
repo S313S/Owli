@@ -849,9 +849,12 @@ UGC_DIGEST_MIN_ROWS = 5
 #: 每个态度格最多给几条代表原声。多了会把提示词撑长，写手反而挑不动。
 UGC_DIGEST_QUOTES_PER_ATTITUDE = 2
 #: 每一格最多摆几个角标。摆多了提示词撑长，写手反而挑不动。
-UGC_DIGEST_MARKS_PER_BUCKET = 8
-#: 要求写手至少产出几条聚合断言（每条挂 ≥3 个角标）。
-UGC_DIGEST_MIN_AGGREGATE_CLAIMS = 3
+UGC_DIGEST_MARKS_PER_BUCKET = 6
+#: 每**片**至少产出几条聚合断言（每条挂 ≥3 个角标）。
+#: 这个数是按片给的，不是按节给的：节被切成四片、每片都照「本节至少 3 条」写，
+#: 等于四倍的活——实测把每片从 250 s 推到 270–330 s，撞上 fast 档 330 s 的节墙钟，
+#: 第 2、3 片双双超时整节作废。四片各写 1 条，整节自然满 3 条。
+UGC_DIGEST_MIN_AGGREGATE_CLAIMS = 1
 
 
 def _ugc_coding_digest(
@@ -920,11 +923,11 @@ def _ugc_coding_digest(
         if quotes:
             lines.append(f"- {attitude}向代表原声：" + "；".join(quotes))
     lines.append(
-        f"要求：本节至少写 {UGC_DIGEST_MIN_AGGREGATE_CLAIMS} 条**聚合断言**——"
+        f"要求：本片至少写 {UGC_DIGEST_MIN_AGGREGATE_CLAIMS} 条**聚合断言**——"
         "一条断言归纳上面某一格里的多条 UGC，并在 claims 里把这一格的角标"
         "**挂满 3 个以上**（例：『本节 18 条讲功能与能力的编码里，有 4 条指向"
-        "同一处能力短板』[S04][S07][S11][S19]）。聚合断言与逐条引用并存，"
-        "不要为了聚合丢掉单条的细节。\n"
+        "同一处能力短板』[S04][S07][S11][S19]）。写一条就够，别为了凑数把整片"
+        "改写成综述；聚合断言与逐条引用并存，不要为了聚合丢掉单条的细节。\n"
         "用法：可以写「本节 N 条 UGC 里 M 条编码为正向」这类**条数**表述，"
         "并挂上对应角标；不得写「用户 X% 认为」「多数用户」这类推及全网的比例句式，"
         "也不得把这段摘要本身当证据——引用仍只能引池里的条目。"
