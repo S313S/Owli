@@ -152,22 +152,26 @@ def offpool_marks(markdown: str, pool: frozenset[int]) -> list[str]:
     return [f"S{n:02d}" for n in sorted(used - pool)]
 
 
-def _ctx(path: Path, research_id: str) -> validation.Ctx:
+def _ctx(path: Path, research_id: str, runs_root: Path) -> validation.Ctx:
+    # runs_root 必须显式传：早先按 `path.parents[3]` 反推，分节目录多一层之后
+    # 它指到了研究目录而不是 runs 根，capability 于是把每次 Write 都判成越界
+    # （09-05 实测 permission_denials 全是节文件路径，引擎写不下去只好 blocked）。
     return validation.Ctx(
         output_path=path, output_format="markdown", research_id=research_id,
         goal_id=GOAL_ID, agent_id=AGENT_ID,
         read_text=lambda: path.read_text(encoding="utf-8"),
         read_json=lambda: json.loads(path.read_text(encoding="utf-8")),
-        store=None, source_domains=frozenset(), runs_root=path.parents[3],
+        store=None, source_domains=frozenset(), runs_root=runs_root,
     )
 
 
-def _task(body: str, output_path: Path, research_id: str, model: str) -> EngineTask:
+def _task(body: str, output_path: Path, research_id: str, model: str,
+          runs_root: Path) -> EngineTask:
     return EngineTask(
         body=body, output_path=output_path, output_format="markdown",
         research_id=research_id, goal_id=GOAL_ID, agent_id=AGENT_ID,
         agent_kind=AGENT_KIND, validators=["file_exists"], model=model,
-        runs_root=output_path.parents[3],
+        runs_root=runs_root,
         capability=Capability(
             # 分节落盘要 Edit 追加，Edit 得先 Read 回自己刚写的那一段，故 read 也开在 exports/。
             profile="readonly-analyst", tools=("fs.write", "fs.read"),
@@ -196,6 +200,23 @@ def default_adapter() -> Any:
                                    "codex": CodexAdapter()})
 
 
+def _failure_detail(result: Any) -> str:
+    """把引擎为什么没写出来说清楚：报错、权限拒绝、校验失败，一样不少。"""
+    bits = []
+    for field in ("engine_error", "conclusion_error"):
+        value = getattr(result, field, None)
+        if value:
+            bits.append(f"{field}={value}")
+    denials = list(getattr(result, "permission_denials", None) or [])
+    if denials:
+        bits.append(f"被拒路径/工具 {len(denials)} 次，例如 {denials[0]}")
+    report = getattr(result, "validation", None)
+    for item in getattr(report, "results", []) or []:
+        if str(getattr(item, "verdict", "")).endswith("fail"):
+            bits.append(f"校验 {item.name} 未过：{str(getattr(item, 'detail', ''))[:120]}")
+    return ("；".join(bits))[:500]
+
+
 async def polish(store: Any, research_id: str, runs_root: Path, report_text: str, *,
                  template: str | None = None, adapter: Any = None,
                  on_event: Callable[[Any], Awaitable[None]] | None = None) -> dict[str, Any]:
@@ -220,8 +241,9 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
             path.unlink(missing_ok=True)
             body = build_prompt(skill, data, report_text, path, errors, parts, name)
             try:
-                result = await adapter.run(_task(body, path, research_id, skill.model),
-                                           _ctx(path, research_id), on_event=on_event)
+                result = await adapter.run(
+                    _task(body, path, research_id, skill.model, runs_root),
+                    _ctx(path, research_id, runs_root), on_event=on_event)
             except asyncio.CancelledError:
                 raise                       # 取消要往上传，别当成一次失败尝试吞掉
             except Exception as exc:        # noqa: BLE001
@@ -234,10 +256,11 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
             # 判据落在产物上不落在返回码上：传输层报错但这一节落盘了就认（照 backfill 的
             # `_recover_transport_completion` 同思路）；返回 succeeded 但没落盘一样判没写。
             if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:
-                engine_error = (getattr(result, "engine_error", None)
-                                or getattr(result, "conclusion_error", None))
+                # 只报 engine_error / conclusion_error 是不够的：09-05 撞到的那次
+                # 两者都是 None，真话写在 permission_denials 与 validation 里，
+                # 少打这两样让我多绕了两轮。
                 errors = (f"「{name}」这一节没写出来或写得过短。"
-                          + (f"上一轮引擎报错：{engine_error}" if engine_error else ""),)
+                          + _failure_detail(result),)
                 continue
             offpool = offpool_marks(path.read_text(encoding="utf-8"), pool)
             if not offpool:
