@@ -107,6 +107,8 @@ def test_评级章产物按permalink贴回_行数不变且五维落库(tmp_path:
         "goal_id": "goal-1", "agent_id": "reliability-audit",
         "rated": 3, "unmatched": 0, "invalid": 0, "samples": [],
         "invalid_samples": [], "failed": "",
+        # D-049：这三行库里五维全 NULL，走的是「旧产物回贴」那一路
+        "kept": 0, "filled": 3,
     }]
 
 
@@ -195,18 +197,21 @@ def test_goal收尾时先入库采集产物再贴评级(tmp_path: Path) -> None:
     assert ordering == ["upsert:collection", "upsert:rating"]
 
 
-def test_D029_评级产物读不到或非list_早退也返回三元组(tmp_path: Path) -> None:
-    """D-029：早退分支返回二元组会让 `_persist_rating_chapter` 解包崩死。"""
+def test_D029_评级产物读不到或非list_早退也返回四元组(tmp_path: Path) -> None:
+    """D-029：早退分支少返回一项会让 `_persist_rating_chapter` 解包崩死。
+
+    D-049 给第四项 kept（库里已有分、这次一格没动的行数），早退路一并跟上。
+    """
     from app.orchestrator.runtime import RuntimeCoordinator
 
     shim = SimpleNamespace()
     missing = RuntimeCoordinator._rating_payloads(
         shim, tmp_path / "no-such-file.json", existing={}, agent_id="ra",
     )
-    assert missing == ([], [], [])
+    assert missing == ([], [], [], 0)
     not_list = tmp_path / "not-list.json"
     not_list.write_text('{"markdown": "x"}', encoding="utf-8")
     result = RuntimeCoordinator._rating_payloads(
         shim, not_list, existing={}, agent_id="ra",
     )
-    assert result == ([], [], [])
+    assert result == ([], [], [], 0)

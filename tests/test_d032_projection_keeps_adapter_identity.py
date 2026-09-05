@@ -198,8 +198,8 @@ class ProjectionIdentityTest(unittest.TestCase):
         self.assertEqual(rows[0]["platform"], "weibo")
         self.assertEqual(rows[0]["platform_item_id"], _WEIBO_ITEM_ID)
         self.assertEqual(rows[0]["fetch_method"], "media_crawler")
-        # 评分列不在本卡的保护名单里：终态补扫时由评级章产物重贴（
-        # `_persist_rating_chapter` 在采集 payload 之后跑），本用例只锁身份列。
+        # 评分列由 D-049 另行保护（本用例只锁身份列，评分见
+        # tests/test_d049_projection_keeps_scores.py）。
         self.assertEqual(rows[0]["extra"]["provider"], "media_crawler")
 
     def test_公众号池读行同形不被改写(self) -> None:

@@ -1658,28 +1658,45 @@ class RuntimeCoordinator:
         "score_authority", "score_freshness", "score_crossref",
         "score_completeness", "score_independence", "rating_notes",
     )
+    _RATING_SCORE_COLUMNS = (
+        "score_authority", "score_freshness", "score_crossref",
+        "score_completeness", "score_independence",
+    )
     _RATING_EXTRA_KEYS = ("authority_kind", "content_kind", "interest_relation")
 
     def _rating_payloads(
         self, path: Path, *, existing: Mapping[str, Mapping[str, Any]],
         agent_id: str,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[str], list[str], int]:
         """§RATE-1 货 3：评级章产物按 permalink 贴回已入库那一行，只动评分列。
 
         评级章不重抄正文——`upsert_evidence_batch` 只认 `(report_id, permalink)`
         与平台原生 ID，抄错一个字段就是插一条新行（D-015 一轮报废的教训）。所以这里
         拿库里那一行做底，只把五维 + rating_notes + 三个闭集标签盖上去；库里没有的
         permalink **不插新行**，只记 unmatched 让它可见。
+
+        §D-049：**库里已有分的行，产物不许盖分。** 收尾补评
+        （`app/reliability/backfill.py`）永远晚于评级章，它算出的分才是最新的；
+        而这里的产物是评级章当时写下的旧分，续写 / 补节 / 重放一起跑就把补评
+        结果静默还原（RATE-4 的代表性尺子因此在生产上一分也不生效）。所以按
+        库里五维**有没有分**分两路：有分 → 五维 / rating_notes / rated_by /
+        三个闭集标签全保留库值（kept）；五维全 NULL → 整份贴回，即「旧产物回贴」
+        照旧（filled）。评分块整块判：五维与 rating_notes 必须逐格一致，按列补空
+        会写出被库拒的不一致行；`rated_by` 与三个闭集标签则按键补空。
+        不拿 `rated_by` 判新旧——`--rescore-only` 的补评保留原 `agent:*` 标记
+        （backfill.py `_rating_provenance`），标记根本认不出谁新谁旧。
+        第四个返回值是 kept 行数，filled = len(payloads) - kept。
         """
         try:
             items = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
-            return [], [], []
+            return [], [], [], 0
         if not isinstance(items, list):
-            return [], [], []
+            return [], [], [], 0
         payloads: list[dict[str, Any]] = []
         unmatched: list[str] = []
         invalid: list[str] = []
+        kept = 0
         for raw in items:
             if not isinstance(raw, Mapping):
                 continue
@@ -1697,19 +1714,33 @@ class RuntimeCoordinator:
                 unmatched.append(permalink or "(缺 permalink)")
                 continue
             payload = dict(stored)
-            for column in self._RATING_COLUMNS:
-                if raw.get(column) is not None:
-                    payload[column] = raw[column]
+            scored = any(
+                stored.get(column) is not None
+                for column in self._RATING_SCORE_COLUMNS
+            )
+            if not scored:
+                # 五维 + rating_notes 是**一整块**：`dao._prepare_evidence` 要求
+                # 备注里的五个数字与五维列逐格一致（`?` 记法对应 NULL），按列
+                # 补空会写出「分是产物的、备注还是库里的」这种不一致行，直接被
+                # 库拒。所以只在库里五维全空时整块贴回。
+                for column in self._RATING_COLUMNS:
+                    if raw.get(column) is not None:
+                        payload[column] = raw[column]
             extra = dict(payload.get("extra") or {})
             raw_extra = raw.get("extra") if isinstance(raw.get("extra"), Mapping) else {}
             for key in self._RATING_EXTRA_KEYS:
                 value = raw_extra.get(key) if raw_extra else raw.get(key)
-                if value:
-                    extra[key] = value
+                if not value:
+                    continue
+                if scored and extra.get(key):
+                    continue
+                extra[key] = value
             payload["extra"] = extra
-            payload["rated_by"] = f"agent:{agent_id}"
+            if not (scored and payload.get("rated_by")):
+                payload["rated_by"] = f"agent:{agent_id}"
             payloads.append(payload)
-        return payloads, unmatched, invalid
+            kept += 1 if scored else 0
+        return payloads, unmatched, invalid, kept
 
     @classmethod
     def _rating_scores_ok(cls, raw: Mapping[str, Any]) -> bool:
@@ -1967,9 +1998,10 @@ class RuntimeCoordinator:
             for item in self.store.list_evidence(plan.research_id)
         }
         path = self.runs_root / plan.research_id / str(agent.output["path"])
-        payloads, unmatched, invalid = self._rating_payloads(
+        payloads, unmatched, invalid, kept = self._rating_payloads(
             path, existing=existing, agent_id=agent.agent_id,
         )
+        filled = len(payloads) - kept
         failed = ""
         if payloads:
             try:
@@ -1979,6 +2011,7 @@ class RuntimeCoordinator:
                 # 不把调它的那条收尾路径一起带走。
                 failed = f"{type(error).__name__}: {error}"
                 payloads = []
+                kept = filled = 0
         await self.events.publish(plan.research_id, {
             "type": "rating_chapter_persisted",
             "data": {
@@ -1986,6 +2019,10 @@ class RuntimeCoordinator:
                 "rated": len(payloads), "unmatched": len(unmatched),
                 "invalid": len(invalid), "samples": unmatched[:5],
                 "invalid_samples": invalid[:5], "failed": failed,
+                # D-049：kept = 库里已有分、这次一格没动的行；
+                # filled = 五维全空、由旧产物整份贴回的行。让「谁的分赢」
+                # 不是静默发生的：补评之后再跑，kept 应等于有分行数。
+                "kept": kept, "filled": filled,
             },
         })
 
@@ -2089,9 +2126,16 @@ class RuntimeCoordinator:
             # 全列 UPDATE 会把它抹成 NULL（r-f59fdba77cd7 那 25 行的
             # normalized_score 现已全 NULL）。平台列已受保护、没被改，
             # dao._validate_normalization 的「norm_context.platform 与
-            # platform 一致」照旧成立。评分五列不进名单：评级章产物在
-            # 采集 payload 之后重贴（_persist_rating_chapter），正常路径能复原。
+            # platform 一致」照旧成立。
             "normalized_score", "norm_method", "norm_context",
+            # D-049：评分列也进名单。原来不进的理由是「评级章产物在采集
+            # payload 之后重贴（_persist_rating_chapter），正常路径能复原」——
+            # 那个理由在「收尾补评之后」不成立：产物里是评级章当时的旧分，
+            # 复原回去正好把补评算好的分抹掉。这里先保住库值不被采集产物
+            # 写成 NULL，评级章那一步再按「有分不动」补空（_rating_payloads）。
+            "score_authority", "score_freshness", "score_crossref",
+            "score_completeness", "score_independence",
+            "rating_notes", "rated_by",
         )
         downgraded: list[dict[str, str]] = []
         for payload in payloads:
