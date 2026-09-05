@@ -848,6 +848,10 @@ def _numbered_evidence_rows(
 UGC_DIGEST_MIN_ROWS = 5
 #: 每个态度格最多给几条代表原声。多了会把提示词撑长，写手反而挑不动。
 UGC_DIGEST_QUOTES_PER_ATTITUDE = 2
+#: 每一格最多摆几个角标。摆多了提示词撑长，写手反而挑不动。
+UGC_DIGEST_MARKS_PER_BUCKET = 8
+#: 要求写手至少产出几条聚合断言（每条挂 ≥3 个角标）。
+UGC_DIGEST_MIN_AGGREGATE_CLAIMS = 3
 
 
 def _ugc_coding_digest(
@@ -874,15 +878,38 @@ def _ugc_coding_digest(
         counts = Counter(value for value in values if value)
         return "、".join(f"{name} {count} 条" for name, count in counts.most_common())
 
+    def grouped(pairs: Iterable[tuple[str, str]]) -> str:
+        """每一格连**角标清单**一起给。
+
+        只给条数，写手写不出挂 ≥3 个角标的聚合断言——它不知道哪几条在这一格。
+        第一轮重放实测：只给条数时全节只出现一句「N 条」，≥3 证据的断言仍是 1 条。
+        """
+
+        buckets: dict[str, list[str]] = {}
+        for name, citation in pairs:
+            if name and citation:
+                buckets.setdefault(name, []).append(citation)
+        return "；".join(
+            f"{name} {len(marks)} 条 {''.join(marks[:UGC_DIGEST_MARKS_PER_BUCKET])}"
+            + ("…" if len(marks) > UGC_DIGEST_MARKS_PER_BUCKET else "")
+            for name, marks in sorted(
+                buckets.items(), key=lambda pair: (-len(pair[1]), pair[0])
+            )
+        )
+
     lines = [
         f"【本节 UGC 聚合摘要】本节可见池里 {len(coded)} 条已逐条编码"
         "（模型判断，不是统计抽样）：",
-        "- 态度：" + tally(coding["attitude"] for _, coding in coded),
+        "- 态度：" + grouped(
+            (coding["attitude"], citation) for citation, coding in coded
+        ),
+        "- 主题：" + grouped(
+            (topic, citation)
+            for citation, coding in coded
+            for topic in (coding.get("topics") or [])
+        ),
         "- 场景：" + tally(coding["scenario"] for _, coding in coded),
         "- 人群：" + tally(coding["audience"] for _, coding in coded),
-        "- 主题：" + tally(
-            topic for _, coding in coded for topic in (coding.get("topics") or [])
-        ),
     ]
     for attitude in ("正", "负", "混合"):
         quotes = [
@@ -893,6 +920,11 @@ def _ugc_coding_digest(
         if quotes:
             lines.append(f"- {attitude}向代表原声：" + "；".join(quotes))
     lines.append(
+        f"要求：本节至少写 {UGC_DIGEST_MIN_AGGREGATE_CLAIMS} 条**聚合断言**——"
+        "一条断言归纳上面某一格里的多条 UGC，并在 claims 里把这一格的角标"
+        "**挂满 3 个以上**（例：『本节 18 条讲功能与能力的编码里，有 4 条指向"
+        "同一处能力短板』[S04][S07][S11][S19]）。聚合断言与逐条引用并存，"
+        "不要为了聚合丢掉单条的细节。\n"
         "用法：可以写「本节 N 条 UGC 里 M 条编码为正向」这类**条数**表述，"
         "并挂上对应角标；不得写「用户 X% 认为」「多数用户」这类推及全网的比例句式，"
         "也不得把这段摘要本身当证据——引用仍只能引池里的条目。"

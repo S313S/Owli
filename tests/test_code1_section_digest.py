@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.orchestrator.sectioning import (
+    UGC_DIGEST_MARKS_PER_BUCKET,
     UGC_DIGEST_MIN_ROWS,
     _ugc_coding_digest,
 )
@@ -43,12 +44,27 @@ def test_没编码的行不进摘要():
     assert "本节可见池里 6 条" in digest
 
 
-def test_摘要给条数与代表原声_并挂角标():
+def test_每一格连角标清单一起给():
+    """只给条数写不出挂 ≥3 角标的聚合断言——第一轮重放实测过。"""
+
     digest = _ugc_coding_digest(_pool(10), _rows(10))
-    assert "态度：" in digest and "正 5 条" in digest and "负 5 条" in digest
-    assert "主题：功能与能力 5 条" in digest
+    assert "正 5 条 [S01][S03][S05][S07][S09]" in digest
+    assert "主题：功能与能力 5 条 [S01][S03][S05][S07][S09]" in digest
     assert "正向代表原声：[S01]「原声1」；[S03]「原声3」" in digest
-    assert digest.count("[S") == 4, "每格最多两条原声，正负各一格"
+
+
+def test_一格角标过多时截断并标省略():
+    digest = _ugc_coding_digest(_pool(30), _rows(30, attitude="正"))
+    marks = UGC_DIGEST_MARKS_PER_BUCKET
+    assert f"正 15 条 " in digest and "…" in digest
+    attitude_line = next(l for l in digest.splitlines() if l.startswith("- 态度："))
+    assert attitude_line.count("[S") == marks * 2, "两格各截到上限"
+
+
+def test_明确要求写聚合断言():
+    digest = _ugc_coding_digest(_pool(10), _rows(10))
+    assert "至少写 3 条**聚合断言**" in digest
+    assert "挂满 3 个以上" in digest
 
 
 def test_摘要写死了条数口径_禁百分比句式():
