@@ -229,3 +229,28 @@ def test_d051_旧片指向没变就照旧跳过(tmp_path):
         e["data"]["shard"] for e in events if e["type"] == "write_shard_skipped"
     ] == [1]
     assert "sec-1.part.1.md" not in bodies
+
+
+def test_d051_片提示词把可看性尺子的词表讲全(tmp_path):
+    """货 6：提示词只禁「本片/分片/第 N 片」，R7 的词表还含运行时章号与 shard。
+
+    真机 r-13d61d236bff：靶子节『证据缺口』写了「缺失章 goal-3/ch-3、
+    goal-1/ch-1 的搜索抓取因 timeout 未落地」，`check_readable` R7 打红。
+    这句话**早于本卡**（底料自己那份第 1 片里就有两处 `goal-1/ch-1`），
+    8956 那轮 R7 反而是绿的——那轮第 1 片挂了，这三段整个没进成稿，
+    红不出来是因为内容没了。本卡把片救回来，这句话跟着回来，尺子才亮。
+    """
+    _, _, bodies, _, _ = _shard_run(tmp_path, evidence=30, wall_clock=330.0)
+
+    shard_bodies = {
+        name: body for name, body in bodies.items() if ".part." in name
+    }
+    assert shard_bodies
+    for body in shard_bodies.values():
+        # 既有那句不许被顶掉
+        assert "「本片」「分片」「第 N 片」" in body
+        # R7 词表里 `goal-\d+/ch-\d+`、`ch-\d+/sec-\d+`、`shard` 三样也要讲到
+        assert "goal-1/ch-1" in body
+        assert "ch-6/sec-1" in body
+        assert "shard" in body
+        assert "运行时章节编号" in body
