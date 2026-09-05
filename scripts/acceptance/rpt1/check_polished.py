@@ -28,9 +28,17 @@ from app.report.polish.skills import load_templates  # noqa: E402
 #: 内部词：读者不知道也不需要知道研究是怎么切块的。
 FORBIDDEN = (r"goal-\d", r"sec-\d", r"ch-\d", "本片", "本节样本", "本章样本", "上游目标",
              "采集章", "撰写章")
-#: ⑤ 的程度词：没数字时至少要有一个判断的力度。
-DEGREE_WORDS = ("最", "更", "近半", "过半", "多数", "少数", "普遍", "集中", "远", "几乎",
-                "全部", "唯一", "首", "领先", "落后", "不足", "超过", "翻倍", "零")
+#: ⑤ 的程度词：没数字时至少要有一个判断的力度。含对比与转折——「A 在 X 不在 Y」
+#: 是最典型的行动式标题句式，早先漏收，把三个合格标题误判成红（09-05 首稿实测）。
+DEGREE_WORDS = ("最", "更", "近半", "过半", "多数", "少数", "普遍", "集中", "聚焦", "远",
+                "几乎", "全部", "唯一", "首", "领先", "落后", "不足", "超过", "翻倍", "零",
+                "不在", "而非", "不是", "并非", "相比", "统一", "形成", "转向", "推向",
+                "主要", "仅", "只", "未", "没有", "反而", "却")
+#: ⑤ 不管这些一级节里的小标题——它们的措辞是模板自己规定的（附录四件事、
+#: 建议段的「值得进一步验证的方向」），要求它们写成结论句是尺子越界。
+STRUCTURAL_SECTIONS = frozenset({
+    "论据与数据", "建议", "附录", "需要回应的点", "谁强在哪", "对比总览", "时间线",
+})
 MARK = re.compile(r"\[S(\d{2,})\]")
 #: 附录的信息源清单里角标是裸写的（`S01｜A 级｜…`），也得当角标认，
 #: 否则 ④ 会把 `S01` 里的 `01` 当成一个没出处的数字。
@@ -70,6 +78,17 @@ def _sections_of(markdown: str, level: int) -> list[str]:
     prefix = "#" * level + " "
     return [line[len(prefix):].strip() for line in markdown.splitlines()
             if line.startswith(prefix)]
+
+
+def _body_subheadings(markdown: str) -> list[str]:
+    """要求写成行动式标题的二级标题：结构节（附录/建议等）底下的一概不算。"""
+    picked, current = [], ""
+    for line in markdown.splitlines():
+        if line.startswith("# "):
+            current = line[2:].strip()
+        elif line.startswith("## ") and current not in STRUCTURAL_SECTIONS:
+            picked.append(line[3:].strip())
+    return picked
 
 
 def _template_for(markdown: str, tables_path: Path):
@@ -121,7 +140,7 @@ def check_numbers(markdown: str, allowed: set[str]) -> list[str]:
 
 def check_action_titles(markdown: str, template) -> list[str]:
     problems = []
-    for title in _sections_of(markdown, 2):
+    for title in _body_subheadings(markdown):
         if title in template.sections:
             continue
         if any(char.isdigit() for char in title) or any(w in title for w in DEGREE_WORDS):

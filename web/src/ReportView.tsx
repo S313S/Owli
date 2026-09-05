@@ -1,8 +1,9 @@
-import { Alert, Button, Collapse, Empty, Popover, Segmented, Space, Spin, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Collapse, Empty, Popover, Segmented, Select, Space, Spin, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ApiEnvelope, EvidenceItem, EvidenceView, ReportSection, ReportView as ReportData } from './types'
+import type { ApiEnvelope, EvidenceItem, EvidenceView, PolishedReport, PolishedTable,
+  ReportSection, ReportTemplate, ReportView as ReportData } from './types'
 
 // 五维顺序 = evidence 列序 = rating_notes 段序 = Excel G–K（四处同序，spec §5）
 export const SCORE_DIMS: Array<[keyof EvidenceItem, string]> = [
@@ -178,8 +179,57 @@ function MissingList({ report }: { report: ReportData }) {
   </section>
 }
 
+/** §RPT-1 正式稿：只读一份已整理好的稿；没整理过就是 null，不是错。 */
+function usePolishedReport(researchId: string, template: string, reload: number) {
+  const [polished, setPolished] = useState<PolishedReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let disposed = false
+    setLoading(true)
+    void (async () => {
+      try {
+        const r = await fetch(`/api/researches/${encodeURIComponent(researchId)}/polished`
+          + `?template=${encodeURIComponent(template)}`)
+        const body = r.ok ? await r.json() as ApiEnvelope<PolishedReport> : null
+        if (!disposed) setPolished(body?.ok ? body.data : null)
+      } catch { if (!disposed) setPolished(null) } finally { if (!disposed) setLoading(false) }
+    })()
+    return () => { disposed = true }
+  }, [researchId, template, reload])
+  return { polished, loading }
+}
+
+/** 确定性数据表：写手不许改这里的数，所以原样折叠在正文下面，随时可核。 */
+function DeterministicTables({ tables }: { tables: Record<string, PolishedTable> }) {
+  const items = Object.values(tables).filter((t) => t && t.rows?.length)
+  if (!items.length) return null
+  return <Collapse ghost data-testid="polished-tables" items={items.map((t) => ({
+    key: t.name,
+    label: `${t.title}（n=${t.n}）`,
+    children: <>
+      <Table size="small" pagination={false} rowKey={(_, i) => String(i)}
+        dataSource={t.rows} columns={(t.columns ?? []).map((c) => ({
+          title: c, dataIndex: c, render: (v: unknown) => String(v ?? ''),
+        }))} />
+      <Typography.Paragraph type="secondary" style={{ marginTop: 6, marginBottom: 0 }}>
+        口径：{t.basis}
+        {Object.keys(t.coverage ?? {}).length > 0 && <> · 覆盖：{Object.entries(t.coverage)
+          .map(([k, v]) => `${k} ${v}`).join(' / ')}</>}
+      </Typography.Paragraph>
+    </>,
+  }))} />
+}
+
 export default function ReportView({ researchId, fallback }: { researchId: string; fallback?: string | null }) {
   const { report, evidence, error, refresh } = useReportData(researchId)
+  // 正式稿是给「拿结论去用的人」看的，有就默认停在它；工作稿随时能切回来。
+  const [template, setTemplate] = useState('consulting')
+  const [polishTick, setPolishTick] = useState(0)
+  const [draft, setDraft] = useState<'work' | 'polished' | null>(null)
+  const { polished, loading: polishing } = usePolishedReport(researchId, template, polishTick)
+  useEffect(() => {
+    if (draft === null && !polishing) setDraft(polished ? 'polished' : 'work')
+  }, [draft, polishing, polished])
   const lookup = useMemo<Lookup>(() => {
     const byNo = new Map<number, EvidenceItem | { permalink: string; title: string }>()
     for (const s of report?.sources ?? []) byNo.set(s.citation_no, { permalink: s.permalink, title: s.title })
@@ -197,17 +247,30 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
   if (!report) return <Spin tip="读取报告…"><div style={{ minHeight: 120 }} /></Spin>
 
   const dangling = report.citations.dangling
+  const showPolished = draft === 'polished' && polished !== null
   return <div className="report-view" data-testid="report-view" data-format={report.format}>
     <div className="report-toolbar" data-testid="report-toolbar">
-      <ExportButtons researchId={researchId} report={report} onDone={refresh} />
+      <ExportButtons researchId={researchId} report={report} onDone={refresh}
+        template={template} onTemplateChange={setTemplate}
+        onPolished={() => { setPolishTick((n) => n + 1); setDraft('polished') }} />
     </div>
-    {dangling.length > 0 && <Alert type="error" showIcon style={{ marginBottom: 8 }}
+    {polished !== null && <Segmented data-testid="draft-tabs" style={{ marginBottom: 12 }}
+      value={showPolished ? 'polished' : 'work'} onChange={(v) => setDraft(v as 'work' | 'polished')}
+      options={[{ label: '正式稿', value: 'polished' }, { label: '工作稿', value: 'work' }]} />}
+    {showPolished && <div className="polished-view" data-testid="polished-view"
+      data-template={polished.template}>
+      <Markdown text={polished.markdown} lookup={lookup} />
+      <Typography.Title level={5} style={{ marginTop: 16 }}>确定性数据表</Typography.Title>
+      <DeterministicTables tables={polished.tables} />
+      <References report={report} evidence={evidence} />
+    </div>}
+    {!showPolished && dangling.length > 0 && <Alert type="error" showIcon style={{ marginBottom: 8 }}
       message={`正文引用了 ${dangling.length} 个清单里没有的角标：${dangling.map((n) => `S${String(n).padStart(2, '0')}`).join('、')}`} />}
-    {report.conclusions.length > 0 && <section data-testid="report-conclusions">
+    {!showPolished && report.conclusions.length > 0 && <section data-testid="report-conclusions">
       <Typography.Title level={4}>结论</Typography.Title>
       <ul>{report.conclusions.map((c, i) => <li key={i}>{withMarks(c, lookup)}</li>)}</ul>
     </section>}
-    {report.sections.map((section, i) => <section key={section.section_id ?? i} data-testid="report-section" data-placeholder={section.placeholder}>
+    {!showPolished && report.sections.map((section, i) => <section key={section.section_id ?? i} data-testid="report-section" data-placeholder={section.placeholder}>
       <ReplaySectionButton researchId={researchId} section={section} />
       {section.placeholder
         ? <div className="report-section-placeholder">
@@ -216,8 +279,8 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
           </div>
         : <Markdown text={section.markdown} lookup={lookup} />}
     </section>)}
-    <References report={report} evidence={evidence} />
-    <MissingList report={report} />
+    {!showPolished && <References report={report} evidence={evidence} />}
+    {!showPolished && <MissingList report={report} />}
   </div>
 }
 
@@ -254,8 +317,53 @@ function ReplaySectionButton({ researchId, section }: {
   </Button>
 }
 
-function ExportButtons({ researchId, report, onDone }: { researchId: string; report: ReportData; onDone: () => void }) {
+function ExportButtons({ researchId, report, onDone, template, onTemplateChange, onPolished }: {
+  researchId: string; report: ReportData; onDone: () => void
+  template: string; onTemplateChange: (name: string) => void; onPolished: () => void
+}) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [templates, setTemplates] = useState<ReportTemplate[]>([])
+  const [waited, setWaited] = useState<string | null>(null)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch('/api/report-templates')
+        if (!r.ok) return
+        const body = await r.json() as ApiEnvelope<{ templates: ReportTemplate[] }>
+        if (body.ok) setTemplates(body.data.templates)
+      } catch { /* 拿不到清单就只留默认模板，按钮照样能按 */ }
+    })()
+  }, [])
+  // 整理是后台活（Opus 一次调用，几分钟起步）。状态一律走 SSE，不许轮询
+  // （web 契约：只有 RunPanel 豁免定时器），所以这里订阅本研究的事件流，
+  // 只认 progress 的 polish 阶段与 export_failed 两种。
+  const polish = async () => {
+    setBusy('polished'); setWaited(null)
+    let source: EventSource | null = null
+    const stop = () => { source?.close(); source = null; setBusy(null) }
+    try {
+      const r = await fetch(`/api/researches/${encodeURIComponent(researchId)}/export`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'polished', template }),
+      })
+      const body = await r.json() as ApiEnvelope<{ status?: string }>
+      if (!r.ok || !body.ok) throw new Error(body.error?.message ?? `HTTP ${r.status}`)
+      source = new EventSource(`/api/researches/${encodeURIComponent(researchId)}/events`)
+      source.addEventListener('progress', (event) => {
+        const data = JSON.parse((event as MessageEvent<string>).data)?.data ?? {}
+        if (data.stage !== 'polish') return
+        setWaited(String(data.summary ?? ''))
+        if (data.status === 'done') {
+          void message.success('正式稿已整理完成'); onPolished(); onDone(); stop()
+        }
+      })
+      source.addEventListener('export_failed', (event) => {
+        const data = JSON.parse((event as MessageEvent<string>).data)?.data ?? {}
+        if (data.kind !== 'polished') return
+        void message.error(`整理失败：${data.error ?? '未知原因'}`); onDone(); stop()
+      })
+    } catch (e) { void message.error(e instanceof Error ? e.message : String(e)); stop() }
+  }
   const run = async (kind: 'excel' | 'feishu') => {
     setBusy(kind)
     try {
@@ -270,9 +378,22 @@ function ExportButtons({ researchId, report, onDone }: { researchId: string; rep
     } catch (e) { void message.error(e instanceof Error ? e.message : String(e)) } finally { setBusy(null) }
   }
   const excel = report.exports.filter((x) => x.kind === 'excel').at(-1)
+  // url=null 的那条是失败登记（货 3），只当提示不给链接。
+  const lastPolished = report.exports.filter((x) => x.kind === 'polished').at(-1)
+  const options = (templates.length ? templates : [{ name: 'consulting', title: '调研报告（咨询体）' }])
+    .map((t) => ({ value: t.name, label: t.title }))
   return <>
+    <Button size="small" type="primary" loading={busy === 'polished'} onClick={() => void polish()}
+      data-testid="export-polished">整理成正式稿</Button>
+    <Select size="small" style={{ minWidth: 170 }} value={template} options={options}
+      onChange={onTemplateChange} data-testid="polished-template" />
+    {busy === 'polished' && <Typography.Text type="secondary" data-testid="polished-progress">
+      {waited ?? '正在整理（Opus 一次调用通常要几分钟）'}</Typography.Text>}
     <Button size="small" loading={busy === 'excel'} onClick={() => void run('excel')} data-testid="export-excel">导出 Excel</Button>
     <Button size="small" loading={busy === 'feishu'} onClick={() => void run('feishu')} data-testid="export-feishu">推送飞书</Button>
+    {lastPolished && (lastPolished.url
+      ? <a href={lastPolished.url} target="_blank" rel="noreferrer">上次整理 {lastPolished.created_at}</a>
+      : <Tag color="orange" data-testid="polished-failed">上次整理失败</Tag>)}
     {excel?.url && <a href={excel.url} target="_blank" rel="noreferrer">上次导出 {excel.created_at}</a>}
     {report.feishu.doc_url && <a href={report.feishu.doc_url} target="_blank" rel="noreferrer">飞书云文档</a>}
     {report.feishu.status && report.feishu.status !== 'pending' && <Tag>飞书 {report.feishu.status}</Tag>}

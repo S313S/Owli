@@ -330,3 +330,32 @@ export type EvidenceView = {
   }
   score_fields: string[]
 }
+
+// §RPT-1 正式稿：工作稿之上的一层，模板可选；sources 与工作稿同形，角标卡直接复用。
+export type ReportTemplate = {
+  name: string
+  title: string
+  description: string
+  sections: string[]
+}
+
+export type PolishedTable = {
+  name: string
+  title: string
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  n: number
+  basis: string
+  coverage: Record<string, number>
+}
+
+export type PolishedReport = {
+  research_id: string
+  template: string
+  title: string
+  markdown: string
+  tables: Record<string, PolishedTable>
+  sources: ReportSource[]
+  generated_at: number
+  url: string
+}

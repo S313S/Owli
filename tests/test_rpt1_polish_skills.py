@@ -138,3 +138,33 @@ def test_ruler_catches_topic_style_heading(tmp_path):
     findings = _run(tmp_path, GOOD.replace(
         "## 小红书贡献了 296 条证据，却一条都没被引用", "## 小红书数据分析"))
     assert any("小红书数据分析" in p for p in findings["⑤ 行动式标题"])
+
+
+def test_ruler_does_not_demand_action_titles_inside_structural_sections(tmp_path):
+    """附录/建议底下的小标题措辞是模板自己规定的，尺子不许拿行动式标题去要求它们。
+
+    09-05 首稿实测：尺子把「一、样本怎么来的」「值得进一步验证的方向」判成红，
+    是尺子越界不是稿有问题。
+    """
+    markdown = GOOD.replace("# 附录\n\n信息源：S01。",
+                            "# 附录\n\n## 一、样本怎么来的\n\n说明。\n\n## 四、信息源清单\n\nS01。")
+    markdown = markdown.replace("1. 补一轮小红书精读[S01]",
+                                "## 值得进一步验证的方向\n\n1. 补一轮小红书精读[S01]")
+    assert not _run(tmp_path, markdown)["⑤ 行动式标题"]
+
+
+@pytest.mark.parametrize("title", [
+    "豆包的负向印象聚焦在交付质检，不在AI能力本身",
+    "豆包正被字节统一为AI办公场景的入口",
+    "DeepSeek在同期证据里形成清晰的技术派对照",
+])
+def test_ruler_accepts_contrast_style_action_titles(tmp_path, title):
+    """「A 在 X 不在 Y」这类对比句是最典型的行动式标题，早先的词表漏收了它们。"""
+    markdown = GOOD.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    assert not _run(tmp_path, markdown)["⑤ 行动式标题"]
+
+
+def test_ruler_still_catches_a_topic_heading_in_the_body(tmp_path):
+    """放宽之后仍要抓得住真正的话题式标题，否则等于把尺子改废了。"""
+    markdown = GOOD.replace("## 小红书贡献了 296 条证据，却一条都没被引用", "## 平台情况说明")
+    assert any("平台情况说明" in p for p in _run(tmp_path, markdown)["⑤ 行动式标题"])

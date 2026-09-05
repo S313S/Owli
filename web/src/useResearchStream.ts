@@ -17,6 +17,10 @@ const eventTypes = [
   'stream_connected', 'research_snapshot', 'research_update', 'progress',
   'agent_update', 'card_update', 'artifact', 'error', 'replay_truncated',
   'normalized_event', 'section_heartbeat',
+  // §RPT-1：正式稿整理失败。不进这张表就到不了页面（提货单 §二 坑 6）。
+  'export_failed',
+  // §D-046 的新事件：跳过同章已写好的节；面板按普通进度行显示即可。
+  'write_section_skipped',
 ]
 
 export function useResearchStream(researchId: string) {

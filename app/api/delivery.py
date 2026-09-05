@@ -208,12 +208,19 @@ def register_delivery_routes(
             raise HTTPException(status_code=404, detail="这份研究还没整理过该模板的正式稿")
         work_text = read_report(research_id, report.get("report_path"))
         tables = json.loads(tables_path.read_text(encoding="utf-8")) if tables_path.is_file() else {}
+        # 角标卡的料还是工作稿那一份：正式稿不新增信息源，只从池里挑。
+        # 工作稿读不到时（库里 report_path 是指向别的 worktree 的绝对路径就会这样）
+        # 退回 tables.json 里存下的同一批源，别让整页角标变成悬空。
+        sources = parse_report(work_text)["sources"] if work_text else [
+            {"citation_no": int(item["mark"][1:]), "mark": item["mark"],
+             "title": item.get("title") or "", "permalink": item.get("url") or ""}
+            for item in (tables.get("sources") or [])
+        ]
         return envelope({
             "research_id": research_id, "template": skill.name, "title": skill.title,
             "markdown": md_path.read_text(encoding="utf-8"),
             "tables": tables.get("tables") or {},
-            # 角标卡的料还是工作稿那一份：正式稿不新增信息源，只从池里挑。
-            "sources": (parse_report(work_text)["sources"] if work_text else []),
+            "sources": sources,
             "generated_at": md_path.stat().st_mtime,
             "url": f"/api/researches/{research_id}/exports/{md_path.name}",
         })
