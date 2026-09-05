@@ -184,3 +184,48 @@ def test_d051_坏片重写还坏就记失败(tmp_path, monkeypatch):
     assert [e for e in events if e["type"] == "section_shards_incomplete"]
     assert result.succeeded is False
     assert store.list_chapters("r-ledger")[0]["status"] != "done"
+
+
+def test_d051_旧片角标编号还在但指向变了要作废重写(tmp_path):
+    """货 4：编号在池里 ≠ 它指的还是那一条。
+
+    RATE-4 二轮现场：换评分口径后池换掉 11/30 条，角标编号按池位发（S01…S30）
+    一格没动，旧片引的号照样「在池里」，指的却是另一条笔记。D-042 那道闸只做
+    编号集合作差，一个都拦不住；真拦下它的是合并之后的节级契约（`信息源` 行
+    mark→permalink 逐字映射），代价是整节作废——`conclusion_invalid 共 11 处`。
+    """
+    stale = (
+        "## 结论\n\n- 旧口径下的判断 [S01]\n\n"
+        "## 信息源\n\n- [S01] [换尺子前的那条](https://example.com/999)\n"
+    )
+    _, store, bodies, events, _ = _shard_run(
+        tmp_path, evidence=30, seed_parts={1: stale}, wall_clock=330.0,
+    )
+
+    marks = [e["data"] for e in events if e["type"] == "write_shard_stale"]
+    assert [(item["shard"], item["citations"]) for item in marks] == [(1, ["[S01]"])]
+    # 作废重写这一片：它没被当成「已写成的片」跳过。
+    assert "sec-1.part.1.md" in bodies
+    assert [
+        e["data"]["shard"] for e in events if e["type"] == "write_shard_skipped"
+    ] == []
+    merged = [e["data"] for e in events if e["type"] == "write_shards_merged"]
+    assert merged[0]["done"] == 3
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_d051_旧片指向没变就照旧跳过(tmp_path):
+    """对照：编号与指向都对得上的盘上片仍然跳过，不白付一次重写。"""
+    keep = (
+        "## 结论\n\n- 上一轮已写成 [S01]\n\n"
+        "## 信息源\n\n- [S01] [来源 1](https://example.com/001)\n"
+    )
+    _, _, bodies, events, _ = _shard_run(
+        tmp_path, evidence=30, seed_parts={1: keep}, wall_clock=330.0,
+    )
+
+    assert [e for e in events if e["type"] == "write_shard_stale"] == []
+    assert [
+        e["data"]["shard"] for e in events if e["type"] == "write_shard_skipped"
+    ] == [1]
+    assert "sec-1.part.1.md" not in bodies

@@ -1625,12 +1625,49 @@ def _shard_stale_citations(
     `_section_evidence_pool_result` 同源（都用节可见池的 `citation` 字段）。
     """
 
-    marks = {
-        str(item.get("citation") or "")
+    by_mark = {
+        str(item.get("citation") or ""): str(item.get("permalink") or "")
         for item in pool.get("items", [])
         if isinstance(item, Mapping)
     }
-    return set(validation._CITATION.findall(markdown)) - marks
+    stale = set(validation._CITATION.findall(markdown)) - set(by_mark)
+    # §D-051 货 4：**编号还在池里 ≠ 它指的还是那一条**。角标编号是按池位发的
+    # （S01…S30），换评分口径只换「进池的是哪 30 条」，编号区间一格不动——旧片
+    # 引的 [S05] 号照样在池里，指的却已是另一条笔记。上面那行集合作差因此一个
+    # 都拦不住。真拦下它的是**合并之后**节级契约那第三道检查（`信息源` 行
+    # mark→permalink 逐字映射，见 `_section_evidence_pool_result`），代价是整节
+    # 作废：RATE-4 二轮 `conclusion_invalid 共 11 处`，四片好稿陪葬。
+    # 这里按同一口径在**片**上先量一次，只作废这一片。
+    stale |= _shard_remapped_marks(markdown, by_mark)
+    return stale
+
+
+def _shard_remapped_marks(
+    markdown: str, by_mark: Mapping[str, str],
+) -> set[str]:
+    """`信息源` 里角标指向和本轮池对不上的那些角标（§D-051 货 4）。
+
+    判定口径与 `_section_evidence_pool_result` 那一段逐字同源：只看 `信息源`
+    小节里的行，行上第一个角标要唯一映射到池里该编号的 permalink。编号本身
+    不在池里的由调用方的集合作差管，这里不重复报。
+    """
+
+    remapped: set[str] = set()
+    in_sources = False
+    for line in markdown.splitlines():
+        heading = _MARKDOWN_HEADING.match(line)
+        if heading:
+            in_sources = "信息源" in heading.group(1)
+            continue
+        if not in_sources:
+            continue
+        mark_match = validation._CITATION.search(line)
+        if mark_match is None:
+            continue
+        expected = by_mark.get(mark_match.group(0))
+        if expected and _raw_urls(line) != {expected}:
+            remapped.add(mark_match.group(0))
+    return remapped
 
 
 def _merge_shard_files(
