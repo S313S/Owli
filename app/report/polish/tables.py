@@ -256,6 +256,25 @@ def _entity_dimension(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any]
                             "总条数": len(rows)})
 
 
+#: 交叉验证结论的强弱序：只要有一条多源互证的主张撑着，这个角标就不算孤证。
+_VERDICT_RANK = ("PASS", "CONFLICT", "WEAK", "SINGLE")
+
+
+def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
+                      claims: Sequence[Mapping[str, Any]]) -> dict[int, str]:
+    """角标 → 引用它的那些主张里最强的交叉验证结论。没有主张引它就不出现在结果里。"""
+    mark_of = {str(row["id"]): int(row["citation_no"]) for row in cited if row.get("id")}
+    found: dict[int, set[str]] = defaultdict(set)
+    for claim in claims:
+        verdict = str(claim.get("verdict") or "")
+        for evidence_id in claim.get("evidence_ids") or []:
+            mark = mark_of.get(str(evidence_id))
+            if mark is not None and verdict:
+                found[mark].add(verdict)
+    return {mark: next((v for v in _VERDICT_RANK if v in verdicts), "SINGLE")
+            for mark, verdicts in found.items()}
+
+
 #: 全部可用表名；SKILL.md 的 `tables:` 只能从这里挑（加载器会校验）。
 TABLE_NAMES: tuple[str, ...] = (
     "platform_mix", "grade_mix", "crossref_mix", "entity_mentions",
@@ -281,6 +300,7 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         tables["timeline"] = timeline
     cited = [r for r in rows if r.get("citation_no") is not None]
     grade_by_mark = {int(r["citation_no"]): r.get("grade") for r in cited}
+    crossref_by_mark = _crossref_by_mark(cited, claims)
     return {
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
@@ -295,7 +315,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # 写手的「C 级只作旁证」规则要靠每条源的等级才执行得了。
         "sources": [{"mark": _mark(int(s["citation_no"])), "title": s.get("title"),
                      "url": s.get("url") or s.get("permalink"),
-                     "grade": grade_by_mark.get(int(s["citation_no"])) or s.get("grade")}
+                     "grade": grade_by_mark.get(int(s["citation_no"])) or s.get("grade"),
+                     # 建议段门禁要按角标核：这条源背后的主张里最强的那个交叉验证结论。
+                     "crossref": crossref_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

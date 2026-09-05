@@ -25,9 +25,26 @@ if str(ROOT) not in sys.path:
 
 from app.report.polish.skills import load_templates  # noqa: E402
 
-#: 内部词：读者不知道也不需要知道研究是怎么切块的。
+#: 内部词：读者不知道也不需要知道研究是怎么切块的，也不需要知道库长什么样。
+#: 后半截（表名 / 字段名 / 代码路径）是用户 2026-09-05 读稿后加的（裁决条 3）——
+#: 首稿写了「来源：见 topic_polarity」「词表见 app/report/polish/lexicon.py」。
 FORBIDDEN = (r"goal-\d", r"sec-\d", r"ch-\d", "本片", "本节样本", "本章样本", "上游目标",
-             "采集章", "撰写章")
+             "采集章", "撰写章",
+             "topic_polarity", "entity_mentions", "grade_mix", "crossref_mix", "platform_mix",
+             "entity_dimension", "timeline", "citation_no", "evidence.platform", "reports.extra",
+             r"[\w/.-]+\.py")
+#: 裁决条 1：带这些评价词的句子里必须写出被评的是谁。
+JUDGEMENT_WORDS = ("偏浅", "偏弱", "不足", "较差", "套路化", "敷衍", "不够", "有限",
+                   "偏低", "偏高", "薄弱", "欠缺")
+#: 裁决条 2：方法论口径词不许进开篇节；开篇节必须给一句人话把握度。
+METHOD_WORDS = ("SINGLE", "PASS", "WEAK", "CONFLICT")
+CONFIDENCE_WORD = "把握度"
+#: 各模板的开篇节（摘要位）与建议节、降级节。尺子按模板认，不写死一套标题。
+OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
+ADVICE_SECTIONS = frozenset({"建议", "需要回应的点"})
+DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: 句子切分：中文句号/问号/叹号/分号与换行都算一句到头。
+SENTENCE_SPLIT = re.compile(r"[。！？；\n]")
 #: ⑤ 的程度词：没数字时至少要有一个判断的力度。含对比与转折——「A 在 X 不在 Y」
 #: 是最典型的行动式标题句式，早先漏收，把三个合格标题误判成红（09-05 首稿实测）。
 DEGREE_WORDS = ("最", "更", "近半", "过半", "多数", "少数", "普遍", "集中", "聚焦", "远",
@@ -149,7 +166,70 @@ def check_action_titles(markdown: str, template) -> list[str]:
     return problems
 
 
-CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题")
+def _section_bodies(markdown: str) -> dict[str, list[str]]:
+    """一级标题 → 该节的正文行（含二级标题原文，建议段的降级小标题要认得出）。"""
+    bodies: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in markdown.splitlines():
+        matched = re.match(r"^# +(.+)$", line)
+        if matched:
+            current = matched.group(1).strip()
+            bodies.setdefault(current, [])
+        elif current is not None:
+            bodies[current].append(line)
+    return bodies
+
+
+def check_judgement_has_subject(markdown: str, entities: list[str]) -> list[str]:
+    """裁决条 1：带评价词的句子里要写出被评的是谁（实体名，或「本报告/本次样本」这类）。"""
+    subjects = [*entities, "本报告", "本次样本", "本轮", "本批", "样本", "证据池"]
+    problems = []
+    for index, line in enumerate(markdown.splitlines(), start=1):
+        if line.startswith(("|", "#", ">")):
+            continue
+        for sentence in SENTENCE_SPLIT.split(MARK_ANY.sub("", line)):
+            hit = next((w for w in JUDGEMENT_WORDS if w in sentence), None)
+            if hit and not any(name and name in sentence for name in subjects):
+                problems.append(f"第 {index} 行「{hit}」没写清是在说谁：{sentence.strip()[:40]}")
+    return problems
+
+
+def check_opening_section(markdown: str, template) -> list[str]:
+    """裁决条 2：开篇节零方法论术语，且必须给一句人话把握度。"""
+    bodies = _section_bodies(markdown)
+    opening = next((name for name in template.sections if name in OPENING_SECTIONS), None)
+    if opening is None:
+        return []
+    if opening not in bodies:
+        return [f"缺开篇节「{opening}」"]
+    text = "\n".join(bodies[opening])
+    problems = [f"开篇节出现内部口径词 {w}" for w in METHOD_WORDS if w in text]
+    if CONFIDENCE_WORD not in text:
+        problems.append(f"开篇节没有那句「本报告结论的{CONFIDENCE_WORD}为…，主要因为…」")
+    return problems
+
+
+def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list[str]:
+    """裁决条 4：一条建议所引角标若全是单源孤证，必须降级到「值得进一步验证的方向」。"""
+    bodies = _section_bodies(markdown)
+    advice = next((name for name in template.sections if name in ADVICE_SECTIONS), None)
+    if advice is None or advice not in bodies:
+        return []
+    problems = []
+    for line in bodies[advice]:
+        if line.strip().startswith("#"):
+            if DOWNGRADE_HEADING in line:
+                break          # 降级区之后的都不受门禁管
+            continue
+        marks = [int(n) for n in MARK_ANY.findall(line)]
+        verdicts = {crossref.get(n) for n in marks if crossref.get(n)}
+        if marks and verdicts and verdicts == {"SINGLE"}:
+            problems.append(
+                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{line.strip()[:46]}")
+    return problems
+
+CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
+          "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁")
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -162,12 +242,18 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
     allowed: set[str] = set()
     _numbers_from(data.get("tables"), allowed)
     _numbers_from(data.get("counts"), allowed)
+    crossref = {int(s["mark"][1:]): str(s["crossref"]) for s in data.get("sources") or []
+                if s.get("crossref")}
+    entities = [str(e) for e in (data.get("entities") or [])]
     findings = {
         CHECKS[0]: check_no_internal_words(markdown),
         CHECKS[1]: check_sections(markdown, template),
         CHECKS[2]: check_marks_in_pool(markdown, pool),
         CHECKS[3]: check_numbers(markdown, allowed),
         CHECKS[4]: check_action_titles(markdown, template),
+        CHECKS[5]: check_judgement_has_subject(markdown, entities),
+        CHECKS[6]: check_opening_section(markdown, template),
+        CHECKS[7]: check_advice_gate(markdown, template, crossref),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

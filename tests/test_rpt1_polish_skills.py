@@ -59,9 +59,12 @@ def test_prompt_carries_rules_skeleton_pool_and_tables():
     assert "上一轮被打回" not in prompt
 
 
+# 用户 09-05 裁决后，开篇节必须带那句人话把握度；旧夹具缺它是被替换的语义，不是尺子太严。
 GOOD = """# 执行摘要
 
 豆包在国内讨论量最大，562 条证据里 296 条来自小红书[S01]。
+
+本报告结论的把握度为低，主要因为绝大多数说法都只有一个来源撑着。
 
 # 关键发现
 
@@ -168,3 +171,139 @@ def test_ruler_still_catches_a_topic_heading_in_the_body(tmp_path):
     """放宽之后仍要抓得住真正的话题式标题，否则等于把尺子改废了。"""
     markdown = GOOD.replace("## 小红书贡献了 296 条证据，却一条都没被引用", "## 平台情况说明")
     assert any("平台情况说明" in p for p in _run(tmp_path, markdown)["⑤ 行动式标题"])
+
+
+# ── 用户 2026-09-05 读稿裁决的四条，尺子侧 ────────────────────────────────
+GOOD_V2 = """# 执行摘要
+
+豆包在国内讨论量最大，562 条证据里 296 条来自小红书[S01]。
+
+本报告结论的把握度为低，主要因为绝大多数说法都只有一个来源撑着。
+
+# 关键发现
+
+1. 【A】小红书贡献过半证据但零引用[S01]
+
+## 小红书贡献了 296 条证据，却一条都没被引用
+
+正文解读[S01]。
+
+# 论据与数据
+
+| 平台 | 采集条数 |
+| --- | --- |
+| xhs | 296 |
+
+来源：各平台采集量与被引量对照
+
+# 建议
+
+1. 补一轮小红书精读[S02]
+
+## 值得进一步验证的方向
+
+1. 豆包的输出深度是否偏浅[S01]
+
+# 附录
+
+信息源：S01。
+"""
+
+
+def _tables_v2(tmp_path: Path, crossref: dict[str, str]) -> Path:
+    path = tmp_path / "r-t.polished.consulting.tables.json"
+    path.write_text(json.dumps({
+        "entities": ["豆包", "Kimi"],
+        "sources": [{"mark": m, "title": "帖", "url": "u", "grade": "A", "crossref": v}
+                    for m, v in crossref.items()],
+        "counts": {"evidence": 562},
+        "tables": {"platform_mix": {"rows": [{"平台": "xhs", "采集条数": 296}], "n": 562}},
+    }, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _run_v2(tmp_path: Path, markdown: str,
+            crossref: dict[str, str] | None = None) -> dict[str, list[str]]:
+    crossref = crossref or {"S01": "PASS", "S02": "PASS"}
+    md = tmp_path / "r-t.polished.consulting.md"
+    md.write_text(markdown, encoding="utf-8")
+    work = tmp_path / "work.md"
+    work.write_text("".join(f"[{m}]" for m in crossref), encoding="utf-8")
+    return check_polished.run(md, _tables_v2(tmp_path, crossref), work)
+
+
+def test_v2_clean_report_passes_all_eight(tmp_path):
+    assert not [name for name, problems in _run_v2(tmp_path, GOOD_V2).items() if problems]
+
+
+@pytest.mark.parametrize("word", ["topic_polarity", "citation_no", "evidence.platform",
+                                  "app/report/polish/lexicon.py"])
+def test_ruler_catches_table_and_field_names_in_the_body(tmp_path, word):
+    """裁决条 3：读者不需要知道库长什么样——表名、字段名、代码路径一律不许出现。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("来源：各平台采集量与被引量对照", f"来源：{word}"))
+    assert any(word.split("/")[-1] in p for p in findings["① 无内部词"])
+
+
+def test_ruler_catches_a_judgement_without_its_subject(tmp_path):
+    """裁决条 1：首稿那句「输出深度偏浅」读者分不清说的是产品还是这份报告。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", "输出深度偏浅[S01]。"))
+    assert any("偏浅" in p for p in findings["⑥ 评价句写清说谁"])
+
+
+def test_ruler_accepts_a_judgement_that_names_the_subject(tmp_path):
+    findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", "豆包的输出深度偏浅[S01]。"))
+    assert not findings["⑥ 评价句写清说谁"]
+
+
+@pytest.mark.parametrize("bad, expect", [
+    ("多数主张为 SINGLE（253/274）。", "内部口径词 SINGLE"),
+    ("", "把握度"),
+])
+def test_ruler_guards_the_opening_section(tmp_path, bad, expect):
+    """裁决条 2：开篇节零方法论术语 + 必须给一句人话把握度。"""
+    line = "本报告结论的把握度为低，主要因为绝大多数说法都只有一个来源撑着。"
+    markdown = GOOD_V2.replace(line, bad or "")
+    assert any(expect in p for p in _run_v2(tmp_path, markdown)["⑦ 摘要口径与把握度"])
+
+
+def test_ruler_demotes_advice_backed_only_by_single_source_claims(tmp_path):
+    """裁决条 4：建议所引角标全是单源孤证就得降级。首稿建议 1、2 正是这样。"""
+    findings = _run_v2(tmp_path, GOOD_V2, {"S01": "PASS", "S02": "SINGLE"})
+    assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
+
+
+def test_ruler_lets_advice_stand_when_a_cited_mark_is_cross_verified(tmp_path):
+    findings = _run_v2(tmp_path, GOOD_V2, {"S01": "SINGLE", "S02": "PASS"})
+    assert not findings["⑧ 建议门禁"]
+
+
+def test_downgrade_section_itself_is_exempt_from_the_advice_gate(tmp_path):
+    """降级区里本来就是孤证条目，门禁不能再拿它开刀。"""
+    findings = _run_v2(tmp_path, GOOD_V2, {"S01": "SINGLE", "S02": "PASS"})
+    assert not findings["⑧ 建议门禁"]
+
+
+# ── 骨架验收：字节数不是判据，节齐不齐才是 ──────────────────────────────
+def test_missing_sections_catches_a_truncated_draft():
+    """09-05 实测：引擎中途断流，落盘 4 805 B 只写到第一节，光看字节数就是假绿。"""
+    from app.report.polish.run import MIN_DRAFT_BYTES, missing_sections
+
+    sections = ["执行摘要", "关键发现", "论据与数据", "建议", "附录"]
+    truncated = "# 调研报告：国内大家对豆包的看法\n\n## 执行摘要\n\n" + "正文。" * 900
+    assert len(truncated.encode()) > MIN_DRAFT_BYTES     # 字节数够，骗得过旧判据
+    assert missing_sections(truncated, sections) == sections
+
+
+def test_missing_sections_accepts_the_declared_skeleton():
+    from app.report.polish.run import missing_sections
+
+    sections = ["执行摘要", "建议"]
+    assert missing_sections("# 执行摘要\n\n正文\n\n# 建议\n\n正文\n", sections) == []
+
+
+def test_a_document_title_that_demotes_the_skeleton_is_rejected():
+    """写手加文档标题、把骨架降成二级 —— 判「没写完」，不是判过。"""
+    from app.report.polish.run import missing_sections
+
+    demoted = "# 国内大家对豆包的看法\n\n## 执行摘要\n\n正文\n\n## 建议\n\n正文\n"
+    assert missing_sections(demoted, ["执行摘要", "建议"]) == ["执行摘要", "建议"]

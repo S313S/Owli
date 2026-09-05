@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
@@ -24,7 +24,17 @@ GOAL_ID = "polished"
 #: 角标越池允许整稿重写一次；再越即 failed（提货单货 2）。
 MAX_ATTEMPTS = 2
 #: 低于这个字节数的产物按「没写成」算——D-045 那轮的占位节只有 124 B。
+#: 但字节数只是下限，**真正的验收判据是骨架齐不齐**（`missing_sections`）：
+#: 09-05 撞到过引擎写到一半 SDK `Stream closed`，落盘 4 805 B、只写到第一节，
+#: 光看字节数就成了假绿。
 MIN_DRAFT_BYTES = 2000
+_H1 = re.compile(r"^# +(.+)$", re.MULTILINE)
+
+
+def missing_sections(markdown: str, sections: Sequence[str]) -> list[str]:
+    """SKILL 声明的一级标题里，成稿还缺哪些。写手把标题降成二级也算缺。"""
+    found = {line.strip() for line in _H1.findall(markdown)}
+    return [name for name in sections if name not in found]
 _MARK = re.compile(r"\[S(\d{2,})\]")
 
 
@@ -68,16 +78,27 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     """共用硬规则 + 模板正文 + 输入区；重写轮把上一轮的错误原样附在最后。"""
     objectives = "\n".join(f"- {g.get('objective')}" for g in data.get("objectives") or []
                            if g.get("objective"))
-    pool = "\n".join(f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{s.get('title') or ''}｜{s.get('url') or ''}"
-                     for s in data.get("sources") or [])
-    tables = json.dumps({name: data["tables"][name] for name in template.tables
-                         if name in data["tables"]}, ensure_ascii=False, indent=1)
+    verdicts = {"PASS": "多源互证", "CONFLICT": "多源冲突", "WEAK": "证据偏弱", "SINGLE": "单源孤证"}
+    pool = "\n".join(
+        f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
+        f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
+        for s in data.get("sources") or [])
+    # 按中文表名交给写手，机器表名（topic_polarity 之类）一律不进提示词——
+    # 首稿里「来源：见 topic_polarity」就是照抄 JSON 键来的（用户 09-05 裁决条 3）。
+    tables = json.dumps({data["tables"][name].get("title") or name:
+                         {k: v for k, v in data["tables"][name].items() if k != "name"}
+                         for name in template.tables if name in data["tables"]},
+                        ensure_ascii=False, indent=1)
     parts = [
         # 必须给绝对路径：只给文件名时引擎会拿工作区根去猜，两次都被 capability 判越界。
         f"# 任务\n把下面这份工作稿整理成一份《{template.title}》正式稿，写成 Markdown，"
         f"用 Write/Edit 落到这个**绝对路径**（照抄，别改目录）：\n\n`{output_path}`\n\n"
         "这是你唯一能写的目录，写别处一定被拒。"
         "只重新组织与解读，不做新的调研，不编造任何事实与数字。\n\n"
+        # 09-05 实测：写手会自作主张加一个文档标题当 H1、把骨架全降成 H2，
+        # 骨架校验直接判红。所以把一级标题清单在任务段就钉死。
+        f"**文件的一级标题只能是这 {len(template.sections)} 个，原样各写一个 `# 标题`，"
+        f"顺序不变、不加文档标题、不改字**：{' / '.join(template.sections)}。\n\n"
         "**分节落盘，不要在一条回复里输出整篇。** 先 Write 出第一节，然后一节一节 Edit 追加到同一个文件末尾，每次只追加一个一级标题及其内容。整篇一次性吐出来会被传输层掐断，"
         "这一条不是建议是硬要求。全部节写完后再回结论。",
         f"# 共用硬规则\n\n{shared_rules()}",
@@ -85,7 +106,7 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 调研问题\n{data.get('research_question')}",
         f"# 本次研究的目标\n{objectives}",
         f"# 涉及的实体\n{'、'.join(data.get('entities') or [])}",
-        f"# 信息源池（只能引这些角标，一个都不许多）\n{pool}",
+        f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论）\n{pool}",
         f"# 确定性数据表（数字的唯一来源，一个数都不许改）\n```json\n{tables}\n```",
         f"# 工作稿\n\n{_work_view(data, report_text)}",
     ]
@@ -158,6 +179,13 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                           or "适配器双腿判定未通过"),)
             continue
         markdown = draft_path.read_text(encoding="utf-8")
+        # 骨架不齐 = 没写完（引擎中途断流就是这样），当失败重来，别当成稿。
+        lacking = missing_sections(markdown, skill.sections)
+        if lacking:
+            errors = (f"成稿缺一级标题：{'、'.join(lacking)}。"
+                      f"这 {len(skill.sections)} 个词必须原样各作一个一级标题（`# 词`），"
+                      "不许加文档标题、不许降成二级标题、不许改字。",)
+            continue
         offpool = offpool_marks(markdown, pool)
         if not offpool:
             # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
@@ -170,5 +198,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     return {"status": "failed", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
             "attempts": MAX_ATTEMPTS,
+            "missing_sections": missing_sections(draft_path.read_text(encoding="utf-8"),
+                                                 skill.sections) if draft_path.is_file() else [],
             "offpool": offpool_marks(draft_path.read_text(encoding="utf-8"), pool)
             if draft_path.is_file() else [], "errors": list(errors)}
