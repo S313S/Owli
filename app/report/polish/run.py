@@ -219,14 +219,38 @@ def _task(body: str, output_path: Path, research_id: str, model: str,
 SECTION_TIMEOUT_SECONDS = 1800.0
 
 
+class _CodexModelShim:
+    """回退到 Codex 时把 Claude 的模型名摘掉，让 Codex 用它自己的默认档。
+
+    09-05 夜实测：Claude 撞五小时限额（路由日志 `utilization: 0.95`）后路由层回退
+    Codex，而任务里带着 `model="opus"` 被原样传过去，Codex 直接 400——
+    `The 'opus' model is not supported when using Codex with a ChatGPT account`，
+    九格里五格就这么全废了。模型名是跟引擎走的，不能跨引擎照抄。
+    `app/adapters/` 是本包禁区，所以在本模块套一层壳，不改适配器本身。
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:      # timeout_seconds 等一律透传
+        return getattr(self._inner, name)
+
+    async def run(self, task: Any, ctx: Any, on_event: Any = None) -> Any:
+        from dataclasses import replace
+
+        if getattr(task, "model", None) is not None:
+            task = replace(task, model=None)      # None = 用 Codex 自己的默认档
+        return await self._inner.run(task, ctx, on_event=on_event)
+
+
 def default_adapter() -> Any:
-    """本包自用的适配器：撰写墙钟放宽到 `SECTION_TIMEOUT_SECONDS`，其余照默认。"""
+    """本包自用的适配器：撰写墙钟放宽，且回退 Codex 时不带 Claude 的模型名。"""
     from app.adapters.claude import ClaudeAdapter
     from app.adapters.codex import CodexAdapter
     from app.adapters.routing import RoutedAdapter
 
     return RoutedAdapter(adapters={"claude": ClaudeAdapter(timeout_seconds=SECTION_TIMEOUT_SECONDS),
-                                   "codex": CodexAdapter()})
+                                   "codex": _CodexModelShim(CodexAdapter())})
 
 
 def _failure_detail(result: Any) -> str:

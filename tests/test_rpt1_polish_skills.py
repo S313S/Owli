@@ -465,3 +465,39 @@ def test_advice_gate_still_fires_when_the_whole_entry_is_single_source(tmp_path)
     markdown = GOOD_V2.replace("1. 补一轮小红书精读[S02]", advice)
     findings = _run_v2(tmp_path, markdown, {"S01": "PASS", "S02": "SINGLE"})
     assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
+
+
+# ── 回退 Codex 时不许带 Claude 的模型名 ────────────────────────────────────
+def test_codex_shim_strips_the_claude_model_name():
+    """Claude 撞限额回退 Codex 时，opus 被原样传过去导致 400，九格废了五格。"""
+    import asyncio
+
+    from app.adapters.contracts import EngineTask
+    from app.report.polish.run import _CodexModelShim
+
+    seen = {}
+
+    class _Inner:
+        timeout_seconds = 123.0
+
+        async def run(self, task, ctx, on_event=None):
+            seen["model"] = task.model
+            seen["body"] = task.body
+            return "ok"
+
+    shim = _CodexModelShim(_Inner())
+    assert shim.timeout_seconds == 123.0          # 其余属性透传
+    task = EngineTask(body="正文", output_path=Path("/tmp/x.md"), output_format="markdown",
+                      research_id="r-t", goal_id="polished", agent_id="a", agent_kind="k",
+                      validators=[], capability=None, model="opus")
+    assert asyncio.run(shim.run(task, None)) == "ok"
+    assert seen["model"] is None and seen["body"] == "正文"   # 只摘模型名，别的不动
+
+
+def test_claude_side_keeps_its_model_name():
+    """壳只套在 Codex 上；Claude 那条腿仍然拿得到 opus。"""
+    from app.report.polish.run import default_adapter
+
+    adapter = default_adapter()
+    assert adapter._adapters["claude"].timeout_seconds == 1800.0
+    assert type(adapter._adapters["codex"]).__name__ == "_CodexModelShim"
