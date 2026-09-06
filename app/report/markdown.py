@@ -264,6 +264,17 @@ def merge_section_shards(
     return "\n".join(blocks).rstrip() + "\n"
 
 
+def _merged_for_display(entities: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """同名/同别名的实体卡合成一行。合并失败不许拖垮报告——原样返回。"""
+    try:
+        from app.plan.entities import merge_entity_cards
+
+        merged, _ = merge_entity_cards(list(entities))
+    except Exception:  # noqa: BLE001 —— 去重只是好看，报告结构比它重要
+        return list(entities)
+    return merged or list(entities)
+
+
 def render_entity_section(entities: Sequence[Mapping[str, Any]]) -> list[str]:
     """§ENT-1 货 6：报告开头的「研究对象」节——这份报告说的到底是哪几个产品。
 
@@ -273,8 +284,11 @@ def render_entity_section(entities: Sequence[Mapping[str, Any]]) -> list[str]:
     """
     if not entities:
         return []
+    # §RPT-2 货 5 ①：09-04 那份底料的「研究对象」里「豆包」出现了两次（id 豆包 + id Doubao，
+    # canonical 同为「豆包」）。骨架侧 `merge_entity_cards` 后来补上了合并（§ENT-2），
+    # 但历史计划里的重复卡还在，读者切到工作稿一眼就看得见——渲染层再挡一道。
     lines = ["## 研究对象", ""]
-    for entity in entities:
+    for entity in _merged_for_display(entities):
         names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
         alias = "、".join(dict.fromkeys(
             str(item).strip()

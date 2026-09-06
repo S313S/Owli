@@ -249,6 +249,8 @@ export type ReportSection = {
   markdown: string
   placeholder: boolean
   missing_reason?: string | null
+  /** §RPT-2 货 5 ②：读者看的那句人话，由后端给；原因码只留给分组与排查。 */
+  missing_text?: string | null
 }
 
 export type ReportSource = {

@@ -173,7 +173,8 @@ function MissingList({ report }: { report: ReportData }) {
   return <section data-testid="report-missing">
     <Alert type="warning" showIcon message={`缺失清单：${report.missing.length} 项未写出，按原因分组`} style={{ marginBottom: 8 }} />
     {groups.map(([reason, items]) => <div key={reason} className="report-missing-group" data-reason={reason}>
-      <Space wrap><Tag color="orange">{REASON_LABEL[reason] ?? reason}</Tag><Typography.Text type="secondary">{reason} · {items.length} 项</Typography.Text></Space>
+      {/* §RPT-2 货 5 ②：原因码只当分组键用，不许印到页面上——读者不认识 conclusion_invalid。 */}
+      <Space wrap><Tag color="orange">{REASON_LABEL[reason] ?? '未写出'}</Tag><Typography.Text type="secondary">{items.length} 项</Typography.Text></Space>
       <ul>{items.map((m, i) => <li key={i}>{m.goal_id}{m.chapter_id ? ` / ${m.chapter_id}` : ''}</li>)}</ul>
     </div>)}
   </section>
@@ -280,7 +281,8 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
       {section.placeholder
         ? <div className="report-section-placeholder">
             <Typography.Text strong>{section.title ?? section.section_id}</Typography.Text>
-            <div>此节未写出 · 原因：<Tag color="orange">{REASON_LABEL[section.missing_reason ?? ''] ?? section.missing_reason}</Tag></div>
+            {/* 人话由后端给（render.missing_text），前端不再拼原因码。 */}
+            <div>{section.missing_text ?? '本节未成稿。'}</div>
           </div>
         : <Markdown text={section.markdown} lookup={lookup} />}
     </section>)}
