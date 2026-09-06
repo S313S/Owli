@@ -62,15 +62,15 @@ def test_prompt_carries_rules_skeleton_pool_and_tables():
 # 用户 09-05 裁决后，开篇节必须带那句人话把握度；旧夹具缺它是被替换的语义，不是尺子太严。
 GOOD = """# 执行摘要
 
-豆包在国内讨论量最大，562 条证据里 296 条来自小红书[S01]。
+豆包在国内讨论量最大，562 条采集、33 条进入引用[S01]。
 
 本报告结论的把握度为低，主要因为绝大多数说法都只有一个来源撑着。
 
 # 关键发现
 
-1. 【A】小红书贡献过半证据但零引用[S01]
+1. 【A】豆包的正向说法集中在内容生产[S01]
 
-## 小红书贡献了 296 条证据，却一条都没被引用
+## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类
 
 正文解读[S01]。
 
@@ -94,7 +94,7 @@ def _tables_file(tmp_path: Path, marks=("S01",)) -> Path:
     path = tmp_path / "r-t.polished.consulting.tables.json"
     path.write_text(json.dumps({
         "sources": [{"mark": m, "title": "帖", "url": "u", "grade": "A"} for m in marks],
-        "counts": {"evidence": 562},
+        "counts": {"evidence": 562, "cited": 33},
         "tables": {"platform_mix": {"rows": [{"平台": "xhs", "采集条数": 296}], "n": 562}},
     }, ensure_ascii=False), encoding="utf-8")
     return path
@@ -139,7 +139,7 @@ def test_ruler_catches_invented_number(tmp_path):
 
 def test_ruler_catches_topic_style_heading(tmp_path):
     findings = _run(tmp_path, GOOD.replace(
-        "## 小红书贡献了 296 条证据，却一条都没被引用", "## 小红书数据分析"))
+        "## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", "## 小红书数据分析"))
     assert any("小红书数据分析" in p for p in findings["⑤ 行动式标题"])
 
 
@@ -163,28 +163,28 @@ def test_ruler_does_not_demand_action_titles_inside_structural_sections(tmp_path
 ])
 def test_ruler_accepts_contrast_style_action_titles(tmp_path, title):
     """「A 在 X 不在 Y」这类对比句是最典型的行动式标题，早先的词表漏收了它们。"""
-    markdown = GOOD.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    markdown = GOOD.replace("## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", f"## {title}")
     assert not _run(tmp_path, markdown)["⑤ 行动式标题"]
 
 
 def test_ruler_still_catches_a_topic_heading_in_the_body(tmp_path):
     """放宽之后仍要抓得住真正的话题式标题，否则等于把尺子改废了。"""
-    markdown = GOOD.replace("## 小红书贡献了 296 条证据，却一条都没被引用", "## 平台情况说明")
+    markdown = GOOD.replace("## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", "## 平台情况说明")
     assert any("平台情况说明" in p for p in _run(tmp_path, markdown)["⑤ 行动式标题"])
 
 
 # ── 用户 2026-09-05 读稿裁决的四条，尺子侧 ────────────────────────────────
 GOOD_V2 = """# 执行摘要
 
-豆包在国内讨论量最大，562 条证据里 296 条来自小红书[S01]。
+豆包在国内讨论量最大，562 条采集、33 条进入引用[S01]。
 
 本报告结论的把握度为低，主要因为绝大多数说法都只有一个来源撑着。
 
 # 关键发现
 
-1. 【A】小红书贡献过半证据但零引用[S01]
+1. 【A】豆包的正向说法集中在内容生产[S01]
 
-## 小红书贡献了 296 条证据，却一条都没被引用
+## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类
 
 正文解读[S01]。
 
@@ -216,7 +216,7 @@ def _tables_v2(tmp_path: Path, crossref: dict[str, str]) -> Path:
         "entities": ["豆包", "Kimi"],
         "sources": [{"mark": m, "title": "帖", "url": "u", "grade": "A", "crossref": v}
                     for m, v in crossref.items()],
-        "counts": {"evidence": 562},
+        "counts": {"evidence": 562, "cited": 33},
         "tables": {"platform_mix": {"rows": [{"平台": "xhs", "采集条数": 296}], "n": 562}},
     }, ensure_ascii=False), encoding="utf-8")
     return path
@@ -440,13 +440,13 @@ def test_assemble_without_sources_is_unchanged(tmp_path):
 ])
 def test_ruler_accepts_real_conclusion_titles(tmp_path, title):
     """靠「有没有程度词」反着判，连着冤枉了五个真结论句——改成正面认话题式标题。"""
-    markdown = GOOD_V2.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    markdown = GOOD_V2.replace("## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", f"## {title}")
     assert not _run_v2(tmp_path, markdown)["⑤ 行动式标题"]
 
 
 @pytest.mark.parametrize("title", ["平台情况说明", "小红书数据分析", "二、竞品对比", "样本概况"])
 def test_ruler_still_catches_topic_style_titles(tmp_path, title):
-    markdown = GOOD_V2.replace("## 小红书贡献了 296 条证据，却一条都没被引用", f"## {title}")
+    markdown = GOOD_V2.replace("## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", f"## {title}")
     assert any(title in p for p in _run_v2(tmp_path, markdown)["⑤ 行动式标题"])
 
 
@@ -662,3 +662,49 @@ def test_resume_only_credits_a_cell_this_round_actually_wrote(cell, skippable):
     那种格——旧稿永远不被当成本轮成果。
     """
     assert bool(cell.get("passed") and not cell.get("skipped")) is skippable
+
+
+# —— §RPT-2 货 2：管道自诊出正文、摘要样本数口径。尺子自己也要验，先造红再造绿。——
+
+@pytest.mark.parametrize("line", [
+    "小红书 296 条采集里 0 条被引[S01]。",
+    "本报告的被引证据只有 33 条[S01]。",
+    "| 平台 | 采集条数 | 被引条数 |",
+    "n=562 · 口径：按平台分组的采集量对照 · 来源：各平台采集量[S01]",
+])
+def test_闸9_管道自诊出现在主体节判红(tmp_path, line):
+    findings = _run(tmp_path, GOOD.replace("正文解读[S01]。", line))
+    assert findings["⑨ 管道自诊不占主体节"]
+
+
+def test_闸9_同样的话放进附录不判红(tmp_path):
+    """诚实感该待的地方：附录与开篇那句把握度，不是关键发现的头条。"""
+    findings = _run(tmp_path, GOOD.replace(
+        "信息源：S01。", "信息源：S01。小红书 296 条采集里 0 条被引，样本结构偏。"))
+    assert not findings["⑨ 管道自诊不占主体节"]
+
+
+def test_闸9_论据与数据节里的管道表不判红(tmp_path):
+    """把管道表集中列在「论据与数据」是模板允许的；⑨ 管的是主体节的主表。"""
+    assert not _run(tmp_path, GOOD)["⑨ 管道自诊不占主体节"]
+
+
+def test_闸10_摘要单写采集总数判红(tmp_path):
+    findings = _run(tmp_path, GOOD.replace(
+        "562 条采集、33 条进入引用[S01]。", "本次调研的 562 条证据显示豆包口碑分化[S01]。"))
+    assert findings["⑩ 摘要样本数口径"]
+
+
+@pytest.mark.parametrize("sentence", [
+    "562 条采集、33 条进入引用[S01]。",
+    "支撑本报告结论的是 33 条被引证据[S01]。",
+])
+def test_闸10_两种合法写法都不判红(tmp_path, sentence):
+    findings = _run(tmp_path, GOOD.replace("562 条采集、33 条进入引用[S01]。", sentence))
+    assert not findings["⑩ 摘要样本数口径"]
+
+
+def test_闸10_采集总数出现在正文别处不判红(tmp_path):
+    """⑩ 只管开篇节——论据与数据里那张表的 n=562 是它该待的地方。"""
+    findings = _run(tmp_path, GOOD.replace("| xhs | 296 |", "| xhs | 296 |\n\nn=562 条[S01]"))
+    assert not findings["⑩ 摘要样本数口径"]

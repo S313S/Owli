@@ -3,7 +3,7 @@
 
     python3 scripts/acceptance/rpt1/check_polished.py <正式稿.md> <tables.json> <工作稿>
 
-八条判据（全过才 PASS）：
+十条判据（全过才 PASS）：
   ① 正文零内部词（goal- / sec- / ch- / 本片 / 本节样本 …）
   ② 一级标题 ⊇ 模板 SKILL.md 声明的 sections
   ③ 角标 ⊆ 工作稿信息源池
@@ -54,6 +54,14 @@ CONFIDENCE_WORD = "把握度"
 OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
 ADVICE_SECTIONS = frozenset({"建议", "需要回应的点"})
 DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: §RPT-2 货 2 闸 ⑨：主体节（关键发现、正/负/争议/诉求、对比总览…）只讲调研对象。
+#: 「主体节」= 模板声明的节里去掉开篇、建议、集中列表、时间线与附录剩下的那些——
+#: 这样加模板不用回来改尺子。
+NON_FINDING_SECTIONS = (OPENING_SECTIONS | ADVICE_SECTIONS
+                        | frozenset({"论据与数据", "时间线", "附录"}))
+#: 取数口径词。09-05 首稿的第一条关键发现标题就是「小红书 296 条采集里 0 条被最终引用」，
+#: 配一张平台 × 采集条数 × 被引条数的表——最显眼的位置给了工具的自我检讨。
+PIPELINE_WORDS = ("被引", "采集条数", "采集量", "采集总数")
 #: 句子切分：中文句号/问号/叹号/分号与换行都算一句到头。
 SENTENCE_SPLIT = re.compile(r"[。！？；\n]")
 #: ⑤ 的程度词：没数字时至少要有一个判断的力度。含对比与转折——「A 在 X 不在 Y」
@@ -307,11 +315,56 @@ def check_ratio_phrases(markdown: str) -> list[str]:
     return problems
 
 
-#: 编号有缺口是**故意**的：⑨⑩ 归 §RPT-2（管道自诊不是发现 / 摘要不许单写采集总数），
-#: 它那两条还没合 main。三包改同一个文件，合并序是 RPT-1 → RPT-2 → CODE-1，
-#: 本包在最后，届时 ⑨⑩ 就位、编号自然连续。现在占 ⑨ 会跟它撞号。
+def check_pipeline_out_of_findings(markdown: str, template) -> list[str]:
+    """§RPT-2 货 2 闸 ⑨：管道自诊不许占主体节。
+
+    诚实感不靠这个撑——它归开篇节末尾那句人话把握度和附录「样本怎么来的」。
+    """
+    bodies = _section_bodies(markdown)
+    problems = []
+    for name in template.sections:
+        if name in NON_FINDING_SECTIONS or name not in bodies:
+            continue
+        for offset, line in enumerate(bodies[name], start=1):
+            hit = next((w for w in PIPELINE_WORDS if w in line), None)
+            if hit:
+                problems.append(
+                    f"主体节「{name}」第 {offset} 行出现取数口径词「{hit}」，"
+                    f"管道自诊只能进附录：{line.strip()[:40]}")
+    return problems
+
+
+def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
+    """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
+
+    「本次调研的 562 条证据显示……」是误导——撑起结论的是被引的 33 条。
+    合法写法只有两种：只写被引数，或者两个数一起写。
+    """
+    total, cited = counts.get("evidence"), counts.get("cited")
+    if not total or cited is None:
+        return []  # 两个数缺一个就判不了，尺子不猜
+    bodies = _section_bodies(markdown)
+    opening = next((name for name in template.sections if name in OPENING_SECTIONS), None)
+    if opening is None or opening not in bodies:
+        return []
+    problems = []
+    for sentence in SENTENCE_SPLIT.split("\n".join(bodies[opening])):
+        if not re.search(rf"(?<!\d){total}(?!\d)\s*条", sentence):
+            continue
+        if cited is not None and re.search(rf"(?<!\d){cited}(?!\d)", sentence):
+            continue  # 两个数一起写，合法
+        problems.append(
+            f"开篇节单写了采集总数 {total}：{sentence.strip()[:46]}"
+            f"（只能写被引数 {cited}，或者「{total} 条采集、{cited} 条进入引用」）")
+    return problems
+
+
+#: 编号连续了：⑨⑩ 归 §RPT-2（管道自诊不是发现 / 摘要不许单写采集总数），
+#: ⑪ 归 §CODE-1（不许把编码结果说成全网比例）。三包改同一个文件，
+#: 合并序 RPT-1 → RPT-2 → CODE-1；本次 rebase 是 RPT-2 那一棒，⑨⑩ 就位。
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
-          "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁", "⑪ 不许推及全网")
+          "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
+          "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网")
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -336,7 +389,9 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[5]: check_judgement_has_subject(markdown, entities),
         CHECKS[6]: check_opening_section(markdown, template),
         CHECKS[7]: check_advice_gate(markdown, template, crossref),
-        CHECKS[8]: check_ratio_phrases(markdown),
+        CHECKS[8]: check_pipeline_out_of_findings(markdown, template),
+        CHECKS[9]: check_summary_sample_size(markdown, template, data.get("counts") or {}),
+        CHECKS[10]: check_ratio_phrases(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(
