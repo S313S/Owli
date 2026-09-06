@@ -784,9 +784,15 @@ def test_decision_balance_选项式引用合法且_baseline_深拷贝独立(tmp_
 
     assert 1 <= len(questions) <= 5
     for question in questions:
-        assert question["input_type"] in {"single", "multi", "choice_2"}
-        assert 2 <= len(question["options"]) <= 4
-        assert question["answer"] is None
+        assert question["input_type"] in {"single", "multi", "choice_2", "text"}
+        # §RPT-2 货 1 ②：q-2 的读者闭集是五项（四类读者 + 不明），q-3 是一句话自由文本。
+        # 原先这里限死「2–4 个选项、答案一律留空」，锁的正是被替换掉的那套语义。
+        if question["input_type"] == "text":
+            assert question["options"] == []
+        else:
+            assert 2 <= len(question["options"]) <= 5
+        # 阻塞批准的只有 q-1；可跳过的追问生成期就预填「不明」，所以答案非空。
+        assert question["answer"] is None if question["q_id"] == "q-1" else question["answer"]
         assert question["affects"]
         assert set(question["affects"]) <= node_ids
 

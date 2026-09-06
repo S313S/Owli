@@ -429,6 +429,10 @@ class RuntimeCoordinator:
         *,
         auto_respond: bool = True,
     ) -> None:
+        # §RPT-2 货 1：可跳过的追问（q-2/q-3）生成期就预填了默认答案，
+        # 不该再发一张卡片打扰用户——要改在计划编辑页改。
+        if question.get("answer") not in (None, "", [], {}):
+            return
         card = Card(
             card_id=f"{plan.research_id}-{question['q_id']}",
             card_type=CardType.QUESTION,

@@ -180,3 +180,22 @@ def test_offpool_failure_is_recorded_with_the_offending_marks(tmp_path: Path, mo
     asyncio.run(go())
     exports = (store.get_report(RESEARCH_ID)["extra"] or {}).get("exports") or []
     assert exports and "S64" in exports[0]["desc"] and exports[0]["url"] is None
+
+
+def test_报告题面是看法时接口推荐舆情简报(tmp_path: Path) -> None:
+    """§RPT-2 货 1 ①：带上 research_id 就顺便算 recommended，前端下拉默认选中它。"""
+    app, _, _ = _app(tmp_path)
+    endpoint = _route(app, "/api/report-templates")
+    body = _run(app, lambda: endpoint(research_id=RESEARCH_ID))
+    assert body["data"]["recommended"] == "sentiment-brief"
+    # 不带 research_id 照旧只列清单，退回默认模板——推荐只是省一次点击，不该拦住下拉。
+    plain = _run(app, lambda: endpoint())
+    assert plain["data"]["recommended"] == "consulting"
+    assert len(plain["data"]["templates"]) == 3
+
+
+def test_研究不存在时推荐退回默认不报错(tmp_path: Path) -> None:
+    app, _, _ = _app(tmp_path)
+    endpoint = _route(app, "/api/report-templates")
+    body = _run(app, lambda: endpoint(research_id="r-不存在"))
+    assert body["data"]["recommended"] == "consulting"

@@ -1,5 +1,5 @@
 import { Alert, Button, Collapse, Empty, Popover, Segmented, Select, Space, Spin, Table, Tag, Typography, message } from 'antd'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ApiEnvelope, EvidenceItem, EvidenceView, PolishedReport, PolishedTable,
@@ -224,6 +224,9 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
   const { report, evidence, error, refresh } = useReportData(researchId)
   // 正式稿是给「拿结论去用的人」看的，有就默认停在它；工作稿随时能切回来。
   const [template, setTemplate] = useState('consulting')
+  // §RPT-2 货 1 ①：后端按题面算推荐模板，下拉默认选中它——但用户一旦手动改过，
+  // 推荐就不许再回来抢（清单是异步到的，晚于用户第一次点击也可能发生）。
+  const templatePicked = useRef(false)
   const [polishTick, setPolishTick] = useState(0)
   const [draft, setDraft] = useState<'work' | 'polished' | null>(null)
   const { polished, loading: polishing } = usePolishedReport(researchId, template, polishTick)
@@ -251,7 +254,9 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
   return <div className="report-view" data-testid="report-view" data-format={report.format}>
     <div className="report-toolbar" data-testid="report-toolbar">
       <ExportButtons researchId={researchId} report={report} onDone={refresh}
-        template={template} onTemplateChange={setTemplate}
+        template={template}
+        onTemplateChange={(name) => { templatePicked.current = true; setTemplate(name) }}
+        onRecommended={(name) => { if (!templatePicked.current) setTemplate(name) }}
         onPolished={() => { setPolishTick((n) => n + 1); setDraft('polished') }} />
     </div>
     {polished !== null && <Segmented data-testid="draft-tabs" style={{ marginBottom: 12 }}
@@ -317,9 +322,10 @@ function ReplaySectionButton({ researchId, section }: {
   </Button>
 }
 
-function ExportButtons({ researchId, report, onDone, template, onTemplateChange, onPolished }: {
+function ExportButtons({ researchId, report, onDone, template, onTemplateChange, onRecommended, onPolished }: {
   researchId: string; report: ReportData; onDone: () => void
-  template: string; onTemplateChange: (name: string) => void; onPolished: () => void
+  template: string; onTemplateChange: (name: string) => void
+  onRecommended: (name: string) => void; onPolished: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
@@ -327,13 +333,17 @@ function ExportButtons({ researchId, report, onDone, template, onTemplateChange,
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch('/api/report-templates')
+        const r = await fetch(`/api/report-templates?research_id=${encodeURIComponent(researchId)}`)
         if (!r.ok) return
-        const body = await r.json() as ApiEnvelope<{ templates: ReportTemplate[] }>
-        if (body.ok) setTemplates(body.data.templates)
+        const body = await r.json() as ApiEnvelope<{ templates: ReportTemplate[]; recommended?: string }>
+        if (!body.ok) return
+        setTemplates(body.data.templates)
+        if (body.data.recommended) onRecommended(body.data.recommended)
       } catch { /* 拿不到清单就只留默认模板，按钮照样能按 */ }
     })()
-  }, [])
+    // 只在挂载时取一次：onRecommended 每次渲染都是新函数，进依赖会让它反复抢回推荐值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [researchId])
   // 整理是后台活（Opus 一次调用，几分钟起步）。状态一律走 SSE，不许轮询
   // （web 契约：只有 RunPanel 豁免定时器），所以这里订阅本研究的事件流，
   // 只认 progress 的 polish 阶段与 export_failed 两种。

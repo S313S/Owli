@@ -150,11 +150,31 @@ def register_delivery_routes(
             "summary": f"正式稿已整理完成（{template}）"}})
 
     @application.get("/api/report-templates")
-    async def list_report_templates() -> dict[str, Any]:
-        """前端模板下拉的数据源；加模板只加目录，这里不用改。"""
-        from app.report.polish.skills import load_templates
+    async def list_report_templates(research_id: str | None = None) -> dict[str, Any]:
+        """前端模板下拉的数据源；加模板只加目录，这里不用改。
 
-        return envelope({"templates": [t.as_listing() for t in load_templates()]})
+        带上 `research_id` 就顺便按题面算一个 `recommended`（§RPT-2 货 1 ①）——
+        前端下拉默认选中它，用户仍然可以改。研究不存在或没题面就退回默认模板，
+        不报错：推荐只是省一次点击，不该拦住下拉。
+        """
+        from app.report.polish.skills import DEFAULT_TEMPLATE, load_templates, recommend_template
+
+        recommended = DEFAULT_TEMPLATE
+        if research_id:
+            report = store.get_report(research_id)
+            if report is not None:
+                plan = report.get("plan_snapshot") or {}
+                if isinstance(plan, str):
+                    plan = json.loads(plan or "{}")
+                question = plan.get("research_question") or report.get("research_question") or ""
+                # 按 canonical 去重后再数：`豆包` 与 `Doubao` 在计划里是两条，
+                # 直接数行数会把单实体题面误判成对比题面。
+                from app.report.polish.tables import _entity_aliases
+
+                entity_count = len(_entity_aliases(plan))
+                recommended = recommend_template(str(question), entity_count=entity_count)
+        return envelope({"templates": [t.as_listing() for t in load_templates()],
+                         "recommended": recommended})
 
     @application.post("/api/researches/{research_id}/export")
     async def export_research(research_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:

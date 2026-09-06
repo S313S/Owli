@@ -344,6 +344,10 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "objectives": [{"goal_id": g.get("goal_id"), "objective": g.get("objective")}
                        for g in (plan.get("goals") or []) if isinstance(g, Mapping)],
         "entities": sorted(_entity_aliases(plan)),
+        # §RPT-2 货 1 ②：读者是谁、他要拿这份报告做什么决定。q-2/q-3 可跳过，
+        # 跳过就是「不明」——写手见「不明」要把建议节写成「对不同读者的含义」。
+        # 形状以 `_audience` 的平铺键为准（main 上先落的那一版）；
+        # `run.sections_for` 平铺与嵌套两种都认，老产物不会因此读不出读者身份。
         **_audience(plan),
         "lexicon_version": LEXICON_VERSION,
         # 附录要交底「为什么不给百分比」，用的就是后两个数——它们必须是算出来的，

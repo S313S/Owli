@@ -111,3 +111,34 @@ def shared_rules(root: str | None = None) -> str:
             raise FileNotFoundError(f"共用规则缺文件：{path}")
         chunks.append(path.read_text(encoding="utf-8").strip())
     return "\n\n---\n\n".join(chunks)
+
+
+#: 题面里出现这些词就是在问「大家怎么看」——该走舆情简报，不是咨询体。
+#: §RPT-2 货 1：09-05 那份「国内大家对豆包的看法」走了默认咨询体，六张表里没有
+#: 一张回答「谁在夸什么、骂什么」，读者拿不到答案（提货单 §2.2 第 3 条）。
+SENTIMENT_CUES: tuple[str, ...] = ("看法", "口碑", "怎么说", "怎么看", "评价", "吐槽",
+                                   "风评", "反馈", "舆情", "槽点")
+#: 对比类线索。只有线索还不够——得真有两个及以上研究对象才配得上矩阵稿。
+COMPARE_CUES: tuple[str, ...] = ("对比", "竞品", "vs", "VS", "哪个好", "比较")
+
+
+def recommend_template(question: str, *, entity_count: int = 0,
+                       decision_type: str | None = None) -> str:
+    """按题面（与研究对象个数）推荐一个模板名，认不出就回默认的咨询体。
+
+    判定顺序就是下面三条的书写顺序，先命中先返回——「豆包和 Kimi 大家怎么评价」
+    这种两头都沾的题面归舆情简报，因为读者问的是「怎么评价」，对比只是范围。
+
+    - 题面含看法/口碑/怎么说/评价/吐槽 → `sentiment-brief`
+    - 研究对象 ≥2 且题面含对比/竞品/vs → `competitor-matrix`
+    - 其余 → `DEFAULT_TEMPLATE`（咨询体）
+
+    `decision_type` 是 q-1 的答案，目前只作旁证不参与判定；留着是为了让调用方
+    不必在加规则时改签名。
+    """
+    text = (question or "").strip()
+    if any(cue in text for cue in SENTIMENT_CUES):
+        return "sentiment-brief"
+    if entity_count >= 2 and any(cue in text for cue in COMPARE_CUES):
+        return "competitor-matrix"
+    return DEFAULT_TEMPLATE
