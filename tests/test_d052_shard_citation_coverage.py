@@ -56,3 +56,109 @@ def test_d052_提示词没被写长_片墙钟扛得住():
     """
     assert _shard_notice(3, 4, 8, 6, "").count("\n") <= 20
     assert _shard_notice(1, 4, 7, 6, "").count("\n") <= 20
+
+
+def _undercite_new_shard(monkeypatch, *, shard: int, keep: int, times: int):
+    """把指定新写片的前 ``times`` 稿改成只引本片池前 ``keep`` 条证据。"""
+    import json
+    from collections.abc import Callable
+
+    import app.orchestrator.sectioning as sectioning
+    from tests.test_d031_write_sharding import _pool_from_body
+
+    original: Callable = sectioning._run_before_section_deadline
+    calls: list[str] = []
+    prompts: list[str] = []
+    seen = 0
+
+    async def spy(adapter, task, ctx, on_event, deadline):
+        nonlocal seen
+        result = await original(adapter, task, ctx, on_event, deadline)
+        name = task.output_path.name
+        calls.append(name)
+        if f".part.{shard}." not in name:
+            return result
+        seen += 1
+        prompts.append(task.body)
+        if seen <= times:
+            payload = json.loads(task.output_path.read_text(encoding="utf-8"))
+            items = _pool_from_body(task.body)["items"][:keep]
+            payload["claims"][0]["evidence"] = [
+                {"permalink": item["permalink"]} for item in items
+            ]
+            task.output_path.write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8",
+            )
+        return result
+
+    monkeypatch.setattr(sectioning, "_run_before_section_deadline", spy)
+    return calls, prompts
+
+
+def test_d052_片池十条只引三条_发事件并定向重写一次(tmp_path, monkeypatch):
+    """真机后两片的形态：拿 7 用 4、拿 8 用 3，四片全成、账上全绿。"""
+    from tests.test_d031_write_sharding import _shard_run
+
+    calls, prompts = _undercite_new_shard(monkeypatch, shard=2, keep=3, times=1)
+
+    result, store, _, events, _ = _shard_run(tmp_path, evidence=30)
+
+    assert result.succeeded is True
+    # 只重写第 2 片，第 1、3 片各跑一次。
+    assert calls == [
+        "sec-1.part.1.md", "sec-1.part.2.md",
+        "sec-1.part.2.md", "sec-1.part.3.md",
+    ]
+    undercited = [e for e in events if e["type"] == "write_shard_undercited"]
+    assert len(undercited) == 1
+    assert undercited[0]["is_error"] is True
+    data = undercited[0]["data"]
+    assert (data["shard"], data["pool"], data["cited"]) == (2, 10, 3)
+    assert data["missing"] == [f"[S{index:02d}]" for index in range(14, 21)]
+    assert data["missing_total"] == 7
+    assert data["attempt"] == 1
+    assert "accepted" not in data
+    # 重写的 prompt 点名漏掉的角标，并把「每条都要用」讲一遍。
+    assert "[S14]" in prompts[1] and "一条结论都没引到" in prompts[1]
+    assert "至少被一条 `## 结论` 列表项引用" in prompts[1]
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_d052_重写后仍少引_接受这一稿但把读数留在事件里(tmp_path, monkeypatch):
+    """上限 1 次：再付一次多半还是同一个取舍，把时间留给后面的片。"""
+    from tests.test_d031_write_sharding import _shard_run
+
+    calls, _ = _undercite_new_shard(monkeypatch, shard=2, keep=3, times=3)
+
+    result, store, _, events, _ = _shard_run(tmp_path, evidence=30)
+
+    assert result.succeeded is True
+    # 只重写一次就收手，节级重试不因为少引被触发。
+    assert calls == [
+        "sec-1.part.1.md", "sec-1.part.2.md",
+        "sec-1.part.2.md", "sec-1.part.3.md",
+    ]
+    undercited = [e["data"] for e in events if e["type"] == "write_shard_undercited"]
+    assert [(item["attempt"], item.get("accepted")) for item in undercited] == [
+        (1, None), (1, True),
+    ]
+    assert undercited[1]["cited"] == 3
+    # 片仍算成，节照旧 done——少引不作废好稿。
+    assert [e["data"]["succeeded"] for e in events
+            if e["type"] == "write_shard_finished"] == [True, True, True]
+    assert store.list_chapters("r-ledger")[0]["status"] == "done"
+
+
+def test_d052_只漏一条不重写_按写手取舍放过(tmp_path, monkeypatch):
+    """判据线 ≥27/30 本身留了余量；为一条证据再付一次引擎不划算。"""
+    from tests.test_d031_write_sharding import _shard_run
+
+    calls, _ = _undercite_new_shard(monkeypatch, shard=2, keep=9, times=1)
+
+    result, _, _, events, _ = _shard_run(tmp_path, evidence=30)
+
+    assert result.succeeded is True
+    assert calls == [f"sec-1.part.{k}.md" for k in (1, 2, 3)]
+    undercited = [e["data"] for e in events if e["type"] == "write_shard_undercited"]
+    assert [(item["shard"], item["cited"], item.get("accepted")) for item in
+            undercited] == [(2, 9, True)]

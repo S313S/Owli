@@ -222,7 +222,16 @@ def _shard_run(
             shard_task.output_path.parent.mkdir(parents=True, exist_ok=True)
             shard_task.output_path.write_text(
                 json.dumps(
-                    {"markdown": markdown, "claims": [{"id": f"c-{shard:02d}01"}]},
+                    {"markdown": markdown, "claims": [{
+                        "id": f"c-{shard:02d}01",
+                        # §D-052 货 2：片池里每条证据都要被至少一条结论引到，
+                        # 否则新加的覆盖闸会判这片少引、多付一次定向重写。
+                        # 这个假写手是「照规矩写完了」的那种，让它把本片池引全。
+                        "evidence": [
+                            {"permalink": entry["permalink"]}
+                            for entry in pool["items"]
+                        ],
+                    }]},
                     ensure_ascii=False,
                 ),
                 encoding="utf-8",

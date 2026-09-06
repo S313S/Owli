@@ -1642,6 +1642,38 @@ def _shard_stale_citations(
     return stale
 
 
+def _shard_uncited_marks(
+    claims: list[Any], pool: Mapping[str, Any],
+) -> list[str]:
+    """本片池里**一条结论都没引到**的那些证据的角标（§D-052 货 2）。
+
+    §D-051 治的是「片挂了没人管」，本卡治的是「片没挂、写手自己少写」：真机
+    r-6be31e934d1b 四片全 `succeeded=true`、合并零丢失、页面十项全绿，写手却
+    只引了池里 30 条中的 21 条（后两片拿 7 用 4、拿 8 用 3）。少引的证据不进
+    `## 信息源`，读者那份报告里等于从没采过，而现有的闸一个都拦不住——
+    `_shard_stale_citations` 只管「引了池外 / 指向错」，管不着「池内没引」。
+
+    口径与判据同源：片信封 `claims[].evidence[].permalink` 去重后跟本片池的
+    permalink 求差。只看 claims 不看正文角标——判据线量的就是 claims，且正文
+    角标的池内外由 `_shard_stale_citations` 那条路管，两边不重复报。
+    """
+
+    by_link = {
+        str(item.get("permalink") or ""): str(item.get("citation") or "")
+        for item in pool.get("items", [])
+        if isinstance(item, Mapping) and item.get("permalink")
+    }
+    cited = {
+        str(evidence.get("permalink") or "")
+        for claim in claims if isinstance(claim, Mapping)
+        for evidence in (claim.get("evidence") or [])
+        if isinstance(evidence, Mapping)
+    }
+    return sorted(
+        mark for link, mark in by_link.items() if link not in cited
+    )
+
+
 def _shard_remapped_marks(
     markdown: str, by_mark: Mapping[str, str],
 ) -> set[str]:
@@ -1932,6 +1964,7 @@ async def _run_section_shards(
         engine_attempts = 0
         offpool_rewrites = 0
         unparseable_rewrites = 0
+        undercited_rewrites = 0
         while True:
             shard_attempt += 1
             engine_attempts += 1
@@ -1992,6 +2025,54 @@ async def _run_section_shards(
                     shard_attempt = 0
                     resume_for = None
                     continue
+                uncited_marks = (
+                    _shard_uncited_marks(envelope[1], _shard_pool(
+                        evidence_pool, start, size,
+                    ))
+                    if envelope is not None else []
+                )
+                # 漏 1 条按写手的取舍放过（判据线本身留了 3 条余量）；漏得更多
+                # 就是本卡那个形态，定向重写一次。上限 1：同一份池再付第二次
+                # 多半还是同一个取舍，把时间留给后面的片（口径同 §D-051 货 2）。
+                if len(uncited_marks) > 1 and undercited_rewrites < 1:
+                    undercited_rewrites += 1
+                    await _emit(on_event, "write_shard_undercited", {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "shard": index, "shards": total,
+                        "pool": size, "cited": size - len(uncited_marks),
+                        "missing": uncited_marks[:10],
+                        "missing_total": len(uncited_marks),
+                        "attempt": undercited_rewrites,
+                    }, is_error=True)
+                    shard_path.unlink(missing_ok=True)
+                    shard_task = replace(
+                        shard_task,
+                        body=(
+                            f"{body}\n\n【证据没用全重写】上一稿把本片池里的 "
+                            f"{' '.join(uncited_marks)} 一条结论都没引到。"
+                            "本片池里的每一条证据都要在 `## 信息源` 出现，"
+                            "且至少被一条 `## 结论` 列表项引用（一条结论可以带"
+                            "多个角标）；确实与本节无关的，也要在结论里写明"
+                            "为什么不采信并带上它的角标。\n"
+                        ),
+                    )
+                    shard_attempt = 0
+                    resume_for = None
+                    continue
+                if uncited_marks:
+                    # 重写过还是没用全（或只漏 1 条）：接受这一稿，但把读数留在
+                    # 事件里——判据查的是库与事件，别让它只活在片产物里。
+                    await _emit(on_event, "write_shard_undercited", {
+                        "goal_id": context.goal_id,
+                        "chapter_id": section["section_id"],
+                        "shard": index, "shards": total,
+                        "pool": size, "cited": size - len(uncited_marks),
+                        "missing": uncited_marks[:10],
+                        "missing_total": len(uncited_marks),
+                        "attempt": undercited_rewrites,
+                        "accepted": True,
+                    }, is_error=True)
                 break
             if (
                 bool(getattr(result, "succeeded", False))
