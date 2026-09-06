@@ -501,3 +501,36 @@ def test_claude_side_keeps_its_model_name():
     adapter = default_adapter()
     assert adapter._adapters["claude"].timeout_seconds == 1800.0
     assert type(adapter._adapters["codex"]).__name__ == "_CodexModelShim"
+
+
+# ── ④ 的老大难：写手把两行的数相加 ────────────────────────────────────────
+def test_shared_rules_spell_out_the_no_arithmetic_counter_examples():
+    """九格里三格都栽在加总；规则只说「不许算」不够，得把反例摆出来。"""
+    rules = shared_rules()
+    assert "表里有的数只能原样引一行，两行的数不许合并" in rules
+    for bad in ("259", "70%", "21/40"):
+        assert bad in rules, f"缺少反例 {bad}"
+    assert "D 级 257 条、未评级 2 条" in rules          # 正确写法也要给
+
+
+def test_ruler_catches_a_number_summed_from_two_table_rows(tmp_path):
+    """257 与 2 都在表里，259 不在——加总出来的数没出处，判红。"""
+    tables = tmp_path / "r-t.polished.consulting.tables.json"
+    tables.write_text(json.dumps({
+        "entities": ["豆包"], "counts": {},
+        "sources": [{"mark": "S01", "title": "帖", "url": "u", "grade": "A",
+                     "crossref": "PASS"}],
+        "tables": {"grade_mix": {"rows": [{"等级": "D", "全库条数": 257},
+                                          {"等级": "?", "全库条数": 2}]},
+                   # GOOD_V2 正文本来就提到 296 / 562，夹具要带上，否则 ④ 会被它们干扰
+                   "platform_mix": {"rows": [{"平台": "xhs", "采集条数": 296}], "n": 562}},
+    }, ensure_ascii=False), encoding="utf-8")
+    md = tmp_path / "r-t.polished.consulting.md"
+    md.write_text(GOOD_V2.replace("正文解读[S01]。", "未被引证据合计 259 条。"), encoding="utf-8")
+    work = tmp_path / "work.md"
+    work.write_text("[S01]", encoding="utf-8")
+    findings = check_polished.run(md, tables, work)
+    assert any("259" in p for p in findings["④ 数字有出处"])
+    # 分开各引一行就该放行
+    md.write_text(GOOD_V2.replace("正文解读[S01]。", "D 级 257 条、未评级 2 条。"), encoding="utf-8")
+    assert not check_polished.run(md, tables, work)["④ 数字有出处"]
