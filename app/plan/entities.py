@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from copy import deepcopy
 from typing import Any, Mapping, Sequence
 
@@ -472,6 +473,28 @@ async def _progress(on_progress: Any, text: str) -> None:
 
 __all__ = [
     "CARD_ATTEMPTS", "MAX_ENTITIES", "clean_aliases", "duplicate_entity_groups",
-    "entity_card", "entity_cards_match", "entity_prompt", "merge_entity_cards",
+    "entity_card", "entity_cards_match", "entity_prompt", "mentions", "merge_entity_cards",
     "resolve_entities",
 ]
+
+
+def mentions(text: str, name: str) -> bool:
+    """这段正文点没点这个名字：中文按包含算，拉丁名要求词边界。
+
+    §CODE-2 把它从 `plan/lint.py` 提到这里，让规划期的「章节点没点名实体」与
+    出表期的「原声点没点名被评实体」共用一把尺子——两处各写一份，迟早一处认
+    `Doubao` 另一处不认，而**不一致是静默的**（§RATE-4 踩过：两条打分路 447 行
+    不一致，把被测改动整个掩掉）。
+
+    拉丁名要词边界，不然 `Kimi` 会在 `Kimimaro` 里命中；中文不加边界，因为
+    「豆包的回答」里「豆包」后面没有分词符可依。一个字的名字调用方自己挡
+    （`entity_names` 已按 `len >= 2` 过滤），这里不重复判。
+    """
+
+    if not name:
+        return False
+    if any("一" <= char <= "鿿" for char in name):
+        return name in text
+    return re.search(
+        rf"(?<![0-9A-Za-z]){re.escape(name)}(?![0-9A-Za-z])", text, re.IGNORECASE
+    ) is not None
