@@ -886,3 +886,32 @@ def test_exports_那份没落盘就判失败(tmp_path, monkeypatch):
     assert not md_path.is_file() and draft_path.is_file()
     assert any("exports" in e for e in outcome["errors"])
     assert run_mod is not None
+
+
+# —— 货 3（不碰 tables.py 的那半）：主题段五步 + 附录样本偏差四句 ————————
+
+def test_共用规则给出主题段五步():
+    """借 customer-research 的综合模板：读者要的是「多少人在说、说得多重、原话、
+    对我意味着什么」，不是「有哪些说法」。"""
+    rules = shared_rules()
+    assert "## 5.6 主题段的五步" in rules
+    for step in ("主题名", "出现在 X 条 / Y 个平台", "强度", "对提问方意味着什么"):
+        assert step in rules, step
+    # 强度拿不到就跳过，不许拿条数冒充——这条是防写手编读数的闸
+    assert "不许拿条数冒充强度" in rules
+
+
+def test_附录固定四句样本偏差且只写采到的平台():
+    rules = shared_rules()
+    for line in ("小红书偏种草与晒单", "抖音偏娱乐化表达",
+                 "微博偏事件与转述", "Reddit 偏技术向"):
+        assert line in rules, line
+    assert "没采到的那句删掉" in rules
+
+
+@pytest.mark.parametrize("template", [t.name for t in load_templates()])
+def test_模板不再引用作废的四件事(template):
+    """§7 从四件事改成五件事；模板里留着旧说法，写手就会照旧漏掉样本偏差那件。"""
+    body = get_template(template).body
+    assert "四件事" not in body, f"{template} 还在说「四件事」"
+    assert "五件事" in body, f"{template} 没引用附录五件事"
