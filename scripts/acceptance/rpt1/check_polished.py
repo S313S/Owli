@@ -36,6 +36,17 @@ FORBIDDEN = (r"goal-\d", r"sec-\d", r"ch-\d", "本片", "本节样本", "本章�
 #: 裁决条 1：带这些评价词的句子里必须写出被评的是谁。
 JUDGEMENT_WORDS = ("偏浅", "偏弱", "不足", "较差", "套路化", "敷衍", "不够", "有限",
                    "偏低", "偏高", "薄弱", "欠缺")
+#: ⑥ 的情态用法：「不足以 / 不够以 + 动词」说的是「撑不起某个结论」，不是在评价谁。
+#: 依据 r-b10812f664d2×consulting 第 194 行「适合启动诊断，不足以直接支持全面改版」。
+MODAL_NOT_ENOUGH = re.compile(r"(?:不足|不够)以")
+#: ⑥ 的否定/劝诫用法：句子在说「不能这么解释」，评价词是被否定掉的那个读法。
+#: 依据 r-3e04f808dffd×competitor-matrix 第 195 行「也不能把空白格解释为产品能力较差」。
+NEGATED_READING = re.compile(r"不(?:表示|等于|意味着|代表|能把|应把|该把)")
+#: 链接不是句子：剥掉链接后没中文的「句」是引文行，不上 ⑥；④ 也不从链接里取数。
+#: 依据 r-3e04f808dffd×competitor-matrix 第 64 行被切出的 `(https://m.weibo.cn/…` 片段，
+#: 与 r-b10812f664d2×sentiment-brief 第 65/71/77 行「来源链接：https://…」。
+URL_IN_TEXT = re.compile(r"https?://\S+")
+CJK = re.compile(r"[\u4e00-\u9fff]")
 #: 裁决条 2：方法论口径词不许进开篇节；开篇节必须给一句人话把握度。
 METHOD_WORDS = ("SINGLE", "PASS", "WEAK", "CONFLICT")
 CONFIDENCE_WORD = "把握度"
@@ -194,14 +205,23 @@ def check_judgement_has_subject(markdown: str, entities: list[str]) -> list[str]
     """裁决条 1：带评价词的句子里要写出被评的是谁（实体名，或「本报告/本次样本」这类）。"""
     # 被评对象不一定是产品：口径段里评的是语料本身（「带立场标注的主张不足…」），
     # 那些句子主语写得很清楚，尺子不该拿它们开刀（09-05 二稿实测误报 5 处）。
+    # 「材料/评论/反馈/说法/用户/受访/支撑」同属这一类被评对象，09-06 九格里被冤枉了
+    # 一批（如 r-045acebc352b×sentiment-brief 第 29 行「后者所在材料同时包含相反评价」、
+    # r-3e04f808dffd×consulting 第 175 行「对长期口碑演变的支撑有限」）。
     subjects = [*entities, "本报告", "本次样本", "本轮", "本批", "样本", "证据池",
-                "证据", "主张", "语料", "数据", "口径", "覆盖", "来源", "样本量", "结论"]
+                "证据", "主张", "语料", "数据", "口径", "覆盖", "来源", "样本量", "结论",
+                "材料", "评论", "反馈", "说法", "用户", "受访", "支撑"]
     problems = []
     for index, line in enumerate(markdown.splitlines(), start=1):
         if line.startswith(("|", "#", ">")):
             continue
+        if not CJK.search(URL_IN_TEXT.sub("", line)):
+            continue  # 整行只是一条链接
         for sentence in SENTENCE_SPLIT.split(MARK_ANY.sub("", line)):
-            hit = next((w for w in JUDGEMENT_WORDS if w in sentence), None)
+            probe = URL_IN_TEXT.sub("", sentence)
+            if not CJK.search(probe) or NEGATED_READING.search(probe):
+                continue
+            hit = next((w for w in JUDGEMENT_WORDS if w in MODAL_NOT_ENOUGH.sub("", probe)), None)
             if hit and not any(name and name in sentence for name in subjects):
                 problems.append(f"第 {index} 行「{hit}」没写清是在说谁：{sentence.strip()[:40]}")
     return problems

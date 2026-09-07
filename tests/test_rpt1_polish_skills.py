@@ -534,3 +534,24 @@ def test_ruler_catches_a_number_summed_from_two_table_rows(tmp_path):
     # 分开各引一行就该放行
     md.write_text(GOOD_V2.replace("正文解读[S01]。", "D 级 257 条、未评级 2 条。"), encoding="utf-8")
     assert not check_polished.run(md, tables, work)["④ 数字有出处"]
+
+
+@pytest.mark.parametrize("sentence, why", [
+    ("现有材料适合启动诊断，不足以直接支持全面改版[S01]。", "情态：不足以+动词"),
+    ("这批材料同时包含相反评价，交叉印证偏弱[S01]。", "主语是「材料」"),
+    ("对长期口碑演变的支撑有限[S01]。", "主语是「支撑」"),
+    ("读者不能把空白格解释为产品能力较差[S01]。", "否定/劝诫用法"),
+])
+def test_ruler_lets_these_judgement_shapes_through(tmp_path, sentence, why):
+    """⑥ 09-06 九格误报的四种句式（依据见 check_polished.py 常量注释里的原文出处）。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", sentence))
+    assert not findings["⑥ 评价句写清说谁"], why
+
+
+def test_ruler_skips_a_line_that_is_only_a_link(tmp_path):
+    """一整行「来源链接：https://…」不是判断句，⑥ 不该拿它开刀。"""
+    findings = _run_v2(
+        tmp_path,
+        GOOD_V2.replace("正文解读[S01]。",
+                        "正文解读[S01]。\n\n来源链接：https://m.weibo.cn/detail/5338769299341618"))
+    assert not findings["⑥ 评价句写清说谁"]
