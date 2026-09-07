@@ -790,3 +790,33 @@ def test_建议门禁两节都过一遍(tmp_path):
     work.write_text("".join(f"[{m}]" for m in crossref), encoding="utf-8")
     problems = check_polished.run(md, matrix_tables, work)["⑧ 建议门禁"]
     assert sum("单源孤证" in p for p in problems) == 2
+
+
+# —— 守卫：谁再改建议节的名字，这里当场打红 ————————————————————————
+
+@pytest.mark.parametrize("template", [t.name for t in __import__(
+    "app.report.polish.skills", fromlist=["load_templates"]).load_templates()])
+@pytest.mark.parametrize("audience", [{}, {"audience": {"audience_role": "竞品团队"}}])
+def test_每个模板都有一节落在建议门禁的辖区内(template, audience):
+    """⑧ 建议门禁按节名硬匹配 `ADVICE_SECTIONS` 找节，找不到就返回空——**不报错**。
+
+    §RPT-2 货 4 ① 给「建议」加了改名分支，改名而尺子不跟着认，后果是六处
+    「只有单源孤证撑着」的真抓一处不剩、读数还是绿的（在 main 的尺子上实测如此）。
+    这条守卫锁的就是那个静默失灵：任何模板、任何读者身份下，成稿的一级标题里
+    必须至少有一节在门禁辖区内。将来谁再改节名，红在这里，不用等实跑。
+    """
+    from app.report.polish.run import sections_for
+    from app.report.polish.skills import get_template
+
+    names = sections_for(get_template(template), audience)
+    covered = [n for n in names if n in check_polished.ADVICE_SECTIONS]
+    assert covered, f"模板 {template} 在 {audience or '读者不明'} 下没有一节归 ⑧ 管：{names}"
+
+
+def test_门禁辖区词表跟着改名分支走():
+    """改名产生的两个节名都必须在辖区内——漏一个就是漏一种读者身份下的稿。"""
+    from app.report.polish.run import (ADVICE_SECTION, ADVICE_SECTION_UNKNOWN_AUDIENCE,
+                                       IMPLICATIONS_SECTION)
+
+    for name in (ADVICE_SECTION, ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION):
+        assert name in check_polished.ADVICE_SECTIONS, name
