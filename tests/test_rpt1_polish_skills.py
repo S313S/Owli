@@ -634,3 +634,15 @@ def test_progress_is_written_atomically(tmp_path):
     matrix._save_progress(path, "abc", {"g": {"passed": False}})
     assert json.loads(path.read_text(encoding="utf-8"))["revision"] == "abc"
     assert not list(path.parent.glob("*.tmp"))
+
+
+def test_a_single_cell_run_updates_the_book_instead_of_replacing_it(tmp_path):
+    """`--only 某一格` 不能把整本账本覆盖成只剩那一格——否则下次 --resume
+    会把本来已过的八格又跑一遍（≈5 h）。账本总是先读进来再往上加。"""
+    matrix = _matrix()
+    path = tmp_path / "book.json"
+    matrix._save_progress(path, "abc", {f"g{i}": {"passed": True} for i in range(8)})
+    book = matrix._load_progress(path, "abc")          # 单格那轮开跑时也要先读
+    book["g8"] = {"passed": False}                     # 只加自己这一格
+    matrix._save_progress(path, "abc", book)
+    assert len(matrix._load_progress(path, "abc")) == 9

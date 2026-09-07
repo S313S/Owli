@@ -102,7 +102,10 @@ async def one(runner, store, runs_root: Path, research_id: str, template: str,
         outcome = {"status": "ok", "attempts": 0, "offpool": [], "skipped": True}
     row = {"research_id": research_id, "template": template, "status": outcome["status"],
            "attempts": outcome.get("attempts"), "seconds": round(time.time() - started, 1),
-           "bytes": md_path.stat().st_size if md_path.is_file() else 0}
+           "bytes": md_path.stat().st_size if md_path.is_file() else 0,
+           # 这一格到底重写没重写，要跟着读数走——否则账本里「过了」的格分不出
+           # 是本轮写出来的，还是上一轮留下的稿被重新压了一遍尺子。
+           "skipped": bool(outcome.get("skipped"))}
     if outcome["status"] != "ok":
         row["ruler"] = {"—": ["未出稿：" + "；".join(outcome.get("errors") or ["未知"])]}
         return row
@@ -136,7 +139,11 @@ async def main() -> int:
     progress_path = Path(args.progress)
     if not progress_path.is_absolute():
         progress_path = ROOT / progress_path
-    book = _load_progress(progress_path, revision) if args.resume else {}
+    # 账本**总是**先读进来再往上加，不管这轮带不带 --resume——否则 `--only 某一格`
+    # 会把整本覆盖成只剩那一格，下次 --resume 就把本来已过的八格又跑一遍。
+    # （版本对不上时 `_load_progress` 自己返回空，所以这样读不会串轮。）
+    book = _load_progress(progress_path, revision)
+    skippable = book if args.resume else {}
     if args.resume:
         done = sum(1 for v in book.values() if v.get("passed"))
         print(f"续跑账本 {progress_path}（代码 {revision}）："
@@ -144,8 +151,8 @@ async def main() -> int:
     rows = []
     for research_id, template in cells:
         key = f"{research_id}:{template}"
-        if args.resume and (book.get(key) or {}).get("passed"):
-            row = dict(book[key])
+        if (skippable.get(key) or {}).get("passed"):
+            row = dict(skippable[key])
             row["resumed"] = True
             rows.append(row)
             print(f"[SKIP] {key}  上一段已过尺子，不重跑", flush=True)
@@ -157,8 +164,10 @@ async def main() -> int:
         book[key] = row
         _save_progress(progress_path, revision, book)
         mark = "PASS" if row.get("passed") else "FAIL"
+        # 没重写就把话说明白：这一格量的是上一轮留下的稿，不是本轮的成果。
+        stale = "  ← 未重写，只压尺子" if row.get("skipped") else ""
         print(f"[{mark}] {research_id} × {template}  {row['bytes']} B  "
-              f"{row['seconds']}s  attempts={row['attempts']}", flush=True)
+              f"{row['seconds']}s  attempts={row['attempts']}{stale}", flush=True)
         for name, problems in (row.get("ruler") or {}).items():
             print(f"        {name}: {len(problems)} 处 · {problems[0][:70]}", flush=True)
     print("\n" + json.dumps(rows, ensure_ascii=False, indent=1))

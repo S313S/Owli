@@ -51,6 +51,24 @@ nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py \
 
 单格返工：`--only <research_id>:<模板>`。
 
+## 先单跑一格给人读，再起整轮
+
+调度可能先要一格出稿给用户读，再起整轮。两步的旗标不能凭感觉：
+
+```bash
+# 第一步：单跑一格。**必须带 --force**——九份旧稿都还在，不带 --force 会被
+# 默认路径跳过，只重新压一遍尺子，交给用户的就是上一轮那份旧稿（读数里
+# 会打「← 未重写，只压尺子」，别忽略这行）。
+../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/rpt1-8956.db --runs var/runs --force   --only r-3e04f808dffd:consulting > var/rpt1-sample-$(date +%m%d-%H%M).log 2>&1
+
+# 第二步：起剩下的八格。**用 --resume，不要用 --force**——第一格已经进账本，
+# --resume 会跳过它；用 --force 则把它连同另外八格一起重跑，白烧一格。
+nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/rpt1-8956.db --runs var/runs --resume   > var/rpt1-final-$(date +%m%d-%H%M).log 2>&1 &
+```
+
+前提是两步之间**代码一个字没动**（含没提交的改动）——动了账本自动作废，
+第二步会连第一格一起重跑，这是设计如此，不是故障。
+
 ## 跑完看什么
 
 - 末尾一行 `尺子全过 N/9`，退出码 0 只在 9/9 时给。
