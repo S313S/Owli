@@ -289,8 +289,29 @@ def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list
                 f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{text.strip()[:46]}")
     return problems
 
+def check_ratio_phrases(markdown: str) -> list[str]:
+    """§CODE-1：编码是模型判断，正式稿只能写条数，不能推及全网（用户 09-05 拍甲）。
+
+    表格行不参与——表里的占比是数据本身，不是写手的断言。
+    """
+    from app.reliability.coding import ratio_phrase_offenders
+
+    problems = []
+    for index, line in enumerate(markdown.splitlines(), start=1):
+        if line.startswith("|"):
+            continue
+        for offender in ratio_phrase_offenders(line):
+            problems.append(
+                f"第 {index} 行的 {offender!r} 把编码结果说成了全网比例；"
+                "编码是模型判断，只能写「N 条里 M 条编码为正向」")
+    return problems
+
+
+#: 编号有缺口是**故意**的：⑨⑩ 归 §RPT-2（管道自诊不是发现 / 摘要不许单写采集总数），
+#: 它那两条还没合 main。三包改同一个文件，合并序是 RPT-1 → RPT-2 → CODE-1，
+#: 本包在最后，届时 ⑨⑩ 就位、编号自然连续。现在占 ⑨ 会跟它撞号。
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
-          "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁")
+          "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁", "⑪ 不许推及全网")
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -315,6 +336,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[5]: check_judgement_has_subject(markdown, entities),
         CHECKS[6]: check_opening_section(markdown, template),
         CHECKS[7]: check_advice_gate(markdown, template, crossref),
+        CHECKS[8]: check_ratio_phrases(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

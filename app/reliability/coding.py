@@ -372,19 +372,34 @@ __all__ = [
 #: 只能写「N 条里 M 条编码为正向」，不能推及全网）。闸词按**去掉引用原文与链接
 #: 之后**的正文匹配：小红书话题名里就有「人类对豆包的开发不足百分之一」，
 #: 拿它打红写手是冤枉——本包一轮重放实测踩过。
+#: 无条件违规：这几个词本身就是「推及全网」，跟有没有数字无关。
+FORBIDDEN_CROWD_PATTERN = re.compile(r"多数用户|大多数用户|用户普遍|绝大多数用户")
+#: 比例写法。**不无条件禁**——表里的「被引占比 15%」「287 条里 260 条（90%）」都是
+#: 合法的数据引用，一刀切会把它们打成假红（本包三轮重放里假红比真红还多）。
+#: 只有当同一句里还出现人群主语时，它才是用户拍甲禁的那种「用户 X% 认为」。
 FORBIDDEN_RATIO_PATTERN = re.compile(
     r"\d+\s*(?:%|％)|百分之[零一二三四五六七八九十百千万\d]+"
-    r"|多数用户|大多数用户|用户普遍|绝大多数用户"
 )
+CROWD_SUBJECT = re.compile(r"用户|网友|受访者|消费者|的人|人们|大家")
+_SENTENCE = re.compile(r"[^。！？；\n]+")
 _QUOTED = re.compile(r"[「『“\"][^」』”\"]{0,120}[」』”\"]")
 _LINKED = re.compile(r"https?://\S+|\[[^\]]{0,120}\]\([^)]{0,300}\)")
 
 
 def ratio_phrase_offenders(markdown: str) -> list[str]:
-    """回正文里自己写的比例句式；引用原文与链接里的不算。"""
+    """回正文里自己写的比例句式；引用原文与链接里的不算。
+
+    编码是**模型判断**，正式稿只能写「N 条里 M 条编码为正向」，不能写
+    「用户 X% 认为」（用户 2026-09-05 拍甲）。所以判的是**推及全网**，
+    不是判百分号：占比数据照写，写成人群断言才红。
+    """
 
     stripped = _QUOTED.sub("", _LINKED.sub("", str(markdown)))
-    return [match.group(0) for match in FORBIDDEN_RATIO_PATTERN.finditer(stripped)]
+    offenders = [m.group(0) for m in FORBIDDEN_CROWD_PATTERN.finditer(stripped)]
+    for sentence in _SENTENCE.findall(stripped):
+        if CROWD_SUBJECT.search(sentence):
+            offenders.extend(m.group(0) for m in FORBIDDEN_RATIO_PATTERN.finditer(sentence))
+    return offenders
 
 
 def coded_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

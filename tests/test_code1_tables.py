@@ -164,3 +164,19 @@ def test_分母写进壳里防误读():
     assert table["n"] == 1
     assert table["coverage"] == {"已编码 UGC 条数": 1, "全库证据条数": 2, "身份不明条数": 1}
     assert "不是全库 2 条证据" in table["basis"]
+
+
+def test_闸词判的是推及全网_不是判百分号():
+    """占比数据照写，写成人群断言才红——一刀切禁百分号，假红会比真红还多。"""
+
+    # 合法：表里的占比、附录交底的覆盖率，都没有人群主语。
+    assert ratio_phrase_offenders("小红书被引占比 15%，微博 8%。") == []
+    assert ratio_phrase_offenders("287 条编码里 260 条看不出身份（90%）。") == []
+    assert ratio_phrase_offenders("抽检 30 条，一致 28 条。") == []
+    # 违规：同句里有人群主语，就是用户拍甲禁的那种句式。
+    assert ratio_phrase_offenders("用户里有 62% 给了正面评价。") == ["62%"]
+    assert ratio_phrase_offenders("网友百分之六十认为好用。") == ["百分之六十"]
+    # 无条件违规：跟有没有数字无关。
+    assert ratio_phrase_offenders("大多数用户觉得不错。") == ["大多数用户"]
+    # 跨句不误伤：占比在前一句，人群主语在后一句。
+    assert ratio_phrase_offenders("被引占比 15%。用户反馈以正面为主。") == []
