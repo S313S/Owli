@@ -44,6 +44,10 @@ def missing_sections(markdown: str, sections: Sequence[str]) -> list[str]:
 #: 而是「你是谁决定了这份报告对你意味着什么」。标题由代码写，写手改不了也不用改。
 ADVICE_SECTION = "建议"
 ADVICE_SECTION_UNKNOWN_AUDIENCE = "对不同读者的含义"
+#: §RPT-2 货 4 ②：竞品对比稿自带的「对提问方意味着什么」（借 competitor-profiling
+#: 的 Competitive Implications 一节）。模板里已经有它，建议节就不必再改名——
+#: 否则读者不明时会出现两节讲同一件事。
+IMPLICATIONS_SECTION = "对提问方意味着什么"
 
 
 def sections_for(template: Template, data: Mapping[str, Any]) -> tuple[str, ...]:
@@ -51,7 +55,7 @@ def sections_for(template: Template, data: Mapping[str, Any]) -> tuple[str, ...]
     from app.plan.question import AUDIENCE_UNKNOWN
 
     role = str((data.get("audience") or {}).get("audience_role") or AUDIENCE_UNKNOWN)
-    if role != AUDIENCE_UNKNOWN:
+    if role != AUDIENCE_UNKNOWN or IMPLICATIONS_SECTION in template.sections:
         return tuple(template.sections)
     return tuple(ADVICE_SECTION_UNKNOWN_AUDIENCE if name == ADVICE_SECTION else name
                  for name in template.sections)

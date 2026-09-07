@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.report.polish.run import ADVICE_SECTION_UNKNOWN_AUDIENCE  # noqa: E402
+from app.report.polish.run import (ADVICE_SECTION_UNKNOWN_AUDIENCE,  # noqa: E402
+                                   IMPLICATIONS_SECTION)
 from app.report.polish.skills import load_templates  # noqa: E402
 
 #: 内部词：读者不知道也不需要知道研究是怎么切块的，也不需要知道库长什么样。
@@ -56,7 +57,10 @@ OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
 #: §RPT-2 货 4 ①：读者身份「不明」时 run.py 把「建议」改名成「对不同读者的含义」，
 #: 尺子要认这个别名——否则改名后判据 ② 误报「缺『建议』」，建议门禁还会
 #: 因为按模板名找不到节而静默放行（假绿）。
-ADVICE_SECTIONS = frozenset({"建议", "需要回应的点", ADVICE_SECTION_UNKNOWN_AUDIENCE})
+#: §RPT-2 货 4 ②：竞品对比稿的「对提问方意味着什么」写的也是「凭这些证据你该怎么看」，
+#: 同样受「弱证据不撑强建议」的门禁管——它和「建议」会同时出现，门禁要两节都过一遍。
+ADVICE_SECTIONS = frozenset({"建议", "需要回应的点",
+                            ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION})
 DOWNGRADE_HEADING = "值得进一步验证的方向"
 #: §RPT-2 货 2 闸 ⑨：主体节（关键发现、正/负/争议/诉求、对比总览…）只讲调研对象。
 #: 「主体节」= 模板声明的节里去掉开篇、建议、集中列表、时间线与附录剩下的那些——
@@ -290,14 +294,16 @@ def check_opening_section(markdown: str, template) -> list[str]:
 def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list[str]:
     """裁决条 4：一条建议所引角标若全是单源孤证，必须降级到「值得进一步验证的方向」。"""
     bodies = _section_bodies(markdown)
-    advice = next((name for name in resolved_sections(markdown, template)
-                   if name in ADVICE_SECTIONS), None)
-    if advice is None or advice not in bodies:
-        return []
+    return [p for name in resolved_sections(markdown, template)
+            if name in ADVICE_SECTIONS and name in bodies
+            for p in _advice_entry_problems(bodies[name], crossref)]
+
+
+def _advice_entry_problems(lines: list[str], crossref: dict[int, str]) -> list[str]:
     # 一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把
     # 只引孤证的那半行单独判红（09-05 九格实测两格误报）。按「条」聚合才对。
     problems, entries, current = [], [], []
-    for line in bodies[advice]:
+    for line in lines:
         if line.strip().startswith("#"):
             if DOWNGRADE_HEADING in line:
                 break          # 降级区之后的都不受门禁管

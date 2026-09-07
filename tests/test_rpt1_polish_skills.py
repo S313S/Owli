@@ -749,3 +749,44 @@ def test_建议门禁在改名后的节上照样开火(tmp_path):
     findings = _run_v2(tmp_path, GOOD_V2.replace("# 建议", "# 对不同读者的含义"),
                        {"S01": "PASS", "S02": "SINGLE"})
     assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
+
+
+# —— §RPT-2 货 4 ②：竞品对比稿收尾「对提问方意味着什么」 ——————————————
+
+def test_竞品对比稿有对提问方意味着什么这一节():
+    """借 competitor-profiling 的 Competitive Implications：谁强在哪之后要落到「所以对你」。"""
+    names = list(get_template("competitor-matrix").sections)
+    assert "对提问方意味着什么" in names
+    # 位置：先摆事实（谁强在哪），再说含义，最后才给动作（建议）
+    assert names.index("谁强在哪") < names.index("对提问方意味着什么") < names.index("建议")
+
+
+def test_对比稿读者不明时建议节不改名():
+    """它已经有一节专写含义，建议节再改名就成了两节讲同一件事。"""
+    from app.report.polish.run import sections_for
+
+    skill = get_template("competitor-matrix")
+    names = sections_for(skill, {})
+    assert "建议" in names and "对不同读者的含义" not in names
+    assert names == tuple(skill.sections)
+
+
+def test_建议门禁两节都过一遍(tmp_path):
+    """含义节写的也是「凭这些证据你该怎么看」，孤证撑着照样要降级。
+
+    门禁按模板声明的节找节，所以这条必须用竞品对比稿的夹具——
+    咨询体不声明这一节，往它稿子里插一节门禁根本看不见。
+    """
+    crossref = {"S01": "PASS", "S02": "SINGLE"}
+    tables = _tables_v2(tmp_path, crossref)
+    matrix_tables = tables.with_name("r-t.polished.competitor-matrix.tables.json")
+    matrix_tables.write_text(tables.read_text(encoding="utf-8"), encoding="utf-8")
+    md = tmp_path / "r-t.polished.competitor-matrix.md"
+    md.write_text(GOOD_V2.replace(
+        "# 建议",
+        "# 对提问方意味着什么\n\n- **对竞品团队**：这块口碑最集中[S02]\n\n# 建议"),
+        encoding="utf-8")
+    work = tmp_path / "work.md"
+    work.write_text("".join(f"[{m}]" for m in crossref), encoding="utf-8")
+    problems = check_polished.run(md, matrix_tables, work)["⑧ 建议门禁"]
+    assert sum("单源孤证" in p for p in problems) == 2
