@@ -276,10 +276,22 @@ def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
 
 
 #: 全部可用表名；SKILL.md 的 `tables:` 只能从这里挑（加载器会校验）。
+#: 模板 frontmatter 只能声明这里有的表名（`skills._load_one` 会校验），
+#: 而 `build_prompt` 又只投喂「模板点名过的表」——**两处都对上，写手才看得见一张表**。
+#: 后三张由 §CODE-1 货 2 产出，本包先留位：名字在白名单里，模板也声明了，
+#: `build_tables` 还没产出时 `build_prompt` 自然跳过（`if name in data["tables"]`），
+#: CODE-1 一接线就能被写手看到，不用回头再改三份 SKILL.md。
 TABLE_NAMES: tuple[str, ...] = (
     "platform_mix", "grade_mix", "crossref_mix", "entity_mentions",
     "topic_polarity", "timeline", "entity_dimension",
+    # —— §CODE-1 货 2 留位（挂在 `tables` 键下，不是顶层：尺子 ④ 的 allowed
+    #    集合只从 tables/counts 递归收数，挂顶层的话表里的数在正文里会被判无出处）
+    "attitude_by_topic", "scenario_counts", "quotes",
 )
+#: 上面留位的、暂时还没有产出者的表名。用例靠它守「留位不等于已实现」这条边界。
+RESERVED_TABLE_NAMES: frozenset[str] = frozenset({
+    "attitude_by_topic", "scenario_counts", "quotes",
+})
 
 
 def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],

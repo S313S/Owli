@@ -121,3 +121,49 @@ def test_nightly_reports_all_produce_every_table(research_id: str):
     assert data["tables"]["platform_mix"]["n"] == total == data["counts"]["evidence"]
     assert all(table["rows"] for table in data["tables"].values())
     assert json.dumps(data, ensure_ascii=False)  # 全表可 JSON 序列化，才能落 tables.json
+
+
+# —— §CODE-1 货 2 的三张聚合表：本包只留位，用例守住留位的三条边界 ——
+
+def test_reserved_table_names_are_whitelisted_so_skills_can_declare_them():
+    """留位第一层：名字进白名单，三份 SKILL.md 才敢声明它（不在白名单就抛，三个模板一起废）。"""
+    from app.report.polish.skills import load_templates
+    from app.report.polish.tables import RESERVED_TABLE_NAMES, TABLE_NAMES
+
+    assert RESERVED_TABLE_NAMES <= set(TABLE_NAMES)
+    for template in load_templates():
+        assert RESERVED_TABLE_NAMES <= set(template.tables), f"{template.name} 没声明留位的表"
+
+
+def test_reserved_tables_are_not_produced_yet_and_that_is_not_an_error():
+    """留位第二层：还没产出者，`build_tables` 不出这三张表，也不报错。"""
+    from app.report.polish.tables import RESERVED_TABLE_NAMES
+
+    data = _build([_evidence()])
+    assert not (RESERVED_TABLE_NAMES & set(data["tables"]))
+
+
+def test_a_declared_but_absent_table_is_skipped_not_crashed(tmp_path):
+    """留位第三层：模板声明了、数据里还没有，组提示词要静静跳过而不是 KeyError。"""
+    from app.report.polish.run import build_prompt
+    from app.report.polish.skills import get_template
+
+    data = _build([_evidence()])
+    prompt = build_prompt(get_template("consulting"), data, "# 报告\n", tmp_path / "s.md",
+                          parts=[("执行摘要", tmp_path / "s.md")], current="执行摘要")
+    assert "attitude_by_topic" not in prompt  # 机器表名任何时候都不进提示词
+
+
+def test_numbers_in_a_table_under_the_tables_key_count_as_sourced():
+    """CODE-1 必须把三张表挂在 `tables` 键下——尺子 ④ 的白名单只从 tables/counts 递归收数。
+    挂顶层的话，附录那句「287 条里 260 条看不出身份」会被 ④ 判成没出处。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_polished",
+        Path(__file__).resolve().parents[1] / "scripts/acceptance/rpt1/check_polished.py")
+    check_polished = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check_polished)
+    allowed: set[str] = set()
+    check_polished._numbers_from({"attitude_by_topic": {"rows": [{"条数": 287}]}}, allowed)
+    assert "287" in allowed
