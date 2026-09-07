@@ -413,6 +413,23 @@ def hedge_density(markdown: str) -> list[str]:
     return problems
 
 
+#: §RULE-1 货 4（评审 #8，调度拍乙）：正式稿只出表不出图。
+#: 前端没有图表渲染器（`web/src` 与 skill 目录里都没有 mermaid），写手自选的
+#: `xychart-beta ... line [27, 4, ...]` 在真实页面上整段显示成裸代码。
+CHART_WORDS = ("mermaid", "xychart", "```")
+
+
+def check_no_charts(markdown: str) -> list[str]:
+    """成稿里不许有围栏与图表源码——围栏里除了图表源码没别的东西该进正式稿。"""
+    problems = []
+    for index, line in enumerate(writer_text(markdown).splitlines(), start=1):
+        hit = next((w for w in CHART_WORDS if w in line), None)
+        if hit:
+            problems.append(f"第 {index} 行出现 {hit!r}：页面没有图表渲染器，"
+                            f"图会渲染成裸代码；趋势改成表 + 一句结论（{line.strip()[:30]}）")
+    return problems
+
+
 def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
     """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
 
@@ -444,7 +461,7 @@ def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
           "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
-          "⑫ 假设与不确定性只写一次")
+          "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度",)
@@ -476,6 +493,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[9]: check_summary_sample_size(markdown, template, data.get("counts") or {}),
         CHECKS[10]: check_ratio_phrases(markdown),
         CHECKS[11]: check_uncertainty_once(markdown),
+        CHECKS[12]: check_no_charts(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

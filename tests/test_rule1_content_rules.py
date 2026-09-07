@@ -168,3 +168,29 @@ def test_two_hedges_in_a_section_are_fine(tmp_path):
     """上限是 2 不是 0——该限定的时候还是要限定，别把尺子改成禁止说人话。"""
     markdown = GOOD.replace("正文解读[S01]。", "正文解读[S01]。该结论为单源，不能外推。")
     assert not _warn(tmp_path, markdown)["⒜ 限定句密度"]
+
+
+# ── 货 4（评审 #8，调度拍乙）：正式稿只出表不出图 ────────────────────────
+MERMAID = """```mermaid
+xychart-beta
+    line [27, 4, 11]
+```"""
+
+
+def test_a_mermaid_chart_is_red(tmp_path):
+    """真机截图坐实：这段在页面上整块显示成裸代码，读者一个字读不出来。"""
+    problems = _run(tmp_path, GOOD.replace("正文解读[S01]。",
+                                           "正文解读[S01]。\n\n" + MERMAID))["⑬ 只出表不出图"]
+    assert problems and any("mermaid" in p for p in problems)
+
+
+def test_any_code_fence_is_red_even_without_mermaid(tmp_path):
+    """围栏里除了图表源码没别的东西该进正式稿——只堵 mermaid 会漏掉别的画法。"""
+    markdown = GOOD.replace("正文解读[S01]。", "正文解读[S01]。\n\n```\npie 30 70\n```")
+    assert _run(tmp_path, markdown)["⑬ 只出表不出图"]
+
+
+def test_a_markdown_table_is_still_fine(tmp_path):
+    """趋势改成表 + 一句结论，是这条规则要的形态，不能顺手把表也判红。"""
+    trend = "证据在 8 月见顶后回落[S01]。\n\n| 月份 | 证据条数 |\n| --- | --- |\n| 2026-08 | 19 |"
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", trend))["⑬ 只出表不出图"]
