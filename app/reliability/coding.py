@@ -147,7 +147,38 @@ def engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> str:
+def _plan_entity_names(report: Mapping[str, Any] | None) -> list[str]:
+    """从报告的计划快照取被评实体的全部叫法，取不到就空着（编码照跑，只是不加这条约束）。
+
+    沿用 `_entity_aliases`——它按 canonical 把「豆包」「Doubao」两张卡并成一个实体。
+    延迟 import：`polish` 那层会反过来 import 本模块，放模块顶层就成环。
+    """
+
+    from app.report.polish.tables import _entity_aliases
+
+    plan = (report or {}).get("plan_snapshot")
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(plan, Mapping):
+        return []
+    return sorted({name for names in _entity_aliases(plan).values() for name in names
+                   if len(str(name).strip()) >= 2})
+
+
+def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
+                   entity_names: Sequence[str] = ()) -> str:
+    # §CODE-2 货 3：防**新**数据再出「引反人」。它不替代出表时那道程序闸——
+    # 已经编码好的行不会因为提示词变了就重编，重编要真金白银付引擎钱。
+    naming = (
+        f"quote 必须点名被评实体（{'、'.join(entity_names[:12])}）——"
+        "同一条里如果有既点了名、又能代表这条态度的句子，**必须选那句**；"
+        "只有整条都没点名时才退而摘最能代表态度的一句。"
+        "**别摘夸别的产品的话**：「但是 X 不会觉得自己是你的对立面」这种句子夸的是 X，"
+        "拿它当被评实体的正面原声就是引反了人。\n"
+    ) if entity_names else ""
     return (
         "目标：对国内社媒 UGC 逐条打结构化编码，供后续按条数聚合。只依据输入文本，"
         "不补造事实、不推测作者身份。\n"
@@ -164,6 +195,7 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> 
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
         "要能代表这条的态度。禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
         "输入文本里，对不上整批退回重打。实在摘不出就给空字符串。\n"
+        + naming +
         f"trigger 闭集：{'/'.join(TRIGGERS)}，答的是「这个人为什么开始用或换用」。"
         "帖子没交代就填「不明」——**不许从场景倒推**，说在办公场景用不等于是工作要求。\n"
         f"alternatives 是数组，最多 {ALTERNATIVES_MAX} 个，填**同一条里提到的其他工具名**，"
@@ -255,6 +287,7 @@ def _ctx(path: Path, report_id: str, goal_id: str) -> validation.Ctx:
 async def _code_batch(
     items: Sequence[Mapping[str, Any]], *, adapter: Any, output_path: Path,
     report_id: str, goal_id: str, engine_preference: str | None,
+    entity_names: Sequence[str] = (),
 ) -> list[dict[str, Any]] | None:
     """一批编码；三次重打都过不了闸就整批返回 None，绝不半信半疑地写库。"""
 
@@ -264,7 +297,8 @@ async def _code_batch(
     errors: list[str] = []
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         output_path.unlink(missing_ok=True)
-        body = _coding_prompt(compact, output_path=output_path)
+        body = _coding_prompt(compact, output_path=output_path,
+                              entity_names=entity_names)
         if errors:
             body += "\n上一轮错误：" + "；".join(errors[:10])
         task = EngineTask(
@@ -361,8 +395,11 @@ async def code_report(
     if not 1 <= batch_size <= CODING_BATCH_MAX:
         raise ValueError(f"编码 batch_size 必须在 1–{CODING_BATCH_MAX} 之间")
     _safe_component(report_id, "report_id")
-    if store.get_report(report_id) is None:
+    report = store.get_report(report_id)
+    if report is None:
         raise KeyError(f"报告不存在：{report_id}")
+    # §CODE-2 货 3：把被评实体的叫法带进提示词，让模型挑句子时就避开「夸别人的话」。
+    entity_names = _plan_entity_names(report)
     rows = store.list_evidence(report_id)
     already = sum(1 for item in rows if is_coded(item))
     targets = coding_targets(rows, force=force)
@@ -383,6 +420,7 @@ async def code_report(
                 ),
                 report_id=report_id, goal_id=goal_id,
                 engine_preference=engine_preference,
+                entity_names=entity_names,
             )
             if labels is None:
                 failed += len(batch)

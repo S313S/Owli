@@ -151,3 +151,44 @@ def test_原声全被丢光时整张表不出而不是出空表():
 
     assert "quotes" not in built["tables"], "一行都不剩就不出这张表"
     assert built["omitted_tables"]["quotes"], "不出表要写明原因，让人看得见"
+
+
+def test_编码提示词要求quote点名被评实体():
+    """货 3：防**新**数据再出「引反人」。
+
+    它不替代货 1 那道程序闸——已编码的 287 条不会因为提示词变了就重编，
+    重编要 15 批引擎调用、真花钱。
+    """
+    from pathlib import Path
+    from app.reliability.coding import _coding_prompt
+
+    body = _coding_prompt([], output_path=Path("/tmp/x.json"),
+                          entity_names=["豆包", "Doubao"])
+
+    assert "必须点名被评实体" in body
+    assert "豆包" in body and "Doubao" in body, "叫法要摆进提示词，别让模型自己猜"
+    assert "引反" in body, "要讲清为什么，不是只下一条禁令"
+
+
+def test_取不到计划实体时提示词不加这条约束():
+    """取不到叫法就空着：编码照跑，只是少一条约束，不阻塞。"""
+    from pathlib import Path
+    from app.reliability.coding import _coding_prompt, _plan_entity_names
+
+    body = _coding_prompt([], output_path=Path("/tmp/x.json"))
+
+    assert "必须点名被评实体" not in body
+    assert _plan_entity_names(None) == []
+    assert _plan_entity_names({"plan_snapshot": "不是 JSON"}) == []
+
+
+def test_计划快照是字符串或字典都取得到叫法():
+    """库里 `plan_snapshot` 是 JSON 字符串，测试夹具里常是 dict，两种都得认。"""
+    import json as _json
+    from app.reliability.coding import _plan_entity_names
+
+    plan = _plan_with_two_cards()
+
+    assert _plan_entity_names({"plan_snapshot": plan}) == \
+        _plan_entity_names({"plan_snapshot": _json.dumps(plan, ensure_ascii=False)})
+    assert "Doubao" in _plan_entity_names({"plan_snapshot": plan})
