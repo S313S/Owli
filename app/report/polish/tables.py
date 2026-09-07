@@ -282,6 +282,9 @@ def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
 TABLE_NAMES: tuple[str, ...] = (
     "platform_mix", "grade_mix", "crossref_mix", "entity_mentions",
     "topic_polarity", "timeline", "entity_dimension",
+    # §CODE-1：UGC 逐条编码聚出来的三张表。词表命中（topic_polarity）只数触发词，
+    # 编码是逐条模型判断，两者口径不同、都留着：编码表作主表，词表表作附录对照。
+    "attitude_by_topic", "scenario_counts", "quotes",
 )
 
 
@@ -314,6 +317,20 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "topic_polarity": _topic_polarity(rows),
         "entity_dimension": _entity_dimension(rows, plan),
     }
+    # §CODE-1：三张 UGC 编码表。挂进 `tables` 有两个作用——尺子 ④「数字有出处」的
+    # 白名单从这里递归收数，SKILL 的 `tables:` 行也只能从这里选表；挂到别处等于
+    # 既判红又漏投。没有已编码的 UGC 时整块不出，不摆空表。
+    # 延迟 import：`polish/` 这层原本只依赖轻量的 lexicon，不把 reliability 那串
+    # 依赖拉进模块顶层，也免了将来谁给 coding 加个 polish import 就成环。
+    from app.reliability.coding import polish_tables
+
+    coding = polish_tables(
+        evidence,
+        citations={str(r.get("id")): int(r["citation_no"]) for r in rows
+                   if r.get("citation_no") is not None},
+    )
+    if coding["scenario_counts"]["n"]:
+        tables.update(coding)
     timeline = _timeline(rows)
     if timeline is not None:
         tables["timeline"] = timeline
