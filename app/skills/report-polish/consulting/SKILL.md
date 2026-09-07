@@ -4,6 +4,9 @@ title: 调研报告（咨询体）
 description: 通用调研题面的默认模板，如「国内大家对 X 的看法」「X 竞品分析」；执行摘要→关键发现→论据→建议→附录。
 tables: [attitude_by_topic, scenario_counts, quotes, scenario_attitude, audience_attitude, trigger_counts, platform_mix, grade_mix, crossref_mix, entity_mentions, topic_polarity, timeline]
 sections: [执行摘要, 关键发现, 论据与数据, 建议, 附录]
+# §SHARD-1：这一节按执行摘要里的关键发现条数切片，一条发现一片。
+# 只切确诊撞墙的这一节；论据与数据、附录留作观察项，真撞了再按同一机制加。
+shard_sections: [关键发现]
 model: opus
 ---
 

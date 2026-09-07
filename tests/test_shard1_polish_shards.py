@@ -178,3 +178,157 @@ def test_合并只认给定的片路径_旧片不会被扫进来(tmp_path):
     (tmp_path / "02-关键发现.shard-9.md").write_text("## 旧\n\n上一轮[S99]。", encoding="utf-8")
     merged = merge_shards(paths)
     assert "S99" not in merged and merged.count("## ") == 2
+
+
+# —— 货 3：polish() 的片循环（端到端，引擎打桩）——————————————
+
+#: 背景那段要撑过 MIN_SECTION_BYTES，但**编号列表只能有一份**——
+#: 整段重复三遍就成了 12 条发现，正好会撞上 MAX_SHARDS 的封顶（第一次写就踩了）。
+SUMMARY_4 = ("背景一段话[S01]。" * 30 + "\n\n关键发现：\n\n"
+             + "".join(f"{i}. 【B】第 {i} 条结论句[S01]。\n" for i in range(1, 5))
+             + "\n> 本报告结论的把握度为**低**，主要因为样本薄。\n")
+
+
+class _Scripted:
+    """按落点决定写什么：摘要写编号列表，片写带二级标题的正文，其余整节写。"""
+
+    def __init__(self, summary: str = SUMMARY_4, fail_shard: int | None = None,
+                 shard_body: str | None = None):
+        self.summary, self.fail_shard, self.shard_body = summary, fail_shard, shard_body
+        self.calls: list[str] = []
+        self.prompts: list[str] = []
+
+    async def run(self, task, ctx, on_event=None):
+        name = task.output_path.name
+        self.calls.append(name)
+        self.prompts.append(task.body)
+        result = type("R", (), {"succeeded": True, "engine_error": None})()
+        if ".shard-" in name:
+            index = int(name.rsplit(".shard-", 1)[1].split(".")[0])
+            if index == self.fail_shard:
+                return result                       # 返回成功但不落盘：假绿那一族
+            body = self.shard_body or f"## 第 {index} 条的行动式标题\n\n解读[S01]。"
+            task.output_path.write_text(body + "补白。" * 80, encoding="utf-8")
+            return result
+        text = self.summary if name.startswith("01-") else "正文[S01]。" * 40
+        task.output_path.write_text(text, encoding="utf-8")
+        return result
+
+
+def _polish(tmp_path, adapter):
+    runs = tmp_path / "runs"
+    return asyncio.run(polish_fn()(_Store(), "r-t", runs, WORK,
+                                   template="consulting", adapter=adapter)), runs
+
+
+def polish_fn():
+    from app.report.polish.run import polish
+
+    return lambda *a, **k: polish(*a, **k)
+
+
+def test_摘要四条发现就切四片_合并进正文(tmp_path):
+    adapter = _Scripted()
+    outcome, runs = _polish(tmp_path, adapter)
+    assert outcome["status"] == "ok"
+    assert outcome["shards"]["关键发现"] == 4
+    assert outcome["shards"]["执行摘要"] == 0, "大纲节不许切"
+    shard_calls = [c for c in adapter.calls if ".shard-" in c]
+    assert shard_calls == [f"02-关键发现.shard-{i}.md" for i in range(1, 5)]
+
+    section = runs / "r-t" / "goals" / "polished" / "consulting-parts" / "02-关键发现.md"
+    assert section.is_file()
+    assert section.read_text(encoding="utf-8").count("## 第") == 4
+    final = Path(outcome["path"]).read_text(encoding="utf-8")
+    for i in range(1, 5):
+        assert f"## 第 {i} 条的行动式标题" in final, f"第 {i} 片没进正文"
+
+
+def test_一片没写成整节就不判done_半份稿不落exports(tmp_path):
+    """D-051 降到片级：第 3 片没落盘，整节作废，残缺的合并稿一个字都不许往下走。"""
+    outcome, runs = _polish(tmp_path, _Scripted(fail_shard=3))
+    assert outcome["status"] == "failed"
+    assert outcome["failed_section"] == "关键发现"
+    parts_dir = runs / "r-t" / "goals" / "polished" / "consulting-parts"
+    assert not (parts_dir / "02-关键发现.md").is_file(), "半份合并稿落盘了"
+    assert not Path(outcome["path"]).is_file(), "半份稿进了 exports/"
+    assert "关键发现" in outcome["missing_sections"]
+    # 前两片写成了、第 4 片根本没起——失败即停，不白烧后面的片。
+    assert (parts_dir / "02-关键发现.shard-1.md").is_file()
+    assert not (parts_dir / "02-关键发现.shard-4.md").is_file()
+
+
+def test_摘要读不出编号列表就退回整节写一次(tmp_path):
+    """解析失灵最坏回到 09-07 之前的老行为，不是新的失败路径。"""
+    adapter = _Scripted(summary="通篇散文没有编号列表[S01]。" * 30)
+    outcome, _ = _polish(tmp_path, adapter)
+    assert outcome["status"] == "ok"
+    assert outcome["shards"]["关键发现"] == 0
+    assert not [c for c in adapter.calls if ".shard-" in c]
+    assert adapter.calls.count("02-关键发现.md") == 1
+
+
+def test_片提示词只加边界不加活(tmp_path):
+    """§七 第 2 条：每片的活只有「展开这一条」，共用硬规则原样带、一条都不许加。
+
+    兄弟片只给**标题行**不给正文——给了正文提示词按片翻倍，
+    正好把分片省下的那点又还回去。
+    """
+    from app.report.polish.skills import shared_rules
+
+    adapter = _Scripted()
+    _polish(tmp_path, adapter)
+    shard_prompt = next(b for c, b in zip(adapter.calls, adapter.prompts) if ".shard-1." in c)
+    section_prompt = next(b for c, b in zip(adapter.calls, adapter.prompts)
+                          if c.startswith("04-"))
+    for chunk in (shared_rules(), "# 本模板骨架", "# 信息源池", "# 确定性数据表", "# 工作稿"):
+        assert chunk in shard_prompt, "共用区在片提示词里缺了一块"
+    assert "**本轮你只写第 1 条**" in shard_prompt
+    assert "只展开你这一条，别复述别条" in shard_prompt
+    for i in range(1, 5):                      # 四条的标题行都在，作边界
+        assert f"{i}. 【B】第 {i} 条结论句[S01]。" in shard_prompt
+    # 不加活的量化判据：片提示词不该比整节提示词长出一截。
+    assert len(shard_prompt) < len(section_prompt) + 1200
+
+
+def test_片没引到自带角标就重写一次(tmp_path):
+    """片级引用契约（D-052 思路降级）：这条发现自带的角标至少要引到一个。"""
+    adapter = _Scripted(shard_body="## 标题\n\n通篇不引角标的解读。")
+    outcome, _ = _polish(tmp_path, adapter)
+    assert outcome["status"] == "failed"
+    assert any("一个自带角标都没引到" in e for e in outcome["errors"])
+    # 只赔这一片两次尝试，不是整节重来。
+    assert adapter.calls.count("02-关键发现.shard-1.md") == 2
+    assert "02-关键发现.shard-2.md" not in adapter.calls
+
+
+def test_落盘回读闸留在合并之后_中途不误判(tmp_path, monkeypatch):
+    """§七 第 5 条：RPT-2 那道「落盘后当场回读 exports/」的闸必须在**合并之后**。
+
+    留在片与片之间会在「片写完、整节还没合并落盘」时误判 failed。这条用例两头都钉：
+    ① 分片顺利跑完时，闸照常在收尾开火（把 exports 写掉就该判红）；
+    ② 中途那些片写完的时刻不触发它——`fail_shard` 那条用例给的错误是「没引到角标 /
+       没写出来」，而不是「正式稿没落到 exports/」。
+    """
+    real = Path.write_text
+
+    def _skip_exports(self, *args, **kwargs):
+        if self.parent.name == "exports" and self.suffix == ".md":
+            return 0
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _skip_exports)
+    outcome, runs = _polish(tmp_path, _Scripted())
+    assert outcome["status"] == "failed"
+    assert any("exports" in e for e in outcome["errors"])
+    # 四片与合并后的整节都写成了，红只红在搬运这一步。
+    assert outcome["shards"]["关键发现"] == 4
+    parts_dir = runs / "r-t" / "goals" / "polished" / "consulting-parts"
+    assert (parts_dir / "02-关键发现.md").is_file()
+
+
+def test_中途片失败时不报exports那条错(tmp_path):
+    outcome, _ = _polish(tmp_path, _Scripted(fail_shard=2))
+    assert outcome["status"] == "failed"
+    assert not any("没落到 exports/" in e for e in outcome["errors"]), \
+        "闸被挪到了片与片之间，中途误判"

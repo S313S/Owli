@@ -15,6 +15,8 @@ from typing import Any, Awaitable, Callable, Mapping, Sequence
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineTask
+from app.report.polish.sharding import (Finding, merge_shards, parse_findings, shard_paths,
+                                        should_shard)
 from app.report.polish.skills import Template, get_template, shared_rules
 from app.report.polish.tables import collect_inputs
 
@@ -182,10 +184,54 @@ def _work_view(data: Mapping[str, Any], report_text: str) -> str:
             f"### 工作稿正文全文\n{body}")
 
 
+def _task_head(template: Template, output_path: Path, parts: Sequence[tuple[str, Path]],
+               current: str | None, finding: Finding | None,
+               findings: Sequence[Finding]) -> str:
+    """开头那段任务说明。整节写一份、写片写另一份，别的区一律共用。"""
+    # 必须给绝对路径：只给文件名时引擎会拿工作区根去猜，两次都被 capability 判越界。
+    # 一次只写一节：适配器每次任务硬墙钟 300 秒（`DEFAULT_CLAUDE_TIMEOUT_SECONDS`，
+    # 在本包禁区里改不得），整份五节塞不进去，09-05 实测每轮都写到第三节被掐。
+    skeleton = " / ".join(name for name, _ in parts)
+    where = (f"用 Write 写到：\n\n`{output_path}`\n\n"
+             "这是你本轮唯一能写的路径，写别处一定被拒。**别的节这轮不要碰、不要写。**\n")
+    if finding is None:
+        return (f"# 任务\n这是一份《{template.title}》正式稿，一共 {len(parts)} 节，"
+                f"由多轮分头写。**本轮你只写「{current}」这一节**，{where}"
+                f"全篇骨架（给你看上下文，不是让你都写）：{skeleton}\n"
+                f"**文件里只写「{current}」这一节的正文，不要写标题行**——一级标题由程序统一加，"
+                "你写了反而会重复。\n"
+                "只重新组织与解读，不做新的调研，不编造任何事实与数字。")
+    # 片：边界写死在「这一条发现」上。兄弟片只给**标题行**不给正文——给了正文
+    # 提示词按片翻倍，正好把分片省下的那点又还回去（§SHARD-1 §八 兜底 1）。
+    siblings = "\n".join(f.title_line for f in findings)
+    return (f"# 任务\n这是一份《{template.title}》正式稿的「{current}」这一节，"
+            f"按执行摘要里的 {len(findings)} 条关键发现分头写，"
+            f"**本轮你只写第 {finding.index} 条**，{where}"
+            f"全篇骨架（给你看上下文，不是让你都写）：{skeleton}\n\n"
+            f"## 你这一片要展开的那条发现（执行摘要里的原话）\n{finding.title_line}\n\n"
+            f"## 这一节全部 {len(findings)} 条发现的标题行（给你看边界，不是让你都写）\n"
+            f"{siblings}\n\n"
+            "**只展开你这一条，别复述别条，别下与别条冲突的判断。**\n"
+            f"按本模板骨架里「{current}」那一节的四步写这一条："
+            "行动式二级标题 → 一张表 → 三到五句解读 → 反证或限定。\n"
+            f"**文件里只写这一条的正文，从 `## ` 二级标题起**——一级标题「{current}」"
+            "由程序统一加，你写了反而会重复。\n"
+            f"这条发现自带的角标是 {'、'.join(finding.marks) or '（无）'}，"
+            "至少要引到其中一个；池子外的角标一个都不许出现。\n"
+            "只重新组织与解读，不做新的调研，不编造任何事实与数字。")
+
+
 def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                  output_path: Path, errors: tuple[str, ...] = (),
-                 parts: Sequence[tuple[str, Path]] = (), current: str | None = None) -> str:
-    """共用硬规则 + 模板正文 + 输入区；重写轮把上一轮的错误原样附在最后。"""
+                 parts: Sequence[tuple[str, Path]] = (), current: str | None = None,
+                 finding: Finding | None = None,
+                 findings: Sequence[Finding] = ()) -> str:
+    """共用硬规则 + 模板正文 + 输入区；重写轮把上一轮的错误原样附在最后。
+
+    `finding` 非空 = 这一轮写的是一个**片**（这一节里的某一条发现）。除了开头那段
+    任务说明，其余各区**一个字都不变**——每片的活只有「把这一条发现展开」，
+    共用硬规则原样带、不加码（CODE-1 货 1 踩过：提示词加活会按片翻倍撞墙钟）。
+    """
     objectives = "\n".join(f"- {g.get('objective')}" for g in data.get("objectives") or []
                            if g.get("objective"))
     verdicts = {"PASS": "多源互证", "CONFLICT": "多源冲突", "WEAK": "证据偏弱", "SINGLE": "单源孤证"}
@@ -199,18 +245,8 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
                          {k: v for k, v in data["tables"][name].items() if k != "name"}
                          for name in template.tables if name in data["tables"]},
                         ensure_ascii=False, indent=1)
-    parts = [
-        # 必须给绝对路径：只给文件名时引擎会拿工作区根去猜，两次都被 capability 判越界。
-        # 一次只写一节：适配器每次任务硬墙钟 300 秒（`DEFAULT_CLAUDE_TIMEOUT_SECONDS`，
-        # 在本包禁区里改不得），整份五节塞不进去，09-05 实测每轮都写到第三节被掐。
-        f"# 任务\n这是一份《{template.title}》正式稿，一共 {len(parts)} 节，"
-        f"由多轮分头写。**本轮你只写「{current}」这一节**，用 Write 写到：\n\n"
-        f"`{output_path}`\n\n"
-        "这是你本轮唯一能写的路径，写别处一定被拒。**别的节这轮不要碰、不要写。**\n"
-        f"全篇骨架（给你看上下文，不是让你都写）：{' / '.join(name for name, _ in parts)}\n"
-        f"**文件里只写「{current}」这一节的正文，不要写标题行**——一级标题由程序统一加，"
-        "你写了反而会重复。\n"
-        "只重新组织与解读，不做新的调研，不编造任何事实与数字。",
+    blocks = [
+        _task_head(template, output_path, parts, current, finding, findings),
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
@@ -226,8 +262,8 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 工作稿\n\n{_work_view(data, report_text)}",
     ]
     if errors:
-        parts.append("# 上一轮被打回的原因（必须改掉）\n" + "\n".join(f"- {e}" for e in errors))
-    return "\n\n".join(parts)
+        blocks.append("# 上一轮被打回的原因（必须改掉）\n" + "\n".join(f"- {e}" for e in errors))
+    return "\n\n".join(blocks)
 
 
 def _audience_view(data: Mapping[str, Any]) -> str:
@@ -349,6 +385,87 @@ def _failure_detail(result: Any) -> str:
     return ("；".join(bits))[:500]
 
 
+def _timeout_hint(detail: str, finding: Finding | None) -> str:
+    """超时的定向提示**分层，不删干净**（§SHARD-1 §七 第 4 条）。
+
+    整节那句「把每条的解读压到三句以内」是拿内容深度换写得完；分片之后前提没了
+    ——一片只有一条发现，没有「每条」可压。但**单片仍可能超时**（某条发现角标
+    特别多），那时同一个道理对单片仍成立，所以换成片级的一句，而不是删掉。
+    """
+    if "超时" not in detail:
+        return ""
+    scope = "这一条" if finding is not None else "每条"
+    unit = "这一片" if finding is not None else "这一节"
+    return (f"\n上一轮是**超时**被掐的：这一轮把{scope}的解读压到三句以内、"
+            f"该引的角标照引，先把{unit}写完整比写满更重要。")
+
+
+def findings_for(skill: Template, section: str, parts: Sequence[tuple[str, Path]]) -> list[Finding]:
+    """这一节要切成几片。声明了才切，且大纲节得先写成——读不出编号列表就退回整节写。
+
+    退回整节是**老行为**，不是新的失败路径：解析失灵最坏也就回到 09-07 之前的样子。
+    """
+    if section not in skill.shard_sections or not parts:
+        return []
+    outline = parts[0][1]
+    if not outline.is_file():
+        return []
+    findings = parse_findings(outline.read_text(encoding="utf-8"))
+    return findings if should_shard(findings) else []
+
+
+async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
+                        report_text: str, *, path: Path, label: str, unit: str,
+                        research_id: str, runs_root: Path, pool: frozenset[int],
+                        parts: Sequence[tuple[str, Path]], current: str,
+                        finding: Finding | None = None, findings: Sequence[Finding] = (),
+                        on_event: Any = None) -> tuple[bool, tuple[str, ...], int]:
+    """写一个目标——整节或一片，最多 `MAX_ATTEMPTS` 次。返回 (成功, 最后的错误, 尝试数)。
+
+    整节与片走的是同一条重试路，只是目标文件、提示词开头与判据措辞不同：
+    重试的代价从「整节」降到「一片」（§SHARD-1 §六）。
+    """
+    errors: tuple[str, ...] = ()
+    attempts = 0
+    for _ in range(MAX_ATTEMPTS):
+        attempts += 1
+        path.unlink(missing_ok=True)
+        body = build_prompt(skill, data, report_text, path, errors, parts, current,
+                            finding=finding, findings=findings)
+        try:
+            result = await adapter.run(
+                _task(body, path, research_id, skill.model, runs_root),
+                _ctx(path, research_id, runs_root), on_event=on_event)
+        except asyncio.CancelledError:
+            raise                       # 取消要往上传，别当成一次失败尝试吞掉
+        except Exception as exc:        # noqa: BLE001
+            # SDK 子进程整个崩掉时（09-05 实测「Error in hook callback」→「Stream closed」）
+            # 异常会冲出 adapter。一片崩了只算这一片一次失败，别丢掉已经写好的别的片。
+            errors = (f"「{label}」这一轮引擎进程异常退出：{type(exc).__name__}: {exc}"[:400],)
+            continue
+        # 判据落在产物上不落在返回码上：传输层报错但落盘了就认；返回 succeeded 但没落盘判没写。
+        if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:
+            detail = _failure_detail(result)
+            errors = (f"「{label}」{unit}没写出来或写得过短。" + detail
+                      + _timeout_hint(detail, finding),)
+            continue
+        text = path.read_text(encoding="utf-8")
+        offpool = offpool_marks(text, pool)
+        if offpool:
+            # 越池改**片级**重写：代价从整节降到一片。
+            errors = (f"{unit}引用了信息源池里没有的角标：{'、'.join(offpool)}。"
+                      f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
+            continue
+        if finding is not None and finding.marks and not any(m in text for m in finding.marks):
+            # 片级引用契约：照 D-052「池里每条都要被用到」同思路降级到片级。
+            # 这条发现自己一个角标都没有时不要求——不能要求引用不存在的东西。
+            errors = (f"{unit}一个自带角标都没引到。这条发现在执行摘要里带的角标是 "
+                      f"{'、'.join(finding.marks)}，至少要引到其中一个。",)
+            continue
+        return True, (), attempts
+    return False, errors, attempts
+
+
 async def polish(store: Any, research_id: str, runs_root: Path, report_text: str, *,
                  template: str | None = None, adapter: Any = None,
                  on_event: Callable[[Any], Awaitable[None]] | None = None) -> dict[str, Any]:
@@ -368,49 +485,54 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     # 开跑前清全部旧分节/旧分片，再进节循环（D-041/D-042 销账；见 clear_stale_parts）。
     cleared = clear_stale_parts(runs_root, research_id, skill.name)
     attempts = 0
+
+    def _failed(section: str, path: Path, errors: Sequence[str]) -> dict[str, Any]:
+        return {"status": "failed", "template": skill.name, "path": str(md_path),
+                "draft_path": str(draft_path), "tables_path": str(tables_path),
+                "attempts": attempts, "failed_section": section, "cleared": cleared,
+                "shards": shard_counts,
+                # 按 mtime 判本轮真写成了哪几节：光看「文件在不在」会少报——开跑前
+                # 已经清干净了，所以这里的「在」就是本轮写的（D-041/D-042 修完的红利）。
+                "missing_sections": [n for n, q in parts if not q.is_file()],
+                "offpool": offpool_marks(path.read_text(encoding="utf-8"), pool)
+                if path.is_file() else [], "errors": list(errors)}
+
+    shard_counts: dict[str, int] = {}
     for name, path in parts:
-        errors: tuple[str, ...] = ()
-        for _ in range(MAX_ATTEMPTS):
-            attempts += 1
-            path.unlink(missing_ok=True)
-            body = build_prompt(skill, data, report_text, path, errors, parts, name)
-            try:
-                result = await adapter.run(
-                    _task(body, path, research_id, skill.model, runs_root),
-                    _ctx(path, research_id, runs_root), on_event=on_event)
-            except asyncio.CancelledError:
-                raise                       # 取消要往上传，别当成一次失败尝试吞掉
-            except Exception as exc:        # noqa: BLE001
-                # SDK 子进程整个崩掉时（09-05 实测「Error in hook callback」→
-                # 「Stream closed」）异常会冲出 adapter，把整份整理带走。一节崩了
-                # 只算这一节一次失败，换下一次尝试——环境问题归环境侧，这里只保证
-                # 不因为一次崩溃丢掉已经写好的其它节。
-                errors = (f"「{name}」这一轮引擎进程异常退出：{type(exc).__name__}: {exc}"[:400],)
-                continue
-            # 判据落在产物上不落在返回码上：传输层报错但这一节落盘了就认（照 backfill 的
-            # `_recover_transport_completion` 同思路）；返回 succeeded 但没落盘一样判没写。
-            if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:
-                # 只报 engine_error / conclusion_error 是不够的：09-05 撞到的那次
-                # 两者都是 None，真话写在 permission_denials 与 validation 里，
-                # 少打这两样让我多绕了两轮。
-                detail = _failure_detail(result)
-                hint = ("\n上一轮是**超时**被掐的：这一轮把每条的解读压到三句以内、"
-                        "该引的角标照引，先把这一节写完整比写满更重要。"
-                        if "超时" in detail else "")
-                errors = (f"「{name}」这一节没写出来或写得过短。" + detail + hint,)
-                continue
-            offpool = offpool_marks(path.read_text(encoding="utf-8"), pool)
-            if not offpool:
-                break
-            errors = (f"这一节引用了信息源池里没有的角标：{'、'.join(offpool)}。"
-                      f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
-        else:
-            return {"status": "failed", "template": skill.name, "path": str(md_path),
-                    "draft_path": str(draft_path), "tables_path": str(tables_path),
-                    "attempts": attempts, "failed_section": name, "cleared": cleared,
-                    "missing_sections": [n for n, p in parts if not p.is_file()],
-                    "offpool": offpool_marks(path.read_text(encoding="utf-8"), pool)
-                    if path.is_file() else [], "errors": list(errors)}
+        findings = findings_for(skill, name, parts)
+        shard_counts[name] = len(findings)
+        if not findings:
+            ok, errors, used = await _write_target(
+                adapter, skill, data, report_text, path=path, label=name, unit="这一节",
+                research_id=research_id, runs_root=runs_root, pool=pool, parts=parts,
+                current=name, on_event=on_event)
+            attempts += used
+            if not ok:
+                return _failed(name, path, errors)
+            continue
+        # 分片的节：一条发现一片，片数由摘要定（`findings_for`）。
+        paths = shard_paths(path, len(findings))
+        for finding, spath in zip(findings, paths):
+            label = f"{name} 第 {finding.index} 条发现"
+            ok, errors, used = await _write_target(
+                adapter, skill, data, report_text, path=spath, label=label, unit="这一片",
+                research_id=research_id, runs_root=runs_root, pool=pool, parts=parts,
+                current=name, finding=finding, findings=findings, on_event=on_event)
+            attempts += used
+            if not ok:
+                # D-051：任一片没写成，这一节不算 done——残缺的合并稿不许往下走。
+                path.unlink(missing_ok=True)
+                return _failed(name, spath, errors)
+        # 合并 = 按片序拼接片正文；信息源表不在这里动，由 `assemble` 最后统一追加。
+        path.write_text(merge_shards(paths), encoding="utf-8")
+        # 角标检查从一处变两处：每片写完在 `_write_target` 里查过一次（早失败早重写），
+        # 合并后再查一次兜跨片的情况。片都干净而合并脏，只可能是拼错了片——
+        # 这是保险丝不是重写口，所以直接判红，别再付一轮引擎。
+        merged_offpool = offpool_marks(path.read_text(encoding="utf-8"), pool)
+        if merged_offpool:
+            return _failed(name, path, [
+                f"「{name}」各片单独都没越池，合并后却出现越池角标 "
+                f"{'、'.join(merged_offpool)}——合并取错片了。"])
     markdown = assemble(parts, data.get("sources") or [])
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
@@ -422,7 +544,9 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         return {"status": "failed", "template": skill.name, "path": str(md_path),
                 "draft_path": str(draft_path), "tables_path": str(tables_path),
                 "attempts": attempts, "offpool": [], "cleared": cleared,
+                "shards": shard_counts,
                 "errors": [f"正式稿没落到 exports/：{md_path}（goals/ 那份在 {draft_path}）"]}
     return {"status": "ok", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
-            "attempts": attempts, "offpool": [], "cleared": cleared}
+            "attempts": attempts, "offpool": [], "cleared": cleared,
+            "shards": shard_counts}

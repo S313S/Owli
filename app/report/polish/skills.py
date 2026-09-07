@@ -18,7 +18,7 @@ SHARED_DIR = "_shared"
 #: `_shared/` 里按这个顺序拼进提示词；缺文件即报错，不静默跳过。
 SHARED_FILES: tuple[str, ...] = ("writing-rules.md", "evidence-grades.md", "audit-checklist.md")
 DEFAULT_TEMPLATE = "consulting"
-_LIST_FIELDS = ("tables", "sections")
+_LIST_FIELDS = ("tables", "sections", "shard_sections")
 _TEXT_FIELDS = ("name", "title", "description", "model")
 
 
@@ -33,6 +33,9 @@ class Template:
     sections: tuple[str, ...]
     model: str
     body: str
+    #: 声明哪几节要按摘要条数切片（§SHARD-1）。空 = 整节写一次，老行为。
+    #: 大纲永远是第一节（三个模板的第一节都是摘要/总体倾向），所以它自己不许切。
+    shard_sections: tuple[str, ...] = ()
 
     def as_listing(self) -> dict[str, object]:
         """给 `GET /api/report-templates` 用：前端下拉只需要这四个字段。"""
@@ -73,10 +76,17 @@ def _load_one(skill_file: Path) -> Template:
     sections = tuple(str(s) for s in (meta.get("sections") or []))
     if not sections:
         raise ValueError(f"{skill_file} 缺 sections：尺子要靠它核成稿的一级标题")
+    shard_sections = tuple(str(s) for s in (meta.get("shard_sections") or []))
+    stray = [s for s in shard_sections if s not in sections]
+    if stray:
+        raise ValueError(f"{skill_file} 的 shard_sections 声明了不在 sections 里的 {stray}")
+    if sections[0] in shard_sections:
+        # 片数是从第一节（大纲节）读出来的，它必须先整节写成，切了就没有大纲可读。
+        raise ValueError(f"{skill_file} 不能切第一节 {sections[0]!r}：片数要从它里面读")
     return Template(
         name=name, title=str(meta.get("title") or name),
         description=str(meta.get("description") or ""), tables=tables, sections=sections,
-        model=str(meta.get("model") or "opus"), body=body,
+        model=str(meta.get("model") or "opus"), body=body, shard_sections=shard_sections,
     )
 
 
