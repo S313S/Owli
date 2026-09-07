@@ -182,9 +182,13 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
+        # 读者身份决定「所以呢」写给谁看（§RPT-2 货 1 的 q-1）。没答就是「不明」，
+        # 此时不要假装知道读者是谁——模板会改成分读者给含义。
+        # 只出这一个小标题：早先 main 与本包各写了一段，合起来是两段讲同一件事，
+        # 白占提示词长度（提示词加活会按片翻倍撞墙钟）。
+        f"# 这份报告给谁看\n{_audience_view(data)}",
         f"# 本次研究的目标\n{objectives}",
         f"# 涉及的实体\n{'、'.join(data.get('entities') or [])}",
-        f"# 读者是谁（建议节写给他看）\n{_audience_view(data)}",
         f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论）\n{pool}",
         f"# 确定性数据表（数字的唯一来源，一个数都不许改）\n```json\n{tables}\n```",
         f"# 工作稿\n\n{_work_view(data, report_text)}",
@@ -203,12 +207,15 @@ def _audience_view(data: Mapping[str, Any]) -> str:
     nested = data.get("audience") or {}
     role = str(data.get("audience_role") or nested.get("audience_role") or AUDIENCE_UNKNOWN)
     stake = str(data.get("audience_stake") or nested.get("audience_stake") or AUDIENCE_UNKNOWN)
+    # 第一行只写身份本身（main 那一版的形状，别的地方按这个形状读）；
+    # 第二行起才是本包加的写法要求。
     if role == AUDIENCE_UNKNOWN:
-        return ("读者身份未知。建议节改名「对不同读者的含义」，分三行分别写给"
-                "竞品团队 / 本产品团队 / 投资分析，每行一句「这对你意味着什么」+ 一个动作。")
-    lines = [f"读者身份：{role}。每条建议的第一句必须先写「对{role}意味着什么」，再写动作。"]
-    if stake != AUDIENCE_UNKNOWN:
-        lines.append(f"读者最想知道的一点：{stake}")
+        return (f"{AUDIENCE_UNKNOWN}\n读者身份未知。建议节改名「对不同读者的含义」，"
+                "分三行分别写给竞品团队 / 本产品团队 / 投资分析，"
+                "每行一句「这对你意味着什么」+ 一个动作。")
+    lines = [role, f"每条建议的第一句必须先写「对{role}意味着什么」，再写动作。"]
+    if stake and stake != AUDIENCE_UNKNOWN:
+        lines.append(f"他们最想知道的：{stake}")
     return "\n".join(lines)
 
 

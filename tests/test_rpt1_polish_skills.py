@@ -590,7 +590,9 @@ def test_rpt2_structural_sections_are_exempt_from_action_titles(tmp_path, sectio
 def test_action_title_gate_still_fires_outside_structural_sections(tmp_path):
     """豁免只针对结构节：正文节里的话题式标题照抓，别把放宽做成拆闸。"""
     findings = _run_v2(tmp_path, GOOD_V2.replace(
-        "## 小红书贡献了 296 条证据，却一条都没被引用", "## 用户评价分析"))
+        # 夹具原来的标题带「被引」，§RPT-2 闸 ⑨ 会判红，货 2 里已换成这句；
+        # 这条用例要的是「正文节里的话题式标题照抓」，改指现在这句，意图不变。
+        "## 豆包的正向说法集中在内容生产，296 条里最密的就是这一类", "## 用户评价分析"))
     assert any("用户评价分析" in p for p in findings["⑤ 行动式标题"])
 
 
