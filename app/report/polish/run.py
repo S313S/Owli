@@ -73,6 +73,38 @@ def section_paths(runs_root: Path, research_id: str, template: str,
     return [(name, root / f"{index:02d}-{name}.md") for index, name in enumerate(sections, 1)]
 
 
+#: 分节/分片文件名的形状：`02-关键发现.md`、`02-关键发现.shard-1.md`。
+#: 只清这个形状，`.report-polisher-*.json` 之类的引擎旁产物不动。
+_PART_GLOB = "[0-9][0-9]-*.md"
+
+
+def stale_part_paths(runs_root: Path, research_id: str, template: str) -> list[Path]:
+    """该格 parts 目录下现存的全部分节与分片文件（不管这一轮声明了哪几节）。
+
+    不按 `section_paths()` 的清单删：读者身份一变，「建议」会改名成
+    「对不同读者的含义」，上一轮那份 `04-建议.md` 就落在清单之外、留在树上。
+    """
+    root = Path(runs_root) / research_id / "goals" / GOAL_ID / f"{template}-parts"
+    return sorted(path for path in root.glob(_PART_GLOB) if path.is_file()) \
+        if root.is_dir() else []
+
+
+def clear_stale_parts(runs_root: Path, research_id: str, template: str) -> list[str]:
+    """开跑前把该格全部分节/分片清一遍，返回清掉的文件名。
+
+    D-041/D-042 的销账动作。原先 `polish()` 只在每次尝试前清**当前这一节**，
+    开跑前不清全部——09-07 实测树上躺着上一轮的 55 份分节。不分片时它只让
+    `missing_sections` 少报（诊断失真）；**接了分片之后它升格成内容错误**：
+    合并器按片序扫目录/清单取片，上一轮的旧片会被当本轮产物拼进正文，
+    而且零报错。所以这一步是分片的硬前置，不是可选项。
+    """
+    removed = []
+    for path in stale_part_paths(runs_root, research_id, template):
+        path.unlink()
+        removed.append(path.name)
+    return removed
+
+
 def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """信息源清单：由代码生成，不让写手誊抄。
 
@@ -333,6 +365,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         adapter = default_adapter()
     parts = section_paths(runs_root, research_id, skill.name, sections_for(skill, data))
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
+    # 开跑前清全部旧分节/旧分片，再进节循环（D-041/D-042 销账；见 clear_stale_parts）。
+    cleared = clear_stale_parts(runs_root, research_id, skill.name)
     attempts = 0
     for name, path in parts:
         errors: tuple[str, ...] = ()
@@ -373,7 +407,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         else:
             return {"status": "failed", "template": skill.name, "path": str(md_path),
                     "draft_path": str(draft_path), "tables_path": str(tables_path),
-                    "attempts": attempts, "failed_section": name,
+                    "attempts": attempts, "failed_section": name, "cleared": cleared,
                     "missing_sections": [n for n, p in parts if not p.is_file()],
                     "offpool": offpool_marks(path.read_text(encoding="utf-8"), pool)
                     if path.is_file() else [], "errors": list(errors)}
@@ -387,8 +421,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     if not md_path.is_file():
         return {"status": "failed", "template": skill.name, "path": str(md_path),
                 "draft_path": str(draft_path), "tables_path": str(tables_path),
-                "attempts": attempts, "offpool": [],
+                "attempts": attempts, "offpool": [], "cleared": cleared,
                 "errors": [f"正式稿没落到 exports/：{md_path}（goals/ 那份在 {draft_path}）"]}
     return {"status": "ok", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
-            "attempts": attempts, "offpool": []}
+            "attempts": attempts, "offpool": [], "cleared": cleared}
