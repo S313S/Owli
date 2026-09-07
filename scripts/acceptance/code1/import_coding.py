@@ -37,19 +37,29 @@ def _count_coded(conn: sqlite3.Connection, research: str) -> int:
     ).fetchone()[0]
 
 
-def backup(dst: str, backup_dir: Path) -> Path:
-    """`.backup` 一份目标库。用 sqlite 的 backup API，不是 cp——cp 会漏 -wal。
+def snapshot(src: str, out: Path) -> Path:
+    """取一份库快照。**取快照只走这一个函数，别各自 `cp`。**
 
-    备份**落在本包自己的树里**，不往目标库那棵树写文件：那是别人的 worktree、
-    今晚的运行时，除了库文件本身一个字节都不该多出来。
+    `cp` 会漏 `-wal`：开着 WAL 的库，刚写入还没 checkpoint 的行只在 wal 文件里，
+    单拷主库文件拿到的是**写入前**的状态。症状很坏——数据明明写进去了，下游
+    却读不到，看起来像「功能没生效」，而不是像一个拷贝错误。本包 09-07 就这么
+    自摆过一次假故障，而且脚本注释里当时就写着别用 cp：**写规则的人和用规则的
+    人是同一个，照样会踩**。所以把它做成函数，不给踩的机会。
     """
 
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(f"file:{src}?mode=ro", uri=True) as s, \
+            sqlite3.connect(str(out)) as t:
+        s.backup(t)
+    return out
+
+
+def backup(dst: str, backup_dir: Path) -> Path:
+    """写库前留一份底。落在**本包自己的树里**，不往目标库那棵树写文件——
+    那是别人的 worktree，除了库文件本身一个字节都不该多出来。"""
+
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    out = backup_dir / f"{Path(dst).name}.pre-coding-{stamp}.backup"
-    with sqlite3.connect(f"file:{dst}?mode=ro", uri=True) as src, \
-            sqlite3.connect(str(out)) as target:
-        src.backup(target)
+    out = snapshot(dst, backup_dir / f"{Path(dst).name}.pre-coding-{stamp}.backup")
     print(f"[备份] {out}  ({out.stat().st_size} 字节)")
     return out
 
@@ -130,7 +140,15 @@ def main() -> int:
                     help="真写。不给就是演练：只盘点不写一个字节")
     ap.add_argument("--backup-dir", default="var/backups",
                     help="备份落在本包自己的树里，不往目标库那棵树写文件")
+    ap.add_argument("--snapshot-to", metavar="路径",
+                    help="只取一份 --dst 的库快照到这里就退出，不导入。"
+                         "要拿库去验数时用它，别用 cp（cp 漏 -wal，会读到旧状态）")
     args = ap.parse_args()
+
+    if args.snapshot_to:
+        out = snapshot(args.dst, Path(args.snapshot_to))
+        print(f"[快照] {out}  ({out.stat().st_size} 字节)")
+        return 0
 
     todo, missing = plan(args.src, args.dst, args.research)
     if missing:
