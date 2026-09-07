@@ -24,6 +24,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineTask
+from app.plan.entities import mentions
 from app.report.polish.lexicon import TOPIC_LEXICON
 
 AGENT_ID = "ugc-coding"
@@ -146,7 +147,38 @@ def engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> str:
+def _plan_entity_names(report: Mapping[str, Any] | None) -> list[str]:
+    """从报告的计划快照取被评实体的全部叫法，取不到就空着（编码照跑，只是不加这条约束）。
+
+    沿用 `_entity_aliases`——它按 canonical 把「豆包」「Doubao」两张卡并成一个实体。
+    延迟 import：`polish` 那层会反过来 import 本模块，放模块顶层就成环。
+    """
+
+    from app.report.polish.tables import _entity_aliases
+
+    plan = (report or {}).get("plan_snapshot")
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(plan, Mapping):
+        return []
+    return sorted({name for names in _entity_aliases(plan).values() for name in names
+                   if len(str(name).strip()) >= 2})
+
+
+def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
+                   entity_names: Sequence[str] = ()) -> str:
+    # §CODE-2 货 3：防**新**数据再出「引反人」。它不替代出表时那道程序闸——
+    # 已经编码好的行不会因为提示词变了就重编，重编要真金白银付引擎钱。
+    naming = (
+        f"quote 必须点名被评实体（{'、'.join(entity_names[:12])}）——"
+        "同一条里如果有既点了名、又能代表这条态度的句子，**必须选那句**；"
+        "只有整条都没点名时才退而摘最能代表态度的一句。"
+        "**别摘夸别的产品的话**：「但是 X 不会觉得自己是你的对立面」这种句子夸的是 X，"
+        "拿它当被评实体的正面原声就是引反了人。\n"
+    ) if entity_names else ""
     return (
         "目标：对国内社媒 UGC 逐条打结构化编码，供后续按条数聚合。只依据输入文本，"
         "不补造事实、不推测作者身份。\n"
@@ -163,6 +195,7 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> 
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
         "要能代表这条的态度。禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
         "输入文本里，对不上整批退回重打。实在摘不出就给空字符串。\n"
+        + naming +
         f"trigger 闭集：{'/'.join(TRIGGERS)}，答的是「这个人为什么开始用或换用」。"
         "帖子没交代就填「不明」——**不许从场景倒推**，说在办公场景用不等于是工作要求。\n"
         f"alternatives 是数组，最多 {ALTERNATIVES_MAX} 个，填**同一条里提到的其他工具名**，"
@@ -254,6 +287,7 @@ def _ctx(path: Path, report_id: str, goal_id: str) -> validation.Ctx:
 async def _code_batch(
     items: Sequence[Mapping[str, Any]], *, adapter: Any, output_path: Path,
     report_id: str, goal_id: str, engine_preference: str | None,
+    entity_names: Sequence[str] = (),
 ) -> list[dict[str, Any]] | None:
     """一批编码；三次重打都过不了闸就整批返回 None，绝不半信半疑地写库。"""
 
@@ -263,7 +297,8 @@ async def _code_batch(
     errors: list[str] = []
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         output_path.unlink(missing_ok=True)
-        body = _coding_prompt(compact, output_path=output_path)
+        body = _coding_prompt(compact, output_path=output_path,
+                              entity_names=entity_names)
         if errors:
             body += "\n上一轮错误：" + "；".join(errors[:10])
         task = EngineTask(
@@ -360,8 +395,11 @@ async def code_report(
     if not 1 <= batch_size <= CODING_BATCH_MAX:
         raise ValueError(f"编码 batch_size 必须在 1–{CODING_BATCH_MAX} 之间")
     _safe_component(report_id, "report_id")
-    if store.get_report(report_id) is None:
+    report = store.get_report(report_id)
+    if report is None:
         raise KeyError(f"报告不存在：{report_id}")
+    # §CODE-2 货 3：把被评实体的叫法带进提示词，让模型挑句子时就避开「夸别人的话」。
+    entity_names = _plan_entity_names(report)
     rows = store.list_evidence(report_id)
     already = sum(1 for item in rows if is_coded(item))
     targets = coding_targets(rows, force=force)
@@ -382,6 +420,7 @@ async def code_report(
                 ),
                 report_id=report_id, goal_id=goal_id,
                 engine_preference=engine_preference,
+                entity_names=entity_names,
             )
             if labels is None:
                 failed += len(batch)
@@ -466,6 +505,90 @@ TOPIC_NONE = "未归主题"
 QUOTES_PER_CELL = 3
 
 
+#: 丢弃样本每类留几条——留数是为了**能抽查这道闸判得对不对**，不是为了出表。
+#: 全量留会把几百条正文塞进报告数据块，一条不留就只剩一个没法复核的总数。
+DROPPED_SAMPLES = 8
+
+
+_PROPER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9._-]{1,}|[「『《]([^」』》]{2,12})[」』》]")
+
+
+def _looks_like_other_name(quote: str, accepted: Sequence[str]) -> bool:
+    """这句话里像不像点了**别人**的名字。粗筛，用来分堆，不用来判对错。
+
+    认两种形状：拉丁词（`WorkBuddy`、`Claude`、`K3`）和书名号/引号里的短名
+    （「通义千问」）。中文裸写的竞品名（通义千问不加引号）认不出来，会落进
+    「谁都没点」那堆——**所以这两堆的边界是软的**，它只是让人抽查时知道先看哪堆，
+    真要下结论得读样本原文。样本就在旁边，别只信这个标。
+    """
+
+    for match in _PROPER_NAME.finditer(quote):
+        text = (match.group(1) or match.group(0)).strip()
+        if len(text) >= 2 and not any(mentions(text, name) for name in accepted):
+            return True
+    return False
+
+
+def _dropped_quotes(
+    coded: Sequence[Mapping[str, Any]], accepted: Sequence[str],
+    marks: Mapping[str, int],
+) -> dict[str, Any]:
+    """被原声闸丢掉的行：分两堆、各留样本、留计数。
+
+    §CODE-2 判据 3：丢弃**必须数得出**。丢得多不一定是闸判错了——这份底料 74%
+    的原声压根没点名被评实体（点的是别的产品，或者干脆是「短发yyds」这种跑题
+    内容）——但**丢得多也可能是叫法表不全**，那会把国内用户的声音又删掉一批。
+    两者从总数上分不出来，只能靠人读样本，所以这里留样本。
+
+    分母写两个：`已编码带原声` 是语料面，`本可入表` 是这张表面（只算进了引用池、
+    本来就够格出表的那些）。表注要用的是后者——读者看见的是那张表，不是全库。
+    """
+
+    if not accepted:
+        return {"设闸": False, "丢弃": 0}
+    with_quote = [item for item in coded if item["coding"].get("quote")]
+    dropped = [item for item in with_quote
+               if not _names_the_entity(item["coding"]["quote"], accepted)]
+    eligible = [item for item in with_quote
+                if not marks or str(item.get("id")) in marks]
+    dropped_eligible = [item for item in eligible
+                        if not _names_the_entity(item["coding"]["quote"], accepted)]
+
+    def sample(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [{"evidence_id": str(item.get("id")), "platform": item.get("platform"),
+                 "quote": item["coding"]["quote"]}
+                for item in items[:DROPPED_SAMPLES]]
+
+    others = [item for item in dropped
+              if _looks_like_other_name(item["coding"]["quote"], accepted)]
+    none = [item for item in dropped if item not in others]
+    return {
+        "设闸": True,
+        "已编码带原声": len(with_quote),
+        "点名被评实体": len(with_quote) - len(dropped),
+        "丢弃": len(dropped),
+        "本可入表": len(eligible),
+        "本可入表被丢": len(dropped_eligible),
+        "点了别的名": {"条数": len(others), "样本": sample(others)},
+        "谁都没点": {"条数": len(none), "样本": sample(none)},
+    }
+
+
+def _names_the_entity(quote: str, accepted: Sequence[str]) -> bool:
+    """这句原声点没点被评实体的名。`accepted` 为空 = 不设闸，行为与加闸前一字不差。
+
+    §CODE-2：加闸前程序只校验「是正文子串」——**逐字摘对了，但摘的可能是在夸
+    别人**。评审第二轮坐实过一条：「但是workbuddy不会觉得自己是你的对立面」被
+    当成豆包的正向原声出表，而这句夸的是 WorkBuddy、语境在暗踩豆包，等于当着
+    客户的面把贬他的话说成夸他的话。子串闸拦不住这种错，因为它确实是子串。
+
+    不设闸时不过滤，是留给备料与离线核数（那两处要看全量），和 `citations`
+    为空时不筛角标是同一个道理。
+    """
+
+    return not accepted or any(mentions(quote, name) for name in accepted)
+
+
 def _quote_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
     """原声按互动量降序；取不到互动量的排在后面，同分按 id 稳定。"""
 
@@ -477,18 +600,26 @@ def _quote_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
 
 def coding_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
+    entity_names: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """把已编码的行聚成正式稿要的确定性表（用户 09-05 拍乙的表型）。
 
     主表是「主题 × 态度」，另加一张场景条数表；`audience` 不出表——底料实测
     287 条里 260 条「不明」，摆出来是一格独大的空表，只在附录写一句。
     `citations` 是 证据 id → 角标序号，没给就不填角标（表本身不依赖它）。
+
+    `entity_names` 是被评实体的全部叫法（中文名/英文名/别名，已按 canonical 归一）。
+    §CODE-2：给了就只出**点名了被评实体**的原声，其余丢弃并计数；不给不设闸。
+    调用方从计划的实体卡取名，别在这儿另抽一份——名字空间对不齐是静默的。
     """
 
     from app.reliability.scoring import engagement_value
 
     coded = coded_rows(rows)
     marks = dict(citations or {})
+    # 一个字的叫法（"X"）拿去做包含匹配满篇都是，和 `plan/lint.py` 同一条规矩。
+    accepted = [str(name).strip() for name in (entity_names or [])
+                if len(str(name).strip()) >= 2]
     attitude_by_topic: list[dict[str, Any]] = []
     cells: dict[tuple[str, str], int] = {}
     for item in coded:
@@ -513,9 +644,14 @@ def coding_tables(
     ]
 
     quotes: list[dict[str, Any]] = []
+    # §CODE-2 货 2：同一句原声跨格去重。一条 UGC 可命中多个主题，原样出表同一句
+    # 会在两格各占一行（评审第二轮实测 S58 出现两行）；读者数不出这是一个人说的
+    # 还是两个人说的，等于把 1 条声音读成 2 条。按**去空白后的句子**认，不按证据
+    # id 认：转发同一句话的两条证据，对读者也是同一句。
+    seen_quotes: set[str] = set()
     for topic in (*TOPICS, TOPIC_NONE):
         for attitude in ("正", "负"):
-            picked = sorted(
+            candidates = sorted(
                 (
                     item for item in coded
                     if item["coding"]["quote"]
@@ -525,9 +661,22 @@ def coding_tables(
                     # 弃用是浪费，裸引会被尺子③判红，摆出来只会诱导它裸引。
                     # 不给角标表时（备料、离线核数）不过滤，行为不变。
                     and (not marks or str(item.get("id")) in marks)
+                    and _names_the_entity(item["coding"]["quote"], accepted)
                 ),
                 key=_quote_sort_key,
-            )[:QUOTES_PER_CELL]
+            )
+            # 边挑边记 seen，不是先过滤再截断：**跨格重复与格内重复是同一件事**，
+            # 只挡跨格的话，两条证据摘出同一句话、又落在同一格，照样出两行。
+            # 记在截断之前，所以去掉重复不会让这一格空一位——后面的候选补得上来。
+            picked: list[Mapping[str, Any]] = []
+            for item in candidates:
+                if len(picked) >= QUOTES_PER_CELL:
+                    break
+                key = _squeeze(item["coding"]["quote"])
+                if key in seen_quotes:
+                    continue
+                seen_quotes.add(key)
+                picked.append(item)
             for item in picked:
                 quotes.append({
                     "topic": topic,
@@ -542,6 +691,7 @@ def coding_tables(
                     "engagement": engagement_value(item),
                 })
 
+    dropped = _dropped_quotes(coded, accepted, marks)
     audience = Counter(item["coding"]["audience"] for item in coded)
     unknown = audience.get("不明", 0)
     return {
@@ -550,6 +700,10 @@ def coding_tables(
         "attitude_by_topic": attitude_by_topic,
         "scenario_counts": scenario_counts,
         "quotes": quotes,
+        # §CODE-2 货 1：被闸丢掉的原声要**数得出、抽得到**，不是静默跳过。
+        # 丢得异常多（实测这份底料 74%）说明的不是闸坏了，可能是语料跑题、
+        # 也可能是叫法表不全——两者都得有人看见才判得出，所以留样本不留总数。
+        "quotes_dropped": dropped,
         # 对账口径写在数据里，别让读表的人自己猜：场景表一行一条、加起来等于条数；
         # 主题表一条可命中多个主题，加起来是**命中次数**，天然大于条数。
         "reconciliation": {
@@ -567,6 +721,28 @@ def coding_tables(
             "表内均为条数，不是全网比例。"
         ),
     }
+
+
+def _quotes_footnote(dropped: Mapping[str, Any]) -> str:
+    """表注：这张表筛掉了多少、以及**不该**从行数少里读出什么。
+
+    §CODE-2 判据 4 的变体，调度 09-07 晚补的：闸加上之后这张表会从 24 行缩到 4 行，
+    而 4 行全在境外平台。读者看见这个形状，会顺手读出两个都不成立的结论——
+    「国内没人评这个产品」和「我们没采到国内的声音」。实测这份底料两个都是假的：
+    国内两家平台上点名评被评实体的原声有 64 条，占全部点名原声的九成，
+    只是没走到这张表里。空表会被读成「没人这么说」，**一张筛短了的表同样会**，
+    所以行数少的时候必须自己交代是筛短的。措辞不出字段名与表名：读表的是人。
+    """
+
+    if not dropped.get("设闸") or not dropped.get("丢弃"):
+        return ""
+    return (
+        f"本表只收**点名了研究对象**的原声：另有 {dropped['本可入表被丢']} 条原本够格"
+        f"进表的原声通篇没提到研究对象（多半在说别的产品，或与研究对象无关），已排除；"
+        f"全部已编码原声里同样没点名的共 {dropped['丢弃']} 条。"
+        f"所以**行数少是筛选后的结果**——既不代表没人讨论这个产品，"
+        f"也不代表没有采到某个平台的声音。"
+    )
 
 
 def _shell(name: str, title: str, columns: Sequence[str], rows: Sequence[Mapping[str, Any]],
@@ -590,7 +766,7 @@ def _row_marks(items: Iterable[Mapping[str, Any]], marks: Mapping[str, int]) -> 
 
 def polish_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
-    total_evidence: int | None = None,
+    total_evidence: int | None = None, entity_names: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """把 `coding_tables` 的聚合结果包成正式稿要的三张标准壳表。
 
@@ -600,7 +776,7 @@ def polish_tables(
 
     rows = list(rows)
     marks = dict(citations or {})
-    data = coding_tables(rows, citations=citations)
+    data = coding_tables(rows, citations=citations, entity_names=entity_names)
     coded = coded_rows(rows)
     n = len(coded)
     total = len(rows) if total_evidence is None else total_evidence
@@ -678,6 +854,7 @@ def polish_tables(
             basis=(
                 "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"
                 "互动量最高的 3 条。原声是**例子不是分布**，读它不能替代读上面的条数表。"
+                + _quotes_footnote(data["quotes_dropped"])
             ),
             coverage=coverage),
         # §RPT-2 货 3：人群 × 态度。「不明」占到一半就整张不出——底料实测 287 条里

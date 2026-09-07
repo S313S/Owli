@@ -7,7 +7,7 @@ from collections import Counter, deque
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.plan.entities import duplicate_entity_groups
+from app.plan.entities import duplicate_entity_groups, mentions
 from app.plan.model import (
     Plan, SECTIONED_CHAPTER_KINDS, agent_kind_of, rated_collector_id,
 )
@@ -1344,14 +1344,9 @@ def _entity_names(entity: Mapping[str, Any]) -> list[str]:
     return picked
 
 
-def _mentions(text: str, name: str) -> bool:
-    """名字在正文里出现过没有：中文按包含算，拉丁名要求词边界。"""
-
-    if not name:
-        return False
-    if any("一" <= char <= "鿿" for char in name):
-        return name in text
-    return re.search(rf"(?<![0-9A-Za-z]){re.escape(name)}(?![0-9A-Za-z])", text) is not None
+#: 名字在正文里出现过没有。§CODE-2 提到 `plan/entities.py` 与出表期的原声闸共用，
+#: 这里只留一个别名——两处各写一份尺子，不一致时是静默的。
+_mentions = mentions
 
 
 def _mask(text: str, names: Iterable[str]) -> str:

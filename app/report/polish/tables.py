@@ -388,6 +388,11 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         evidence,
         citations={str(r.get("id")): int(r["citation_no"]) for r in rows
                    if r.get("citation_no") is not None},
+        # §CODE-2：原声必须点名被评实体。叫法从**这里**取，不在 coding 里另抽一份——
+        # `_entity_aliases` 已经把「豆包」与「Doubao」两张卡按 canonical 并成一个实体
+        # （骨架把它们当两实体的坑还在），另抽一份必然对不齐，而对不齐是静默的。
+        entity_names=sorted({name for names in _entity_aliases(plan).values()
+                             for name in names}),
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
