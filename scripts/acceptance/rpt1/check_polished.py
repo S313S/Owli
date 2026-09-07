@@ -75,6 +75,13 @@ MARK_ANY = re.compile(r"\[?S(\d{2,})\]?")
 NUMBER = re.compile(r"\d+(?:\.\d+)?%?")
 #: 日期、版本号、列表序号这些不是「论据数字」，不纳入 ④。
 SKIP_NUMBER_CONTEXT = re.compile(r"^\s*\d+[.)、]\s|20\d\d[-年]\d|v\d")
+#: 标准编号（「字母串 + 空格 + 数字」）是名字的一部分，不是论据数字。
+#: 依据 r-b10812f664d2×sentiment-brief 第 34 行与 r-3e04f808dffd×competitor-matrix
+#: 第 173 行的「符合 ISO 8601 的抓取时间」——被拆出 8601 判红。
+STANDARD_CODE = re.compile(r"[A-Za-z][A-Za-z0-9-]{1,9}\s+\d+(?:-\d+)?")
+#: ``` 围栏里是图表源码不是正文，轴刻度不是论据数字。
+#: 依据 r-b10812f664d2×sentiment-brief 第 99 行 mermaid 的 `y-axis "证据条数" 0 --> 80`。
+FENCE = re.compile(r"^\s*```")
 
 
 def _numbers_from(node: object, out: set[str]) -> None:
@@ -154,10 +161,18 @@ def check_marks_in_pool(markdown: str, pool: set[int]) -> list[str]:
 
 def check_numbers(markdown: str, allowed: set[str]) -> list[str]:
     problems = []
+    fenced = False
     for index, line in enumerate(markdown.splitlines(), start=1):
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue  # 图表源码不是正文
         if line.startswith("|") or line.startswith(">") or SKIP_NUMBER_CONTEXT.search(line):
             continue  # 表格行、原文引用、列表序号不纳入
-        naked = MARK_ANY.sub("", line)
+        # 数字不从链接里取：permalink 里的 5338737804574917、44000000001702 之类
+        # 是 id 不是论据（依据 b108×sentiment-brief 第 65/71/77 行「来源链接：…」）。
+        naked = STANDARD_CODE.sub("", URL_IN_TEXT.sub("", MARK_ANY.sub("", line)))
         for number in NUMBER.findall(naked):
             if number in allowed or number.rstrip("%") in allowed:
                 continue

@@ -555,3 +555,20 @@ def test_ruler_skips_a_line_that_is_only_a_link(tmp_path):
         GOOD_V2.replace("正文解读[S01]。",
                         "正文解读[S01]。\n\n来源链接：https://m.weibo.cn/detail/5338769299341618"))
     assert not findings["⑥ 评价句写清说谁"]
+
+
+@pytest.mark.parametrize("line, why", [
+    ("无法补写符合 ISO 8601 的抓取时间。", "标准编号整体跳过"),
+    ("来源链接：https://m.weibo.cn/detail/5338737804574917", "数字不从链接里取"),
+    ("```mermaid\nxychart-beta\n    y-axis \"证据条数\" 0 --> 80\n```", "围栏里是图表源码"),
+])
+def test_ruler_does_not_read_numbers_out_of_these(tmp_path, line, why):
+    """④ 09-06 九格误报的三处来源（依据见 check_polished.py 常量注释里的原文出处）。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", f"正文解读[S01]。\n\n{line}"))
+    assert not findings["④ 数字有出处"], why
+
+
+def test_ruler_still_catches_a_naked_number_in_prose(tmp_path):
+    """放行三处之后，正文里凭空冒出来的数字仍要判红。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", "有 947 条材料提到这一点。"))
+    assert any("947" in p for p in findings["④ 数字有出处"])
