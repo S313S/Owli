@@ -124,7 +124,11 @@ def test_三张表用的是正式稿标准壳():
 
     standard = set(_table("x", "t", (), [], n=0, basis="", coverage={}))
     tables = polish_tables([_coded(1, topics=["功能与能力"])], citations={"ev-001": 4})
-    assert set(tables) == {"attitude_by_topic", "scenario_counts", "quotes"}
+    # §RPT-2 货 3 往同一个产出里加了 scenario_attitude（场景 × 态度）；
+    # audience_attitude 只在身份不明不过半时才出，这份夹具全是「不明」故不在。
+    # 这条用例要的是「每张表都用标准壳」，集合跟着长，意图不变。
+    assert set(tables) == {"attitude_by_topic", "scenario_counts", "quotes",
+                           "scenario_attitude"}
     for name, table in tables.items():
         assert set(table) == standard, name
         assert table["name"] == name

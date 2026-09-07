@@ -565,10 +565,19 @@ def polish_tables(
                     1 for item in coded if item["coding"]["audience"] == "不明")}
     by_cell: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     by_scenario: dict[str, list[Mapping[str, Any]]] = {}
+    # §RPT-2 货 3：人群 × 态度、场景 × 态度。两张都从同一批 `coded` 里聚，
+    # 不另起一条计算路——§RATE-4 踩过两条路 447 行不一致、把被测改动整个掩掉。
+    by_audience: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    by_scene_cell: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     for item in coded:
         for topic in (item["coding"].get("topics") or [TOPIC_NONE]):
             by_cell.setdefault((topic, item["coding"]["attitude"]), []).append(item)
         by_scenario.setdefault(item["coding"]["scenario"], []).append(item)
+        by_audience.setdefault(
+            (item["coding"]["audience"], item["coding"]["attitude"]), []).append(item)
+        by_scene_cell.setdefault(
+            (item["coding"]["scenario"], item["coding"]["attitude"]), []).append(item)
+    unknown_audience = coverage["身份不明条数"]
     return {
         "attitude_by_topic": _shell(
             "attitude_by_topic", "UGC 逐条编码：主题 × 态度条数",
@@ -611,6 +620,38 @@ def polish_tables(
             basis=(
                 "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"
                 "互动量最高的 3 条。原声是**例子不是分布**，读它不能替代读上面的条数表。"
+            ),
+            coverage=coverage),
+        # §RPT-2 货 3：人群 × 态度。「不明」占到一半就整张不出——底料实测 287 条里
+        # 260 条不明，摆出来是一格独大的表，读者会把「没标出身份」读成「这类人最多」。
+        # 不出表不是缺一块内容：那个数在 coverage 的「身份不明条数」里，附录写一句。
+        **({} if unknown_audience * 2 >= n else {"audience_attitude": _shell(
+            "audience_attitude", "UGC 逐条编码：人群 × 态度条数",
+            ("人群", "态度", "条数"),
+            [{"人群": who, "态度": attitude, "条数": len(items),
+              "marks": _row_marks(items, marks)}
+             for (who, attitude), items in sorted(
+                 by_audience.items(), key=lambda kv: (-len(kv[1]), kv[0]))],
+            n=n,
+            basis=(
+                f"每条 UGC 归一个人群、一个态度，各行相加 = 已编码条数 {n}；"
+                f"其中身份不明 {unknown_audience} 条，占比不到一半才出这张表。"
+            ),
+            coverage=coverage)}),
+        # §RPT-2 货 3：场景 × 态度。`scenario_counts` 只答「在什么场景下被谈」，
+        # 这张才答「在那个场景下是夸还是骂」——口碑节要的是后者。
+        "scenario_attitude": _shell(
+            "scenario_attitude", "UGC 逐条编码：场景 × 态度条数",
+            ("场景", "态度", "条数"),
+            [{"场景": scene, "态度": attitude, "条数": len(items),
+              "marks": _row_marks(items, marks)}
+             for (scene, attitude), items in sorted(
+                 by_scene_cell.items(), key=lambda kv: (-len(kv[1]), kv[0]))],
+            n=n,
+            basis=(
+                f"每条 UGC 归一个场景、一个态度，各行相加 = 已编码条数 {n}。"
+                f"分母是已编码的 UGC，不是全库 {total} 条证据。"
+                f"角标只标其中进了引用池的那些，有条数没角标是没进池、不是数据可疑。"
             ),
             coverage=coverage),
     }

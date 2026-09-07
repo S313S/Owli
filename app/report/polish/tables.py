@@ -285,6 +285,9 @@ TABLE_NAMES: tuple[str, ...] = (
     # §CODE-1：UGC 逐条编码聚出来的三张表。词表命中（topic_polarity）只数触发词，
     # 编码是逐条模型判断，两者口径不同、都留着：编码表作主表，词表表作附录对照。
     "attitude_by_topic", "scenario_counts", "quotes",
+    # §RPT-2 货 3：场景 × 态度是口碑节的主表（scenario_counts 只答「在哪谈」，
+    # 这张答「在那儿是夸还是骂」）；人群 × 态度只在身份不明不过半时才出现。
+    "scenario_attitude", "audience_attitude",
 )
 
 
