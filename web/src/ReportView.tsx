@@ -11,7 +11,9 @@ export const SCORE_DIMS: Array<[keyof EvidenceItem, string]> = [
   ['score_completeness', '完整'], ['score_independence', '无关'],
 ]
 const MARK = /\[S(\d{2})\]/g
-const REASON_LABEL: Record<string, string> = {
+// §RPT-2 货 5 ②：原因码的人话词表。历史只读页那张缺失清单卡也要用同一份——
+// 两处各写一份，改了一处另一处照样把 conclusion_invalid 印给读者看。
+export const REASON_LABEL: Record<string, string> = {
   timeout: '超时', tool_unavailable: '工具不可用', retry_exhausted: '重试耗尽',
   conclusion_invalid: '结论不合规', empty_result: '空结果', quota_exhausted: '额度耗尽',
 }

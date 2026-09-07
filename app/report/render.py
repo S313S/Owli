@@ -85,8 +85,10 @@ def missing_text(reason: str | None) -> str:
 _GAP_LINE = re.compile(r"^(?P<lead>\s*[-*]\s*)(?P<kind>gap|假设)=(?P<json>\{.*\})\s*$")
 #: JSON 里的键 → 中文行名。证据缺口摊成「维度 / 状态 / 说明」，假设摊成「假设 / 理由」。
 _GAP_LABELS: dict[str, tuple[tuple[str, str], ...]] = {
+    # `reason` 是 09-04 底料里实测出现的第四种说明键（「可见证据无豆包官网……」）。
+    # 不收进来它会落进 leftover，页面上就印成英文标签「reason：…」。
     "gap": (("dimension", "维度"), ("dimensions", "维度"), ("status", "状态"),
-            ("detail", "说明"), ("handling", "说明")),
+            ("detail", "说明"), ("handling", "说明"), ("reason", "说明")),
     "假设": (("item", "假设"), ("assumption", "假设"), ("reason", "理由"),
              ("detail", "理由")),
 }

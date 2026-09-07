@@ -1,6 +1,6 @@
 import { Alert, Card, Empty, List, Space, Tag, Typography } from 'antd'
 import type { ResearchSnapshot } from './types'
-import ReportView from './ReportView'
+import ReportView, { REASON_LABEL } from './ReportView'
 import RunPanel from './RunPanel'
 
 const statusColor: Record<string, string> = {
@@ -121,7 +121,8 @@ export default function HistoricalResearchView({ snapshot }: { snapshot: Researc
                     <Tag color={statusColor[item.status]}>{item.status}</Tag>
                   </Space>}
                   description={<>
-                    <div>原因：{item.reason ?? '未记录'}</div>
+                    {/* §RPT-2 货 5 ②：读者不认识 conclusion_invalid，页面上只出人话。 */}
+                    <div>原因：{item.reason ? REASON_LABEL[item.reason] ?? '未写出' : '未记录'}</div>
                     {item.error && <div>错误摘要：{item.error}</div>}
                   </>}
                 />

@@ -91,3 +91,15 @@ def test_认不出的原因码也不许原样漏到页面():
 def test_没有重名时实体节一个字不动():
     text = "- **豆包**：豆包、Doubao。字节的助手。\n- **Kimi**：Kimi。月之暗面。"
     assert dedupe_entity_lines(text) == text
+
+
+def test_缺口的reason键也摊成说明():
+    """09-04 底料实测的第四种说明键；不收进词表它会印成英文标签「reason：…」。"""
+    from app.report.render import humanize_gap_lines
+
+    line = ('- gap={"dimension":"豆包官方定位","status":"missing",'
+            '"reason":"可见证据无豆包官网、官方公告或应用市场页"}')
+    out = humanize_gap_lines(line)
+    assert "reason" not in out and "gap={" not in out
+    assert "- 说明：可见证据无豆包官网、官方公告或应用市场页" in out
+    assert "- 状态：完全没采到" in out
