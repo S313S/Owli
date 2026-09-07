@@ -348,9 +348,12 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                 "本轮没有已编码的 UGC（编码工序没跑，或结果没落进这个库），故不出表。"
                 "这不等于没人讨论，只是这一轮没有可聚合的数据。")
         else:
+            # 原因写中性的：这个分支管的是所有表，各表筛空的道理不同
+            # （原声要既摘得出又进了引用池，触发事件要帖子交代了为什么开始用），
+            # 套一个具体解释上去，等于给读的人一个错误的排查方向。
             omitted_tables[name] = (
-                f"已编码 {coded_n} 条 UGC，但这张表筛完是空的"
-                "（原声要既摘得出又进了引用池才留），故不出表。")
+                f"已编码 {coded_n} 条 UGC，但按这张表自己的口径筛完没有一行，"
+                "故不出表。看该表 basis 里写的口径。")
     timeline = _timeline(rows)
     if timeline is not None:
         tables["timeline"] = timeline

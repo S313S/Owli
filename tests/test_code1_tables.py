@@ -214,7 +214,7 @@ def test_有编码但原声筛空时_只缺原声表():
     assert "attitude_by_topic" in data["tables"]
     assert "scenario_counts" in data["tables"]
     assert "quotes" not in data["tables"]
-    assert "筛完是空的" in data["omitted_tables"]["quotes"]
+    assert "按这张表自己的口径筛完没有一行" in data["omitted_tables"]["quotes"]
 
 
 def test_三张表都出得来时_omitted为空():
