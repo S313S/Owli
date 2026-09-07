@@ -497,28 +497,41 @@ def check_cell_attribution(markdown: str, tables: Mapping[str, Any]) -> list[str
         return []
     problems = []
     for index, line in enumerate(writer_text(markdown).splitlines(), start=1):
-        if line.startswith(("|", ">")) or not any(w in line for w in ATTRIBUTION_WORDS):
+        if line.startswith(("|", ">")):
             continue
-        used = {int(n) for n in MARK_ANY.findall(line)}
-        for topic in {key[0] for key in cells}:
-            if not topic or topic not in line:
+        # 按**句**判，不按行判：一行里常常前半句在念条数、后半句才在解释语义。
+        # 整行判会把「豆包在这个主题里并非一边倒的好评」这种只讲分布的句子也判红
+        # （09-07 拿三份真稿实测，整行判误伤两处）。分句连破折号一起切。
+        for sentence in re.split(r"[。！？；\n]|——", line):
+            if not any(w in sentence for w in ATTRIBUTION_WORDS):
                 continue
-            wanted = {a for a, hints in ATTITUDE_HINTS.items() if any(h in line for h in hints)}
-            picked = [v for (t, a), v in cells.items()
-                      if t == topic and (not wanted or a in wanted)]
-            count = sum(c for c, _ in picked)
-            marks = {m for _, ms in picked for m in ms}
-            if not count:
-                continue
-            if not marks or len(marks) < count * CELL_MARK_COVERAGE:
-                problems.append(
-                    f"第 {index} 行在给「{topic}」这一格归因，但这一格 {count} 条里"
-                    f"只有 {len(marks)} 条进了引用池——只准写「{count} 条，本轮未进引用」"
-                    f"：{line.strip()[:40]}")
-            elif used and not (used & marks):
-                problems.append(
-                    f"第 {index} 行解释「{topic}」这一格，引的角标不在这一格里"
-                    f"（这一格是 {sorted(f'S{m:02d}' for m in marks)}）：{line.strip()[:40]}")
+            used = {int(n) for n in MARK_ANY.findall(sentence)}
+            problems += _cell_attribution_problems(sentence, cells, used, index)
+    return problems
+
+
+def _cell_attribution_problems(sentence: str, cells: dict[tuple[str, str], tuple[int, set[int]]],
+                               used: set[int], index: int) -> list[str]:
+    problems = []
+    for topic in sorted({key[0] for key in cells}):
+        if not topic or topic not in sentence:
+            continue
+        # 句子里说了正向/负向，就只比那一半的格；没说就把这个主题的几格合起来看。
+        wanted = {a for a, hints in ATTITUDE_HINTS.items() if any(h in sentence for h in hints)}
+        picked = [v for (t, a), v in cells.items() if t == topic and (not wanted or a in wanted)]
+        count = sum(c for c, _ in picked)
+        marks = {m for _, ms in picked for m in ms}
+        if not count:
+            continue
+        if not marks or len(marks) < count * CELL_MARK_COVERAGE:
+            problems.append(
+                f"第 {index} 行在给「{topic}」这一格归因，但这一格 {count} 条里"
+                f"只有 {len(marks)} 条进了引用池——只准写「{count} 条，本轮未进引用」"
+                f"：{sentence.strip()[:40]}")
+        elif used and not (used & marks):
+            problems.append(
+                f"第 {index} 行解释「{topic}」这一格，引的角标不在这一格里"
+                f"（这一格是 {sorted(f'S{m:02d}' for m in marks)}）：{sentence.strip()[:40]}")
     return problems
 
 
@@ -534,10 +547,13 @@ def check_marks_per_cell(markdown: str) -> list[str]:
             continue
         for cell in line.strip().strip("|").split("|"):
             used = MARK_ANY.findall(cell)
-            if len(used) > MARKS_PER_CELL:
+            # 只判「条数 + 一串角标」那种格——那才是读不了的矩阵格（评审 #12 的原样）。
+            # 整列只放角标的出处列（`| 强在哪 | … | 角标 |` 那种）不在此列：
+            # 它本来就是给人查出处用的，判红只会逼写手把出处删掉。
+            if len(used) > MARKS_PER_CELL and NUMBER.search(MARK_ANY.sub("", cell)):
                 problems.append(
                     f"第 {index} 行有一格塞了 {len(used)} 个角标（上限 {MARKS_PER_CELL}）"
-                    f"，出处写到表下面那一行去：{cell.strip()[:40]}")
+                    f"，格里只写条数、出处写到表下面那一行去：{cell.strip()[:40]}")
     return problems
 
 

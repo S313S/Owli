@@ -342,3 +342,32 @@ def test_a_footnote_plus_self_talk_on_one_line_is_still_red(tmp_path):
     body = "来源：各实体的提及量与被引量对照。本轮被引条数偏低[S01]。"
     assert _run(tmp_path, GOOD.replace("正文解读[S01]。", body), **ENTITY_TABLE)[
         "⑨ 管道自诊不占主体节"]
+
+
+# ── 两条收紧（09-07 拿三份真稿实测出来的误报） ──────────────────────────
+def test_a_distribution_sentence_is_not_attribution(tmp_path):
+    """整行判会误伤：前半句念条数、后半句才解释语义时，只该判后半句。
+
+    依据 r-3e04f808dffd×consulting 第 52 行「同一主题「价格与付费」下……——
+    豆包在这个主题里并非一边倒的好评」——后半句没点名那一格，判它是冤枉。
+    """
+    line = "同一主题「价格与付费」下还有负向 19 条——豆包在这个主题里并非一边倒的好评[S02]。"
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", line), **THIN)[
+        "⑮ 归因只引该格内的角标"]
+
+
+def test_a_marks_only_column_is_not_a_stuffed_cell(tmp_path):
+    """出处列本来就是给人查出处的，判红只会逼写手把出处删掉。
+
+    依据 r-3e04f808dffd×consulting 第 89 行 `[S50][S51][S57][S61]` 那一格。
+    """
+    assert not _run(tmp_path, GOOD.replace("| 价格与付费 | 19 |",
+                                           "| 强在哪 | [S50][S51][S57][S61] |"))[
+        "⑯ 表格一格 ≤3 个角标"]
+
+
+def test_a_matrix_cell_with_a_count_plus_marks_is_still_red(tmp_path):
+    """收紧之后仍要抓住真正读不了的那种格（真稿里 `22 [S49][S51]…[S59]`）。"""
+    assert _run(tmp_path, GOOD.replace("| 价格与付费 | 19 |",
+                                       "| 豆包 | 22 [S49][S51][S55][S56] |"))[
+        "⑯ 表格一格 ≤3 个角标"]
