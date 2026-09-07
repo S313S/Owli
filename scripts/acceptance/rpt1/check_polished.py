@@ -367,7 +367,22 @@ def check_ratio_phrases(markdown: str) -> list[str]:
     return problems
 
 
-def check_pipeline_out_of_findings(markdown: str, template) -> list[str]:
+def _without_source_footnote(line: str, titles: Sequence[str]) -> str:
+    """把「来源：<中文表名>」这段溯源脚注剥掉再判。
+
+    §RULE-1 外加一条（调度 09-07 拍乙）：违禁词的本意是**禁止正文做管道自我检讨**，
+    而「来源：各平台采集量与被引量对照」是溯源脚注——恰恰是 §6.5.3 要求写的那一行。
+    只剥「来源：」后面**真的是某张表的中文名**的那一段：改表名常量（甲）面太大，
+    让写手换说法（丙）与「按中文表名交给写手」的既有裁决打架。
+    """
+    for title in titles:
+        if title:
+            line = re.sub(rf"来源[：:]\s*{re.escape(title)}", "", line)
+    return line
+
+
+def check_pipeline_out_of_findings(markdown: str, template,
+                                   table_titles: Sequence[str] = ()) -> list[str]:
     """§RPT-2 货 2 闸 ⑨：管道自诊不许占主体节。
 
     诚实感不靠这个撑——它归开篇节末尾那句人话把握度和附录「样本怎么来的」。
@@ -378,7 +393,8 @@ def check_pipeline_out_of_findings(markdown: str, template) -> list[str]:
         if name in NON_FINDING_SECTIONS or name not in bodies:
             continue
         for offset, line in enumerate(bodies[name], start=1):
-            hit = next((w for w in PIPELINE_WORDS if w in line), None)
+            probe = _without_source_footnote(line, table_titles)
+            hit = next((w for w in PIPELINE_WORDS if w in probe), None)
             if hit:
                 problems.append(
                     f"主体节「{name}」第 {offset} 行出现取数口径词「{hit}」，"
@@ -576,6 +592,9 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
     crossref = {int(s["mark"][1:]): str(s["crossref"]) for s in data.get("sources") or []
                 if s.get("crossref")}
     entities = [str(e) for e in (data.get("entities") or [])]
+    # 中文表名：写手标溯源用的就是这些名字（`build_prompt` 只把中文名投给它）。
+    table_titles = [str(t.get("title") or "") for t in (data.get("tables") or {}).values()
+                    if isinstance(t, dict)]
     findings = {
         CHECKS[0]: check_no_internal_words(markdown),
         CHECKS[1]: check_sections(markdown, template),
@@ -585,7 +604,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[5]: check_judgement_has_subject(markdown, entities),
         CHECKS[6]: check_opening_section(markdown, template),
         CHECKS[7]: check_advice_gate(markdown, template, crossref),
-        CHECKS[8]: check_pipeline_out_of_findings(markdown, template),
+        CHECKS[8]: check_pipeline_out_of_findings(markdown, template, table_titles),
         CHECKS[9]: check_summary_sample_size(markdown, template, data.get("counts") or {}),
         CHECKS[10]: check_ratio_phrases(markdown),
         CHECKS[11]: check_uncertainty_once(markdown),

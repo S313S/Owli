@@ -311,3 +311,34 @@ def test_the_matrix_row_hands_the_writer_at_most_three_marks():
              "content_excerpt": "豆包的价格与门槛", "_extra": {}} for i in range(1, 10)]
     table = _entity_dimension(rows, {"subjects": ["豆包"]})
     assert table["rows"] and len(table["rows"][0]["marks"]) == MATRIX_MARKS_PER_ROW
+
+
+# ── 外加一条（调度 09-07 拍乙）：表名脚注不算管道自诊 ────────────────────
+#: 实体提及量表是**主体节的合法主表**（它讲的是调研对象，不是取数过程），
+#: 可它的中文表名自带「被引」二字——SHARD-1 第一格的红点就出在这里。
+ENTITY_TABLE = {"tables": {"entity_mentions": {"title": "各实体的提及量与被引量对照",
+                                               "rows": [{"实体": "豆包", "提及条数": 19}],
+                                               "n": 562}}}
+
+
+def test_a_source_footnote_naming_a_table_is_not_pipeline_self_talk(tmp_path):
+    """「来源：各实体的提及量与被引量对照」是溯源脚注，恰恰是 §6.5.3 要求写的那一行，
+    不是正文在做管道自我检讨。改表名（甲）面太大，让写手换说法（丙）与既有裁决打架。"""
+    body = "豆包被提及 19 次，最密[S01]。\n\n| 实体 | 提及条数 |\n| --- | --- |\n| 豆包 | 19 |\n\n" \
+           "来源：各实体的提及量与被引量对照"
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", body), **ENTITY_TABLE)[
+        "⑨ 管道自诊不占主体节"]
+
+
+def test_real_pipeline_self_talk_in_a_finding_is_still_red(tmp_path):
+    """闸别开太大：主体节里真的在讲取数过程，照旧判红。"""
+    body = "小红书 19 条采集里被引 0 条，说明这一轮取数偏了[S01]。"
+    assert _run(tmp_path, GOOD.replace("正文解读[S01]。", body), **ENTITY_TABLE)[
+        "⑨ 管道自诊不占主体节"]
+
+
+def test_a_footnote_plus_self_talk_on_one_line_is_still_red(tmp_path):
+    """剥掉脚注之后这一行**剩下的部分**还在自诊，就还是红——只放行脚注本身。"""
+    body = "来源：各实体的提及量与被引量对照。本轮被引条数偏低[S01]。"
+    assert _run(tmp_path, GOOD.replace("正文解读[S01]。", body), **ENTITY_TABLE)[
+        "⑨ 管道自诊不占主体节"]
