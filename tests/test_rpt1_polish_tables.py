@@ -109,14 +109,30 @@ class _Store:
 @pytest.mark.skipif(not NIGHTLY_DB.exists(), reason="夜跑库副本不在本 worktree")
 @pytest.mark.parametrize("research_id", NIGHTLY_IDS)
 def test_nightly_reports_all_produce_every_table(research_id: str):
-    """三份 completed 成稿各出全表，且 n 与 `evidence_view().counts.total` 相等。"""
+    """三份 completed 成稿各出全表，且 n 与 `evidence_view().counts.total` 相等。
+
+    §CODE-1 之后表集合不再是定值：编码表**有已编码的行才出**，没有就整块不出
+    （不摆空表）。所以这里不写死名单，而是按「这份底料到底有没有编码」反着断言——
+    写死名单会在下次给另两份底料补编码时又红一次，红的还是尺子不是代码。
+    """
     store = _Store(NIGHTLY_DB)
     report = store.get_report(research_id)
     path = Path(report["report_path"])
     text = (NIGHTLY_RUNS / research_id / "goals" / path.parent.name / path.name).read_text("utf-8")
     data = collect_inputs(store, research_id, text)
-    assert set(data["tables"]) == {"platform_mix", "grade_mix", "crossref_mix", "entity_mentions",
-                                   "topic_polarity", "entity_dimension", "timeline"}
+    base = {"platform_mix", "grade_mix", "crossref_mix", "entity_mentions",
+            "topic_polarity", "entity_dimension", "timeline"}
+    coding = {"attitude_by_topic", "scenario_counts", "quotes", "scenario_attitude"}
+    produced = set(data["tables"])
+    assert base <= produced, f"基础表缺了 {base - produced}"
+    assert produced <= base | coding | {"audience_attitude", "trigger_counts"}
+    # 走的是这条不解 JSON 的裸 store——九格真实那条路。它认得出编码，才叫接上了。
+    from app.reliability.coding import coded_rows
+
+    if coded_rows(store.list_evidence(research_id)):
+        assert coding <= produced, f"这份底料有编码却没出表：缺 {coding - produced}"
+    else:
+        assert not (coding & produced), "没有编码却出了编码表——不该摆空表"
     total = evidence_view(store.list_evidence(research_id))["counts"]["total"]
     assert data["tables"]["platform_mix"]["n"] == total == data["counts"]["evidence"]
     assert all(table["rows"] for table in data["tables"].values())
