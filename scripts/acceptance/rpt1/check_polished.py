@@ -18,7 +18,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -453,6 +453,59 @@ def check_quotes_are_speech(markdown: str, titles: Sequence[str]) -> list[str]:
     return problems
 
 
+#: §RULE-1 货 6（评审 #2）：解释编码表某格的语义时，只能引该格内有角标的行。
+#: 实测咨询体把「价格与付费」19 条负向解读成「嫌豆包太便宜」，依据只是 Reddit
+#: 那几条水印帖——写手只看得见进池的角标，看不见这一格背后的原文，于是拿池内证据
+#: 反推整格语义。这一格没角标或角标覆盖不到三分之一时，只准写条数，不准归因。
+ATTRIBUTION_WORDS = ("并非", "而是", "其实是", "原因在于", "原因是", "反映出", "背后是")
+ATTITUDE_HINTS = {"负": ("负向", "负面", "吐槽", "抱怨", "差评"),
+                  "正": ("正向", "正面", "好评", "夸")}
+CELL_MARK_COVERAGE = 1 / 3
+CODED_CELL_TABLE = "attitude_by_topic"
+
+
+def _coded_cells(tables: Mapping[str, Any]) -> dict[tuple[str, str], tuple[int, set[int]]]:
+    """(主题, 态度) → (这一格几条, 这一格有角标的是哪几条)。表不在就是空 dict。"""
+    cells: dict[tuple[str, str], tuple[int, set[int]]] = {}
+    for row in ((tables.get(CODED_CELL_TABLE) or {}).get("rows") or []):
+        key = (str(row.get("主题") or ""), str(row.get("态度") or ""))
+        marks = {int(n) for n in MARK_ANY.findall(" ".join(row.get("marks") or []))}
+        count, seen = cells.get(key, (0, set()))
+        cells[key] = (count + int(row.get("条数") or 0), seen | marks)
+    return cells
+
+
+def check_cell_attribution(markdown: str, tables: Mapping[str, Any]) -> list[str]:
+    cells = _coded_cells(tables)
+    if not cells:
+        return []
+    problems = []
+    for index, line in enumerate(writer_text(markdown).splitlines(), start=1):
+        if line.startswith(("|", ">")) or not any(w in line for w in ATTRIBUTION_WORDS):
+            continue
+        used = {int(n) for n in MARK_ANY.findall(line)}
+        for topic in {key[0] for key in cells}:
+            if not topic or topic not in line:
+                continue
+            wanted = {a for a, hints in ATTITUDE_HINTS.items() if any(h in line for h in hints)}
+            picked = [v for (t, a), v in cells.items()
+                      if t == topic and (not wanted or a in wanted)]
+            count = sum(c for c, _ in picked)
+            marks = {m for _, ms in picked for m in ms}
+            if not count:
+                continue
+            if not marks or len(marks) < count * CELL_MARK_COVERAGE:
+                problems.append(
+                    f"第 {index} 行在给「{topic}」这一格归因，但这一格 {count} 条里"
+                    f"只有 {len(marks)} 条进了引用池——只准写「{count} 条，本轮未进引用」"
+                    f"：{line.strip()[:40]}")
+            elif used and not (used & marks):
+                problems.append(
+                    f"第 {index} 行解释「{topic}」这一格，引的角标不在这一格里"
+                    f"（这一格是 {sorted(f'S{m:02d}' for m in marks)}）：{line.strip()[:40]}")
+    return problems
+
+
 def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
     """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
 
@@ -484,7 +537,8 @@ def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
           "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
-          "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图", "⑭ 原声是人说的话")
+          "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图", "⑭ 原声是人说的话",
+          "⑮ 归因只引该格内的角标")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度",)
@@ -519,6 +573,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[12]: check_no_charts(markdown),
         CHECKS[13]: check_quotes_are_speech(
             markdown, [str(s.get("title") or "") for s in data.get("sources") or []]),
+        CHECKS[14]: check_cell_attribution(markdown, data.get("tables") or {}),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

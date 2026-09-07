@@ -240,3 +240,51 @@ def test_non_speech_candidates_never_reach_the_writer():
     assert dropped == 1
     assert [row["原声"] for row in coding["quotes"]["rows"]] == ["写文案是真的快"]
     assert "已剔除" in coding["quotes"]["basis"]
+
+
+# ── 货 6（评审 #2）：编码表某格的语义只能用这一格的证据解释 ──────────────
+def _coded(rows) -> dict:
+    return {"tables": {"attitude_by_topic": {"rows": rows, "n": 19},
+                       "topic_polarity": {"title": "主题提及量与极性词命中",
+                                          "rows": [{"主题": "价格与付费", "提及条数": 19}],
+                                          "n": 562}}}
+
+
+THIN = _coded([{"主题": "价格与付费", "态度": "负", "条数": 19, "marks": ["S02"]}])
+THICK = _coded([{"主题": "价格与付费", "态度": "负", "条数": 3, "marks": ["S01", "S02"]}])
+
+
+def test_attribution_on_a_cell_with_thin_citation_is_red(tmp_path):
+    """19 条里只有 1 条带角标，照那 1 条解释整格，必然编错（实测「嫌豆包太便宜」）。"""
+    line = "价格与付费的负向说法并非嫌贵，而是嫌豆包定价太低[S02]。"
+    problems = _run(tmp_path, GOOD.replace("正文解读[S01]。", line), **THIN)[
+        "⑮ 归因只引该格内的角标"]
+    assert problems and "未进引用" in problems[0]
+
+
+def test_stating_the_count_without_attributing_passes(tmp_path):
+    """规则要的是「只写条数」，那这句就必须放行，否则等于禁止写这一格。"""
+    line = "价格与付费 19 条编码为负向，其中 1 条进入引用[S02]。"
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", line), **THIN)[
+        "⑮ 归因只引该格内的角标"]
+
+
+def test_attribution_citing_a_mark_outside_the_cell_is_red(tmp_path):
+    """覆盖够了也不能拿别的格的角标当依据——那是「引错人」的另一种形态。"""
+    line = "价格与付费的负向说法其实是在说涨价[S99]。"
+    problems = _run(tmp_path, GOOD.replace("正文解读[S01]。", line), **THICK)[
+        "⑮ 归因只引该格内的角标"]
+    assert problems and "不在这一格" in problems[0]
+
+
+def test_attribution_citing_a_mark_inside_the_cell_passes(tmp_path):
+    line = "价格与付费的负向说法其实是在说涨价[S01]。"
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", line), **THICK)[
+        "⑮ 归因只引该格内的角标"]
+
+
+def test_the_gate_is_silent_without_a_coding_table(tmp_path):
+    """没有编码表的老稿判不了这件事——尺子不猜（判据落在本轮产出上）。"""
+    assert not _run(tmp_path, GOOD.replace("正文解读[S01]。",
+                                           "这并非价格问题，而是习惯问题[S02]。"))[
+        "⑮ 归因只引该格内的角标"]
