@@ -590,3 +590,47 @@ def test_action_title_gate_still_fires_outside_structural_sections(tmp_path):
     findings = _run_v2(tmp_path, GOOD_V2.replace(
         "## 小红书贡献了 296 条证据，却一条都没被引用", "## 用户评价分析"))
     assert any("用户评价分析" in p for p in findings["⑤ 行动式标题"])
+
+
+# —— 九格续跑账本：串行 5–6 h，中途机器重启要能接着跑而不是从头来 ——
+
+def _matrix():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "rpt1_matrix",
+        Path(__file__).resolve().parents[1] / "scripts/acceptance/rpt1/rpt1_matrix.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("write, revision, expect", [
+    ({"revision": "abc", "cells": {"g": {"passed": True}}}, "abc", 1),   # 版本对上才复用
+    ({"revision": "abc", "cells": {"g": {"passed": True}}}, "xyz", 0),   # 代码变了整本作废
+    ({"revision": "abc", "cells": {"g": "不是字典"}}, "abc", 0),          # 脏行不当数
+])
+def test_progress_book_is_only_reused_under_the_same_code(tmp_path, write, revision, expect):
+    """账本记的是「哪个 git HEAD 下哪一格过了」——尺子或提示词一改，旧的绿一律不认。"""
+    matrix = _matrix()
+    path = tmp_path / "book.json"
+    path.write_text(json.dumps(write, ensure_ascii=False), encoding="utf-8")
+    assert len(matrix._load_progress(path, revision)) == expect
+
+
+def test_a_broken_or_missing_book_reruns_everything_instead_of_crashing(tmp_path):
+    """账本坏了要宁可多跑，不能崩、更不能当成「全过了」。"""
+    matrix = _matrix()
+    broken = tmp_path / "broken.json"
+    broken.write_text("{ 这不是 json", encoding="utf-8")
+    assert matrix._load_progress(broken, "abc") == {}
+    assert matrix._load_progress(tmp_path / "nope.json", "abc") == {}
+
+
+def test_progress_is_written_atomically(tmp_path):
+    """每格落一次账；先写临时文件再改名，跑到一半被杀不会留半个账本。"""
+    matrix = _matrix()
+    path = tmp_path / "sub" / "book.json"
+    matrix._save_progress(path, "abc", {"g": {"passed": False}})
+    assert json.loads(path.read_text(encoding="utf-8"))["revision"] == "abc"
+    assert not list(path.parent.glob("*.tmp"))

@@ -3,8 +3,16 @@
 
     python3 scripts/acceptance/rpt1/rpt1_matrix.py --db var/rpt1-8956.db --runs var/runs
 
-串行跑（每次一个 Opus 调用，几分钟起步）。已经存在且过尺子的成稿默认跳过，
-`--force` 才重跑——撞到缺陷时重跑单格用 `--only <id>:<模板>`。
+串行跑（每次一个 Opus 调用，几分钟起步）。三种跑法：
+
+- 默认：**md 文件在就跳过**（只压尺子不写作，零引擎成本）。注意跳过的判据是
+  「文件存在」不是「过了尺子」——所以它只适合复验尺子，不能拿来续跑。
+- `--force`：九格全部重写。整轮从头跑用这个。
+- `--resume`：按账本续跑——本轮已经写出来**且过了尺子**的格跳过，其余重写。
+  账本记的是「哪个 git HEAD 下哪一格过了」，代码一变账本自动作废，
+  不会拿旧代码写的稿冒充本轮成果。九格串行 5–6 h，中途机器重启用它接着跑。
+
+撞到缺陷时重跑单格用 `--only <id>:<模板>`。
 """
 
 from __future__ import annotations
@@ -13,6 +21,7 @@ import argparse
 import asyncio
 import importlib.util
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -29,6 +38,46 @@ check_polished = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_polished)
 
 REPORTS = ("r-b10812f664d2", "r-3e04f808dffd", "r-045acebc352b")
+#: 续跑账本默认落 var/ 而不是 /tmp——09-07 早上 /tmp 被重启清空，
+#: 九格日志与三个哨兵探测器日志一起没了，读数只剩人工抄下来的那份。
+DEFAULT_PROGRESS = "var/rpt1-matrix-progress.json"
+
+
+def _code_revision() -> str:
+    """当前代码版本。账本靠它作废：改了尺子或提示词，上一轮的绿一律不认。"""
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT),
+                             capture_output=True, text=True, timeout=10)
+        head = out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        head = ""
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
+                           capture_output=True, text=True).stdout.strip()
+    # 工作区脏就永不复用账本：改了没提交的那几行，恰恰最可能是这轮要验的东西。
+    return f"{head}{'+dirty' if dirty else ''}" or "unknown"
+
+
+def _load_progress(path: Path, revision: str) -> dict[str, dict]:
+    """读账本。代码版本对不上就当没有——宁可多跑，不可拿旧码的绿冒充本轮。"""
+    if not path.is_file():
+        return {}
+    try:
+        book = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if book.get("revision") != revision:
+        print(f"账本是 {book.get('revision')!r} 写的，当前是 {revision!r}，整本作废", flush=True)
+        return {}
+    return {k: v for k, v in (book.get("cells") or {}).items() if isinstance(v, dict)}
+
+
+def _save_progress(path: Path, revision: str, cells: dict[str, dict]) -> None:
+    """每跑完一格就落一次，先写临时文件再改名——跑到一半被杀不会留半个账本。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"revision": revision, "cells": cells},
+                              ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _load_runner():
@@ -68,8 +117,13 @@ async def main() -> int:
     parser.add_argument("--db", required=True)
     parser.add_argument("--runs", required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="按账本续跑：本轮已过尺子的格跳过，其余重写")
+    parser.add_argument("--progress", default=DEFAULT_PROGRESS, help="续跑账本路径")
     parser.add_argument("--only", default=None, help="<research_id>:<模板>，只跑这一格")
     args = parser.parse_args()
+    if args.resume and args.force:
+        parser.error("--resume 与 --force 互斥：一个是接着跑，一个是从头跑")
     runs_root = Path(args.runs).resolve()
     runner = _load_runner()
     store = runner.ReadOnlyStore(Path(args.db).resolve())
@@ -78,16 +132,37 @@ async def main() -> int:
     if args.only:
         want_id, _, want_tpl = args.only.partition(":")
         cells = [c for c in cells if c == (want_id, want_tpl)]
+    revision = _code_revision()
+    progress_path = Path(args.progress)
+    if not progress_path.is_absolute():
+        progress_path = ROOT / progress_path
+    book = _load_progress(progress_path, revision) if args.resume else {}
+    if args.resume:
+        done = sum(1 for v in book.values() if v.get("passed"))
+        print(f"续跑账本 {progress_path}（代码 {revision}）："
+              f"账本 {len(book)} 格、其中已过 {done} 格可跳过", flush=True)
     rows = []
     for research_id, template in cells:
-        row = await one(runner, store, runs_root, research_id, template, args.force)
+        key = f"{research_id}:{template}"
+        if args.resume and (book.get(key) or {}).get("passed"):
+            row = dict(book[key])
+            row["resumed"] = True
+            rows.append(row)
+            print(f"[SKIP] {key}  上一段已过尺子，不重跑", flush=True)
+            continue
+        # 续跑时没过的格一律重写：留着上一段那份没过的稿只会被默认路径跳过。
+        row = await one(runner, store, runs_root, research_id, template,
+                        args.force or args.resume)
         rows.append(row)
+        book[key] = row
+        _save_progress(progress_path, revision, book)
         mark = "PASS" if row.get("passed") else "FAIL"
         print(f"[{mark}] {research_id} × {template}  {row['bytes']} B  "
               f"{row['seconds']}s  attempts={row['attempts']}", flush=True)
         for name, problems in (row.get("ruler") or {}).items():
             print(f"        {name}: {len(problems)} 处 · {problems[0][:70]}", flush=True)
     print("\n" + json.dumps(rows, ensure_ascii=False, indent=1))
+    print(f"\n读数账本：{progress_path}", flush=True)
     green = sum(1 for r in rows if r.get("passed"))
     print(f"\n尺子全过 {green}/{len(rows)}")
     return 0 if green == len(rows) else 1
