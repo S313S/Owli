@@ -652,11 +652,14 @@ def polish_tables(
         "quotes": _shell(
             "quotes", "UGC 代表原声（每格按互动量取前 3）",
             ("主题", "态度", "原声", "平台", "互动量"),
-            [{"主题": row["topic"], "态度": row["attitude"], "原声": row["quote"],
-              "平台": row["platform"], "互动量": row["engagement"],
-              "marks": _row_marks(
-                  [{"id": row["evidence_id"]}], marks)}
-             for row in data["quotes"]],
+            # 呈现层**永远**只出引得动的：一条角标都没有的原声，写手弃用是浪费、
+            # 裸引会被尺子③判红。`coding_tables` 在没给角标表时不过滤（备料、
+            # 离线核数要看全量），但走到这里就是要喂给写手了，没有回退。
+            [row for row in (
+                {"主题": q["topic"], "态度": q["attitude"], "原声": q["quote"],
+                 "平台": q["platform"], "互动量": q["engagement"],
+                 "marks": _row_marks([{"id": q["evidence_id"]}], marks)}
+                for q in data["quotes"]) if row["marks"]],
             n=len(data["quotes"]),
             basis=(
                 "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"

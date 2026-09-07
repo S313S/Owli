@@ -334,8 +334,23 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         citations={str(r.get("id")): int(r["citation_no"]) for r in rows
                    if r.get("citation_no") is not None},
     )
-    if coding["scenario_counts"]["n"]:
-        tables.update(coding)
+    # 逐表判空，整块判不够——编码非 0 但原声筛完可能是 0（只留引得动的）。
+    # 空表比缺表坏得多：写手会把 n=0 读成「这个维度没人讨论」，把**没数据**写成
+    # **没人谈**，等于往报告里塞一个假结论，还一路绿到用户眼前。比照 timeline
+    # 数据不够就不出现的既有做法，不出表，并把原因记进元信息让人看得见。
+    coded_n = coding["scenario_counts"]["n"]
+    omitted_tables: dict[str, str] = {}
+    for name, table in coding.items():
+        if table["rows"]:
+            tables[name] = table
+        elif not coded_n:
+            omitted_tables[name] = (
+                "本轮没有已编码的 UGC（编码工序没跑，或结果没落进这个库），故不出表。"
+                "这不等于没人讨论，只是这一轮没有可聚合的数据。")
+        else:
+            omitted_tables[name] = (
+                f"已编码 {coded_n} 条 UGC，但这张表筛完是空的"
+                "（原声要既摘得出又进了引用池才留），故不出表。")
     timeline = _timeline(rows)
     if timeline is not None:
         tables["timeline"] = timeline
@@ -355,6 +370,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # `run.sections_for` 平铺与嵌套两种都认，老产物不会因此读不出读者身份。
         **_audience(plan),
         "lexicon_version": LEXICON_VERSION,
+        # 哪些表没出、为什么。空着是好事，非空就是这一轮少了东西——要让人看见，
+        # 而不是让写手对着一张空表自己编解释。
+        "omitted_tables": omitted_tables,
         # 附录要交底「为什么不给百分比」，用的就是后两个数——它们必须是算出来的，
         # 不能写死在规则文本里，否则写手照抄就成了没出处的数字（尺子 ④ 会判红，且判得对）。
         "counts": {"evidence": len(rows), "cited": len(cited), "claims": len(claims),

@@ -187,3 +187,37 @@ def test_闸词判的是推及全网_不是判百分号():
     assert ratio_phrase_offenders("大多数用户觉得不错。") == ["大多数用户"]
     # 跨句不误伤：占比在前一句，人群主语在后一句。
     assert ratio_phrase_offenders("被引占比 15%。用户反馈以正面为主。") == []
+
+
+def _build(evidence):
+    from app.report.polish.tables import build_tables
+
+    return build_tables(report={"id": "r-1"}, plan={}, evidence=evidence, claims=[],
+                        view={"title": "t", "sources": []})
+
+
+def test_没有编码时三张表不出_并写明原因():
+    """空表比缺表坏：写手会把 n=0 读成「这个维度没人讨论」，那是假结论。"""
+
+    data = _build([{"id": "ev-001", "extra": {"content_kind": "user_opinion"}}])
+    for name in ("attitude_by_topic", "scenario_counts", "quotes"):
+        assert name not in data["tables"], name
+        assert "没有已编码的 UGC" in data["omitted_tables"][name]
+        assert "不等于没人讨论" in data["omitted_tables"][name]
+
+
+def test_有编码但原声筛空时_只缺原声表():
+    """编码非 0 而原声为 0 也要挡——整块判空漏得掉这一种。"""
+
+    # 有编码、但没给角标，原声一条都留不下（只挑引得动的）。
+    data = _build([_coded(1, topics=["功能与能力"])])
+    assert "attitude_by_topic" in data["tables"]
+    assert "scenario_counts" in data["tables"]
+    assert "quotes" not in data["tables"]
+    assert "筛完是空的" in data["omitted_tables"]["quotes"]
+
+
+def test_三张表都出得来时_omitted为空():
+    data = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4)])
+    assert data["omitted_tables"] == {}
+    assert "quotes" in data["tables"]
