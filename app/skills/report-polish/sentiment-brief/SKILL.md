@@ -2,7 +2,7 @@
 name: sentiment-brief
 title: 舆情简报
 description: 适合「最近大家怎么说 X」这类题面；总体倾向开篇，正/负/争议/诉求四块带原文引用，必有时间线，收尾给需要回应的点。
-tables: [topic_polarity, platform_mix, timeline, grade_mix, entity_mentions, attitude_by_topic, scenario_counts, quotes]
+tables: [topic_polarity, platform_mix, timeline, grade_mix, entity_mentions]
 sections: [总体倾向, 正面的说法, 负面的说法, 争议与冲突, 用户诉求, 时间线, 需要回应的点, 附录]
 model: opus
 ---

@@ -2,7 +2,7 @@
 name: consulting
 title: 调研报告（咨询体）
 description: 通用调研题面的默认模板，如「国内大家对 X 的看法」「X 竞品分析」；执行摘要→关键发现→论据→建议→附录。
-tables: [platform_mix, grade_mix, crossref_mix, entity_mentions, topic_polarity, timeline, attitude_by_topic, scenario_counts, quotes]
+tables: [platform_mix, grade_mix, crossref_mix, entity_mentions, topic_polarity, timeline]
 sections: [执行摘要, 关键发现, 论据与数据, 建议, 附录]
 model: opus
 ---
