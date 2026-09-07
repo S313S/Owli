@@ -161,6 +161,10 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 共用硬规则\n\n{shared_rules()}",
         f"# 本模板骨架\n\n{template.body}",
         f"# 调研问题\n{data.get('research_question')}",
+        # 读者身份决定「所以呢」写给谁看（§RPT-2 货 1 的 q-1）。没答就是「不明」，
+        # 此时不要假装知道读者是谁——模板会改成分读者给含义。
+        f"# 这份报告给谁看\n{data.get('audience_role') or '不明'}"
+        + (f"\n他们最想知道的：{data['audience_stake']}" if data.get("audience_stake") else ""),
         f"# 本次研究的目标\n{objectives}",
         f"# 涉及的实体\n{'、'.join(data.get('entities') or [])}",
         f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论）\n{pool}",

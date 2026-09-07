@@ -167,3 +167,33 @@ def test_numbers_in_a_table_under_the_tables_key_count_as_sourced():
     allowed: set[str] = set()
     check_polished._numbers_from({"attitude_by_topic": {"rows": [{"条数": 287}]}}, allowed)
     assert "287" in allowed
+
+
+# —— §RPT-2 货 1 的读者身份两字段：本包负责把它取出来并投喂给写手 ——
+
+@pytest.mark.parametrize("plan_over, role, stake", [
+    ({"audience_role": "竞品团队", "audience_stake": "想知道这对我意味着什么"},
+     "竞品团队", "想知道这对我意味着什么"),
+    ({"audience": {"role": "本产品团队"}}, "本产品团队", ""),
+    ({}, "不明", ""),
+])
+def test_audience_is_read_from_the_plan_with_不明_as_the_default(plan_over, role, stake):
+    """没答不是错：两处都没有就落「不明」，正式稿照写，只是不按读者身份分行。"""
+    data = build_tables(report={"id": "r-t", "title": "T"}, plan={**PLAN, **plan_over},
+                        evidence=[_evidence()], claims=[], view={"title": "T", "sources": []})
+    assert data["audience_role"] == role
+    assert data["audience_stake"] == stake
+
+
+def test_audience_reaches_the_writer_prompt(tmp_path):
+    """取出来还得投喂出去——写手看不到就等于没接。"""
+    from app.report.polish.run import build_prompt
+    from app.report.polish.skills import get_template
+
+    data = build_tables(report={"id": "r-t", "title": "T"},
+                        plan={**PLAN, "audience_role": "投资与分析", "audience_stake": "值不值得投"},
+                        evidence=[_evidence()], claims=[], view={"title": "T", "sources": []})
+    prompt = build_prompt(get_template("consulting"), data, "# 报告\n", tmp_path / "s.md",
+                          parts=[("执行摘要", tmp_path / "s.md")], current="执行摘要")
+    assert "# 这份报告给谁看\n投资与分析" in prompt
+    assert "他们最想知道的：值不值得投" in prompt

@@ -294,6 +294,22 @@ RESERVED_TABLE_NAMES: frozenset[str] = frozenset({
 })
 
 
+#: 读者身份没答时的占位。§RPT-2 货 1 的 q-1 闭集里「不明」排第一，两边要一致。
+AUDIENCE_UNKNOWN = "不明"
+
+
+def _audience(plan: Mapping[str, Any]) -> dict[str, str]:
+    """取读者身份。§RPT-2 货 1 的 q-1 把它写进 plan，本包先按两个位置读：
+    plan 顶层（规范位）与 `plan["audience"]` 子对象（兜底）。两处都没有就是「不明」——
+    没答不是错，正式稿照写，只是建议节不按读者身份分行。"""
+    nested = plan.get("audience")
+    nested = nested if isinstance(nested, Mapping) else {}
+    role = plan.get("audience_role") or nested.get("role") or nested.get("audience_role")
+    stake = plan.get("audience_stake") or nested.get("stake") or nested.get("audience_stake")
+    return {"audience_role": str(role or AUDIENCE_UNKNOWN).strip() or AUDIENCE_UNKNOWN,
+            "audience_stake": str(stake or "").strip()}
+
+
 def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                  evidence: Sequence[Mapping[str, Any]], claims: Sequence[Mapping[str, Any]],
                  view: Mapping[str, Any]) -> dict[str, Any]:
@@ -320,6 +336,7 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "objectives": [{"goal_id": g.get("goal_id"), "objective": g.get("objective")}
                        for g in (plan.get("goals") or []) if isinstance(g, Mapping)],
         "entities": sorted(_entity_aliases(plan)),
+        **_audience(plan),
         "lexicon_version": LEXICON_VERSION,
         # 附录要交底「为什么不给百分比」，用的就是后两个数——它们必须是算出来的，
         # 不能写死在规则文本里，否则写手照抄就成了没出处的数字（尺子 ④ 会判红，且判得对）。
