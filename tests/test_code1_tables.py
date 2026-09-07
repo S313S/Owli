@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.reliability.coding import (
     CODING_VERSION,
     TOPIC_NONE,
+    coded_rows,
     coding_tables,
     ratio_phrase_offenders,
 )
@@ -79,3 +80,31 @@ def test_空语料不炸():
     tables = coding_tables([])
     assert tables["coded_rows"] == 0 and tables["quotes"] == []
     assert tables["audience_note"] == "无已编码证据"
+
+
+def test_主题闭集就是词表的键():
+    """两份词表迟早分叉，且分叉是静默的——改了键名，老数据会落在闭集外。"""
+
+    from app.report.polish.lexicon import TOPIC_LEXICON
+    from app.reliability.coding import TOPICS
+
+    assert TOPICS == tuple(TOPIC_LEXICON)
+
+
+def test_库里已编码的主题都在闭集内():
+    """锁住「已落库的编码 ⊆ 当前词表键」：将来改词表把老数据打成越界，这条先红。"""
+
+    from app.reliability.coding import TOPICS
+
+    rows = [
+        {"id": "ev-1", "extra": {"coding": {
+            "coding_version": "v1", "audience": "不明", "scenario": "学习",
+            "attitude": "正", "topics": ["功能与能力", "竞品对比"], "quote": "好用",
+        }}},
+        {"id": "ev-2", "extra": {"coding": {
+            "coding_version": "v1", "audience": "不明", "scenario": "其他",
+            "attitude": "中", "topics": [], "quote": "",
+        }}},
+    ]
+    used = {t for row in coded_rows(rows) for t in (row["coding"].get("topics") or [])}
+    assert used <= set(TOPICS), f"越界主题：{sorted(used - set(TOPICS))}"

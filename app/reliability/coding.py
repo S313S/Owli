@@ -24,6 +24,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineTask
+from app.report.polish.lexicon import TOPIC_LEXICON
 
 AGENT_ID = "ugc-coding"
 CODING_VERSION = "v1"
@@ -34,13 +35,10 @@ QUOTE_MAX = 40
 AUDIENCES = ("学生", "职场", "创作者", "开发者", "家长", "不明")
 SCENARIOS = ("学习", "写作", "办公", "编程", "生活娱乐", "情感陪伴", "其他")
 ATTITUDES = ("正", "负", "中", "混合")
-#: 八主题闭集与 `app/report/polish/lexicon.py:TOPIC_LEXICON` 的键**逐字相同**。
-#: 那个模块随 §RPT-1 走、还没合进本 base，所以这里先抄一份键名；等货 2 解禁、
-#: polish 合入后改成从 lexicon 导入，不留两份词表。
-TOPICS = (
-    "功能与能力", "回答质量", "交互体验", "速度与稳定",
-    "价格与付费", "广告与推广", "隐私与安全", "竞品对比",
-)
+#: 八主题闭集**就是**词表的键，不另存一份——两份迟早分叉，而分叉是静默的：
+#: 词表改了键名，库里已编码的老数据会一声不响地落在闭集外。
+#: 词表是 §RPT-1 地界（「改词表即改口径」），本包只读它。
+TOPICS = tuple(TOPIC_LEXICON)
 
 
 @dataclass(frozen=True)
