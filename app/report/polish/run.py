@@ -15,6 +15,8 @@ from typing import Any, Awaitable, Callable, Mapping, Sequence
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineTask
+from app.orchestrator.sectioning import (SectionWallClockExpired,  # 只 import，不改那个文件
+                                         _run_before_section_deadline)
 from app.report.polish.sharding import (Finding, merge_shards, parse_findings, shard_paths,
                                         should_shard)
 from app.report.polish.skills import Template, get_template, shared_rules
@@ -419,7 +421,8 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
                         research_id: str, runs_root: Path, pool: frozenset[int],
                         parts: Sequence[tuple[str, Path]], current: str,
                         finding: Finding | None = None, findings: Sequence[Finding] = (),
-                        on_event: Any = None) -> tuple[bool, tuple[str, ...], int]:
+                        on_event: Any = None,
+                        deadline: float | None = None) -> tuple[bool, tuple[str, ...], int]:
     """写一个目标——整节或一片，最多 `MAX_ATTEMPTS` 次。返回 (成功, 最后的错误, 尝试数)。
 
     整节与片走的是同一条重试路，只是目标文件、提示词开头与判据措辞不同：
@@ -433,11 +436,20 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
         body = build_prompt(skill, data, report_text, path, errors, parts, current,
                             finding=finding, findings=findings)
         try:
-            result = await adapter.run(
-                _task(body, path, research_id, skill.model, runs_root),
-                _ctx(path, research_id, runs_root), on_event=on_event)
+            # `deadline=None`（不分片的节）时这个包装器就是 `await adapter.run(...)`
+            # 本身，一行分支都不多走——所以不分片的节行为逐字不变。
+            result = await _run_before_section_deadline(
+                adapter, _task(body, path, research_id, skill.model, runs_root),
+                _ctx(path, research_id, runs_root), on_event, deadline)
         except asyncio.CancelledError:
             raise                       # 取消要往上传，别当成一次失败尝试吞掉
+        except SectionWallClockExpired:
+            # **必须接在兜底 `except Exception` 前面**：它继承 `TimeoutError` 也就是
+            # `Exception`，落到兜底里死因会串成「引擎进程异常退出」，查的人要绕远路。
+            # 到点就不再重试——再进来一次剩余已是负数，包装器立刻抛，白走一圈。
+            errors = (f"「{label}」没写完，这一节的总墙钟到点了（上限 = 片数 × "
+                      f"{SECTION_TIMEOUT_SECONDS:g} 秒）。这是墙钟，不是引擎崩。",)
+            break
         except Exception as exc:        # noqa: BLE001
             # SDK 子进程整个崩掉时（09-05 实测「Error in hook callback」→「Stream closed」）
             # 异常会冲出 adapter。一片崩了只算这一片一次失败，别丢掉已经写好的别的片。
@@ -511,13 +523,24 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                 return _failed(name, path, errors)
             continue
         # 分片的节：一条发现一片，片数由摘要定（`findings_for`）。
+        # 节级总上限（货 5，沿用 `sectioning._run_before_section_deadline`）：
+        # **片墙钟一个字不改**——每片仍旧各拿适配器那份 SECTION_TIMEOUT_SECONDS
+        # （standard 档口径，`config.py` 的 chapter_wall_clock_seconds 同数），
+        # 只在整节头上多扣一个绝对时刻。隔壁 `sectioning.py:2043` 试过让几片**共用**
+        # 一个节闹钟并否掉了：「共用的话第 1 片跑掉 221 s，剩下三片分 109 s，必全灭」，
+        # 所以这里夹的是**上界**不是共用。
+        # 它封的是「重试把上限乘出去」：没有它，一节最坏 = 片数 × MAX_ATTEMPTS × 墙钟；
+        # 有了它 = 片数 × 墙钟，与分片前的每节口径同一个数量级。
+        deadline = (asyncio.get_running_loop().time()
+                    + len(findings) * SECTION_TIMEOUT_SECONDS)
         paths = shard_paths(path, len(findings))
         for finding, spath in zip(findings, paths):
             label = f"{name} 第 {finding.index} 条发现"
             ok, errors, used = await _write_target(
                 adapter, skill, data, report_text, path=spath, label=label, unit="这一片",
                 research_id=research_id, runs_root=runs_root, pool=pool, parts=parts,
-                current=name, finding=finding, findings=findings, on_event=on_event)
+                current=name, finding=finding, findings=findings, on_event=on_event,
+                deadline=deadline)
             attempts += used
             if not ok:
                 # D-051：任一片没写成，这一节不算 done——残缺的合并稿不许往下走。

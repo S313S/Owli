@@ -332,3 +332,109 @@ def test_中途片失败时不报exports那条错(tmp_path):
     assert outcome["status"] == "failed"
     assert not any("没落到 exports/" in e for e in outcome["errors"]), \
         "闸被挪到了片与片之间，中途误判"
+
+
+# —— 货 5：节级总上限（沿用 sectioning，片墙钟一个字不改）——————————
+
+class _SlowShards:
+    """每片各睡 `per_shard` 秒；用来量节上限，不量适配器自己那份片墙钟。"""
+
+    def __init__(self, per_shard: float, summary: str = SUMMARY_4,
+                 per_section: float = 0.0):
+        self.per_shard, self.summary = per_shard, summary
+        self.per_section = per_section
+        self.calls: list[str] = []
+
+    async def run(self, task, ctx, on_event=None):
+        name = task.output_path.name
+        self.calls.append(name)
+        if ".shard-" not in name and self.per_section:
+            await asyncio.sleep(self.per_section)
+        if ".shard-" in name:
+            await asyncio.sleep(self.per_shard)
+            index = int(name.rsplit(".shard-", 1)[1].split(".")[0])
+            task.output_path.write_text(f"## 第 {index} 条\n\n解读[S01]。" + "补白。" * 80,
+                                        encoding="utf-8")
+        else:
+            text = self.summary if name.startswith("01-") else "正文[S01]。" * 40
+            task.output_path.write_text(text, encoding="utf-8")
+        return type("R", (), {"succeeded": True, "engine_error": None})()
+
+
+def test_不分片的节行为逐字不变(tmp_path, monkeypatch):
+    """本条最重要：它是这次改动不外溢的唯一保证。
+
+    不分片的节 `deadline=None`，包装器那一支直接 `await adapter.run(...)`，
+    一行分支都不多走。拿「摘要读不出编号列表」那条路对照——全篇一节不切，
+    调用序列与返回值必须与加节上限之前一模一样。
+    """
+    import app.report.polish.run as run_mod
+
+    # 桩适配器必须**慢过那个墙钟**，否则这条用例量不出外溢：瞬时返回的桩在
+    # 0.05 s 的闹钟下也照样过，尺子就成了摆设（造红时实测过，一开始就是这样）。
+    monkeypatch.setattr(run_mod, "SECTION_TIMEOUT_SECONDS", 0.05)
+    adapter = _SlowShards(per_shard=0.0, per_section=0.2,
+                          summary="通篇散文没有编号列表[S01]。" * 30)
+    outcome, _ = _polish(tmp_path, adapter)
+    assert outcome["status"] == "ok", "不分片的节被节上限误伤了"
+    assert all(v == 0 for v in outcome["shards"].values())
+    assert not [c for c in adapter.calls if ".shard-" in c]
+    assert adapter.calls == ["01-执行摘要.md", "02-关键发现.md", "03-论据与数据.md",
+                            "04-对不同读者的含义.md", "05-附录.md"]
+
+
+def test_节上限到点整节判红_死因是墙钟不是引擎崩(tmp_path, monkeypatch):
+    """造红：`SectionWallClockExpired` 继承 TimeoutError 即 Exception，
+
+    接在兜底 `except Exception` 后面的话，死因会串成「引擎进程异常退出」——
+    这条用例钉的就是「到点时死因必须写墙钟」。
+    """
+    import app.report.polish.run as run_mod
+
+    monkeypatch.setattr(run_mod, "SECTION_TIMEOUT_SECONDS", 0.05)
+    outcome, runs = _polish(tmp_path, _SlowShards(per_shard=0.5))
+    assert outcome["status"] == "failed"
+    assert outcome["failed_section"] == "关键发现"
+    detail = "；".join(outcome["errors"])
+    assert "总墙钟到点" in detail and "不是引擎崩" in detail, detail
+    assert "引擎进程异常退出" not in detail, "死因串成了引擎崩——兜底接在前面了"
+    # D-051 仍成立：半份合并稿不落盘、不进 exports/。
+    parts_dir = runs / "r-t" / "goals" / "polished" / "consulting-parts"
+    assert not (parts_dir / "02-关键发现.md").is_file()
+    assert not Path(outcome["path"]).is_file()
+
+
+def test_第一片跑久不饿死后面的片_夹的是上界不是共用(tmp_path, monkeypatch):
+    """隔壁 `sectioning.py:2043` 否掉的正是「共用」：
+
+    「共用的话第 1 片跑掉 221 s，剩下三片分 109 s，必全灭」。这条用例是那句话的
+    可执行版本——节预算 = 片数 × 墙钟，每片各睡 0.6 个墙钟：**四片全写成**。
+    要是把节上限做成了「几片共用一个墙钟」，第 2 片就该死在这里。
+    """
+    import app.report.polish.run as run_mod
+
+    monkeypatch.setattr(run_mod, "SECTION_TIMEOUT_SECONDS", 0.30)
+    adapter = _SlowShards(per_shard=0.18)           # 0.18 = 0.6 个墙钟
+    outcome, _ = _polish(tmp_path, adapter)
+    assert outcome["status"] == "ok", "后面的片被饿死了——节上限做成了共用"
+    assert outcome["shards"]["关键发现"] == 4
+    assert len([c for c in adapter.calls if ".shard-" in c]) == 4
+    final = Path(outcome["path"]).read_text(encoding="utf-8")
+    assert all(f"## 第 {i} 条" in final for i in range(1, 5))
+
+
+def test_节上限封住重试把总时长乘出去(tmp_path, monkeypatch):
+    """没有它：一节最坏 = 片数 × MAX_ATTEMPTS × 墙钟；有了它 = 片数 × 墙钟。"""
+    import time
+
+    import app.report.polish.run as run_mod
+
+    monkeypatch.setattr(run_mod, "SECTION_TIMEOUT_SECONDS", 0.20)
+    budget = 4 * 0.20
+    started = time.monotonic()
+    # 每片要睡 5 秒——单靠片自己是停不下来的，只有节上限拦得住。
+    outcome, _ = _polish(tmp_path, _SlowShards(per_shard=5.0))
+    elapsed = time.monotonic() - started
+    assert outcome["status"] == "failed"
+    assert elapsed < budget + 1.0, f"节上限没封住：{elapsed:.2f}s"
+    assert elapsed < 5.0, "连第一片自己那 5 秒都没拦住"
