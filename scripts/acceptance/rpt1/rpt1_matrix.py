@@ -111,6 +111,10 @@ async def one(runner, store, runs_root: Path, research_id: str, template: str,
         return row
     findings = check_polished.run(md_path, tables_path, work_path)
     row["ruler"] = {name: problems for name, problems in findings.items() if problems}
+    # 判黄的单独一栏：进账本给人看，不参与 passed——否则一格会因为文风被判红重写。
+    row["ruler_warn"] = {name: problems
+                         for name, problems in check_polished.warnings_of(md_path).items()
+                         if problems}
     row["passed"] = not row["ruler"]
     return row
 

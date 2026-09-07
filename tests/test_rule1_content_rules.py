@@ -122,3 +122,49 @@ def test_fetched_at_reaches_the_source_list_from_the_evidence_row(tmp_path):
                    "title": "豆包用着还行", "fetched_at": "2026-09-06T15:25:58+08:00"}],
         claims=[], view={"sources": [{"citation_no": 1, "title": "豆包用着还行", "url": "u"}]})
     assert data["sources"][0]["fetched_at"] == "2026-09-06T15:25:58+08:00"
+
+
+# ── 货 3（评审 #10）：「假设与不确定性」全篇一次，且在附录 ────────────────
+def test_a_second_uncertainty_heading_is_red(tmp_path):
+    """竞品稿 5 处、舆情简报 6 处，说的都是同一件事——读者读到第三遍开始跳过。"""
+    markdown = GOOD.replace("正文解读[S01]。",
+                            "正文解读[S01]。\n\n### 假设与不确定性\n\n本次样本单源较多[S01]。")
+    assert _run(tmp_path, markdown)["⑫ 假设与不确定性只写一次"]
+
+
+def test_the_only_uncertainty_heading_must_sit_in_the_appendix(tmp_path):
+    """只写一次也不够：写在关键发现里，读者仍要在正文中间读一段免责。"""
+    markdown = GOOD.replace("## 假设与不确定性\n\n本次样本的代表性有限[S01]。\n", "") \
+                   .replace("正文解读[S01]。",
+                            "正文解读[S01]。\n\n### 假设与不确定性\n\n本次样本代表性有限[S01]。")
+    problems = _run(tmp_path, markdown)["⑫ 假设与不确定性只写一次"]
+    assert problems and "关键发现" in problems[0]
+
+
+def test_one_uncertainty_heading_in_the_appendix_passes(tmp_path):
+    assert not _run(tmp_path, GOOD)["⑫ 假设与不确定性只写一次"]
+
+
+# ── 货 2（评审 #11）：限定句密度判黄不判红 ────────────────────────────────
+def _warn(tmp_path: Path, markdown: str) -> dict[str, list[str]]:
+    md = tmp_path / "r-t.polished.consulting.md"
+    md.write_text(markdown, encoding="utf-8")
+    return check_polished.warnings_of(md)
+
+
+HEDGY = ("正文解读[S01]。该结论为单源，不能外推；相关口径待核实，"
+         "现有证据不足以支撑更强的判断，仍属单源。")
+
+
+def test_hedge_density_warns_but_never_fails_the_cell(tmp_path):
+    """判黄不判红：红一格等于让写手整节重写（实测 60–80 分钟），文风不值当付这个钱。"""
+    markdown = GOOD.replace("正文解读[S01]。", HEDGY)
+    assert _warn(tmp_path, markdown)["⒜ 限定句密度"]
+    assert "⒜ 限定句密度" not in _run(tmp_path, markdown)   # 不掀掉这一格
+    assert not [n for n, p in _run(tmp_path, markdown).items() if p]
+
+
+def test_two_hedges_in_a_section_are_fine(tmp_path):
+    """上限是 2 不是 0——该限定的时候还是要限定，别把尺子改成禁止说人话。"""
+    markdown = GOOD.replace("正文解读[S01]。", "正文解读[S01]。该结论为单源，不能外推。")
+    assert not _warn(tmp_path, markdown)["⒜ 限定句密度"]

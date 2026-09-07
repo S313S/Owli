@@ -75,6 +75,13 @@ NON_FINDING_SECTIONS = (OPENING_SECTIONS | ADVICE_SECTIONS
 #: 取数口径词。09-05 首稿的第一条关键发现标题就是「小红书 296 条采集里 0 条被最终引用」，
 #: 配一张平台 × 采集条数 × 被引条数的表——最显眼的位置给了工具的自我检讨。
 PIPELINE_WORDS = ("被引", "采集条数", "采集量", "采集总数")
+#: §RULE-1 货 2/货 3（评审 #10/#11）：限定词与「假设与不确定性」小节。
+#: 实测竞品稿两万字里这四个词出现 40 次、该小节出现 5 处，内容大同小异——
+#: 读者读到第三遍开始跳过，免责说满了等于一句也没说。
+HEDGE_WORDS = ("单源", "不能外推", "待核实", "不足以")
+HEDGE_PER_SECTION = 2
+UNCERTAINTY_HEADING = "假设与不确定性"
+APPENDIX_SECTION = "附录"
 #: 句子切分：中文句号/问号/叹号/分号与换行都算一句到头。
 SENTENCE_SPLIT = re.compile(r"[。！？；\n]")
 #: ⑤ 的程度词：没数字时至少要有一个判断的力度。含对比与转折——「A 在 X 不在 Y」
@@ -378,6 +385,34 @@ def check_pipeline_out_of_findings(markdown: str, template) -> list[str]:
     return problems
 
 
+def check_uncertainty_once(markdown: str) -> list[str]:
+    """货 3：「假设与不确定性」全篇只在附录写一次。
+
+    每节提示词各带一次「写限定」，写手就每节起一个同名小节——竞品稿 5 处、
+    舆情简报 6 处，说的都是同一件事（没有抓取时间）。
+    """
+    bodies = _section_bodies(writer_text(markdown))
+    hits = [(name, line) for name, lines in bodies.items() for line in lines
+            if line.lstrip().startswith("#") and UNCERTAINTY_HEADING in line]
+    problems = [f"「{UNCERTAINTY_HEADING}」出现 {len(hits)} 处，全篇只许在附录写一次"] \
+        if len(hits) > 1 else []
+    problems += [f"「{UNCERTAINTY_HEADING}」写在「{name}」节里，它归附录"
+                 for name, _ in hits if name != APPENDIX_SECTION]
+    return problems
+
+
+def hedge_density(markdown: str) -> list[str]:
+    """货 2：限定句密度。**判黄不判红**——密度是文风，红了要写手整节重写，不值当。"""
+    problems = []
+    for name, lines in _section_bodies(writer_text(markdown)).items():
+        text = "\n".join(line for line in lines if not line.lstrip().startswith(("|", ">")))
+        count = sum(text.count(word) for word in HEDGE_WORDS)
+        if count > HEDGE_PER_SECTION:
+            problems.append(f"「{name}」节里限定词出现 {count} 处（上限 {HEDGE_PER_SECTION}）"
+                            "，把握度在摘要末尾说一次就够")
+    return problems
+
+
 def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
     """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
 
@@ -408,7 +443,11 @@ def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str
 #: 合并序 RPT-1 → RPT-2 → CODE-1；本次 rebase 是 RPT-2 那一棒，⑨⑩ 就位。
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
-          "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网")
+          "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
+          "⑫ 假设与不确定性只写一次")
+#: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
+#: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
+WARNINGS = ("⒜ 限定句密度",)
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -436,11 +475,19 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[8]: check_pipeline_out_of_findings(markdown, template),
         CHECKS[9]: check_summary_sample_size(markdown, template, data.get("counts") or {}),
         CHECKS[10]: check_ratio_phrases(markdown),
+        CHECKS[11]: check_uncertainty_once(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(
             f"信息源池与工作稿角标对不上：池 {len(pool)} 个、工作稿 {len(work_marks)} 个")
     return findings
+
+
+def warnings_of(md_path: Path) -> dict[str, list[str]]:
+    """判黄的那几条。与 `run()` 分开返回：调用方（`rpt1_matrix`）按 `run()` 判过不过，
+    黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。"""
+    markdown = md_path.read_text(encoding="utf-8")
+    return {WARNINGS[0]: hedge_density(markdown)}
 
 
 def main(argv: list[str]) -> int:
@@ -458,6 +505,11 @@ def main(argv: list[str]) -> int:
             print(f"        · {problem}")
         if len(problems) > 12:
             print(f"        · …另有 {len(problems) - 12} 处")
+    for name, problems in warnings_of(md_path).items():
+        print(f"{'OK  ' if not problems else 'WARN'}  {name}"
+              + (f"（{len(problems)} 处）" if problems else ""))
+        for problem in problems[:12]:
+            print(f"        · {problem}")
     failed = [name for name in CHECKS if findings[name]]
     print(("× 未过：" + "、".join(failed)) if failed else f"√ {len(CHECKS)} 条判据全过")
     return 1 if failed else 0
