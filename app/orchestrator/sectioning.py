@@ -18,6 +18,7 @@ from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
+from app.reliability.coding import TOPIC_NONE
 from app.report.markdown import (
     merge_section_shards,
     merge_sectioned_markdown,
@@ -906,10 +907,12 @@ def _ugc_coding_digest(
         "- 态度：" + grouped(
             (coding["attitude"], citation) for citation, coding in coded
         ),
+        # 没命中主题的进「未归主题」格：不设它，四成条目会从主题行凭空消失，
+        # 写手看到的主题条数之和会莫名小于本节条数，和货 2 聚合表的对账口径也对不上。
         "- 主题：" + grouped(
             (topic, citation)
             for citation, coding in coded
-            for topic in (coding.get("topics") or [])
+            for topic in (coding.get("topics") or [TOPIC_NONE])
         ),
         "- 场景：" + tally(coding["scenario"] for _, coding in coded),
         "- 人群：" + tally(coding["audience"] for _, coding in coded),

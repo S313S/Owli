@@ -81,3 +81,15 @@ def test_池外的行取不到():
 
     digest = _ugc_coding_digest(_pool(6), _rows(30))
     assert "本节可见池里 6 条" in digest
+
+
+def test_没命中主题的进未归主题格():
+    """主题行漏掉无主题的条目，写手会看到主题条数之和莫名小于本节条数。"""
+
+    digest = _ugc_coding_digest(_pool(10), _rows(10))
+    assert digest is not None
+    topics_line = next(
+        line for line in digest.splitlines() if line.startswith("- 主题：")
+    )
+    assert "未归主题 5 条" in topics_line
+    assert "功能与能力 5 条" in topics_line
