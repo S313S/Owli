@@ -40,6 +40,23 @@ def missing_sections(markdown: str, sections: Sequence[str]) -> list[str]:
     return [name for name in sections if name not in found]
 
 
+#: §RPT-2 货 4 ①：读者身份「不明」时，建议节改名——这一节不再是「给你的行动清单」，
+#: 而是「你是谁决定了这份报告对你意味着什么」。标题由代码写，写手改不了也不用改。
+ADVICE_SECTION = "建议"
+ADVICE_SECTION_UNKNOWN_AUDIENCE = "对不同读者的含义"
+
+
+def sections_for(template: Template, data: Mapping[str, Any]) -> tuple[str, ...]:
+    """这一稿实际要写的一级标题。读者不明就把「建议」换成「对不同读者的含义」。"""
+    from app.plan.question import AUDIENCE_UNKNOWN
+
+    role = str((data.get("audience") or {}).get("audience_role") or AUDIENCE_UNKNOWN)
+    if role != AUDIENCE_UNKNOWN:
+        return tuple(template.sections)
+    return tuple(ADVICE_SECTION_UNKNOWN_AUDIENCE if name == ADVICE_SECTION else name
+                 for name in template.sections)
+
+
 def section_paths(runs_root: Path, research_id: str, template: str,
                   sections: Sequence[str]) -> list[tuple[str, Path]]:
     """每节各一个文件。
@@ -303,7 +320,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     pool = frozenset(int(s["mark"][1:]) for s in data.get("sources") or [])
     if adapter is None:
         adapter = default_adapter()
-    parts = section_paths(runs_root, research_id, skill.name, skill.sections)
+    parts = section_paths(runs_root, research_id, skill.name, sections_for(skill, data))
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
     attempts = 0
     for name, path in parts:

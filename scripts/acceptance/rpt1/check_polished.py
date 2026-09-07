@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.report.polish.run import ADVICE_SECTION_UNKNOWN_AUDIENCE  # noqa: E402
 from app.report.polish.skills import load_templates  # noqa: E402
 
 #: 内部词：读者不知道也不需要知道研究是怎么切块的，也不需要知道库长什么样。
@@ -52,7 +53,10 @@ METHOD_WORDS = ("SINGLE", "PASS", "WEAK", "CONFLICT")
 CONFIDENCE_WORD = "把握度"
 #: 各模板的开篇节（摘要位）与建议节、降级节。尺子按模板认，不写死一套标题。
 OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
-ADVICE_SECTIONS = frozenset({"建议", "需要回应的点"})
+#: §RPT-2 货 4 ①：读者身份「不明」时 run.py 把「建议」改名成「对不同读者的含义」，
+#: 尺子要认这个别名——否则改名后判据 ② 误报「缺『建议』」，建议门禁还会
+#: 因为按模板名找不到节而静默放行（假绿）。
+ADVICE_SECTIONS = frozenset({"建议", "需要回应的点", ADVICE_SECTION_UNKNOWN_AUDIENCE})
 DOWNGRADE_HEADING = "值得进一步验证的方向"
 #: §RPT-2 货 2 闸 ⑨：主体节（关键发现、正/负/争议/诉求、对比总览…）只讲调研对象。
 #: 「主体节」= 模板声明的节里去掉开篇、建议、集中列表、时间线与附录剩下的那些——
@@ -156,9 +160,24 @@ def check_no_internal_words(markdown: str) -> list[str]:
     return hits
 
 
+def resolved_sections(markdown: str, template) -> list[str]:
+    """模板骨架落到这一稿上的实际标题。
+
+    只有一处会变名：读者身份「不明」时，`run.sections_for` 把建议节改成
+    「对不同读者的含义」。尺子按稿子里实际有哪个来认，不按模板写死。
+    """
+    found = set(_sections_of(markdown, 1))
+    return [ADVICE_SECTION_UNKNOWN_AUDIENCE
+            if (name in ADVICE_SECTIONS and name not in found
+                and ADVICE_SECTION_UNKNOWN_AUDIENCE in found)
+            else name
+            for name in template.sections]
+
+
 def check_sections(markdown: str, template) -> list[str]:
     found = set(_sections_of(markdown, 1))
-    return [f"缺一级标题 {s!r}" for s in template.sections if s not in found]
+    return [f"缺一级标题 {s!r}" for s in resolved_sections(markdown, template)
+            if s not in found]
 
 
 def check_marks_in_pool(markdown: str, pool: set[int]) -> list[str]:
@@ -271,7 +290,8 @@ def check_opening_section(markdown: str, template) -> list[str]:
 def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list[str]:
     """裁决条 4：一条建议所引角标若全是单源孤证，必须降级到「值得进一步验证的方向」。"""
     bodies = _section_bodies(markdown)
-    advice = next((name for name in template.sections if name in ADVICE_SECTIONS), None)
+    advice = next((name for name in resolved_sections(markdown, template)
+                   if name in ADVICE_SECTIONS), None)
     if advice is None or advice not in bodies:
         return []
     # 一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把
@@ -322,7 +342,7 @@ def check_pipeline_out_of_findings(markdown: str, template) -> list[str]:
     """
     bodies = _section_bodies(markdown)
     problems = []
-    for name in template.sections:
+    for name in resolved_sections(markdown, template):
         if name in NON_FINDING_SECTIONS or name not in bodies:
             continue
         for offset, line in enumerate(bodies[name], start=1):

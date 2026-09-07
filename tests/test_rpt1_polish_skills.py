@@ -353,10 +353,12 @@ def test_a_crashing_engine_call_costs_one_attempt_not_the_whole_report(tmp_path)
     """SDK 子进程整个崩掉时异常会冲出 adapter；一节崩了只算这一节一次失败。"""
     import asyncio
 
-    from app.report.polish.run import polish, section_paths
+    from app.report.polish.run import polish, section_paths, sections_for
 
     skill = get_template("consulting")
-    parts = section_paths(tmp_path / "runs", "r-t", skill.name, skill.sections)
+    # 这份夹具的 plan_snapshot 是空的 = 读者「不明」，建议节按货 4 ① 改名，
+    # 落盘文件名跟着变；期望路径要走 sections_for 算，不能按模板原名写死。
+    parts = section_paths(tmp_path / "runs", "r-t", skill.name, sections_for(skill, {}))
     calls = {"n": 0}
 
     class _Adapter:
@@ -708,3 +710,42 @@ def test_闸10_采集总数出现在正文别处不判红(tmp_path):
     """⑩ 只管开篇节——论据与数据里那张表的 n=562 是它该待的地方。"""
     findings = _run(tmp_path, GOOD.replace("| xhs | 296 |", "| xhs | 296 |\n\nn=562 条[S01]"))
     assert not findings["⑩ 摘要样本数口径"]
+
+
+# —— §RPT-2 货 4 ①：读者不明时建议节改名，尺子跟着认别名 ——————————————
+
+def _skill_and(role: str):
+    from app.report.polish.run import sections_for
+    from app.report.polish.skills import get_template
+
+    return sections_for(get_template("consulting"), {"audience": {"audience_role": role}})
+
+
+def test_读者明确时建议节不改名():
+    assert "建议" in _skill_and("竞品团队")
+    assert "对不同读者的含义" not in _skill_and("竞品团队")
+
+
+@pytest.mark.parametrize("data", [{}, {"audience": {}}, {"audience": {"audience_role": "不明"}}])
+def test_读者不明时建议节改名成对不同读者的含义(data):
+    """读者是谁没答（或答了「不明」），这一节就不是行动清单，是「你是谁决定了它的含义」。"""
+    from app.report.polish.run import sections_for
+    from app.report.polish.skills import get_template
+
+    names = sections_for(get_template("consulting"), data)
+    assert "对不同读者的含义" in names and "建议" not in names
+    # 只换这一个名字，其余骨架一字不动
+    assert len(names) == len(get_template("consulting").sections)
+
+
+def test_尺子认改名后的建议节不误报缺标题(tmp_path):
+    """节名改了尺子不跟着改，等于拿旧尺子量新稿——判据 ② 会误报「缺『建议』」。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("# 建议", "# 对不同读者的含义"))
+    assert not [name for name, problems in findings.items() if problems]
+
+
+def test_建议门禁在改名后的节上照样开火(tmp_path):
+    """改名不能变成绕开门禁的后门：孤证撑着的那条照样判红。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace("# 建议", "# 对不同读者的含义"),
+                       {"S01": "PASS", "S02": "SINGLE"})
+    assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
