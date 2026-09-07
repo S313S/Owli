@@ -108,3 +108,59 @@ def test_库里已编码的主题都在闭集内():
     ]
     used = {t for row in coded_rows(rows) for t in (row["coding"].get("topics") or [])}
     assert used <= set(TOPICS), f"越界主题：{sorted(used - set(TOPICS))}"
+
+
+def _coded(index: int, *, topics, attitude="正", scenario="学习", quote="好用"):
+    return {"id": f"ev-{index:03d}", "platform": "xhs", "extra": {"coding": {
+        "coding_version": "v1", "audience": "不明", "scenario": scenario,
+        "attitude": attitude, "topics": topics, "quote": quote}}}
+
+
+def test_三张表用的是正式稿标准壳():
+    """壳与 polish/tables.py:_table 一字不差，否则写手那头要另写分支。"""
+
+    from app.report.polish.tables import _table
+    from app.reliability.coding import polish_tables
+
+    standard = set(_table("x", "t", (), [], n=0, basis="", coverage={}))
+    tables = polish_tables([_coded(1, topics=["功能与能力"])], citations={"ev-001": 4})
+    assert set(tables) == {"attitude_by_topic", "scenario_counts", "quotes"}
+    for name, table in tables.items():
+        assert set(table) == standard, name
+        assert table["name"] == name
+        # marks 是行内一列，不是壳字段——另六张表都这么摆。
+        assert "marks" not in standard
+        assert all(isinstance(row.get("marks"), list) for row in table["rows"]), name
+
+
+def test_角标形态与其余六表一致():
+    """出 S04 不出 [S04]：形态两套，写手和尺子都会对不上。"""
+
+    from app.reliability.coding import polish_tables
+
+    tables = polish_tables([_coded(1, topics=["功能与能力"])], citations={"ev-001": 4})
+    assert tables["attitude_by_topic"]["rows"][0]["marks"] == ["S04"]
+
+
+def test_没角标的原声不进表():
+    """写手引不动的原声，摆出来只会诱导它裸引（尺子③ 会判红，且判得对）。"""
+
+    from app.reliability.coding import polish_tables
+
+    rows = [_coded(1, topics=["功能与能力"], quote="引得动"),
+            _coded(2, topics=["功能与能力"], quote="引不动")]
+    quotes = polish_tables(rows, citations={"ev-001": 4})["quotes"]["rows"]
+    assert [row["原声"] for row in quotes] == ["引得动"]
+    assert all(row["marks"] for row in quotes)
+
+
+def test_分母写进壳里防误读():
+    """n 是已编码 UGC 条数，不是全库条数——写手只看得见 title 与 basis。"""
+
+    from app.reliability.coding import polish_tables
+
+    rows = [_coded(1, topics=["功能与能力"]), {"id": "ev-002", "extra": {}}]
+    table = polish_tables(rows, citations={"ev-001": 4})["scenario_counts"]
+    assert table["n"] == 1
+    assert table["coverage"] == {"已编码 UGC 条数": 1, "全库证据条数": 2, "身份不明条数": 1}
+    assert "不是全库 2 条证据" in table["basis"]

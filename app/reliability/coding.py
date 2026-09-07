@@ -460,6 +460,10 @@ def coding_tables(
                     if item["coding"]["quote"]
                     and item["coding"]["attitude"] == attitude
                     and topic in (item["coding"].get("topics") or [TOPIC_NONE])
+                    # 给了角标表就只挑**引得动**的：没角标的原声写手用不了——
+                    # 弃用是浪费，裸引会被尺子③判红，摆出来只会诱导它裸引。
+                    # 不给角标表时（备料、离线核数）不过滤，行为不变。
+                    and (not marks or str(item.get("id")) in marks)
                 ),
                 key=_quote_sort_key,
             )[:QUOTES_PER_CELL]
@@ -501,4 +505,97 @@ def coding_tables(
             f"模型编码（{CODING_VERSION}），包终端复核 30 条一致 28 条；"
             "表内均为条数，不是全网比例。"
         ),
+    }
+
+
+def _shell(name: str, title: str, columns: Sequence[str], rows: Sequence[Mapping[str, Any]],
+           *, n: int, basis: str, coverage: Mapping[str, Any]) -> dict[str, Any]:
+    """正式稿的标准表壳，字段与 `app/report/polish/tables.py:_table` 一字不差。
+
+    `marks` 不是壳字段，是**行内一列**——另六张表都这么摆，形态不一写手会读岔。
+    """
+
+    return {"name": name, "title": title, "columns": list(columns), "rows": list(rows),
+            "n": n, "basis": basis, "coverage": dict(coverage)}
+
+
+def _row_marks(items: Iterable[Mapping[str, Any]], marks: Mapping[str, int]) -> list[str]:
+    """这一格背后的角标，去重升序；没被引用的证据不产生角标。"""
+
+    return [f"S{no:02d}" for no in sorted(
+        {marks[str(item.get("id"))] for item in items if str(item.get("id")) in marks}
+    )]
+
+
+def polish_tables(
+    rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
+    total_evidence: int | None = None,
+) -> dict[str, Any]:
+    """把 `coding_tables` 的聚合结果包成正式稿要的三张标准壳表。
+
+    聚合语义一份、呈现形态一份，不重算——重算两遍迟早对不上账（§RATE-4 踩过：
+    两条打分路 447 行不一致，把被测改动整个掩掉了）。
+    """
+
+    rows = list(rows)
+    marks = dict(citations or {})
+    data = coding_tables(rows, citations=citations)
+    coded = coded_rows(rows)
+    n = len(coded)
+    total = len(rows) if total_evidence is None else total_evidence
+    # 分母写进 coverage 与 basis：表里的 n 是**已编码的 UGC 条数**，不是全库条数。
+    # 写手看不见机器表名，只看得见 title 与 basis，防误读只能靠这两处。
+    coverage = {"已编码 UGC 条数": n, "全库证据条数": total,
+                "身份不明条数": sum(
+                    1 for item in coded if item["coding"]["audience"] == "不明")}
+    by_cell: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    by_scenario: dict[str, list[Mapping[str, Any]]] = {}
+    for item in coded:
+        for topic in (item["coding"].get("topics") or [TOPIC_NONE]):
+            by_cell.setdefault((topic, item["coding"]["attitude"]), []).append(item)
+        by_scenario.setdefault(item["coding"]["scenario"], []).append(item)
+    return {
+        "attitude_by_topic": _shell(
+            "attitude_by_topic", "UGC 逐条编码：主题 × 态度条数",
+            ("主题", "态度", "条数"),
+            [{"主题": row["topic"], "态度": row["attitude"], "条数": row["count"],
+              "marks": _row_marks(by_cell.get((row["topic"], row["attitude"]), []), marks)}
+             for row in data["attitude_by_topic"]],
+            n=n,
+            basis=(
+                f"对 {n} 条 UGC 逐条模型编码后计数（{data['method_note']}）。"
+                f"一条可命中多个主题，故各格相加是**命中次数** "
+                f"{data['reconciliation']['topic_hit_sum']}，大于条数 {n}；"
+                f"没命中任何主题的归入「{TOPIC_NONE}」，不设它这一格四成条目会凭空消失。"
+                f"条数覆盖全部 {n} 条已编码 UGC；角标只标其中**进了引用池**的那些，"
+                f"所以有的格有条数没角标——那是没进池，不是数据可疑。"
+            ),
+            coverage=coverage),
+        "scenario_counts": _shell(
+            "scenario_counts", "UGC 逐条编码：使用场景条数",
+            ("场景", "条数"),
+            [{"场景": row["scenario"], "条数": row["count"],
+              "marks": _row_marks(by_scenario.get(row["scenario"], []), marks)}
+             for row in data["scenario_counts"]],
+            n=n,
+            basis=(
+                f"每条 UGC 归一个场景，各行相加 = {data['reconciliation']['scenario_sum']}"
+                f" = 已编码条数 {n}。分母是已编码的 UGC，不是全库 {total} 条证据。"
+                f"{data['audience_note']}，故人群不单独出表。"
+            ),
+            coverage=coverage),
+        "quotes": _shell(
+            "quotes", "UGC 代表原声（每格按互动量取前 3）",
+            ("主题", "态度", "原声", "平台", "互动量"),
+            [{"主题": row["topic"], "态度": row["attitude"], "原声": row["quote"],
+              "平台": row["platform"], "互动量": row["engagement"],
+              "marks": _row_marks(
+                  [{"id": row["evidence_id"]}], marks)}
+             for row in data["quotes"]],
+            n=len(data["quotes"]),
+            basis=(
+                "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"
+                "互动量最高的 3 条。原声是**例子不是分布**，读它不能替代读上面的条数表。"
+            ),
+            coverage=coverage),
     }
