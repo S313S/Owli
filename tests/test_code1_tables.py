@@ -166,7 +166,10 @@ def test_分母写进壳里防误读():
     rows = [_coded(1, topics=["功能与能力"]), {"id": "ev-002", "extra": {}}]
     table = polish_tables(rows, citations={"ev-001": 4})["scenario_counts"]
     assert table["n"] == 1
-    assert table["coverage"] == {"已编码 UGC 条数": 1, "全库证据条数": 2, "身份不明条数": 1}
+    # §RPT-2 货 4③ 往同一个 coverage 里加了「带触发事件条数」（trigger 可空，
+    # 写手得知道那张表代表多少条）。这条用例锁的是「分母写进壳里」，键长了意图不变。
+    assert table["coverage"] == {"已编码 UGC 条数": 1, "全库证据条数": 2,
+                                 "身份不明条数": 1, "带触发事件条数": 0}
     assert "不是全库 2 条证据" in table["basis"]
 
 

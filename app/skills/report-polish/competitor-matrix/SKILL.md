@@ -2,7 +2,7 @@
 name: competitor-matrix
 title: 竞品对比稿
 description: 适合多实体题面，如「X 与 Y 的对比」「X 竞品分析」；实体×维度矩阵开篇，逐维度展开，收尾一张「谁强在哪」总表加一节「对提问方意味着什么」。
-tables: [entity_dimension, entity_mentions, attitude_by_topic, quotes, scenario_attitude, audience_attitude, platform_mix, grade_mix, crossref_mix, topic_polarity]
+tables: [entity_dimension, entity_mentions, attitude_by_topic, quotes, scenario_attitude, audience_attitude, trigger_counts, platform_mix, grade_mix, crossref_mix, topic_polarity]
 sections: [执行摘要, 对比总览, 逐维度对比, 谁强在哪, 对提问方意味着什么, 建议, 附录]
 model: opus
 ---

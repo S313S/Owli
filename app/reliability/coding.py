@@ -27,7 +27,9 @@ from app.adapters.contracts import EngineTask
 from app.report.polish.lexicon import TOPIC_LEXICON
 
 AGENT_ID = "ugc-coding"
-CODING_VERSION = "v1"
+#: v2 = 闭集加了 trigger / alternatives（§RPT-2 货 4③）。两个字段都可空，
+#: 所以 v1 那批老行照样能用——`coded_rows` 只看这个字段非空，不比对具体值。
+CODING_VERSION = "v2"
 MAX_ATTEMPTS = 3
 CODING_BATCH_MAX = 40
 QUOTE_MAX = 40
@@ -35,6 +37,12 @@ QUOTE_MAX = 40
 AUDIENCES = ("学生", "职场", "创作者", "开发者", "家长", "不明")
 SCENARIOS = ("学习", "写作", "办公", "编程", "生活娱乐", "情感陪伴", "其他")
 ATTITUDES = ("正", "负", "中", "混合")
+#: §RPT-2 货 4③：为什么开始用/换（借 customer-research 的「触发事件」）。
+#: 与 `alternatives` 一样**可空**——底料里多数帖子根本不交代这个，
+#: 逼写手填等于逼它猜，那比空着糟。
+TRIGGERS = ("推荐", "热点", "工作要求", "试新", "不明")
+#: 同帖提到的其他工具，自由文本，最多三个。多了多半是在抄榜单不是在比较。
+ALTERNATIVES_MAX = 3
 #: 八主题闭集**就是**词表的键，不另存一份——两份迟早分叉，而分叉是静默的：
 #: 词表改了键名，库里已编码的老数据会一声不响地落在闭集外。
 #: 词表是 §RPT-1 地界（「改词表即改口径」），本包只读它。
@@ -128,7 +136,8 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> 
     return (
         "目标：对国内社媒 UGC 逐条打结构化编码，供后续按条数聚合。只依据输入文本，"
         "不补造事实、不推测作者身份。\n"
-        "每项输出 id、audience、scenario、attitude、topics、quote 六个字段。\n"
+        "每项输出 id、audience、scenario、attitude、topics、quote、trigger、"
+        "alternatives 八个字段。\n"
         f"audience 闭集：{'/'.join(AUDIENCES)}。看不出身份就填「不明」，不要猜。\n"
         f"scenario 闭集：{'/'.join(SCENARIOS)}。一条只填一个最主要的场景；"
         "都不像就填「其他」。\n"
@@ -140,6 +149,10 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path) -> 
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
         "要能代表这条的态度。禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
         "输入文本里，对不上整批退回重打。实在摘不出就给空字符串。\n"
+        f"trigger 闭集：{'/'.join(TRIGGERS)}，答的是「这个人为什么开始用或换用」。"
+        "帖子没交代就填「不明」——**不许从场景倒推**，说在办公场景用不等于是工作要求。\n"
+        f"alternatives 是数组，最多 {ALTERNATIVES_MAX} 个，填**同一条里提到的其他工具名**，"
+        "每个名字必须逐字出现在输入文本里；没提到别的工具就给空数组，不要补全竞品清单。\n"
         "输出顶层数组，顺序与输入一致，不要输出 Markdown。\n"
         f"必须把结果写到此精确路径：{output_path}。不得改用其他文件名。\n"
         "输入证据：" + json.dumps(list(items), ensure_ascii=False, separators=(",", ":"))
@@ -185,8 +198,27 @@ def coding_errors(
         if len(quote) > QUOTE_MAX:
             errors.append(f"items[{index}].quote 超过 {QUOTE_MAX} 字：{len(quote)}")
         squeezed = _squeeze(quote)
-        if squeezed and squeezed not in _squeeze(sources.get(str(identity), "")):
+        text = _squeeze(sources.get(str(identity), ""))
+        if squeezed and squeezed not in text:
             errors.append(f"items[{index}].quote 不是原文子串，不许改写或拼接")
+        # §RPT-2 货 4③：两个字段**可空**，缺字段不算错；填了才守规矩。
+        # 老版本（v1）编码的行没有它们，不能因此判整批失败。
+        trigger = item.get("trigger")
+        if trigger not in (None, "") and trigger not in TRIGGERS:
+            errors.append(f"items[{index}].trigger 越界：{trigger!r}")
+        alternatives = item.get("alternatives")
+        if alternatives not in (None, []):
+            if not isinstance(alternatives, list) or len(alternatives) > ALTERNATIVES_MAX:
+                errors.append(
+                    f"items[{index}].alternatives 必须是不超过 {ALTERNATIVES_MAX} 个的数组")
+            else:
+                for name in alternatives:
+                    if not isinstance(name, str) or not name.strip():
+                        errors.append(f"items[{index}].alternatives 里有空项")
+                    # 和 quote 同一道闸：不查子串，模型会把常见竞品名补全成一张榜单。
+                    elif _squeeze(name) not in text:
+                        errors.append(
+                            f"items[{index}].alternatives 的 {name!r} 不在原文里")
     return errors
 
 
@@ -578,6 +610,15 @@ def polish_tables(
         by_scene_cell.setdefault(
             (item["coding"]["scenario"], item["coding"]["attitude"]), []).append(item)
     unknown_audience = coverage["身份不明条数"]
+    # §RPT-2 货 4③：trigger 可空，且 v1 那批老行根本没有这个字段。
+    # 覆盖率写进 coverage，写手才知道这张表代表多少条、不至于拿它当全量。
+    by_trigger: dict[str, list[Mapping[str, Any]]] = {}
+    for item in coded:
+        value = item["coding"].get("trigger")
+        if value:
+            by_trigger.setdefault(str(value), []).append(item)
+    triggered = sum(len(v) for v in by_trigger.values())
+    coverage = {**coverage, "带触发事件条数": triggered}
     return {
         "attitude_by_topic": _shell(
             "attitude_by_topic", "UGC 逐条编码：主题 × 态度条数",
@@ -636,6 +677,20 @@ def polish_tables(
             basis=(
                 f"每条 UGC 归一个人群、一个态度，各行相加 = 已编码条数 {n}；"
                 f"其中身份不明 {unknown_audience} 条，占比不到一半才出这张表。"
+            ),
+            coverage=coverage)}),
+        # §RPT-2 货 4③：触发事件条数。一条都没标就整张不出——v1 编码的行没这个字段，
+        # 摆一张全空的表会被读成「没人是因为推荐来的」，那是把缺字段读成了结论。
+        **({} if not triggered else {"trigger_counts": _shell(
+            "trigger_counts", "UGC 逐条编码：为什么开始用/换",
+            ("触发事件", "条数"),
+            [{"触发事件": name, "条数": len(items), "marks": _row_marks(items, marks)}
+             for name, items in sorted(by_trigger.items(), key=lambda kv: (-len(kv[1]), kv[0]))],
+            n=triggered,
+            basis=(
+                f"分母是**标出了触发事件的** {triggered} 条，不是已编码的 {n} 条，"
+                f"更不是全库 {total} 条——多数帖子不交代为什么开始用，"
+                f"没标出来的不计入，也不能当成「不明」那一格的人。"
             ),
             coverage=coverage)}),
         # §RPT-2 货 3：场景 × 态度。`scenario_counts` 只答「在什么场景下被谈」，

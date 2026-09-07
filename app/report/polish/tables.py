@@ -288,6 +288,8 @@ TABLE_NAMES: tuple[str, ...] = (
     # §RPT-2 货 3：场景 × 态度是口碑节的主表（scenario_counts 只答「在哪谈」，
     # 这张答「在那儿是夸还是骂」）；人群 × 态度只在身份不明不过半时才出现。
     "scenario_attitude", "audience_attitude",
+    # §RPT-2 货 4③：只在有行标出触发事件时才出现。
+    "trigger_counts",
 )
 
 

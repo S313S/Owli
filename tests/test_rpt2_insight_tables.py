@@ -66,3 +66,58 @@ def test_两张表三处齐():
         assert name in TABLE_NAMES, name
         for template in load_templates():
             assert name in template.tables, f"{template.name} 缺 {name}"
+
+
+# —— 货 4③：编码闭集加 trigger / alternatives，两个都可空 ————————————
+
+def _coded_input(text="我用豆包写周报，比 Kimi 顺手"):
+    item = {"id": "ev-001", "title": "", "text": text}
+    return [item], {"ev-001": text}
+
+
+def test_两个新字段缺了也不判错():
+    """v1 编码的行没有这两个字段。缺字段判错会让整批老数据作废。"""
+    from app.reliability.coding import coding_errors
+
+    inputs, sources = _coded_input()
+    item = {"id": "ev-001", "audience": "职场", "scenario": "办公", "attitude": "正",
+            "topics": ["功能与能力"], "quote": "我用豆包写周报"}
+    assert coding_errors([item], inputs, sources) == []
+
+
+def test_触发事件越界判红():
+    from app.reliability.coding import coding_errors
+
+    inputs, sources = _coded_input()
+    item = {"id": "ev-001", "audience": "职场", "scenario": "办公", "attitude": "正",
+            "topics": [], "quote": "", "trigger": "刷到广告"}
+    assert any("trigger 越界" in e for e in coding_errors([item], inputs, sources))
+
+
+def test_替代品必须在原文里():
+    """不查子串，模型会把常见竞品名补全成一张榜单——那是编出来的对比。"""
+    from app.reliability.coding import coding_errors
+
+    inputs, sources = _coded_input()
+    base = {"id": "ev-001", "audience": "职场", "scenario": "办公", "attitude": "正",
+            "topics": [], "quote": ""}
+    assert coding_errors([{**base, "alternatives": ["Kimi"]}], inputs, sources) == []
+    bad = coding_errors([{**base, "alternatives": ["Kimi", "文心一言"]}], inputs, sources)
+    assert any("文心一言" in e for e in bad)
+    many = coding_errors([{**base, "alternatives": ["a", "b", "c", "d"]}], inputs, sources)
+    assert any("不超过 3 个" in e for e in many)
+
+
+def test_没有一条标出触发事件时整张不出表():
+    """v1 老行没这个字段。摆一张全空的表会被读成「没人是因为推荐来的」。"""
+    assert "trigger_counts" not in polish_tables([_row(i) for i in range(4)])
+
+
+def test_触发事件表的分母是标出来的那些不是已编码条数():
+    rows = [_row(i) for i in range(4)]
+    for row in rows[:2]:
+        row["extra"]["coding"]["trigger"] = "推荐"
+    table = polish_tables(rows)["trigger_counts"]
+    assert table["n"] == 2 and sum(r["条数"] for r in table["rows"]) == 2
+    assert "不是已编码的 4 条" in table["basis"]
+    assert table["coverage"]["带触发事件条数"] == 2
