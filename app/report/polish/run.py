@@ -121,14 +121,28 @@ def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
                   "C": "只作旁证", "D": "线索级"}
     lines = ["## 信息源清单", "",
              "（本节由程序按证据库直接生成，未经改写。）", "",
-             "| 角标 | 等级 | 说明 | 标题 | 链接 |", "|---|---|---|---|---|"]
+             "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
     for item in sources:
         grade = str(item.get("grade") or "?")
         title = str(item.get("title") or "").replace("|", "｜").strip() or "（无标题）"
         url = str(item.get("url") or "")
         lines.append(f"| {item['mark']} | {grade} | {grade_note.get(grade, '未评级')} "
-                     f"| {title} | {url} |")
+                     f"| {title} | {_fetched_at_cell(item.get('fetched_at'))} | {url} |")
     return "\n".join(lines) + "\n"
+
+
+def _fetched_at_cell(raw: object) -> str:
+    """抓取时间只在这一列出现，且写成人看的形状。
+
+    §RULE-1 货 1：正文里 `fetched_at: 2026-09-06T15:25:58+08:00` 实测出现 38 次，
+    是写手从工作稿证据契约带过来的习惯。堵住正文之后要给它一个合法落点，
+    否则「什么时候采的」这件读者真会问的事就整份稿都查不到了。
+    落点只此一处，且去掉 `T` 与时区尾巴——读者要的是「哪天采的」，不是 ISO 串。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return "—"
+    return text.replace("T", " ")[:16]
 
 
 def assemble(parts: Sequence[tuple[str, Path]],

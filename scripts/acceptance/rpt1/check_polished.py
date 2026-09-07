@@ -34,7 +34,12 @@ FORBIDDEN = (r"goal-\d", r"sec-\d", r"ch-\d", "本片", "本节样本", "本章�
              "采集章", "撰写章",
              "topic_polarity", "entity_mentions", "grade_mix", "crossref_mix", "platform_mix",
              "entity_dimension", "timeline", "citation_no", "evidence.platform", "reports.extra",
-             r"[\w/.-]+\.py")
+             r"[\w/.-]+\.py",
+             # §RULE-1 货 1（评审 #9）：抓取时间是工作稿的证据契约，不是给读者的。
+             # 实测竞品稿正文里 `（fetched_at: 2026-09-06T15:25:58+08:00）` 出现 38 次，
+             # 同一份稿里还有五种不同时间，正文自己都在解释「这不是抓取时间」。
+             # 合法落点只剩信息源清单那一列（程序填），所以本条只查写手写的部分。
+             "fetched_at", "抓取时间", r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
 #: 裁决条 1：带这些评价词的句子里必须写出被评的是谁。
 JUDGEMENT_WORDS = ("偏浅", "偏弱", "不足", "较差", "套路化", "敷衍", "不够", "有限",
                    "偏低", "偏高", "薄弱", "欠缺")
@@ -155,11 +160,24 @@ def _template_for(markdown: str, tables_path: Path):
     raise SystemExit(f"× 认不出模板 {name!r}（文件名要形如 <id>.polished.<模板>.tables.json）")
 
 
+#: 程序生成的信息源清单（`run.sources_table`）。它的表头就带「抓取时间」，
+#: 而 ① 禁的是**写手写的**正文——尺子拿自己生成的文本判自己红是假红。
+#: 只切尾巴，不改前面的行号。
+SOURCES_TABLE_HEADING = "## 信息源清单"
+
+
+def writer_text(markdown: str) -> str:
+    """成稿里写手负责的那部分：砍掉文末程序生成的信息源清单。"""
+    cut = markdown.rfind("\n" + SOURCES_TABLE_HEADING)
+    return markdown if cut < 0 else markdown[:cut + 1]
+
+
 def check_no_internal_words(markdown: str) -> list[str]:
     hits = []
+    body = writer_text(markdown)
     for pattern in FORBIDDEN:
-        for match in re.finditer(pattern, markdown):
-            line = markdown[:match.start()].count("\n") + 1
+        for match in re.finditer(pattern, body):
+            line = body[:match.start()].count("\n") + 1
             hits.append(f"第 {line} 行命中内部词 {match.group(0)!r}")
     return hits
 

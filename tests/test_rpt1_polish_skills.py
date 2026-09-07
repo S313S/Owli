@@ -403,12 +403,15 @@ def test_sources_table_is_generated_from_the_pool_not_retyped():
     """三格里两格死在「附录」誊抄几十条链接（socket closed）；清单改由代码出。"""
     from app.report.polish.run import sources_table
 
+    # §RULE-1 货 1：抓取时间多了一列——正文里禁掉 `fetched_at` 之后，
+    # 「什么时候采的」这件读者真会问的事只剩这里能查，取不到就写「—」。
     table = sources_table([
-        {"mark": "S01", "grade": "A", "title": "帖 | 带竖线", "url": "https://e.com/a"},
+        {"mark": "S01", "grade": "A", "title": "帖 | 带竖线", "url": "https://e.com/a",
+         "fetched_at": "2026-09-06T15:25:58+08:00"},
         {"mark": "S02", "grade": None, "title": "", "url": "https://e.com/b"},
     ])
-    assert "| S01 | A | 可独立支撑结论 | 帖 ｜ 带竖线 | https://e.com/a |" in table
-    assert "| S02 | ? | 未评级 | （无标题） | https://e.com/b |" in table
+    assert "| S01 | A | 可独立支撑结论 | 帖 ｜ 带竖线 | 2026-09-06 15:25 | https://e.com/a |" in table
+    assert "| S02 | ? | 未评级 | （无标题） | — | https://e.com/b |" in table
     assert table.count("\n|") >= 3          # 表头 + 分隔 + 两行
 
 

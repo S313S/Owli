@@ -359,6 +359,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         tables["timeline"] = timeline
     cited = [r for r in rows if r.get("citation_no") is not None]
     grade_by_mark = {int(r["citation_no"]): r.get("grade") for r in cited}
+    # §RULE-1 货 1：抓取时间只在信息源清单那一列露面（`run.sources_table` 渲染），
+    # 正文一次都不写。工作稿的信息源行不带这个字段，按角标号回查证据补上。
+    fetched_by_mark = {int(r["citation_no"]): r.get("fetched_at") for r in cited}
     crossref_by_mark = _crossref_by_mark(cited, claims)
     return {
         "research_id": report.get("id"),
@@ -388,6 +391,7 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "sources": [{"mark": _mark(int(s["citation_no"])), "title": s.get("title"),
                      "url": s.get("url") or s.get("permalink"),
                      "grade": grade_by_mark.get(int(s["citation_no"])) or s.get("grade"),
+                     "fetched_at": fetched_by_mark.get(int(s["citation_no"])),
                      # 建议段门禁要按角标核：这条源背后的主张里最强的那个交叉验证结论。
                      "crossref": crossref_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
