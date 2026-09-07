@@ -145,17 +145,24 @@ async def main() -> int:
     book = _load_progress(progress_path, revision)
     skippable = book if args.resume else {}
     if args.resume:
-        done = sum(1 for v in book.values() if v.get("passed"))
+        # 这里必须跟下面的跳过条件用同一个式子，否则会报「6 格可跳过」而实际跳 0 格。
+        done = sum(1 for v in book.values() if v.get("passed") and not v.get("skipped"))
         print(f"续跑账本 {progress_path}（代码 {revision}）："
               f"账本 {len(book)} 格、其中已过 {done} 格可跳过", flush=True)
     rows = []
     for research_id, template in cells:
         key = f"{research_id}:{template}"
-        if (skippable.get(key) or {}).get("passed"):
-            row = dict(skippable[key])
+        prior = skippable.get(key) or {}
+        # 跳过的条件是「**本轮真写出来过**、并且过了尺子」——只看 passed 不够：
+        # 默认路径（零成本复验尺子）也会给旧稿判 PASS 并记进账本，`skipped=True`。
+        # 只认 passed 的话，最后一轮会把那几格直接跳掉，交出没有质量补丁的旧稿，
+        # 读数还是 9/9 全绿。这一条同时堵住「md 是旧的、tables.json 是新的」那格：
+        # 旧稿永远不被当成本轮成果。
+        if prior.get("passed") and not prior.get("skipped"):
+            row = dict(prior)
             row["resumed"] = True
             rows.append(row)
-            print(f"[SKIP] {key}  上一段已过尺子，不重跑", flush=True)
+            print(f"[SKIP] {key}  本轮已写出且过尺子，不重跑", flush=True)
             continue
         # 续跑时没过的格一律重写：留着上一段那份没过的稿只会被默认路径跳过。
         row = await one(runner, store, runs_root, research_id, template,
@@ -165,7 +172,12 @@ async def main() -> int:
         _save_progress(progress_path, revision, book)
         mark = "PASS" if row.get("passed") else "FAIL"
         # 没重写就把话说明白：这一格量的是上一轮留下的稿，不是本轮的成果。
-        stale = "  ← 未重写，只压尺子" if row.get("skipped") else ""
+        if row.get("status") != "ok":
+            stale = "  ← 本格未出稿（bytes 是上一轮留下的文件）"
+        elif row.get("skipped"):
+            stale = "  ← 未重写，只压尺子（量的是上一轮的稿）"
+        else:
+            stale = ""
         print(f"[{mark}] {research_id} × {template}  {row['bytes']} B  "
               f"{row['seconds']}s  attempts={row['attempts']}{stale}", flush=True)
         for name, problems in (row.get("ruler") or {}).items():

@@ -646,3 +646,19 @@ def test_a_single_cell_run_updates_the_book_instead_of_replacing_it(tmp_path):
     book["g8"] = {"passed": False}                     # 只加自己这一格
     matrix._save_progress(path, "abc", book)
     assert len(matrix._load_progress(path, "abc")) == 9
+
+
+@pytest.mark.parametrize("cell, skippable", [
+    ({"passed": True, "skipped": False}, True),    # 本轮写出来且过了尺子 → 才算数
+    ({"passed": True, "skipped": True}, False),    # 旧稿被重新压了遍尺子 → 不算
+    ({"passed": False, "skipped": False}, False),  # 本轮写了但没过 → 重写
+])
+def test_resume_only_credits_a_cell_this_round_actually_wrote(cell, skippable):
+    """`--resume` 的跳过条件是 `passed and not skipped`，两个都要。
+
+    只看 passed 会出事：默认路径（零成本复验尺子）也会给上一轮的旧稿判 PASS 并
+    记进账本（skipped=True），于是最后一轮把那几格直接跳掉，交出没有质量补丁的
+    旧稿，而读数还是 9/9 全绿。这一条同时挡住「md 是旧的、tables.json 是新的」
+    那种格——旧稿永远不被当成本轮成果。
+    """
+    assert bool(cell.get("passed") and not cell.get("skipped")) is skippable
