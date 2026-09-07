@@ -18,6 +18,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -430,6 +431,28 @@ def check_no_charts(markdown: str) -> list[str]:
     return problems
 
 
+def check_quotes_are_speech(markdown: str, titles: Sequence[str]) -> list[str]:
+    """§RULE-1 货 5（评审 #7）：引语块里必须是人说的话。
+
+    判据函数与程序侧候选过滤是**同一个** `tables.is_speech_quote`——同一个概念
+    两处两个定义，是 09-07 现形过的一种假绿。
+    """
+    from app.report.polish.tables import is_speech_quote
+
+    problems = []
+    for index, line in enumerate(writer_text(markdown).splitlines(), start=1):
+        body = line.lstrip()
+        if not body.startswith(">"):
+            continue
+        text = MARK_ANY.sub("", body.lstrip(">").strip())
+        if not text or text.startswith(("——", "—", "--")):
+            continue        # 出处行不是引语本身
+        if not is_speech_quote(text, titles):
+            problems.append(f"第 {index} 行引的不是人说的话（帖子标题/产品公告/推广）："
+                            f"{text[:40]}")
+    return problems
+
+
 def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
     """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
 
@@ -461,7 +484,7 @@ def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str
 CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④ 数字有出处", "⑤ 行动式标题",
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
           "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
-          "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图")
+          "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图", "⑭ 原声是人说的话")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度",)
@@ -494,6 +517,8 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[10]: check_ratio_phrases(markdown),
         CHECKS[11]: check_uncertainty_once(markdown),
         CHECKS[12]: check_no_charts(markdown),
+        CHECKS[13]: check_quotes_are_speech(
+            markdown, [str(s.get("title") or "") for s in data.get("sources") or []]),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

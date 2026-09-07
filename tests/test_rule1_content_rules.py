@@ -194,3 +194,49 @@ def test_a_markdown_table_is_still_fine(tmp_path):
     """趋势改成表 + 一句结论，是这条规则要的形态，不能顺手把表也判红。"""
     trend = "证据在 8 月见顶后回落[S01]。\n\n| 月份 | 证据条数 |\n| --- | --- |\n| 2026-08 | 19 |"
     assert not _run(tmp_path, GOOD.replace("正文解读[S01]。", trend))["⑬ 只出表不出图"]
+
+
+# ── 货 5（评审 #7）：原声必须是人说的评价句 ──────────────────────────────
+def _quoted(text: str) -> str:
+    return GOOD.replace("> 用着还行，写文案比我自己快", f"> {text}")
+
+
+@pytest.mark.parametrize("text, why", [
+    ("豆包用着还行", "与信息源清单里那条源的标题一字不差 = 帖子标题"),
+    ("豆包专业版现已上线，立即体验", "产品公告"),
+    ("Doubao Seed Character now available on Atlas", "服务商上架广告（评审实测的 S79）"),
+])
+def test_a_title_or_announcement_is_not_a_quote(tmp_path, text, why):
+    assert _run(tmp_path, _quoted(text))["⑭ 原声是人说的话"], why
+
+
+def test_a_real_user_sentence_passes(tmp_path):
+    """别把闸开太大：人说自己怎么看，一个字都不许拦。"""
+    assert not _run(tmp_path, _quoted("写文案是真的快，但让它写长的就开始车轱辘话"))[
+        "⑭ 原声是人说的话"]
+
+
+def test_the_attribution_line_is_not_judged(tmp_path):
+    """`—— 平台 · 等级 X [S01]` 是出处行，不是引语本身。"""
+    assert not _run(tmp_path, GOOD)["⑭ 原声是人说的话"]
+
+
+def test_the_candidate_filter_and_the_ruler_share_one_predicate(tmp_path):
+    """同一个概念两处两个定义，是 09-07 现形过的一种假绿——这里只许有一个判据函数。"""
+    from app.report.polish import tables as polish_tables_mod
+
+    assert check_polished.check_quotes_are_speech.__doc__
+    assert polish_tables_mod.is_speech_quote("豆包用着还行", ["豆包用着还行"]) is False
+    assert polish_tables_mod.is_speech_quote("写文案是真的快", ["豆包用着还行"]) is True
+
+
+def test_non_speech_candidates_never_reach_the_writer():
+    """挡在候选层：摆出来的候选写手就会用，规则拦不住一张摆在眼前的表。"""
+    from app.report.polish.tables import _drop_non_speech_quotes
+
+    coding = {"quotes": {"rows": [{"原声": "豆包专业版现已上线"}, {"原声": "写文案是真的快"}],
+                         "basis": "口径。"}}
+    dropped = _drop_non_speech_quotes(coding, [{"title": "豆包用着还行"}])
+    assert dropped == 1
+    assert [row["原声"] for row in coding["quotes"]["rows"]] == ["写文案是真的快"]
+    assert "已剔除" in coding["quotes"]["basis"]

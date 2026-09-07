@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -22,6 +23,52 @@ DIMENSIONS: dict[str, tuple[str, ...]] = {
     "价格与门槛": ("免费", "付费", "价格", "会员", "额度"),
     "渠道与生态": ("App", "小程序", "网页", "插件", "接入", "生态"),
 }
+
+
+#: §RULE-1 货 5（评审 #7）：原声必须是**用户/作者的评价句**。
+#: 实测舆情简报「正面的说法」引的是云服务商上架广告
+#: （S79「Doubao Seed Character now available on Atlas」），
+#: 「负面的说法」引的是 Reddit 帖子标题——都不是「说法」。
+#: 标题与公告有两条硬特征：它与证据自己的标题一字不差；或者它在做发布/推广的宣告。
+ANNOUNCEMENT_MARKERS = (
+    "现已上线", "正式上线", "正式发布", "重磅发布", "全新发布", "官方宣布", "官宣",
+    "立即体验", "点击链接", "扫码", "限时优惠", "欢迎试用", "诚邀",
+    "now available", "is now live", "introducing ", "sign up", "try it now",
+)
+#: 比较标题时忽略的东西：空白、标点、大小写。短句撞车没意义，只比 8 个字符以上的。
+_QUOTE_NOISE = re.compile(r"[\s\W_]+", re.UNICODE)
+MIN_TITLE_OVERLAP = 8
+
+
+def normalize_quote(text: object) -> str:
+    return _QUOTE_NOISE.sub("", str(text or "")).lower()
+
+
+def is_speech_quote(text: object, titles: Iterable[object] = ()) -> bool:
+    """这句话能不能当原声。
+
+    两条否决：① 它就是某条证据的标题（帖子标题不是人说的话，是编辑写的招牌）；
+    ② 它在做发布或推广的宣告（产品公告、服务商广告）。
+    两条都不命中才是「人在说自己怎么看」——原声要的是这个。
+    """
+    body = str(text or "").strip()
+    if not body:
+        return False
+    lowered = body.lower()
+    if any(marker in lowered for marker in ANNOUNCEMENT_MARKERS):
+        return False
+    normalized = normalize_quote(body)
+    for title in titles:
+        other = normalize_quote(title)
+        if not other:
+            continue
+        if normalized == other:
+            return False        # 一字不差就是标题，多短都算
+        # 包含关系只在两边都够长时才算——短句撞车是巧合，不是证据。
+        if (min(len(normalized), len(other)) >= MIN_TITLE_OVERLAP
+                and (other in normalized or normalized in other)):
+            return False
+    return True
 
 
 def _mark(number: int) -> str:
@@ -334,6 +381,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         citations={str(r.get("id")): int(r["citation_no"]) for r in rows
                    if r.get("citation_no") is not None},
     )
+    # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
+    # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
+    dropped = _drop_non_speech_quotes(coding, rows)
     # 逐表判空，整块判不够——编码非 0 但原声筛完可能是 0（只留引得动的）。
     # 空表比缺表坏得多：写手会把 n=0 读成「这个维度没人讨论」，把**没数据**写成
     # **没人谈**，等于往报告里塞一个假结论，还一路绿到用户眼前。比照 timeline
@@ -354,6 +404,10 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
             omitted_tables[name] = (
                 f"已编码 {coded_n} 条 UGC，但按这张表自己的口径筛完没有一行，"
                 "故不出表。看该表 basis 里写的口径。")
+    if dropped and "quotes" in omitted_tables:
+        # 「筛完没有一行」有两种，读的人要分得清：本来就没摘出原声，
+        # 还是摘出来了但全是标题/公告。给错了排查方向比不给更费事。
+        omitted_tables["quotes"] += f"（其中 {dropped} 条候选是帖子标题或公告/推广，已剔除）"
     timeline = _timeline(rows)
     if timeline is not None:
         tables["timeline"] = timeline
@@ -397,6 +451,26 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }
+
+
+def _drop_non_speech_quotes(coding: dict[str, Any],
+                            rows: Sequence[Mapping[str, Any]]) -> int:
+    """把不是「人说的话」的原声从候选里去掉，返回去掉了几条。
+
+    去掉之后这张表可能一行不剩——那就走既有的「不出表」分支，不摆空表
+    （空表会被写手读成「这个维度没人谈」）。
+    """
+    table = coding.get("quotes")
+    if not table or not table.get("rows"):
+        return 0
+    titles = [r.get("title") for r in rows]
+    kept = [row for row in table["rows"] if is_speech_quote(row.get("原声"), titles)]
+    dropped = len(table["rows"]) - len(kept)
+    table["rows"] = kept
+    if dropped:
+        # 让人看得见少了什么：不写出来，「原声怎么变少了」只能靠猜。
+        table["basis"] += f"另有 {dropped} 条候选是帖子标题或产品公告/推广，不是人说的话，已剔除。"
+    return dropped
 
 
 def collect_inputs(store: Any, research_id: str, report_text: str) -> dict[str, Any]:
