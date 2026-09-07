@@ -572,3 +572,21 @@ def test_ruler_still_catches_a_naked_number_in_prose(tmp_path):
     """放行三处之后，正文里凭空冒出来的数字仍要判红。"""
     findings = _run_v2(tmp_path, GOOD_V2.replace("正文解读[S01]。", "有 947 条材料提到这一点。"))
     assert any("947" in p for p in findings["④ 数字有出处"])
+
+
+@pytest.mark.parametrize("section, heading", [
+    ("对不同读者的含义", "投资分析"),     # §RPT-2 货 4① 规定的三行之一，实测命中 TOPIC_TITLE
+    ("对提问方意味着什么", "竞品对比"),   # §RPT-2 货 4② 的竞品收尾节，同族措辞也会命中
+])
+def test_rpt2_structural_sections_are_exempt_from_action_titles(tmp_path, section, heading):
+    """⑤ 不查模板规定措辞的结构节：这两节的小标题是 SKILL 规定的，不是写手在起标题。"""
+    findings = _run_v2(tmp_path,
+                       GOOD_V2.replace("# 附录", f"# {section}\n\n## {heading}\n\n正文[S01]。\n\n# 附录"))
+    assert not findings["⑤ 行动式标题"]
+
+
+def test_action_title_gate_still_fires_outside_structural_sections(tmp_path):
+    """豁免只针对结构节：正文节里的话题式标题照抓，别把放宽做成拆闸。"""
+    findings = _run_v2(tmp_path, GOOD_V2.replace(
+        "## 小红书贡献了 296 条证据，却一条都没被引用", "## 用户评价分析"))
+    assert any("用户评价分析" in p for p in findings["⑤ 行动式标题"])
