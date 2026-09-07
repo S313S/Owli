@@ -820,3 +820,69 @@ def test_门禁辖区词表跟着改名分支走():
 
     for name in (ADVICE_SECTION, ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION):
         assert name in check_polished.ADVICE_SECTIONS, name
+
+
+# —— 保险丝：正式稿必须两处都落盘（goals/ 与 exports/），缺一即失败 ——————
+
+def _polish_once(tmp_path, monkeypatch=None):
+    """跑一次 polish 的收尾写盘路径，引擎打桩、不真调。"""
+    import asyncio
+
+    from app.report.polish.run import artifact_paths, engine_draft_path, polish
+    from app.report.polish.skills import get_template
+
+    class _Adapter:
+        async def run(self, task, ctx, on_event=None):
+            task.output_path.write_text("正文[S01]。" * 40, encoding="utf-8")
+            return type("R", (), {"succeeded": True, "engine_error": None})()
+
+    class _Store:
+        def get_report(self, rid):
+            return {"id": rid, "title": "T", "research_question": "q", "plan_snapshot": {},
+                    "extra": {"claims": []}}
+
+        def list_evidence(self, rid):
+            return [{"id": "ev-1", "platform": "xhs", "kind": "post", "citation_no": 1,
+                     "title": "帖", "content_excerpt": "豆包好用", "grade": "A",
+                     "published_at": None, "extra": "{}"}]
+
+    runs = tmp_path / "runs"
+    work = "# 工作稿\n\n## 信息源\n\n- [S01] [帖](https://e.com/a)\n"
+    outcome = asyncio.run(polish(_Store(), "r-t", runs, work,
+                                 template="consulting", adapter=_Adapter()))
+    skill = get_template("consulting")
+    md_path, _ = artifact_paths(runs, "r-t", skill.name)
+    return outcome, md_path, engine_draft_path(runs, "r-t", skill.name)
+
+
+def test_正式稿两处都落盘_缺一即失败(tmp_path):
+    """用户 09-07 撞到的现场：goals/ 有三份成稿、exports/ 一份都没有。
+
+    页面与接口只认 exports/（`artifact_paths`），所以三个模板全 404、静默退回工作稿，
+    而这一头照报 ok——这一族假绿的又一种。这条用例是今晚那一轮的保险丝。
+    """
+    outcome, md_path, draft_path = _polish_once(tmp_path)
+    assert outcome["status"] == "ok"
+    assert md_path.is_file(), "exports/ 那份没落盘"
+    assert draft_path.is_file(), "goals/ 那份没落盘"
+    assert md_path.read_text(encoding="utf-8") == draft_path.read_text(encoding="utf-8")
+    assert outcome["path"] == str(md_path) and outcome["draft_path"] == str(draft_path)
+
+
+def test_exports_那份没落盘就判失败(tmp_path, monkeypatch):
+    """搬运失败必须当场判红，不许报成 ok——否则页面 404、控制台绿。"""
+    import app.report.polish.run as run_mod
+
+    real = Path.write_text
+
+    def _skip_exports(self, *args, **kwargs):
+        if self.parent.name == "exports" and self.suffix == ".md":
+            return 0            # 模拟「写了 goals 没写 exports」
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _skip_exports)
+    outcome, md_path, draft_path = _polish_once(tmp_path)
+    assert outcome["status"] == "failed"
+    assert not md_path.is_file() and draft_path.is_file()
+    assert any("exports" in e for e in outcome["errors"])
+    assert run_mod is not None

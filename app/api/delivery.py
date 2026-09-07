@@ -173,8 +173,22 @@ def register_delivery_routes(
 
                 entity_count = len(_entity_aliases(plan))
                 recommended = recommend_template(str(question), entity_count=entity_count)
-        return envelope({"templates": [t.as_listing() for t in load_templates()],
-                         "recommended": recommended})
+        # §RPT-2 插队件：每个模板标一个 `has_polished`。用户 09-07 在 8977 上实测——
+        # 切到还没整理过的模板，页面静默退回工作稿、一个字的提示都没有，
+        # 三个模板都没稿时就长成「切模板没反应」。下拉要能一眼看出哪些有稿。
+        from app.report.polish.run import artifact_paths
+
+        def _has_polished(name: str) -> bool:
+            if not research_id:
+                return False
+            return artifact_paths(runs_root, research_id, name)[0].is_file()
+
+        listings = []
+        for item in load_templates():
+            listing = item.as_listing()
+            listing["has_polished"] = _has_polished(item.name)
+            listings.append(listing)
+        return envelope({"templates": listings, "recommended": recommended})
 
     @application.post("/api/researches/{research_id}/export")
     async def export_research(research_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:

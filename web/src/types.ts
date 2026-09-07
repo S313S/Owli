@@ -339,6 +339,8 @@ export type ReportTemplate = {
   title: string
   description: string
   sections: string[]
+  /** §RPT-2 插队件：这份研究有没有用这个模板整理过正式稿。下拉要能一眼分辨。 */
+  has_polished?: boolean
 }
 
 export type PolishedTable = {

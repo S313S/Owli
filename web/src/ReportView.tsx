@@ -227,15 +227,22 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
   const { report, evidence, error, refresh } = useReportData(researchId)
   // 正式稿是给「拿结论去用的人」看的，有就默认停在它；工作稿随时能切回来。
   const [template, setTemplate] = useState('consulting')
+  const [templateList, setTemplateList] = useState<ReportTemplate[]>([])
   // §RPT-2 货 1 ①：后端按题面算推荐模板，下拉默认选中它——但用户一旦手动改过，
   // 推荐就不许再回来抢（清单是异步到的，晚于用户第一次点击也可能发生）。
   const templatePicked = useRef(false)
   const [polishTick, setPolishTick] = useState(0)
   const [draft, setDraft] = useState<'work' | 'polished' | null>(null)
+  // 用户自己点过「工作稿 / 正式稿」没有——只有他点过，才不许自动改回去。
+  const draftPicked = useRef(false)
   const { polished, loading: polishing } = usePolishedReport(researchId, template, polishTick)
   useEffect(() => {
-    if (draft === null && !polishing) setDraft(polished ? 'polished' : 'work')
-  }, [draft, polishing, polished])
+    // §RPT-2 插队件第二个成因：原来这句只在 draft===null 时跑一次，正式稿还在路上
+    // 就先把 draft 锁成了 'work'；等稿到了也不再改，切到有稿的模板照样显示工作稿——
+    // 用户看到的还是「切模板没反应」。改成跟着当前模板有没有稿走，除非用户自己点过。
+    if (polishing || draftPicked.current) return
+    setDraft(polished ? 'polished' : 'work')
+  }, [polishing, polished])
   const lookup = useMemo<Lookup>(() => {
     const byNo = new Map<number, EvidenceItem | { permalink: string; title: string }>()
     for (const s of report?.sources ?? []) byNo.set(s.citation_no, { permalink: s.permalink, title: s.title })
@@ -258,12 +265,23 @@ export default function ReportView({ researchId, fallback }: { researchId: strin
     <div className="report-toolbar" data-testid="report-toolbar">
       <ExportButtons researchId={researchId} report={report} onDone={refresh}
         template={template}
-        onTemplateChange={(name) => { templatePicked.current = true; setTemplate(name) }}
+        onTemplateChange={(name) => {
+          templatePicked.current = true; draftPicked.current = false; setTemplate(name)
+        }}
         onRecommended={(name) => { if (!templatePicked.current) setTemplate(name) }}
+        onTemplates={setTemplateList}
         onPolished={() => { setPolishTick((n) => n + 1); setDraft('polished') }} />
     </div>
+    {/* §RPT-2 插队件：用户 09-07 实测「切什么模板结果都一样」——没整理过的模板
+        静默退回工作稿、零提示。机器状态不能以沉默的形式呈现给读者。 */}
+    {polished === null && !polishing && <Alert type="info" showIcon style={{ marginBottom: 8 }}
+      data-testid="polished-absent"
+      message={`这份研究还没用「${templateList.find((t) => t.name === template)?.title ?? template}」`
+        + '整理过正式稿，现在看到的是工作稿。'}
+      description="点上方的「整理成正式稿」按钮生成；下拉里带「（未整理）」的模板都还没有稿。" />}
     {polished !== null && <Segmented data-testid="draft-tabs" style={{ marginBottom: 12 }}
-      value={showPolished ? 'polished' : 'work'} onChange={(v) => setDraft(v as 'work' | 'polished')}
+      value={showPolished ? 'polished' : 'work'}
+      onChange={(v) => { draftPicked.current = true; setDraft(v as 'work' | 'polished') }}
       options={[{ label: '正式稿', value: 'polished' }, { label: '工作稿', value: 'work' }]} />}
     {showPolished && <div className="polished-view" data-testid="polished-view"
       data-template={polished.template}>
@@ -326,10 +344,12 @@ function ReplaySectionButton({ researchId, section }: {
   </Button>
 }
 
-function ExportButtons({ researchId, report, onDone, template, onTemplateChange, onRecommended, onPolished }: {
+function ExportButtons({ researchId, report, onDone, template, onTemplateChange, onRecommended,
+                        onTemplates, onPolished }: {
   researchId: string; report: ReportData; onDone: () => void
   template: string; onTemplateChange: (name: string) => void
   onRecommended: (name: string) => void; onPolished: () => void
+  onTemplates: (list: ReportTemplate[]) => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
@@ -342,6 +362,7 @@ function ExportButtons({ researchId, report, onDone, template, onTemplateChange,
         const body = await r.json() as ApiEnvelope<{ templates: ReportTemplate[]; recommended?: string }>
         if (!body.ok) return
         setTemplates(body.data.templates)
+        onTemplates(body.data.templates)
         if (body.data.recommended) onRecommended(body.data.recommended)
       } catch { /* 拿不到清单就只留默认模板，按钮照样能按 */ }
     })()
@@ -394,8 +415,14 @@ function ExportButtons({ researchId, report, onDone, template, onTemplateChange,
   const excel = report.exports.filter((x) => x.kind === 'excel').at(-1)
   // url=null 的那条是失败登记（货 3），只当提示不给链接。
   const lastPolished = report.exports.filter((x) => x.kind === 'polished').at(-1)
-  const options = (templates.length ? templates : [{ name: 'consulting', title: '调研报告（咨询体）' }])
-    .map((t) => ({ value: t.name, label: t.title }))
+  // §RPT-2 插队件：没整理过的模板在下拉里就要标出来，别让用户每切一次都靠正文去猜。
+  const options = (templates.length
+    ? templates
+    : [{ name: 'consulting', title: '调研报告（咨询体）', has_polished: undefined }])
+    .map((t) => ({
+      value: t.name,
+      label: t.has_polished === false ? `${t.title}（未整理）` : t.title,
+    }))
   return <>
     <Button size="small" type="primary" loading={busy === 'polished'} onClick={() => void polish()}
       data-testid="export-polished">整理成正式稿</Button>

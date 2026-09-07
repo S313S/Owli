@@ -374,6 +374,14 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
     md_path.write_text(markdown, encoding="utf-8")
+    # 落盘后当场回读。用户 09-07 在 8977 上撞到过 goals/ 有三份成稿、exports/ 一份都没有
+    # 的现场：页面只认 exports/，于是三个模板全 404、静默退回工作稿，而这一头照报 ok。
+    # 搬运没成功就必须当场判失败，别把「写了 goals 没写 exports」报成成功。
+    if not md_path.is_file():
+        return {"status": "failed", "template": skill.name, "path": str(md_path),
+                "draft_path": str(draft_path), "tables_path": str(tables_path),
+                "attempts": attempts, "offpool": [],
+                "errors": [f"正式稿没落到 exports/：{md_path}（goals/ 那份在 {draft_path}）"]}
     return {"status": "ok", "template": skill.name, "path": str(md_path),
             "draft_path": str(draft_path), "tables_path": str(tables_path),
             "attempts": attempts, "offpool": []}
