@@ -269,6 +269,10 @@ def _timeline(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
                   coverage={"有发布时间": len(dated), "总条数": len(rows)})
 
 
+#: §RULE-1 货 7：矩阵一行最多给几个角标。给多少，写手就往每个格子里抄多少。
+MATRIX_MARKS_PER_ROW = 3
+
+
 def _entity_dimension(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any]) -> dict[str, Any]:
     """实体 × 维度矩阵：先认 `extra.dimensions`，没有再用 `DIMENSIONS` 词表兜底。"""
     aliases = _entity_aliases(plan)
@@ -292,12 +296,16 @@ def _entity_dimension(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any]
             cells[dim] = len(group)
             row_marks.extend(_marks(group))
         if any(cells[dim] for dim in columns):
-            out.append({**cells, "marks": sorted(set(row_marks))})
+            # §RULE-1 货 7（评审 #12）：这一行的角标写手会往每一格里抄，
+            # 实测每格塞了 9–13 个、格子整个读不了。这里就只给前 3 个——
+            # 矩阵是用来横着比大小的，角标的完整清单在文末信息源清单里。
+            out.append({**cells, "marks": sorted(set(row_marks))[:MATRIX_MARKS_PER_ROW]})
     out.sort(key=lambda r: (-sum(r[d] for d in columns), r["实体"]))
     return _table("entity_dimension", "实体 × 维度的证据条数矩阵", ["实体", *columns], out,
                   n=sum(len(v) for v in grid.values()),
                   basis="格内是同时命中该实体叫法与该维度的证据条数；维度优先取 evidence.extra.dimensions，"
-                        "缺失时用固定词表兜底（词表见 tables.DIMENSIONS）。",
+                        "缺失时用固定词表兜底（词表见 tables.DIMENSIONS）。"
+                        f"每行角标最多列 {MATRIX_MARKS_PER_ROW} 个，且写在表下那一行，不进格子。",
                   coverage={"带 dimensions 字段的证据":
                             sum(1 for r in rows if (r.get("_extra") or {}).get("dimensions")),
                             "总条数": len(rows)})

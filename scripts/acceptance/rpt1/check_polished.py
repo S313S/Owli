@@ -506,6 +506,25 @@ def check_cell_attribution(markdown: str, tables: Mapping[str, Any]) -> list[str
     return problems
 
 
+#: §RULE-1 货 7（评审 #12）：一个表格子里最多几个角标。真机截图坐实：竞品矩阵
+#: 每格塞同一串 9–13 个角标，整张表横着读不了。出处归表下面那一行，不进格子。
+MARKS_PER_CELL = 3
+
+
+def check_marks_per_cell(markdown: str) -> list[str]:
+    problems = []
+    for index, line in enumerate(writer_text(markdown).splitlines(), start=1):
+        if not line.lstrip().startswith("|"):
+            continue
+        for cell in line.strip().strip("|").split("|"):
+            used = MARK_ANY.findall(cell)
+            if len(used) > MARKS_PER_CELL:
+                problems.append(
+                    f"第 {index} 行有一格塞了 {len(used)} 个角标（上限 {MARKS_PER_CELL}）"
+                    f"，出处写到表下面那一行去：{cell.strip()[:40]}")
+    return problems
+
+
 def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str]:
     """§RPT-2 货 2 闸 ⑩：开篇节写样本量不许单写采集总数。
 
@@ -538,7 +557,7 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
           "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
           "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图", "⑭ 原声是人说的话",
-          "⑮ 归因只引该格内的角标")
+          "⑮ 归因只引该格内的角标", "⑯ 表格一格 ≤3 个角标")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度",)
@@ -574,6 +593,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[13]: check_quotes_are_speech(
             markdown, [str(s.get("title") or "") for s in data.get("sources") or []]),
         CHECKS[14]: check_cell_attribution(markdown, data.get("tables") or {}),
+        CHECKS[15]: check_marks_per_cell(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(

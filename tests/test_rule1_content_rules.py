@@ -288,3 +288,26 @@ def test_the_gate_is_silent_without_a_coding_table(tmp_path):
     assert not _run(tmp_path, GOOD.replace("正文解读[S01]。",
                                            "这并非价格问题，而是习惯问题[S02]。"))[
         "⑮ 归因只引该格内的角标"]
+
+
+# ── 货 7（评审 #12）：一个表格子里最多 3 个角标 ──────────────────────────
+def test_a_cell_stuffed_with_marks_is_red(tmp_path):
+    """真机截图坐实：竞品矩阵每格 9–13 个同样的角标，整张表横着读不了。"""
+    row = "| 豆包 | 5 [S01][S02][S01][S02][S01] | 3 |"
+    assert _run(tmp_path, GOOD.replace("| 价格与付费 | 19 |", row))["⑯ 表格一格 ≤3 个角标"]
+
+
+def test_three_marks_in_a_cell_are_fine(tmp_path):
+    assert not _run(tmp_path, GOOD.replace("| 价格与付费 | 19 |",
+                                           "| 豆包 | 5 [S01][S02][S01] |"))[
+        "⑯ 表格一格 ≤3 个角标"]
+
+
+def test_the_matrix_row_hands_the_writer_at_most_three_marks():
+    """写手往每格里抄的就是这一行给它的角标——给多少抄多少，所以在这里封顶。"""
+    from app.report.polish.tables import MATRIX_MARKS_PER_ROW, _entity_dimension
+
+    rows = [{"id": f"e{i}", "citation_no": i, "title": "豆包定价讨论",
+             "content_excerpt": "豆包的价格与门槛", "_extra": {}} for i in range(1, 10)]
+    table = _entity_dimension(rows, {"subjects": ["豆包"]})
+    assert table["rows"] and len(table["rows"][0]["marks"]) == MATRIX_MARKS_PER_ROW
