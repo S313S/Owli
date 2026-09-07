@@ -65,7 +65,21 @@ class CodingResult:
 
 
 def _extra(item: Mapping[str, Any]) -> Mapping[str, Any]:
+    """`extra` 两种形状都认：`Store.list_evidence` 给的是解好的 dict，裸 sqlite
+    读出来的是 JSON 字符串。
+
+    只认 dict 的后果特别坏：裸读的调用方会**静默**拿到 0 条编码，一路绿到三张表
+    整块不出，而没有任何一处报错——看起来像「编码没做」，其实是类型没对上。
+    `polish/tables.py:_with_extra` 早就是这么处理的，两处口径统一。
+    """
+
     value = item.get("extra")
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, Mapping) else {}
     return value if isinstance(value, Mapping) else {}
 
 

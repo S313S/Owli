@@ -221,3 +221,42 @@ def test_三张表都出得来时_omitted为空():
     data = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4)])
     assert data["omitted_tables"] == {}
     assert "quotes" in data["tables"]
+
+
+def test_从库里真读出来的行也认得出编码(tmp_path):
+    """用例喂的形状必须和生产喂的形状一样，否则用例绿着而生产是红的。
+
+    `Store.list_evidence` 给的是解好的 dict，裸 sqlite 读出来的是 JSON 字符串。
+    只认 dict 的话，裸读的调用方会**静默**拿到 0 条编码——三张表整块不出，
+    全程零报错，看起来像「编码没做」，其实是类型没对上。
+    """
+
+    import json
+    import sqlite3
+
+    db = tmp_path / "t.db"
+    conn = sqlite3.connect(db)
+    conn.execute("create table evidence (id text, report_id text, extra text)")
+    coding = {"coding_version": "v1", "audience": "不明", "scenario": "学习",
+              "attitude": "正", "topics": ["功能与能力"], "quote": "好用"}
+    conn.execute("insert into evidence values (?,?,?)",
+                 ("ev-001", "r-1", json.dumps({"content_kind": "user_opinion",
+                                               "coding": coding}, ensure_ascii=False)))
+    conn.commit()
+    conn.row_factory = sqlite3.Row
+    rows = [dict(r) for r in conn.execute("select * from evidence")]
+
+    assert isinstance(rows[0]["extra"], str), "前提：裸 sqlite 读出来就是字符串"
+    assert len(coded_rows(rows)) == 1
+    assert coded_rows(rows)[0]["coding"]["attitude"] == "正"
+    # 同一份数据换成解好的 dict，认出来的编码必须一模一样（`extra` 本身一个是
+    # 字符串一个是 dict，所以比 coding 而不是比整行）。
+    parsed = [{**r, "extra": json.loads(r["extra"])} for r in rows]
+    assert [r["coding"] for r in coded_rows(parsed)] == \
+           [r["coding"] for r in coded_rows(rows)]
+
+
+def test_extra是坏字符串时不炸():
+    assert coded_rows([{"id": "ev-1", "extra": "{不是 json"}]) == []
+    assert coded_rows([{"id": "ev-1", "extra": "null"}]) == []
+    assert coded_rows([{"id": "ev-1", "extra": ""}]) == []
