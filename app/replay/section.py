@@ -56,6 +56,38 @@ def _resolve_agent(plan: Plan, goal_id: str, chapter_id: str) -> tuple[Any, Any]
     raise ReplayTargetError(f"计划里没有 {goal_id}")
 
 
+#: 重放时单次引擎调用的墙钟。适配器默认 300 s（`claude.py` 的
+#: `DEFAULT_CLAUDE_TIMEOUT_SECONDS`），而 2026-09-08 实测 `goal-3/ch-6/sec-2` 四片
+#: 耗时 177 / 265.6 / **335.6** / 165.6 s——第 3 片连撞三次 300 s 线，且片 2 的
+#: 265.6 s 也已逼近：**是四片整体越线，不是某一片特殊**。成因与挂账那条对得上——
+#: `_shared/writing-rules.md` 09-07 从 14,383 B 涨到 18,652 B（+30%，且每片都带）。
+#: 沿用 `app/report/polish/run.py` 那个既定写法：只用 `ClaudeAdapter` 的公开构造
+#: 参数放宽，**`app/adapters/` 一个字不动**。
+#:
+#: **只给重放这条路，不动 `RuntimeCoordinator` 的全局默认**——那个默认会改到所有
+#: 生产整跑，而本轮要治的只是重放。放宽的前提是节预算装得下：节墙钟取自
+#: `goal.retry_policy["chapter_deadline_seconds"]`（本节已由用户拍板改成 1800），
+#: 节预算 = 1800 × 4 片 = 7,200 s ≥ 4 × 900 = 3,600 s。
+REPLAY_ENGINE_TIMEOUT_SECONDS = 900.0
+
+
+def _replay_adapter_factory(store: Any) -> Any:
+    """重放专用适配器工厂：只把 Claude 那一路的墙钟放宽，别的原样。"""
+
+    from app.adapters.claude import ClaudeAdapter
+    from app.adapters.routing import RoutedAdapter
+
+    def factory() -> Any:
+        return RoutedAdapter(
+            utc_clock=lambda: datetime.now(timezone.utc),
+            source_store=store,
+            adapters={"claude": ClaudeAdapter(
+                timeout_seconds=REPLAY_ENGINE_TIMEOUT_SECONDS)},
+        )
+
+    return factory
+
+
 def _reset_to_pending(
     database: Path, research_id: str, goal_id: str, section_ids: list[str]
 ) -> None:
@@ -150,6 +182,7 @@ async def replay_sections(
         auto_confirm=False,
         routing_utc_clock=lambda: datetime.now(timezone.utc),
         scale_config=scale_config,
+        adapter_factory=_replay_adapter_factory(store),
     )
     runtime.researches[research_id] = runtime._state_from_plan(plan)
     runtime._adapters[research_id] = runtime.adapter_factory()
