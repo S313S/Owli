@@ -492,6 +492,39 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
     return False, errors, attempts
 
 
+def citation_preflight(store: Any, research_id: str, data: Mapping[str, Any]) -> list[str]:
+    """起跑前两条硬断言。任一条不过就不许起写手（2026-09-08 用户拍）。
+
+    **为什么挡在这里而不是挡在验收脚本里**：任何调用方都会经过 `polish()`，
+    挡在这里连接口直调也拦得住；挡在矩阵脚本里只拦得住矩阵脚本。
+
+    **背景（这两条各自都真出过事）**：正式稿的角标号取自**工作稿文件**
+    （`parse_report(report_text)` → `sources[].mark`），而等级/抓取时间/交叉验证结论
+    是**按号码从库里回查**的（`grade_by_mark` 等）。两边号码一旦对不上，
+    等级不报错、静默变成 `None`，写手拿不到真等级就**自己编一个**
+    ——2026-09-08 那一格实测五条发现里编错四条，「空是缺信息，编是假信息」。
+    而两边会对不上，是因为 `backfill.py` 的 `_write_artifact_then_citations`
+    **同时改写工作稿文件和重排库里的 citation_no**，只要 rescore 跑在另一个库上就分家。
+    """
+    problems: list[str] = []
+    sources = list(data.get("sources") or [])
+    doc = {int(str(item["mark"])[1:]) for item in sources if item.get("mark")}
+    rows = list(store.list_evidence(research_id) or [])
+    db = {int(r["citation_no"]) for r in rows if r.get("citation_no") is not None}
+    if doc and db and (min(doc), max(doc)) != (min(db), max(db)):
+        problems.append(
+            f"工作稿文件与库里的角标不是同一套：文件 S{min(doc):02d}~S{max(doc):02d}、"
+            f"库 S{min(db):02d}~S{max(db):02d}。多半是 rescore 跑在了另一个库上——"
+            "跑稿用的库必须与改写过工作稿的那个库是同一个。")
+    ungraded = [str(item.get("mark")) for item in sources if not item.get("grade")]
+    if ungraded:
+        problems.append(
+            f"信息源池里有 {len(ungraded)} 条查不到等级（例如 {'、'.join(ungraded[:5])}）。"
+            "等级是按角标号从库里回查的，查不到说明号码对不上；"
+            "这时候起写手，它会自己编等级。")
+    return problems
+
+
 async def polish(store: Any, research_id: str, runs_root: Path, report_text: str, *,
                  template: str | None = None, adapter: Any = None,
                  on_event: Callable[[Any], Awaitable[None]] | None = None) -> dict[str, Any]:
@@ -504,6 +537,13 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     draft_path.parent.mkdir(parents=True, exist_ok=True)
     tables_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     pool = frozenset(int(s["mark"][1:]) for s in data.get("sources") or [])
+    # 起跑前两条硬断言：不过就不起写手，一次引擎都不付。
+    blockers = citation_preflight(store, research_id, data)
+    if blockers:
+        return {"status": "failed", "template": skill.name, "path": str(md_path),
+                "draft_path": str(draft_path), "tables_path": str(tables_path),
+                "attempts": 0, "offpool": [], "cleared": [], "shards": {},
+                "errors": blockers}
     if adapter is None:
         adapter = default_adapter()
     parts = section_paths(runs_root, research_id, skill.name, sections_for(skill, data))

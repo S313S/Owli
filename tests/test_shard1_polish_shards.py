@@ -438,3 +438,65 @@ def test_节上限封住重试把总时长乘出去(tmp_path, monkeypatch):
     assert outcome["status"] == "failed"
     assert elapsed < budget + 1.0, f"节上限没封住：{elapsed:.2f}s"
     assert elapsed < 5.0, "连第一片自己那 5 秒都没拦住"
+
+
+# —— 起跑前两条硬断言（2026-09-08 用户拍）——————————————————
+
+class _StoreMarks(_Store):
+    """可控 citation_no 的库替身：用来喂「号码对不上」和「等级查不到」。"""
+
+    def __init__(self, marks=(1,), grades=("A",)):
+        self._marks, self._grades = marks, grades
+
+    def list_evidence(self, rid):
+        return [{"id": f"ev-{m}", "platform": "xhs", "kind": "post", "citation_no": m,
+                 "title": "帖", "content_excerpt": "豆包好用", "grade": g,
+                 "published_at": None, "extra": "{}"}
+                for m, g in zip(self._marks, self._grades)]
+
+
+def _preflight(store, sources):
+    from app.report.polish.run import citation_preflight
+
+    return citation_preflight(store, "r-t", {"sources": sources})
+
+
+def test_号码对不上就判红_并说清多半是rescore跑在别的库上():
+    """昨夜真出过：工作稿文件 S01~S33、库里 S49~S90，等级静默全空。"""
+    problems = _preflight(_StoreMarks(marks=(49, 90), grades=("A", "B")),
+                          [{"mark": "S01", "grade": "A"}, {"mark": "S33", "grade": "B"}])
+    assert problems and "不是同一套" in problems[0]
+    assert "S01~S33" in problems[0] and "S49~S90" in problems[0]
+    assert "rescore" in problems[0], "没说清怎么查，等于只报了个红"
+
+
+def test_等级查不到就判红_这是挡住写手自己编等级的那道闸():
+    """空是缺信息，编是假信息——09-08 那一格五条发现里编错四条。"""
+    problems = _preflight(_StoreMarks(marks=(1, 2), grades=("A", "B")),
+                          [{"mark": "S01", "grade": None}, {"mark": "S02", "grade": None}])
+    assert any("查不到等级" in p for p in problems)
+    assert any("会自己编等级" in p for p in problems)
+
+
+def test_号码对得上且等级齐全就放行():
+    assert _preflight(_StoreMarks(marks=(1, 2), grades=("A", "B")),
+                      [{"mark": "S01", "grade": "A"}, {"mark": "S02", "grade": "B"}]) == []
+
+
+def test_断言不过时一次引擎都不付(tmp_path):
+    """判据是「不许起写手」，不是「跑完再报错」——要验到零调用。"""
+    import app.report.polish.run as run_mod
+
+    adapter = _Scripted()
+    # 让库里的号码与工作稿文件对不上：夹具工作稿只有 [S01]，库里给 S49。
+    class _Bad(_Store):
+        def list_evidence(self, rid):
+            return [{"id": "ev-49", "platform": "xhs", "kind": "post", "citation_no": 49,
+                     "title": "帖", "content_excerpt": "豆包好用", "grade": "A",
+                     "published_at": None, "extra": "{}"}]
+
+    outcome = asyncio.run(run_mod.polish(_Bad(), "r-t", tmp_path / "runs", WORK,
+                                         template="consulting", adapter=adapter))
+    assert outcome["status"] == "failed"
+    assert outcome["attempts"] == 0
+    assert adapter.calls == [], "断言没拦住，写手已经起跑了"

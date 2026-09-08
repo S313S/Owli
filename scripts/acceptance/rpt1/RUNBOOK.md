@@ -7,7 +7,18 @@
 
 1. **代码得是要验的那一版**：`git status --porcelain` 为空、`git log --oneline -1`
    是三包合齐之后的尖。工作区脏则账本自动带 `+dirty` 且永不复用（见下）。
-2. **底料在本树**：`var/rpt1-8956.db` 与 `var/runs/<id>/` 三份。库只读，只写 `exports/`。
+2. **底料在本树**：`var/shard1-serve.db` 与 `var/runs/<id>/` 三份。库只读，只写 `exports/`。
+
+   > **`var/shard1-serve.db` 现在是唯一权威库**（2026-09-08 改）。名字是起服务时临时取的、
+   > 不好看，但**不改名**——改名会牵动这份手册和调度手上的记录。原来的 `var/rpt1-8956.db`
+   > **已作废别再用**：09-07 那次 rescore 跑在服务库上，`backfill.py` 的
+   > `_write_artifact_then_citations` **同时改写了共享的工作稿文件、并重排了服务库的
+   > `citation_no`**，于是工作稿文件（S01~S33）与 `rpt1-8956.db`（S49~S90）分了家。
+   > 拿旧库跑稿，角标号对不上、等级会静默全空，**而写手拿不到等级就自己编**
+   > （09-08 实测五条发现编错四条）。
+   >
+   > **判据：跑稿的库，必须与改写过工作稿文件的那个库是同一个。**
+   > `polish()` 起跑前会断言这一条（`citation_preflight`），不过就不起写手、一次引擎都不付。
 3. **别在 8969 上跑着别的**。跑着的树是运行时，中途 checkout 会被子进程当场吃到。
 
 ## 起跑
@@ -15,7 +26,7 @@
 ```bash
 cd ../Owli-rpt1
 nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py \
-  --db var/rpt1-8956.db --runs var/runs --force \
+  --db var/shard1-serve.db --runs var/runs --force \
   > var/rpt1-final-$(date +%m%d-%H%M).log 2>&1 &
 echo $!    # 记下 pid
 ```
@@ -30,7 +41,7 @@ echo $!    # 记下 pid
 
 ```bash
 nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py \
-  --db var/rpt1-8956.db --runs var/runs --resume \
+  --db var/shard1-serve.db --runs var/runs --resume \
   > var/rpt1-final-resume-$(date +%m%d-%H%M).log 2>&1 &
 ```
 
@@ -63,11 +74,11 @@ nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py \
 # 第一步：单跑一格。**必须带 --force**——九份旧稿都还在，不带 --force 会被
 # 默认路径跳过，只重新压一遍尺子，交给用户的就是上一轮那份旧稿（读数里
 # 会打「← 未重写，只压尺子」，别忽略这行）。
-../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/rpt1-8956.db --runs var/runs --force   --only r-3e04f808dffd:consulting > var/rpt1-sample-$(date +%m%d-%H%M).log 2>&1
+../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/shard1-serve.db --runs var/runs --force   --only r-3e04f808dffd:consulting > var/rpt1-sample-$(date +%m%d-%H%M).log 2>&1
 
 # 第二步：起剩下的八格。**用 --resume，不要用 --force**——第一格已经进账本，
 # --resume 会跳过它；用 --force 则把它连同另外八格一起重跑，白烧一格。
-nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/rpt1-8956.db --runs var/runs --resume   > var/rpt1-final-$(date +%m%d-%H%M).log 2>&1 &
+nohup ../Owli/.venv/bin/python3 scripts/acceptance/rpt1/rpt1_matrix.py   --db var/shard1-serve.db --runs var/runs --resume   > var/rpt1-final-$(date +%m%d-%H%M).log 2>&1 &
 ```
 
 前提是两步之间**代码一个字没动**（含没提交的改动）——动了账本自动作废，
