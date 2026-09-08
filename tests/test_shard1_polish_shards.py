@@ -500,3 +500,67 @@ def test_断言不过时一次引擎都不付(tmp_path):
     assert outcome["status"] == "failed"
     assert outcome["attempts"] == 0
     assert adapter.calls == [], "断言没拦住，写手已经起跑了"
+
+
+# —— §POOL-1 丁′：附录里机械的三件下放给程序 ————————————————
+
+def test_缺失清单由程序出表_机器reason翻成人话():
+    from app.report.polish.run import missing_table
+
+    md = missing_table([
+        {"goal_id": "goal-1", "chapter_id": "ch-1", "reason": "timeout"},
+        {"goal_id": "goal-2", "chapter_id": "ch-3", "reason": "empty_result"},
+    ])
+    assert md.count("|") >= 8 and "goal-1/ch-1" in md
+    assert "采集超时没跑完" in md and "没采到任何内容" in md
+    # SKILL 第 7 条明写「不要照抄 goal-2/ch-3 empty_result 这种」
+    assert "empty_result" not in md and "timeout" not in md
+
+
+def test_表外的reason原样保留_不瞎猜():
+    """宁可露出机器词，也不替它编一个意思。"""
+    from app.report.polish.run import missing_table
+
+    assert "some_new_reason" in missing_table(
+        [{"goal_id": "g", "chapter_id": "c", "reason": "some_new_reason"}])
+
+
+def test_没有缺失时说清是没有_不出空表():
+    from app.report.polish.run import missing_table
+
+    md = missing_table([])
+    assert "没有缺失" in md and "|" not in md, "空表会被读成「这个维度没人讨论」"
+
+
+def test_各表口径条数与表数一致_basis原样列():
+    from app.report.polish.run import basis_table
+
+    md = basis_table({"platform_mix": {"title": "各平台对照", "basis": "按 platform 分组计数。"},
+                      "grade_mix": {"title": "等级分布", "basis": "五维合计定档。"}})
+    assert md.count("\n|") == 4, "表头 2 行 + 2 张表"
+    assert "按 platform 分组计数。" in md and "五维合计定档。" in md
+
+
+def test_两块都拼进末节_且排在信息源清单之前(tmp_path):
+    """三件都挂末节：缺失清单 → 各表口径 → 信息源清单。顺序错了读者会先看到一堆链接。"""
+    from app.report.polish.run import assemble, missing_table, basis_table, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["执行摘要", "附录"])
+    parts[0][1].parent.mkdir(parents=True, exist_ok=True)
+    for _, path in parts:
+        path.write_text("正文[S01]。", encoding="utf-8")
+    out = assemble(parts, [{"mark": "S01", "grade": "A", "title": "帖", "url": "u"}],
+                   appendix_blocks=(missing_table([{"goal_id": "g", "chapter_id": "c",
+                                                    "reason": "timeout"}]),
+                                    basis_table({"t": {"title": "表", "basis": "口径。"}})))
+    assert out.index("哪些没采到") < out.index("各表口径") < out.index("信息源清单")
+
+
+def test_不给两块时行为逐字不变(tmp_path):
+    """默认空——不分片、不下放的调用方（含既有用例）一个字都不该受影响。"""
+    from app.report.polish.run import assemble, section_paths
+
+    parts = section_paths(tmp_path, "r-t", "consulting", ["附录"])
+    parts[0][1].parent.mkdir(parents=True, exist_ok=True)
+    parts[0][1].write_text("正文[S01]。", encoding="utf-8")
+    assert assemble(parts) == assemble(parts, appendix_blocks=())

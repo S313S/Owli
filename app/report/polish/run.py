@@ -145,8 +145,50 @@ def _fetched_at_cell(raw: object) -> str:
     return text.replace("T", " ")[:16]
 
 
+#: 机器 reason → 人话。SKILL 第 7 条明写「用人话改写，不要照抄
+#: `goal-2/ch-3 empty_result` 这种」——既然是照着一张表改写，就没有理由让模型抄，
+#: 抄错了还要被尺子抓。表外的 reason 原样保留（宁可露出机器词，也不瞎猜它是什么意思）。
+_MISSING_REASON = {
+    "timeout": "这一段采集超时没跑完",
+    "empty_result": "这一段跑完了但没采到任何内容",
+    "conclusion_invalid": "这一段写出来了但没通过结论校验，未采用",
+    "retry_exhausted": "这一段重试用尽仍未成功",
+    "blocked": "这一段被权限或风控挡住",
+}
+
+
+def missing_table(missing: Sequence[Mapping[str, Any]]) -> str:
+    """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。"""
+    if not missing:
+        return "## 哪些没采到\n\n（本次调研没有缺失的采集段落。）\n"
+    lines = ["## 哪些没采到", "",
+             "（本节由程序按工作稿的缺失清单直接生成，未经改写。）", "",
+             "| 缺的是哪一段 | 为什么缺 |", "|---|---|"]
+    for item in missing:
+        where = str(item.get("chapter_id") or "").strip() or "（未标注）"
+        goal = str(item.get("goal_id") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        lines.append(f"| {goal}/{where} | {_MISSING_REASON.get(reason, reason or '原因未记录')} |")
+    return "\n".join(lines) + "\n"
+
+
+def basis_table(tables: Mapping[str, Any]) -> str:
+    """各表口径。`basis` 是每张表自己带的字段，照列即可，不必让模型誊抄。"""
+    rows = [(str(v.get("title") or k), str(v.get("basis") or "").strip())
+            for k, v in (tables or {}).items() if isinstance(v, Mapping)]
+    if not rows:
+        return ""
+    lines = ["## 各表口径", "",
+             "（本节由程序按每张表自己的 basis 字段直接生成，未经改写。）", "",
+             "| 表 | 口径 |", "|---|---|"]
+    for title, basis in rows:
+        lines.append(f"| {title.replace('|', '｜')} | {basis.replace('|', '｜') or '（未登记）'} |")
+    return "\n".join(lines) + "\n"
+
+
 def assemble(parts: Sequence[tuple[str, Path]],
-             sources: Sequence[Mapping[str, Any]] = ()) -> str:
+             sources: Sequence[Mapping[str, Any]] = (),
+             appendix_blocks: Sequence[str] = ()) -> str:
     """把各节拼成成稿：一级标题由代码写，写手只交正文。"""
     chunks = []
     for name, path in parts:
@@ -158,6 +200,12 @@ def assemble(parts: Sequence[tuple[str, Path]],
         if first.strip() in (f"# {name}", f"## {name}", name):
             body = rest.lstrip("\n")
         chunks.append(f"# {name}\n\n{body}")
+    # §POOL-1 丁′：缺失清单与各表口径也由程序生成，与信息源清单一样挂在末节。
+    # 它们本来就是「把现成字段照列一遍」，让模型誊抄既费引擎又会抄错。
+    # 09-05 那次附录连死两格，修法正是把信息源清单下放给程序；这是同一条路再走一步。
+    for block in appendix_blocks:
+        if block.strip():
+            chunks[-1] = chunks[-1].rstrip() + "\n\n" + block
     if sources:
         # 清单挂在最后一节（三个模板的末节都是附录）末尾。
         chunks[-1] = chunks[-1].rstrip() + "\n\n" + sources_table(sources)
@@ -610,7 +658,12 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
             return _failed(name, path, [
                 f"「{name}」各片单独都没越池，合并后却出现越池角标 "
                 f"{'、'.join(merged_offpool)}——合并取错片了。"])
-    markdown = assemble(parts, data.get("sources") or [])
+    from app.report.render import parse_report
+
+    markdown = assemble(parts, data.get("sources") or [], appendix_blocks=(
+        missing_table(parse_report(report_text).get("missing") or []),
+        basis_table(data.get("tables") or {}),
+    ))
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
     md_path.write_text(markdown, encoding="utf-8")
