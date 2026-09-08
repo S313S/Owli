@@ -145,6 +145,30 @@ def _fetched_at_cell(raw: object) -> str:
     return text.replace("T", " ")[:16]
 
 
+#: 机器串 → 人话。**下放给程序不等于可以照抄机器词**——2026-09-09 那一轮
+#: 尺子①「无内部词」红 13 处，**全是这两张程序生成的表**（`goal-3/ch-6/sec-1`、
+#: `evidence.platform`、`citation_no`、`reports.extra`、`app/report/polish/lexicon.py`）。
+#: 教训：下放换的是执行者，不是标准；模型照抄会被抓，程序照抄一样会被抓。
+#: 而 SKILL 里那句「未经改写」应当是「不需要改写」的结果，不是「没做人话化」的托词。
+_PLAIN_WORDS = {
+    "evidence.platform": "证据的平台字段", "citation_no": "引用角标",
+    "reports.extra.claims[].verdict": "主张的交叉验证结论",
+    "reports.extra": "报告的附加数据", "evidence.extra.dimensions": "证据自带的维度标注",
+    "tables.DIMENSIONS": "固定维度词表", "app/report/polish/lexicon.py": "固定词表",
+    "topic_polarity": "主题极性表", "entity_mentions": "实体提及表",
+    "grade_mix": "等级分布表", "crossref_mix": "交叉验证分布表",
+    "platform_mix": "平台分布表", "entity_dimension": "实体×维度表", "timeline": "时间分布表",
+}
+
+
+def plain_words(text: str) -> str:
+    """把机器词换成人话。长键先换，避免 `reports.extra` 先把 `reports.extra.claims[]` 切碎。"""
+    out = str(text or "")
+    for key in sorted(_PLAIN_WORDS, key=len, reverse=True):
+        out = out.replace(key, _PLAIN_WORDS[key])
+    return out
+
+
 #: 机器 reason → 人话。SKILL 第 7 条明写「用人话改写，不要照抄
 #: `goal-2/ch-3 empty_result` 这种」——既然是照着一张表改写，就没有理由让模型抄，
 #: 抄错了还要被尺子抓。表外的 reason 原样保留（宁可露出机器词，也不瞎猜它是什么意思）。
@@ -157,24 +181,33 @@ _MISSING_REASON = {
 }
 
 
-def missing_table(missing: Sequence[Mapping[str, Any]]) -> str:
+def missing_table(missing: Sequence[Mapping[str, Any]],
+                  objectives: Sequence[Mapping[str, Any]] = ()) -> str:
     """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。"""
     if not missing:
         return "## 哪些没采到\n\n（本次调研没有缺失的采集段落。）\n"
     lines = ["## 哪些没采到", "",
              "（本节由程序按工作稿的缺失清单直接生成，未经改写。）", "",
              "| 缺的是哪一段 | 为什么缺 |", "|---|---|"]
-    for item in missing:
-        where = str(item.get("chapter_id") or "").strip() or "（未标注）"
-        goal = str(item.get("goal_id") or "").strip()
+    # 段落名用**这一段在采什么**（目标原话），不用 `goal-x/ch-y`——后者是内部切块方式，
+    # 读者不需要知道，尺子①也禁。取不到就退成「第 N 段」，两者都不泄露内部编号。
+    by_goal = {str(g.get("goal_id")): str(g.get("objective") or "")
+               for g in (objectives or []) if isinstance(g, Mapping)}
+    for index, item in enumerate(missing, 1):
+        objective = by_goal.get(str(item.get("goal_id") or ""), "")
+        # 目标原话是一长句；按逗号切会切出「从豆包官网」这种不成句的残句，
+        # 所以整句截断加省略号——读者要认出是哪一段，不是读完整句。
+        text = plain_words(objective.strip())
+        where = (text[:34] + "…") if len(text) > 34 else text
         reason = str(item.get("reason") or "").strip()
-        lines.append(f"| {goal}/{where} | {_MISSING_REASON.get(reason, reason or '原因未记录')} |")
+        lines.append(f"| {where or f'第 {index} 段'} "
+                     f"| {_MISSING_REASON.get(reason, '原因未记录')} |")
     return "\n".join(lines) + "\n"
 
 
 def basis_table(tables: Mapping[str, Any]) -> str:
     """各表口径。`basis` 是每张表自己带的字段，照列即可，不必让模型誊抄。"""
-    rows = [(str(v.get("title") or k), str(v.get("basis") or "").strip())
+    rows = [(plain_words(str(v.get("title") or k)), plain_words(str(v.get("basis") or "").strip()))
             for k, v in (tables or {}).items() if isinstance(v, Mapping)]
     if not rows:
         return ""
@@ -661,7 +694,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     from app.report.render import parse_report
 
     markdown = assemble(parts, data.get("sources") or [], appendix_blocks=(
-        missing_table(parse_report(report_text).get("missing") or []),
+        missing_table(parse_report(report_text).get("missing") or [],
+                      data.get("objectives") or []),
         basis_table(data.get("tables") or {}),
     ))
     draft_path.write_text(markdown, encoding="utf-8")

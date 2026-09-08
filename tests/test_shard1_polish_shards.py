@@ -511,18 +511,23 @@ def test_缺失清单由程序出表_机器reason翻成人话():
         {"goal_id": "goal-1", "chapter_id": "ch-1", "reason": "timeout"},
         {"goal_id": "goal-2", "chapter_id": "ch-3", "reason": "empty_result"},
     ])
-    assert md.count("|") >= 8 and "goal-1/ch-1" in md
+    assert md.count("|") >= 8
     assert "采集超时没跑完" in md and "没采到任何内容" in md
-    # SKILL 第 7 条明写「不要照抄 goal-2/ch-3 empty_result 这种」
+    # SKILL 第 7 条明写「不要照抄 goal-2/ch-3 empty_result 这种」——**禁的是整个串**。
+    # 2026-09-09 那一轮我把它读成「只禁 reason」，于是 goal-1/ch-1 原样印进正文、
+    # 尺子①红了 4 处。现在两半都禁。
     assert "empty_result" not in md and "timeout" not in md
+    assert "goal-1" not in md and "ch-1" not in md
 
 
-def test_表外的reason原样保留_不瞎猜():
-    """宁可露出机器词，也不替它编一个意思。"""
+def test_表外的reason不印机器词_只说原因未记录():
+    """**这条 2026-09-09 改了语义**：原先「宁可露出机器词也不瞎猜」——但机器词本身
+    就是尺子①禁的东西，露出来照样判红。改成统一说「原因未记录」，既不瞎猜也不泄露。
+    """
     from app.report.polish.run import missing_table
 
-    assert "some_new_reason" in missing_table(
-        [{"goal_id": "g", "chapter_id": "c", "reason": "some_new_reason"}])
+    md = missing_table([{"goal_id": "g", "chapter_id": "c", "reason": "some_new_reason"}])
+    assert "some_new_reason" not in md and "原因未记录" in md
 
 
 def test_没有缺失时说清是没有_不出空表():
@@ -564,3 +569,66 @@ def test_不给两块时行为逐字不变(tmp_path):
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
     parts[0][1].write_text("正文[S01]。", encoding="utf-8")
     assert assemble(parts) == assemble(parts, appendix_blocks=())
+
+
+# —— §POOL-1 修 13 处内部词（2026-09-09 那一轮，红点全在程序生成的两张表里）——
+
+def _internal_word_hits(text: str) -> list[str]:
+    """**复用尺子①那份词表**，不另造一份——两处定义迟早会一处放行一处拦下。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "cp", Path(__file__).resolve().parents[1]
+        / "scripts" / "acceptance" / "rpt1" / "check_polished.py")
+    cp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cp)
+    return [m.group(0) for pattern in cp.FORBIDDEN
+            for m in re.finditer(pattern, text)]
+
+
+def test_缺失清单不含任何内部词_且段落名读者看得懂():
+    from app.report.polish.run import missing_table
+
+    md = missing_table(
+        [{"goal_id": "goal-1", "chapter_id": "ch-1", "reason": "timeout"},
+         {"goal_id": "goal-3", "chapter_id": "ch-6/sec-1", "reason": "conclusion_invalid"}],
+        [{"goal_id": "goal-1", "objective": "从豆包官网采集产品定位与官方口径。"},
+         {"goal_id": "goal-3", "objective": "采集 DeepSeek、Kimi 的产品定位与口碑要点。"}])
+    assert _internal_word_hits(md) == [], f"漏了内部词：{_internal_word_hits(md)}"
+    assert "从豆包官网采集产品定位" in md, "段落名要让读者认出是哪一段"
+    assert "采集超时没跑完" in md
+
+
+def test_各表口径不含任何内部词():
+    """13 处红点里 3 处出在这张表：evidence.platform / reports.extra / lexicon.py。"""
+    from app.report.polish.run import basis_table
+
+    md = basis_table({
+        "platform_mix": {"title": "各平台对照",
+                         "basis": "按 evidence.platform 分组计数；被引 = citation_no 非空。"},
+        "crossref_mix": {"title": "交叉验证分布",
+                         "basis": "按 reports.extra.claims[].verdict 计数。"},
+        "topic_polarity": {"title": "主题极性",
+                           "basis": "词表见 app/report/polish/lexicon.py。"}})
+    assert _internal_word_hits(md) == [], f"漏了内部词：{_internal_word_hits(md)}"
+    assert "证据的平台字段" in md and "引用角标" in md and "固定词表" in md
+
+
+def test_人话映射长键先换_不被短键切碎():
+    from app.report.polish.run import plain_words
+
+    assert plain_words("按 reports.extra.claims[].verdict 计数") == "按 主张的交叉验证结论 计数"
+
+
+def test_取不到目标原话时退成第N段_仍不含内部词():
+    from app.report.polish.run import missing_table
+
+    md = missing_table([{"goal_id": "goal-9", "chapter_id": "ch-1", "reason": "timeout"}])
+    assert "第 1 段" in md and _internal_word_hits(md) == []
+
+
+def test_表外的reason不再漏出机器词():
+    """原先「表外原样保留」会把 `some_new_reason` 印进正文——那也是内部词。"""
+    from app.report.polish.run import missing_table
+
+    md = missing_table([{"goal_id": "g", "chapter_id": "c", "reason": "some_new_reason"}])
+    assert "some_new_reason" not in md and "原因未记录" in md
