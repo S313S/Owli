@@ -19,6 +19,7 @@ from app.orchestrator.chapter_failure import (
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
 from app.reliability.coding import TOPIC_NONE
+from app.reliability.relevance import rows_naming_entities
 from app.report.markdown import (
     merge_section_shards,
     merge_sectioned_markdown,
@@ -2521,8 +2522,17 @@ async def run_sectioned_task(
                 str(section["goal_id"]),
                 research_root=runs_root / plan.research_id,
             )
+            # §SHARD-1 后续（用户 2026-09-08 拍）：标题/正文里不含任何被评实体叫法的行
+            # 不进池。加在**这个**调用点而不是 `_evidence_index` 里面，是因为那个函数
+            # 同时产出「全报告稳定编号」（2405 那个调用点只取编号）和「本节可见池」；
+            # 加在函数里会连编号一起改，而本轮只重放 sec-2、不重放 sec-3——sec-3 的正文
+            # 带着旧编号原样留着，编号一动，同一份工作稿里 `[S07]` 会指两条不同的源，
+            # 一半对一半错且零报错。所以只过滤「谁进池」，不碰编号。
+            # 兜底与 D 闸同族（`keepable or identified`）：全被挡光时回退未过滤那份——
+            # 池空了写手什么都写不出来，比让它看到几条不相关的更糟。
+            relevant = rows_naming_entities(evidence_rows, plan)
             evidence_pool, _ = _evidence_index(
-                evidence_rows,
+                relevant or evidence_rows,
                 allowed_goal_ids,
                 section_goal_id=str(section["goal_id"]),
             )
