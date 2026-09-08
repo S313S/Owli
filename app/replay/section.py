@@ -75,14 +75,19 @@ def _replay_adapter_factory(store: Any) -> Any:
     """重放专用适配器工厂：只把 Claude 那一路的墙钟放宽，别的原样。"""
 
     from app.adapters.claude import ClaudeAdapter
+    from app.adapters.codex import CodexAdapter
     from app.adapters.routing import RoutedAdapter
 
     def factory() -> Any:
+        # `RoutedAdapter` 要求两条引擎都给齐（`缺少引擎适配器：codex`），
+        # 只放宽 Claude 那一路、Codex 原样默认。
         return RoutedAdapter(
             utc_clock=lambda: datetime.now(timezone.utc),
             source_store=store,
-            adapters={"claude": ClaudeAdapter(
-                timeout_seconds=REPLAY_ENGINE_TIMEOUT_SECONDS)},
+            adapters={
+                "claude": ClaudeAdapter(timeout_seconds=REPLAY_ENGINE_TIMEOUT_SECONDS),
+                "codex": CodexAdapter(),
+            },
         )
 
     return factory
