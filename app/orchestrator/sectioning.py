@@ -2393,6 +2393,17 @@ async def run_sectioned_task(
     # source_mcp 可在并发 goal 中直写 evidence，因此证据行也必须与
     # input_rows 同时冻结；合并编号和每节证据池共用这一份快照。
     evidence_rows = store.list_evidence(plan.research_id)
+    # §POOL-1（用户 2026-09-08 拍乙）：相关性硬闸提到**两个调用点共同的上游**算一次。
+    # 标题/正文里不含任何被评实体叫法的行不进池。兜底与 D 闸同族（`keepable or
+    # identified`）：全被挡光就回退未过滤那份——池空了写手什么都写不出来。
+    #
+    # **为什么必须在这里、而不是只在组池那一处**：下面两个 `_evidence_index` 一个取
+    # 「本节可见池」、一个取「全报告编号」，而合并环节 `_merge_shard_structures` 会
+    # **按全局号重排角标**。只过滤其中一个，同一条证据在两处就是两个号——实测 99 条
+    # 里 57 条对不上，写手按池号写的片合并后整体移位，再拿池一校验就是「越池」。
+    # 2026-09-08 那轮 `goal-3/ch-6/sec-2` 的 37 处 conclusion_invalid 就是这么来的：
+    # 分片、写手、续写轮全对，错在两个编号基准不是同一批行。
+    evidence_rows = rows_naming_entities(evidence_rows, plan) or evidence_rows
     # §CODE-1 货 3：按 id 索一份，供口碑节的 UGC 聚合摘要取 extra.coding。
     # 与上面那份快照同源，不另读库——池子和摘要必须看同一份数据。
     evidence_rows_by_id = {
@@ -2522,17 +2533,8 @@ async def run_sectioned_task(
                 str(section["goal_id"]),
                 research_root=runs_root / plan.research_id,
             )
-            # §SHARD-1 后续（用户 2026-09-08 拍）：标题/正文里不含任何被评实体叫法的行
-            # 不进池。加在**这个**调用点而不是 `_evidence_index` 里面，是因为那个函数
-            # 同时产出「全报告稳定编号」（2405 那个调用点只取编号）和「本节可见池」；
-            # 加在函数里会连编号一起改，而本轮只重放 sec-2、不重放 sec-3——sec-3 的正文
-            # 带着旧编号原样留着，编号一动，同一份工作稿里 `[S07]` 会指两条不同的源，
-            # 一半对一半错且零报错。所以只过滤「谁进池」，不碰编号。
-            # 兜底与 D 闸同族（`keepable or identified`）：全被挡光时回退未过滤那份——
-            # 池空了写手什么都写不出来，比让它看到几条不相关的更糟。
-            relevant = rows_naming_entities(evidence_rows, plan)
             evidence_pool, _ = _evidence_index(
-                relevant or evidence_rows,
+                evidence_rows,
                 allowed_goal_ids,
                 section_goal_id=str(section["goal_id"]),
             )
