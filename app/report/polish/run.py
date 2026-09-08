@@ -151,7 +151,7 @@ def _fetched_at_cell(raw: object) -> str:
 #: 教训：下放换的是执行者，不是标准；模型照抄会被抓，程序照抄一样会被抓。
 #: 而 SKILL 里那句「未经改写」应当是「不需要改写」的结果，不是「没做人话化」的托词。
 _PLAIN_WORDS = {
-    "evidence.platform": "证据的平台字段", "citation_no": "引用角标",
+    "evidence.platform": "证据的来源平台", "evidence.published_at": "证据的发布时间", "citation_no": "引用角标",
     "reports.extra.claims[].verdict": "主张的交叉验证结论",
     "reports.extra": "报告的附加数据", "evidence.extra.dimensions": "证据自带的维度标注",
      "app/report/polish/lexicon.py": "固定词表",
@@ -174,7 +174,9 @@ def plain_words(text: str) -> str:
     out = _CODE_POINTER.sub("", str(text or ""))
     for key in sorted(_PLAIN_WORDS, key=len, reverse=True):
         out = out.replace(key, _PLAIN_WORDS[key])
-    return out
+    # 机器词两侧原本靠空格与中文隔开（`按 evidence.platform 分组`），换成中文后
+    # 那两个空格就成了多余的——中文之间不留空格。只收中文之间的，不动中英混排。
+    return re.sub(r"(?<=[\u4e00-\u9fff]) +(?=[\u4e00-\u9fff])", "", out)
 
 
 #: 机器 reason → 人话。SKILL 第 7 条明写「用人话改写，不要照抄

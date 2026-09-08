@@ -264,7 +264,7 @@ def _timeline(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
                        "marks": _marks(old_rows)})
     return _table("timeline", "证据发布时间分布（按月）",
                   ("月份", "证据条数", "其中被引"), out, n=len(dated),
-                  basis="按 evidence.published_at 前 7 位分月，只列最近 12 个有数据的月份，"
+                  basis="按证据的发布时间分月，只列最近 12 个有数据的月份，"
                         "更早的合并成一行；索引源常拿不到发布时间，未标注的不计入。",
                   coverage={"有发布时间": len(dated), "总条数": len(rows)})
 

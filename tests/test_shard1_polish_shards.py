@@ -610,7 +610,7 @@ def test_各表口径不含任何内部词():
         "topic_polarity": {"title": "主题极性",
                            "basis": "词表见 app/report/polish/lexicon.py。"}})
     assert _internal_word_hits(md) == [], f"漏了内部词：{_internal_word_hits(md)}"
-    assert "证据的平台字段" in md and "引用角标" in md
+    assert "证据的来源平台" in md and "引用角标" in md
     # 「词表见 <代码路径>」那半句**整条删掉**，不换成「固定词表」——换了会变成
     # 「词表见 固定词表」这种循环句（调度 09-09 在生成物上抓到）。这条断言原先写的是
     # `"固定词表" in md`，锁的正是被替换掉的那一版做法。
@@ -620,7 +620,9 @@ def test_各表口径不含任何内部词():
 def test_人话映射长键先换_不被短键切碎():
     from app.report.polish.run import plain_words
 
-    assert plain_words("按 reports.extra.claims[].verdict 计数") == "按 主张的交叉验证结论 计数"
+    # 换完还要收掉中文之间的多余空格——机器词原本靠空格与中文隔开（`按 X 计数`），
+    # 换成中文后那两个空格就多余了。
+    assert plain_words("按 reports.extra.claims[].verdict 计数") == "按主张的交叉验证结论计数"
 
 
 def test_取不到目标原话时退成第N段_仍不含内部词():
