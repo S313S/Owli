@@ -610,7 +610,11 @@ def test_各表口径不含任何内部词():
         "topic_polarity": {"title": "主题极性",
                            "basis": "词表见 app/report/polish/lexicon.py。"}})
     assert _internal_word_hits(md) == [], f"漏了内部词：{_internal_word_hits(md)}"
-    assert "证据的平台字段" in md and "引用角标" in md and "固定词表" in md
+    assert "证据的平台字段" in md and "引用角标" in md
+    # 「词表见 <代码路径>」那半句**整条删掉**，不换成「固定词表」——换了会变成
+    # 「词表见 固定词表」这种循环句（调度 09-09 在生成物上抓到）。这条断言原先写的是
+    # `"固定词表" in md`，锁的正是被替换掉的那一版做法。
+    assert "词表见" not in md and "固定词表" not in md
 
 
 def test_人话映射长键先换_不被短键切碎():
@@ -632,3 +636,35 @@ def test_表外的reason不再漏出机器词():
 
     md = missing_table([{"goal_id": "g", "chapter_id": "c", "reason": "some_new_reason"}])
     assert "some_new_reason" not in md and "原因未记录" in md
+
+
+def test_指向代码路径的半句整条删掉_不做词替换():
+    """机械替换会造出「词表见 固定词表」——读者读完等于没读（调度 09-09 在生成物上抓到）。
+
+    两种形态分开处理：带括号的删括号、句号留给前一句；不带括号的连句号一起删。
+    一条正则通吃会把「…兜底（词表见 X）。」的句号也吃掉，两句黏成一句。
+    """
+    from app.report.polish.run import plain_words
+
+    a = plain_words("维度优先取 evidence.extra.dimensions，缺失时用固定词表兜底"
+                    "（词表见 tables.DIMENSIONS）。每行角标最多列 3 个。")
+    assert "词表见" not in a and "兜底。每行角标" in a, a
+    b = plain_words("不得说「X% 用户认为」。词表见 app/report/polish/lexicon.py。")
+    assert "词表见" not in b and b.endswith("不得说「X% 用户认为」。"), b
+
+
+def test_口径里不留英文字段名():
+    """尺子词表里没有 grade / basis，但它们对客户就是英文字段名——尺子绿不等于能看。"""
+    from app.report.polish.run import basis_table
+
+    md = basis_table({"grade_mix": {"title": "等级分布",
+                                    "basis": "grade 是库内生成列（五维合计 ≥8 为 A）。"}})
+    assert "grade" not in md and "等级" in md
+
+
+def test_两张表的表头自己也不带机器词():
+    from app.report.polish.run import basis_table, missing_table
+
+    for md in (basis_table({"t": {"title": "表", "basis": "口径。"}}),
+               missing_table([{"goal_id": "g", "reason": "timeout"}])):
+        assert "basis" not in md and "未经改写" not in md, md

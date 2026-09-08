@@ -154,16 +154,24 @@ _PLAIN_WORDS = {
     "evidence.platform": "证据的平台字段", "citation_no": "引用角标",
     "reports.extra.claims[].verdict": "主张的交叉验证结论",
     "reports.extra": "报告的附加数据", "evidence.extra.dimensions": "证据自带的维度标注",
-    "tables.DIMENSIONS": "固定维度词表", "app/report/polish/lexicon.py": "固定词表",
-    "topic_polarity": "主题极性表", "entity_mentions": "实体提及表",
+     "app/report/polish/lexicon.py": "固定词表",
+    "grade": "等级", "topic_polarity": "主题极性表", "entity_mentions": "实体提及表",
     "grade_mix": "等级分布表", "crossref_mix": "交叉验证分布表",
     "platform_mix": "平台分布表", "entity_dimension": "实体×维度表", "timeline": "时间分布表",
 }
 
 
+#: 「（词表见 <代码路径>）」这半句整条删掉，**不做词替换**——2026-09-09 实测机械替换
+#: 会把「词表见 app/report/polish/lexicon.py」变成「词表见 固定词表」，读者读完等于没读。
+#: 指向代码位置的句子对客户没有信息量，删掉比换个说法诚实。
+#: 两种形态分开处理：带括号的整个括号删掉（句号留给前一句），不带括号的连句号一起删。
+#: 一条正则通吃会把「…兜底（词表见 X）。」的句号也吃掉，两句黏成「兜底每行角标…」。
+_CODE_POINTER = re.compile(r"[（(]词表见[^）)]*[）)]|词表见[^。；]*[。；]")
+
+
 def plain_words(text: str) -> str:
     """把机器词换成人话。长键先换，避免 `reports.extra` 先把 `reports.extra.claims[]` 切碎。"""
-    out = str(text or "")
+    out = _CODE_POINTER.sub("", str(text or ""))
     for key in sorted(_PLAIN_WORDS, key=len, reverse=True):
         out = out.replace(key, _PLAIN_WORDS[key])
     return out
@@ -187,7 +195,7 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
     if not missing:
         return "## 哪些没采到\n\n（本次调研没有缺失的采集段落。）\n"
     lines = ["## 哪些没采到", "",
-             "（本节由程序按工作稿的缺失清单直接生成，未经改写。）", "",
+             "（本节由程序按调研过程记录生成。）", "",
              "| 缺的是哪一段 | 为什么缺 |", "|---|---|"]
     # 段落名用**这一段在采什么**（目标原话），不用 `goal-x/ch-y`——后者是内部切块方式，
     # 读者不需要知道，尺子①也禁。取不到就退成「第 N 段」，两者都不泄露内部编号。
@@ -212,7 +220,7 @@ def basis_table(tables: Mapping[str, Any]) -> str:
     if not rows:
         return ""
     lines = ["## 各表口径", "",
-             "（本节由程序按每张表自己的 basis 字段直接生成，未经改写。）", "",
+             "（本节由程序按每张表登记的口径说明生成。）", "",
              "| 表 | 口径 |", "|---|---|"]
     for title, basis in rows:
         lines.append(f"| {title.replace('|', '｜')} | {basis.replace('|', '｜') or '（未登记）'} |")

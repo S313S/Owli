@@ -131,7 +131,7 @@ def _platform_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         })
     return _table("platform_mix", "各平台采集量与被引量对照", 
                   ("平台", "采集条数", "其中评论", "被引条数", "被引占比"), out,
-                  n=len(rows), basis="按 evidence.platform 分组计数；被引 = citation_no 非空。",
+                  n=len(rows), basis="按证据的来源平台分组计数；被引 = 进了引用池的条数。",
                   coverage={"评级覆盖": sum(1 for r in rows if r.get("grade")), "总条数": len(rows)})
 
 
@@ -149,7 +149,7 @@ def _grade_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return _table("grade_mix", "被引证据的可靠度等级分布",
                   ("等级", "被引条数", "全库条数", "含义"), out,
                   n=len(cited_rows),
-                  basis="grade 是库内生成列（五维合计 ≥8 为 A、≥6 为 B、≥4 为 C，其余 D）。",
+                  basis="等级由五维评分合计定档：≥8 为 A、≥6 为 B、≥4 为 C，其余 D。",
                   coverage={"被引条数": len(cited_rows), "全库条数": len(rows)})
 
 
@@ -236,7 +236,7 @@ def _topic_polarity(rows: Sequence[Mapping[str, Any]], top_n: int = 8) -> dict[s
                   ("主题", "提及条数", "含正向词", "含负向词", "正负同现"), out,
                   n=sum(r["提及条数"] for r in out),
                   basis=f"固定词表 {LEXICON_VERSION} 命中计数，不是情感判断；只能说「提及…的条数」，"
-                        "不得说「X% 用户认为」。词表见 app/report/polish/lexicon.py。",
+                        "不得说「X% 用户认为」。所用词表随报告版本固定，不随单次调研调整。",
                   coverage={"命中任一主题的证据": sum(1 for r in rows if hit_topics(_text_of(r))),
                             "总条数": len(rows)})
 
@@ -304,7 +304,7 @@ def _entity_dimension(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any]
     return _table("entity_dimension", "实体 × 维度的证据条数矩阵", ["实体", *columns], out,
                   n=sum(len(v) for v in grid.values()),
                   basis="格内是同时命中该实体叫法与该维度的证据条数；维度优先取 evidence.extra.dimensions，"
-                        "缺失时用固定词表兜底（词表见 tables.DIMENSIONS）。"
+                        "缺失时用固定维度词表兜底。"
                         f"每行角标最多列 {MATRIX_MARKS_PER_ROW} 个，且写在表下那一行，不进格子。",
                   coverage={"带 dimensions 字段的证据":
                             sum(1 for r in rows if (r.get("_extra") or {}).get("dimensions")),
