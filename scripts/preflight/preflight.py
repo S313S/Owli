@@ -169,14 +169,47 @@ def check_backfill(args: argparse.Namespace) -> Result:
 # ② 未重写的节会不会撞号（出处：D-056 + 09-08 落点事故）
 # --------------------------------------------------------------------------
 
+def _section_markdown(path: Path) -> str:
+    """节产物有两种形态，都要认（09-08 真实状态上现形）：
+
+    - 纯 Markdown（`sec-1.md` 那种占位节）
+    - `{"markdown": ..., "claims": [...]}` 的 JSON 信封（`sec-3.md` 那种成稿节）
+
+    只认前一种，31 KB 带 30 个角标的节会被读成「0 条角标」——
+    静默失效而表现为「平安无事」。
+    """
+
+    if not path.is_file():
+        return ""
+    raw = path.read_text(encoding="utf-8")
+    if raw.lstrip().startswith("{"):
+        try:
+            document = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+        if isinstance(document, dict) and isinstance(document.get("markdown"), str):
+            return document["markdown"]
+    return raw
+
+
+def _is_placeholder(text: str) -> bool:
+    """占位节：去掉标题行后只剩「- 此处缺失：…；原因：…」一行。
+
+    沿用 `render._PLACEHOLDER` 那把尺子，别自己再认一遍这个句式。
+    """
+
+    from app.report.render import _PLACEHOLDER
+
+    body = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+    return len(body) == 1 and _PLACEHOLDER.match(body[0]) is not None
+
+
 def _marks_in(path: Path) -> dict[int, str]:
     """一份节产物「信息源」段里的 号 → URL。号是号，URL 才是身份。"""
 
     from app.report.markdown import _LINK_URL, _MARK, _split_section_structures
 
-    if not path.is_file():
-        return {}
-    _, _, source_lines = _split_section_structures(path.read_text(encoding="utf-8"))
+    _, _, source_lines = _split_section_structures(_section_markdown(path))
     out: dict[int, str] = {}
     for line in source_lines:
         mark, url = _MARK.search(line), _LINK_URL.search(line)
@@ -198,12 +231,14 @@ def check_citation_collision(args: argparse.Namespace) -> Result:
     by_number: dict[int, str] = {int(no): url for url, no in planned.items()}
     clashes: list[dict[str, Any]] = []
     empty: list[str] = []
+    placeholders: list[str] = []
     for path in keep:
         marks = _marks_in(path)
         if not marks:
-            # 读不出角标不等于没撞号——多半是路径错了或那节格式变了。
-            # 静默判绿正是本项目一天现形七次的那一族（`green-on-existence-not-production`）。
-            empty.append(path.name)
+            # 占位节本来就没角标，撞不了号；**别的**读不出才是可疑的
+            # ——多半是路径错了或那节格式变了，静默判绿正是本项目一天现形
+            # 七次的那一族（`green-on-existence-not-production`）。
+            (placeholders if _is_placeholder(_section_markdown(path)) else empty).append(path.name)
         for number, url in marks.items():
             other = by_number.get(number)
             if other is not None and other != url:
@@ -218,8 +253,13 @@ def check_citation_collision(args: argparse.Namespace) -> Result:
         return Result.red("② 未重写节撞号",
                           f"{len(clashes)} 个角标同号不同源（一半对一半错、零报错）",
                           keep_sections=len(keep), clashes=clashes)
-    return Result.ok("② 未重写节撞号", f"{len(keep)} 节、{len(by_number)} 个计划号，0 撞号",
-                     keep_sections=[p.name for p in keep], planned_numbers=len(by_number))
+    return Result.ok(
+        "② 未重写节撞号",
+        f"{len(keep)} 节、{len(by_number)} 个计划号，0 撞号"
+        + (f"（其中 {len(placeholders)} 节是占位节、本就无角标：{'、'.join(placeholders)}）"
+           if placeholders else ""),
+        keep_sections=[p.name for p in keep], planned_numbers=len(by_number),
+        占位节=placeholders)
 
 
 # --------------------------------------------------------------------------

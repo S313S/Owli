@@ -322,3 +322,41 @@ def test_绿_活着的进程查得到() -> None:
     finally:
         child.kill()
         child.wait()
+
+
+# ② 的两条补充——都是在 09-08 真实状态上跑出来才发现的
+def test_绿_占位节本来就没角标不算读不出(tmp_path: Path) -> None:
+    keep = tmp_path / "sec-1.md"
+    keep.write_text("## goal-3｜某章\n\n- 此处缺失：goal-3/ch-6/sec-1；原因：conclusion_invalid\n",
+                    encoding="utf-8")
+    numbers = tmp_path / "nos.json"
+    numbers.write_text(json.dumps({"https://a.example/1": 7}), encoding="utf-8")
+    result = preflight.check_citation_collision(
+        _args(keep_section=[str(keep)], citation_numbers=str(numbers)))
+    assert result.status == preflight.PASS and result.numbers["占位节"] == ["sec-1.md"]
+
+
+def test_红_json信封形态的节也要读得出角标(tmp_path: Path) -> None:
+    # 真实成稿节是 {"markdown": ..., "claims": [...]}；只认纯 Markdown 的话，
+    # 31 KB 带 30 个角标的节会被读成「0 条」——静默失效而表现为「平安无事」。
+    body = ("## 小节\n\n正文 [S07]\n\n### 信息源\n"
+            "- [S07] [标题](https://a.example/1) · fetched_at=2026-09-08T00:00:00+00:00\n")
+    keep = tmp_path / "sec-3.md"
+    keep.write_text(json.dumps({"markdown": body, "claims": []}), encoding="utf-8")
+    numbers = tmp_path / "nos.json"
+    numbers.write_text(json.dumps({"https://b.example/2": 7}), encoding="utf-8")
+    result = preflight.check_citation_collision(
+        _args(keep_section=[str(keep)], citation_numbers=str(numbers)))
+    assert result.status == preflight.FAIL          # 读得出，才判得出撞号
+    assert result.numbers["clashes"][0]["mark"] == "[S07]"
+
+
+def test_红_既不是占位节又读不出角标要判红(tmp_path: Path) -> None:
+    keep = tmp_path / "sec-9.md"
+    keep.write_text("## 小节\n\n有正文但没有信息源段\n", encoding="utf-8")
+    numbers = tmp_path / "nos.json"
+    numbers.write_text(json.dumps({"https://a.example/1": 7}), encoding="utf-8")
+    result = preflight.check_citation_collision(
+        _args(keep_section=[str(keep)], citation_numbers=str(numbers)))
+    assert result.status == preflight.FAIL
+    assert result.numbers["读不出角标的节"] == ["sec-9.md"]
