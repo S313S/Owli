@@ -430,6 +430,50 @@ def hedge_density(markdown: str) -> list[str]:
     return problems
 
 
+#: §WRITE-1 货 3（用户 09-09 拍「2.5 万压到 1.2–1.5 万」）。**单位是字符，不是中文字**：
+#: 底料 `r-3e04f808dffd×consulting` 实测全文 25 197 字符 / 47 314 B / 中文字才 9 933——
+#: 用户读到的「2.5 万」对得上的是**字符数**。开工时按中文字定预算差了三倍，
+#: 会要求这份稿变长（本包实测当场推翻，这是「量出异常先怀疑尺子」第八次现形）。
+#:
+#: 数的是**写手写的那部分**：程序生成的四块（缺失清单 / 各表口径 / 词表命中参考 /
+#: 信息源清单）不计。它们合计 11 041 字符、占全文 44%，其中信息源清单一块就 9 434——
+#: 那是 50 条源的标题与链接，读者不读它、只查它，写手也压不动它。
+#: 全文要真进 1.2–1.5 万，得动信息源清单，那是可追溯性的骨架，**已呈调度请用户拍**。
+#: 本尺子按「写手正文砍一半」落：14 156 → 7 000–9 000 字符。
+#:
+#: **判黄不判红**——篇幅超了要整稿重写，一轮 37.6 分钟；这条给合流那一轮一个读数。
+LENGTH_MAX_CHARS = 9000
+LENGTH_MIN_CHARS = 7000
+
+
+def writer_length(markdown: str) -> int:
+    """写手写的那部分有多少字符。表格与引语照数——它们也占读者的阅读时间。"""
+    from app.report.polish.run import PROGRAM_APPENDIX_HEADINGS
+
+    text = markdown
+    for heading in PROGRAM_APPENDIX_HEADINGS:
+        cut = text.rfind("\n" + heading)
+        if cut >= 0:
+            # 程序块之间不保证顺序，逐块按「这一块到下一个二级标题」剜掉。
+            rest = text[cut + 1:]
+            end = rest.find("\n## ", len(heading))
+            text = text[:cut + 1] + (rest[end + 1:] if end >= 0 else "")
+    return len(text)
+
+
+def length_budget(markdown: str) -> list[str]:
+    """货 3：篇幅。判黄不判红；本包不出判据，读数留给合流那一轮。"""
+    count = writer_length(markdown)
+    if count > LENGTH_MAX_CHARS:
+        return [f"写手正文 {count} 字符，超出上限 {LENGTH_MAX_CHARS}："
+                "先查同一张表出没出两次、两条发现讲没讲同一件事、"
+                "论据节是不是把关键发现的表重排了一遍。⛔ 不许靠删限定句压"]
+    if count < LENGTH_MIN_CHARS:
+        return [f"写手正文 {count} 字符，低于下限 {LENGTH_MIN_CHARS}——"
+                "压过头了，看是不是把限定句或反证删掉了"]
+    return []
+
+
 #: §RULE-1 货 4（评审 #8，调度拍乙）：正式稿只出表不出图。
 #: 前端没有图表渲染器（`web/src` 与 skill 目录里都没有 mermaid），写手自选的
 #: `xychart-beta ... line [27, 4, ...]` 在真实页面上整段显示成裸代码。
@@ -592,7 +636,7 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           "⑮ 归因只引该格内的角标", "⑯ 表格一格 ≤3 个角标")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
-WARNINGS = ("⒜ 限定句密度",)
+WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅")
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -640,7 +684,8 @@ def warnings_of(md_path: Path) -> dict[str, list[str]]:
     """判黄的那几条。与 `run()` 分开返回：调用方（`rpt1_matrix`）按 `run()` 判过不过，
     黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。"""
     markdown = md_path.read_text(encoding="utf-8")
-    return {WARNINGS[0]: hedge_density(markdown)}
+    return {WARNINGS[0]: hedge_density(markdown),
+            WARNINGS[1]: length_budget(markdown)}
 
 
 def main(argv: list[str]) -> int:

@@ -109,6 +109,15 @@ def clear_stale_parts(runs_root: Path, research_id: str, template: str) -> list[
     return removed
 
 
+#: 附录里由程序生成、写手一个字都不写的那几块。标题在这里定义一次，
+#: 尺子按它切掉程序块再量写手的篇幅——同一个概念两处两个定义是本项目现形过的假绿。
+SOURCES_HEADING = "## 信息源清单"
+MISSING_HEADING = "## 哪些没采到"
+BASIS_HEADING = "## 各表口径"
+LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
+PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING, SOURCES_HEADING)
+
+
 def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """信息源清单：由代码生成，不让写手誊抄。
 
@@ -119,7 +128,7 @@ def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """
     grade_note = {"A": "可独立支撑结论", "B": "较可靠，宜与他源同现",
                   "C": "只作旁证", "D": "线索级"}
-    lines = ["## 信息源清单", "",
+    lines = [SOURCES_HEADING, "",
              "（本节由程序按证据库直接生成，未经改写。）", "",
              "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
     for item in sources:
@@ -195,8 +204,8 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
                   objectives: Sequence[Mapping[str, Any]] = ()) -> str:
     """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。"""
     if not missing:
-        return "## 哪些没采到\n\n（本次调研没有缺失的采集段落。）\n"
-    lines = ["## 哪些没采到", "",
+        return f"{MISSING_HEADING}\n\n（本次调研没有缺失的采集段落。）\n"
+    lines = [MISSING_HEADING, "",
              "（本节由程序按调研过程记录生成。）", "",
              "| 缺的是哪一段 | 为什么缺 |", "|---|---|"]
     # 段落名用**这一段在采什么**（目标原话），不用 `goal-x/ch-y`——后者是内部切块方式，
@@ -221,7 +230,7 @@ def basis_table(tables: Mapping[str, Any]) -> str:
             for k, v in (tables or {}).items() if isinstance(v, Mapping)]
     if not rows:
         return ""
-    lines = ["## 各表口径", "",
+    lines = [BASIS_HEADING, "",
              "（本节由程序按每张表登记的口径说明生成。）", "",
              "| 表 | 口径 |", "|---|---|"]
     for title, basis in rows:
@@ -246,7 +255,7 @@ def lexicon_reference_table(tables: Mapping[str, Any]) -> str:
     columns = [str(c) for c in table.get("columns") or []]
     if not columns:
         return ""
-    lines = ["## 词表命中参考（只数触发词，不是情感判断）", "",
+    lines = [LEXICON_HEADING, "",
              "（本节由程序按固定词表的命中计数生成，未经改写。这张表只统计触发词出现在多少条"
              "证据里，**不是情感判断**——一条证据里出现「免费」既可能是在夸也可能是在骂，"
              "词表分不出来。态度的结论一律以逐条编码那张表为准；两张表口径不同，"

@@ -241,3 +241,47 @@ def test_带出处行但没角标的原声照样上子串闸():
     """两样凭据有一样就是原声：出处行在，就算角标漏了也要比对原文。"""
     block = "> 我白请一假，回来还得加班。\n> —— 微博 · 等级 A\n"
     assert altered_quotes(block, _corpus())
+
+
+# —— 货 3：篇幅（判黄不判红；本包不出判据，读数留给合流那一轮）——————————
+
+import sys as _sys  # noqa: E402
+
+_sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "acceptance" / "rpt1"))
+import check_polished as _ruler  # noqa: E402
+
+
+def _doc(writer_chars: int) -> str:
+    from app.report.polish.run import BASIS_HEADING, SOURCES_HEADING
+
+    return ("# 执行摘要\n\n" + "正" * writer_chars + "\n\n"
+            + BASIS_HEADING + "\n\n" + "口" * 3000 + "\n\n"
+            + SOURCES_HEADING + "\n\n" + "源" * 9000 + "\n")
+
+
+def test_篇幅只数写手写的那部分():
+    """程序生成的四块（缺失清单/各表口径/词表命中参考/信息源清单）不算写手的账。
+
+    信息源清单一块就 9 434 字符、占底料全文 37%，读者不读它只查它，写手也压不动。
+    """
+    assert _ruler.writer_length(_doc(5000)) == pytest.approx(5000, abs=40)
+
+
+def test_篇幅单位是字符不是中文字():
+    """开工时按中文字定预算差了三倍——底料全文 25 197 字符、中文字才 9 933，
+
+    用户读到的「2.5 万」对得上的是字符数。按中文字定，尺子会要求这份稿变长。
+    """
+    assert _ruler.LENGTH_MAX_CHARS == 9000 and _ruler.LENGTH_MIN_CHARS == 7000
+    assert _ruler.length_budget(_doc(14154))          # 上一稿那个体量要判黄
+    assert _ruler.length_budget(_doc(8000)) == []     # 砍一半之后不判
+
+
+def test_篇幅压过头也报():
+    """⛔ 不许靠删限定句压篇幅——压过头同样要报出来给人看。"""
+    assert "低于下限" in _ruler.length_budget(_doc(3000))[0]
+
+
+def test_篇幅判黄不判红():
+    """篇幅超了要整稿重写、一轮 37.6 分钟；这条只给读数，不掀掉这一格。"""
+    assert "⒝ 篇幅" in _ruler.WARNINGS and "⒝ 篇幅" not in _ruler.CHECKS
