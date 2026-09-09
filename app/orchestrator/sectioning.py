@@ -20,9 +20,9 @@ from app.orchestrator.chapter_failure import (
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
 # §QUOTE-2：分档函数与那套标注措辞**从 §QUOTE-1 那边 import，不抄一份**。
 # 抄一份不会立刻出错，会在它哪天改词的时候悄悄分叉，而那时没人会想到来比对两处。
-# `_quote_sort_key` 是私名，仍然 import：跨模块引私名是小味道，两处排序语义各写一版才是真病。
+# `_quote_sort_key` 仍是私名：跨模块引私名是小味道，两处排序语义各写一版才是真病。
 from app.reliability.coding import (
-    _ENGAGEMENT_NOTES, _quote_sort_key, engagement_tier, TOPIC_NONE,
+    ENGAGEMENT_NOTES, _quote_sort_key, engagement_tier, TOPIC_NONE,
 )
 from app.reliability.relevance import rows_naming_entities
 from app.report.markdown import (
@@ -937,7 +937,7 @@ def _ugc_coding_digest(
         写手会以为是两回事。
         """
 
-        note = _ENGAGEMENT_NOTES[engagement_tier(rows_by_citation.get(citation) or {})]
+        note = ENGAGEMENT_NOTES[engagement_tier(rows_by_citation.get(citation) or {})]
         return f"{citation}「{coding['quote']}」" + (f"（{note}）" if note else "")
 
     for attitude in ("正", "负", "混合"):

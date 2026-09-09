@@ -105,6 +105,6 @@ def test_标注措辞与_quote1_逐字相同():
     from app.reliability import coding
     from app.orchestrator import sectioning
 
-    assert sectioning._ENGAGEMENT_NOTES is coding._ENGAGEMENT_NOTES
+    assert sectioning.ENGAGEMENT_NOTES is coding.ENGAGEMENT_NOTES
     assert sectioning.engagement_tier is coding.engagement_tier
     assert sectioning._quote_sort_key is coding._quote_sort_key
