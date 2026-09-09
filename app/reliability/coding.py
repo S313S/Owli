@@ -727,13 +727,49 @@ def _names_the_entity(quote: str, accepted: Sequence[str]) -> bool:
     return not accepted or any(mentions(quote, name) for name in accepted)
 
 
-def _quote_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
-    """原声按互动量降序；取不到互动量的排在后面，同分按 id 稳定。"""
+#: 互动量档位：有人理 → 零互动 → 取不到。**分档要显式写出来**，别靠算术凑：
+#: 原来那行是 `-(value if 是数 else -1.0)`，取不到的行靠 `-(-1.0)=1.0` 恰好排到
+#: 零互动（`-0.0`）后面——结果对，但没人看得出这是有意的，改一个符号就静默失效。
+_ENGAGED, _ZERO_ENGAGEMENT, _UNMEASURED = 0, 1, 2
+#: 档位 → 表里那一列写什么。措辞不出字段名、不出「互动量」这种半机器词：
+#: 读这一列的是写手和客户，要的是「这句话有没有人附和」这个意思。
+_ENGAGEMENT_NOTES = {
+    _ENGAGED: "",
+    _ZERO_ENGAGEMENT: "无人点赞或评论",
+    _UNMEASURED: "该平台未提供互动数",
+}
+
+
+def engagement_tier(row: Mapping[str, Any]) -> int:
+    """这条证据在「有没有人理」上属于哪一档。
+
+    §QUOTE-1 货 2：零互动的不许当代表。**降权不是排除**——本包拿真数据试过：
+    287 条已编码行里 80 条互动量正好是 0（小红书评论的 `likes` 天生是 0），
+    排除的话「交互体验/负」那一格唯一的原声就没了，整格空。空格会被读成
+    「没人这么说」，比一条冷门原声更误导，所以留着、降权、并在表里标出来。
+    """
 
     from app.reliability.scoring import engagement_value
 
     value = engagement_value(row)
-    return (-(value if isinstance(value, (int, float)) else -1.0), str(row.get("id")))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return _UNMEASURED
+    return _ENGAGED if value > 0 else _ZERO_ENGAGEMENT
+
+
+def _quote_sort_key(row: Mapping[str, Any]) -> tuple[int, float, str]:
+    """原声先按互动量档位，再按互动量降序，同档同分按 id 稳定。
+
+    ⛔ 档位在前是关键：一格里只要有一条有人理的原声，零互动的就轮不到前面去，
+    与它具体是 0 还是取不到无关。评审实测的病是「一格里大家都是 0 时，随便哪条
+    都能排第一」——那种情况排序救不了，靠的是表里那列标注，见 `polish_tables`。
+    """
+
+    from app.reliability.scoring import engagement_value
+
+    value = engagement_value(row)
+    measured = value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+    return (engagement_tier(row), -float(measured), str(row.get("id")))
 
 
 def coding_tables(
@@ -827,6 +863,11 @@ def coding_tables(
                     ),
                     "platform": item.get("platform"),
                     "engagement": engagement_value(item),
+                    # §QUOTE-1 货 2：光摆一个「0」不够。写手看见一列数字里的 0，
+                    # 照样会把那句话写进执行摘要当「头号负评」（评审实测 S25，
+                    # 微博 0 赞 0 评被引两次）。**得用话告诉它这是什么意思**，
+                    # 所以这里出的是标注不是数字；数字仍在 `engagement` 里。
+                    "engagement_note": _ENGAGEMENT_NOTES[engagement_tier(item)],
                 })
 
     dropped = _dropped_quotes(coded, accepted, marks)
@@ -979,19 +1020,26 @@ def polish_tables(
             coverage=coverage),
         "quotes": _shell(
             "quotes", "UGC 代表原声（每格按互动量取前 3）",
-            ("主题", "态度", "原声", "平台", "互动量"),
+            ("主题", "态度", "原声", "平台", "互动量", "代表性"),
             # 呈现层**永远**只出引得动的：一条角标都没有的原声，写手弃用是浪费、
             # 裸引会被尺子③判红。`coding_tables` 在没给角标表时不过滤（备料、
             # 离线核数要看全量），但走到这里就是要喂给写手了，没有回退。
             [row for row in (
                 {"主题": q["topic"], "态度": q["attitude"], "原声": q["quote"],
                  "平台": q["platform"], "互动量": q["engagement"],
+                 # §QUOTE-1 货 2：0 这个数字本身不会拦住写手。多一列说人话的标注，
+                 # 它把这句写成「头号负评」之前至少看得见「没人附和过」。
+                 # 数字仍留在「互动量」列，尺子④「数字有出处」照收，不受影响。
+                 "代表性": q["engagement_note"],
                  "marks": _row_marks([{"id": q["evidence_id"]}], marks)}
                 for q in data["quotes"]) if row["marks"]],
             n=len(data["quotes"]),
             basis=(
-                "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"
-                "互动量最高的 3 条。原声是**例子不是分布**，读它不能替代读上面的条数表。"
+                "从原文逐字摘出、程序校验过是正文子串**且把话说完**的原声；"
+                "每个主题的正/负各取互动量最高的 3 条——**有人点赞或评论过的排在前面**，"
+                "「代表性」栏标了「无人点赞或评论」的那几条是这一格里没有更好的了才收的，"
+                "⛔ 不得把它们写成多数人的看法、也不得单独拎去当某一方的头号声音。"
+                "原声是**例子不是分布**，读它不能替代读上面的条数表。"
                 + _quotes_footnote(data["quotes_dropped"])
             ),
             coverage=coverage),
