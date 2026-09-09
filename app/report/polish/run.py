@@ -546,6 +546,46 @@ def lowgrade_quotes(markdown: str, grade_by_mark: Mapping[int, Any]) -> list[str
     return problems
 
 
+#: 建议降级区的小标题。共用规则 §6.5.4：全是孤证的想法机械降级放进这里。
+DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: 建议节的节名（含读者不明时的改名与竞品稿自带的那一节）。三处都受同一道门禁管。
+ADVICE_SECTIONS = frozenset({ADVICE_SECTION, "需要回应的点",
+                             ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION})
+_ENTRY_HEAD = re.compile(r"^\s*\d+[.)、]\s")
+
+
+def singlesource_advice(lines: Sequence[str], crossref: Mapping[int, Any]) -> list[str]:
+    """建议门禁：一条建议所引角标若**全是**单源孤证，必须降级到「值得进一步验证的方向」。
+
+    一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把只引孤证的那半行
+    单独判红（09-05 九格实测两格误报）。**按「条」聚合才对。**
+
+    这个函数是**生产与验收共用的那一个**：验收尺子 `check_polished._advice_entry_problems`
+    直接 import 它。同一个概念两处两个定义，是本项目现形过的一种假绿。
+    """
+    problems, entries, current = [], [], []
+    for line in lines:
+        if line.strip().startswith("#"):
+            if DOWNGRADE_HEADING in line:
+                break                   # 降级区之后的都不受门禁管
+            continue
+        if _ENTRY_HEAD.match(line) and current:
+            entries.append(current)
+            current = []
+        current.append(line)
+    if current:
+        entries.append(current)
+    for entry in entries:
+        text = "\n".join(entry)
+        marks = [int(n) for n in re.findall(r"\[?S(\d{2,})\]?", text)]
+        verdicts = {str(crossref.get(n)) for n in marks if crossref.get(n)}
+        if marks and verdicts and verdicts == {"SINGLE"}:
+            problems.append(
+                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」："
+                f"{text.strip()[:46]}")
+    return problems
+
+
 def _ctx(path: Path, research_id: str, runs_root: Path) -> validation.Ctx:
     # runs_root 必须显式传：早先按 `path.parents[3]` 反推，分节目录多一层之后
     # 它指到了研究目录而不是 runs 根，capability 于是把每次 Write 都判成越界
@@ -685,6 +725,10 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
     corpus = quote_corpus(data, report_text)
     grade_by_mark = {int(str(item["mark"])[1:]): item.get("grade")
                      for item in data.get("sources") or [] if item.get("mark")}
+    # 货 4：建议门禁也移到写作期。共用规则 §6.5.4 早写着「全是孤证的建议不算建议」，
+    # 之前只有验收尺子 ⑧ 在查——查出来时整轮 37.6 分钟已经付掉了。
+    crossref = {int(str(item["mark"])[1:]): item.get("crossref")
+                for item in data.get("sources") or [] if item.get("mark")}
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
         path.unlink(missing_ok=True)
@@ -726,6 +770,8 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
         # 货 2 两道闸：规则早写在共用规则里，正式稿层一直没有程序执行它。
         # 挡在这里而不是挡在验收尺子里——挡在这里当轮就重写，挡在尺子里要等整轮跑完。
         quote_problems = altered_quotes(text, corpus) + lowgrade_quotes(text, grade_by_mark)
+        if current in ADVICE_SECTIONS:
+            quote_problems += singlesource_advice(text.splitlines(), crossref)
         if quote_problems:
             errors = tuple(f"{unit}{p}" for p in quote_problems)
             continue

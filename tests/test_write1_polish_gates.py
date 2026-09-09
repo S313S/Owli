@@ -285,3 +285,51 @@ def test_篇幅压过头也报():
 def test_篇幅判黄不判红():
     """篇幅超了要整稿重写、一轮 37.6 分钟；这条只给读数，不掀掉这一格。"""
     assert "⒝ 篇幅" in _ruler.WARNINGS and "⒝ 篇幅" not in _ruler.CHECKS
+
+
+# —— 货 4：单源建议降级，门禁从验收期挪到写作期 ————————————————
+
+from app.report.polish.run import singlesource_advice  # noqa: E402
+
+ADVICE = ("1. **给创作者做一版水印自查清单**（做什么，不是应该重视什么）\n"
+          "   依据：回指第 4 条发现；把握度：低[S01]\n")
+
+
+def test_全是孤证的建议被门禁退回():
+    """上一轮遗留 ⑧：三条行动建议各只有单源孤证，尺子判红是对的。"""
+    problems = singlesource_advice(ADVICE.splitlines(), {1: "SINGLE"})
+    assert len(problems) == 1 and "值得进一步验证的方向" in problems[0]
+
+
+def test_有一条多源互证撑着就放行():
+    assert singlesource_advice(ADVICE.splitlines(), {1: "PASS"}) == []
+
+
+def test_降级区里的条目不受门禁管():
+    """已经降级过的就别再退回——否则写手照做了还是过不了，只能瞎改。"""
+    text = "## 值得进一步验证的方向\n\n" + ADVICE
+    assert singlesource_advice(text.splitlines(), {1: "SINGLE"}) == []
+
+
+def test_一条建议横跨两行按条聚合不按行判():
+    """建议行只带 PASS、依据行只带 SINGLE；按行判会把依据行单独判红（09-05 两格误报）。"""
+    entry = "1. **建议一句话**[S01]\n   依据：回指第 2 条发现[S02]\n"
+    assert singlesource_advice(entry.splitlines(), {1: "PASS", 2: "SINGLE"}) == []
+
+
+def test_尺子与生产侧用的是同一个函数():
+    """判据：同一个概念两处两个定义是本项目现形过的假绿。"""
+    import inspect
+
+    src = inspect.getsource(_ruler._advice_entry_problems)
+    assert "singlesource_advice" in src
+    assert _ruler.ADVICE_SECTIONS is __import__(
+        "app.report.polish.run", fromlist=["x"]).ADVICE_SECTIONS
+
+
+def test_建议节写作期就挡住_不等整轮跑完(tmp_path):
+    """货 4 落点：门禁原先只在验收那一头查，查出来时 37.6 分钟已经付掉了。"""
+    from app.report.polish.run import ADVICE_SECTIONS, ADVICE_SECTION_UNKNOWN_AUDIENCE
+
+    assert ADVICE_SECTION_UNKNOWN_AUDIENCE in ADVICE_SECTIONS   # 读者不明时的改名也算建议节
+    assert "建议" in ADVICE_SECTIONS

@@ -26,6 +26,8 @@ if str(ROOT) not in sys.path:
 
 from app.report.polish.run import (ADVICE_SECTION_UNKNOWN_AUDIENCE,  # noqa: E402
                                    IMPLICATIONS_SECTION)
+from app.report.polish.run import ADVICE_SECTIONS as _RUN_ADVICE_SECTIONS  # noqa: E402
+from app.report.polish.run import DOWNGRADE_HEADING as _RUN_DOWNGRADE_HEADING  # noqa: E402
 from app.report.polish.skills import load_templates  # noqa: E402
 
 #: 内部词：读者不知道也不需要知道研究是怎么切块的，也不需要知道库长什么样。
@@ -65,9 +67,10 @@ OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
 #: 因为按模板名找不到节而静默放行（假绿）。
 #: §RPT-2 货 4 ②：竞品对比稿的「对提问方意味着什么」写的也是「凭这些证据你该怎么看」，
 #: 同样受「弱证据不撑强建议」的门禁管——它和「建议」会同时出现，门禁要两节都过一遍。
-ADVICE_SECTIONS = frozenset({"建议", "需要回应的点",
-                            ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION})
-DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: §WRITE-1 货 4：节名与降级区标题都改从 `run.py` 取——生产侧门禁按同一份名单认节，
+#: 两处各写一份的话，加一个模板节名只改一处就是静默漏查。
+ADVICE_SECTIONS = _RUN_ADVICE_SECTIONS
+DOWNGRADE_HEADING = _RUN_DOWNGRADE_HEADING
 #: §RPT-2 货 2 闸 ⑨：主体节（关键发现、正/负/争议/诉求、对比总览…）只讲调研对象。
 #: 「主体节」= 模板声明的节里去掉开篇、建议、集中列表、时间线与附录剩下的那些——
 #: 这样加模板不用回来改尺子。
@@ -326,28 +329,14 @@ def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list
 
 
 def _advice_entry_problems(lines: list[str], crossref: dict[int, str]) -> list[str]:
-    # 一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把
-    # 只引孤证的那半行单独判红（09-05 九格实测两格误报）。按「条」聚合才对。
-    problems, entries, current = [], [], []
-    for line in lines:
-        if line.strip().startswith("#"):
-            if DOWNGRADE_HEADING in line:
-                break          # 降级区之后的都不受门禁管
-            continue
-        if re.match(r"^\s*\d+[.)、]\s", line) and current:
-            entries.append(current)
-            current = []
-        current.append(line)
-    if current:
-        entries.append(current)
-    for entry in entries:
-        text = "\n".join(entry)
-        marks = [int(n) for n in MARK_ANY.findall(text)]
-        verdicts = {crossref.get(n) for n in marks if crossref.get(n)}
-        if marks and verdicts and verdicts == {"SINGLE"}:
-            problems.append(
-                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{text.strip()[:46]}")
-    return problems
+    """判据函数与生产侧门禁是**同一个** `run.singlesource_advice`。
+
+    §WRITE-1 货 4：这道门禁原先只在验收这一头查，查出来时整轮 37.6 分钟已经付掉了；
+    现在生产侧写完一节当场查，尺子这边留一个薄壳继续查成稿（两处口径不许分家）。
+    """
+    from app.report.polish.run import singlesource_advice
+
+    return singlesource_advice(lines, crossref)
 
 def check_ratio_phrases(markdown: str) -> list[str]:
     """§CODE-1：编码是模型判断，正式稿只能写条数，不能推及全网（用户 09-05 拍甲）。
