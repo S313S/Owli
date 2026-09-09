@@ -586,8 +586,8 @@ async def code_report(
 __all__ = [
     "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
     "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
-    "coding_tables", "coding_targets", "is_coded", "quote_is_complete",
-    "ratio_phrase_offenders",
+    "ENGAGEMENT_NOTES", "coding_tables", "coding_targets", "engagement_tier",
+    "is_coded", "quote_is_complete", "ratio_phrase_offenders",
 ]
 
 
@@ -738,6 +738,13 @@ _ENGAGEMENT_NOTES = {
     _ZERO_ENGAGEMENT: "无人点赞或评论",
     _UNMEASURED: "该平台未提供互动数",
 }
+#: 同一张表的公开名。§QUOTE-2 在 `sectioning.py` 里给每节提示词的「正向/负向代表原声」
+#: 标同一套话，**要求两处逐字相同**——所以它 import 这张表，不另抄一份：抄一份不会
+#: 立刻出错，会在将来某次改词时悄悄分叉，而那时没人会想到去比对两处措辞。
+#: **改这里的词就是同时改两个包的呈现，改前先报调度。**
+#: 下划线那个名字原样留着（本模块内部在用），这里只是把「有外部消费方」这件事
+#: 写在代码上——下划线在 Python 里明写着「没人从外面用」，而那句话现在是假的。
+ENGAGEMENT_NOTES = _ENGAGEMENT_NOTES
 
 
 def engagement_tier(row: Mapping[str, Any]) -> int:

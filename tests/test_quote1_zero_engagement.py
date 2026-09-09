@@ -64,3 +64,30 @@ def test_正式稿那张表出得了代表性这一列():
     assert "代表性" in table["columns"]
     assert table["rows"][0]["代表性"] == "无人点赞或评论"
     assert "不得把它们写成多数人的看法" in table["basis"]
+
+
+def test_措辞表有公开名且与内部名是同一份():
+    """§QUOTE-2 逐字复用这套措辞，两处必须永远一致。
+
+    锁的是**结构**不是人的记性：只要它 import 的是同一个对象，就不可能分叉。
+    抄一份不会立刻出错，会在将来某次改词时悄悄分叉——那时没人会想到去比对两处。
+    """
+
+    from app.reliability import coding
+
+    assert coding.ENGAGEMENT_NOTES is coding._ENGAGEMENT_NOTES
+    assert "ENGAGEMENT_NOTES" in coding.__all__
+    # 措辞本身也钉住：改词等于同时改两个包的呈现，得有人先看见这条红。
+    assert coding.ENGAGEMENT_NOTES[coding._ZERO_ENGAGEMENT] == "无人点赞或评论"
+    assert coding.ENGAGEMENT_NOTES[coding._UNMEASURED] == "该平台未提供互动数"
+    assert coding.ENGAGEMENT_NOTES[coding._ENGAGED] == ""
+
+
+def test_分档函数是公开契约():
+    # §QUOTE-2 直接 import 它；名字与签名冻结，改要先报调度。
+    from app.reliability import coding
+
+    assert "engagement_tier" in coding.__all__
+    assert coding.engagement_tier({"platform": "xhs", "raw_metrics": {"liked_count": 9}}) == 0
+    assert coding.engagement_tier({"platform": "xhs", "raw_metrics": {"liked_count": 0}}) == 1
+    assert coding.engagement_tier({"platform": "xhs"}) == 2
