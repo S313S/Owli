@@ -338,10 +338,44 @@ def _advice_entry_problems(lines: list[str], crossref: dict[int, str]) -> list[s
 
     return singlesource_advice(lines, crossref)
 
+#: §WRITE-1 货 5：**否定掉的推及不是推及。** 成稿第 270 行原文是
+#: 「…属多源互证；但事件本身单一场景，**尚不能外推为**国内用户普遍关注」——
+#: 这是限定句，是 §5 门禁**要求**写手写的那种话，尺子却只匹配「用户普遍」四字，
+#: 没看见前面的「尚不能外推」，把守规矩的句子判成了违规。
+#: 「量出的异常是尺子的」第七次现形——⛔ 改尺子不改稿。
+#:
+#: 只认**同一小句里、出现在违禁词之前**的否定：写在后面的不算
+#: （「用户普遍不满意」照旧是推及全网的断言，只是断的是负面）。
+NEGATED_EXTRAPOLATION = re.compile(
+    r"不能外推|不可外推|不宜外推|不足以|不代表|不等于|不意味着|不能说明|不能读作|"
+    r"无法据此|并不能|尚不|还不能|谈不上|算不上|不是说")
+#: 小句的边界。整句切太粗：「…属多源互证；但事件本身单一场景，尚不能外推为…」
+#: 里两个分句一个是断言一个是限定，按整行判会互相盖住。
+_CLAUSE_BREAKS = "。！？；\n"
+
+
+def _clause_before(line: str, position: int) -> str:
+    """违禁词所在的那一小句里，它前面的那一截。"""
+    head = line[:position]
+    cut = max(head.rfind(char) for char in _CLAUSE_BREAKS)
+    return head[cut + 1:]
+
+
+def _is_negated(line: str, offender: str, occurrence: int) -> bool:
+    """这一次出现是不是被否定掉的。同一行里同一个词出现多次时逐次判。"""
+    start = -1
+    for _ in range(occurrence + 1):
+        start = line.find(offender, start + 1)
+        if start < 0:
+            return False
+    return bool(NEGATED_EXTRAPOLATION.search(_clause_before(line, start)))
+
+
 def check_ratio_phrases(markdown: str) -> list[str]:
     """§CODE-1：编码是模型判断，正式稿只能写条数，不能推及全网（用户 09-05 拍甲）。
 
     表格行不参与——表里的占比是数据本身，不是写手的断言。
+    被否定掉的那些也不参与（§WRITE-1 货 5），见 `NEGATED_EXTRAPOLATION`。
     """
     from app.reliability.coding import ratio_phrase_offenders
 
@@ -349,7 +383,12 @@ def check_ratio_phrases(markdown: str) -> list[str]:
     for index, line in enumerate(markdown.splitlines(), start=1):
         if line.startswith("|"):
             continue
+        seen: dict[str, int] = {}
         for offender in ratio_phrase_offenders(line):
+            occurrence = seen.get(offender, 0)
+            seen[offender] = occurrence + 1
+            if _is_negated(line, offender, occurrence):
+                continue
             problems.append(
                 f"第 {index} 行的 {offender!r} 把编码结果说成了全网比例；"
                 "编码是模型判断，只能写「N 条里 M 条编码为正向」")

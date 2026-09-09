@@ -333,3 +333,43 @@ def test_建议节写作期就挡住_不等整轮跑完(tmp_path):
 
     assert ADVICE_SECTION_UNKNOWN_AUDIENCE in ADVICE_SECTIONS   # 读者不明时的改名也算建议节
     assert "建议" in ADVICE_SECTIONS
+
+
+# —— 货 5：改尺子不改稿——⑪「不许推及全网」要认否定句 ——————————————
+
+REAL_LINE_270 = ("   依据：回指海外 Reddit 手游忘删豆包水印事件的多源围观[S63][S66]；"
+                 "把握度：中（同一 gacha 手游事件多人独立表态、跨立场一致谴责，"
+                 "属多源互证；但事件本身单一场景，尚不能外推为国内用户普遍关注）。")
+
+
+def test_尺子11_真稿第270行不再报红():
+    """成稿第 270 行是**限定句**，是 §5 门禁要求写手写的那种话。
+
+    尺子只匹配「用户普遍」四字、没看见前面的「尚不能外推」，把守规矩的句子判成违规。
+    ⛔ 改尺子不改稿——「量出的异常是尺子的」第七次现形。
+    """
+    assert _ruler.check_ratio_phrases(REAL_LINE_270) == []
+
+
+def test_尺子11_真的肯定句仍要报红():
+    """判据 5 的另一半：否则就是把规则删了，不是改对了。"""
+    assert _ruler.check_ratio_phrases("国内用户普遍关注水印问题，这是最集中的诉求。")
+
+
+def test_尺子11_否定词写在违禁词后面不算否定():
+    """「用户普遍不满意」照旧是推及全网的断言，只是断的是负面。"""
+    assert _ruler.check_ratio_phrases("用户普遍不满意豆包的回答深度。")
+
+
+def test_尺子11_否定只在同一小句里管用():
+    """整句切太粗：分号前是断言、分号后是限定，按整行判会互相盖住。"""
+    assert _ruler.check_ratio_phrases("这一点不足以定论；国内用户普遍在谈价格。")
+
+
+def test_尺子11_整份真稿零命中():
+    """交付前读真生成物：改完之后这份稿 ⑪ 一处都不报。"""
+    path = Path("../Owli-rpt1/var/runs/r-3e04f808dffd/exports/"
+                "r-3e04f808dffd.polished.consulting.md")
+    if not path.is_file():
+        pytest.skip("底料不在这台机器上")
+    assert _ruler.check_ratio_phrases(path.read_text(encoding="utf-8")) == []
