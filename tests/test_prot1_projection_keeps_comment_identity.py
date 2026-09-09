@@ -9,8 +9,12 @@
 `load_evidence_payloads` 把它们当自定义键塞进 `extra`，payload 里根本没有这两列；
 `goal_id` 则被显式写成**当前正在收尾的那个 goal**。`dao._update_evidence`
 (`dao.py:1155`) 是全列 UPDATE，三列一起按 `dao.py:51,76-77` 的默认值落成
-`post / NULL / 本 goal`。抖音 107 行本属 goal-1，被 goal-3 的章产物回显后改成
-goal-3，按 goal 分块编号从 S1–S21 重编到 S75–S95，成稿只留引到的号 → S1–S21 成孤号。
+`post / NULL / 本 goal`。
+
+⚠️ 适用范围：`goal_id` 这一支锁的是**机制**（证据行按 goal 分块编号，归属被回显
+改写就等于被搬进别的号段），**不是**立包时那条「S1–S21 孤号由此而来」的归因——
+后者在当前库上已证伪（goal-1 名下 0 条是 09-08 用户拍的数据归位；角标空洞遍布
+全段，是 `set_citations` 只留成稿引到的号）。用例照留，防的是将来再被覆盖。
 
 判法与 D-032 / D-049 同一手法（这是第三次）：三列进 `runtime.protected_fields`，
 **库里已有值就不许回贴改写**，产物首次写入的行不受影响。
@@ -192,8 +196,8 @@ class ProjectionKeepsCommentIdentityTest(unittest.TestCase):
     def test_跨goal回显不改写已入库行的goal_id(self) -> None:
         """造红支 ③：抖音 107 行属 goal-1，被 goal-3 的章回显后不许变成 goal-3。
 
-        改了就等于把它们从 goal-1 的编号区间搬到 goal-3 的区间重编，
-        goal-1 那段配额（S1–S21）随即成为没有主人的孤号。
+        改了就等于把它们从 goal-1 的编号区间搬到 goal-3 的区间重编。
+        （锁机制，不锁「S1–S21 孤号由此而来」那条归因——见模块 docstring。）
         """
 
         self.store.upsert_evidence_batch([
@@ -208,7 +212,7 @@ class ProjectionKeepsCommentIdentityTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(
             rows[0]["goal_id"], "goal-1",
-            "goal_id 被跨 goal 回显改写：S1–S21 孤号即由此而来",
+            "goal_id 被跨 goal 回显改写：证据行会被搬进别的号段重编",
         )
 
     def test_产物首次写入的行不受保护名单影响(self) -> None:

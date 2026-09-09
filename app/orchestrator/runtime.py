@@ -2148,9 +2148,13 @@ class RuntimeCoordinator:
             # UPDATE，三列一起落成 `post / NULL / 本 goal`。
             # 现场（`r-3e04f808dffd`）：采集期写的 188 行评论，`source_type` 因为
             # 早已在名单里而幸存，`kind` 被抹成 post，附录于是说 xhs / douyin
-            # 「0 条评论」（`report/polish/tables.py` 数的是 kind）；抖音 107 行
-            # 本属 goal-1，被 goal-3 的章产物当跨 goal 对照回显后改成 goal-3，
-            # 在 goal-3 区间重编号，goal-1 那段配额 S1–S21 随即成为孤号。
+            # 「0 条评论」（`report/polish/tables.py` 数的是 kind）。
+            # `goal_id` 进名单是防将来：证据行按 goal 分块编号，归属被回显改写
+            # 就等于被搬进别的号段重编。⚠️ **别把它读成「S1–S21 孤号是这么来的」**
+            # ——立包时的那条因果链在当前库上已证伪：goal-1 名下 0 条是 09-08
+            # 用户亲手拍的数据归位所致，而角标空洞遍布全段（S45–S51、S53–S62……
+            # 共 49 个），是收尾 `set_citations` 只留成稿真正引到的 50 个号。
+            # 两件事同一个现象、不同成因；密集重编号在 §WRITE-1 另办。
             # `kind` 与 `parent_permalink` 必须同时进名单：`dao._prepare_evidence`
             # 要求 `kind=comment` 必须带 `parent_permalink`，只保住一个会让整批
             # upsert 抛 ValueError。
