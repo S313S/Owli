@@ -2140,6 +2140,21 @@ class RuntimeCoordinator:
             "score_authority", "score_freshness", "score_crossref",
             "score_completeness", "score_independence",
             "rating_notes", "rated_by",
+            # §PROT-1：身份三列同理，且这三列比上面几列更藏得住——
+            # `evidence_artifacts._FROZEN_FIELDS` 里根本没有 `kind` /
+            # `parent_permalink`，产物即便照抄库里那一行，它们也只会被当自定义键
+            # 塞进 `extra`，payload 里没有这两列；`goal_id` 则被 `load_evidence_payloads`
+            # 显式写成**正在收尾的那个 goal**。到 `dao._update_evidence` 的全列
+            # UPDATE，三列一起落成 `post / NULL / 本 goal`。
+            # 现场（`r-3e04f808dffd`）：采集期写的 188 行评论，`source_type` 因为
+            # 早已在名单里而幸存，`kind` 被抹成 post，附录于是说 xhs / douyin
+            # 「0 条评论」（`report/polish/tables.py` 数的是 kind）；抖音 107 行
+            # 本属 goal-1，被 goal-3 的章产物当跨 goal 对照回显后改成 goal-3，
+            # 在 goal-3 区间重编号，goal-1 那段配额 S1–S21 随即成为孤号。
+            # `kind` 与 `parent_permalink` 必须同时进名单：`dao._prepare_evidence`
+            # 要求 `kind=comment` 必须带 `parent_permalink`，只保住一个会让整批
+            # upsert 抛 ValueError。
+            "kind", "parent_permalink", "goal_id",
         )
         downgraded: list[dict[str, str]] = []
         for payload in payloads:
