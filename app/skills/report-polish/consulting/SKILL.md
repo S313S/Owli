@@ -2,7 +2,7 @@
 name: consulting
 title: 调研报告（咨询体）
 description: 通用调研题面的默认模板，如「国内大家对 X 的看法」「X 竞品分析」；执行摘要→关键发现→论据→建议→附录。
-tables: [attitude_by_topic, scenario_counts, quotes, scenario_attitude, audience_attitude, trigger_counts, platform_mix, grade_mix, crossref_mix, entity_mentions, topic_polarity, timeline]
+tables: [attitude_by_topic, scenario_counts, quotes, scenario_attitude, audience_attitude, trigger_counts, platform_mix, grade_mix, crossref_mix, entity_mentions, timeline]
 sections: [执行摘要, 关键发现, 论据与数据, 建议, 附录]
 # §SHARD-1：这一节按执行摘要里的关键发现条数切片，一条发现一片。
 # 只切确诊撞墙的这一节；论据与数据、附录留作观察项，真撞了再按同一机制加。
@@ -63,6 +63,11 @@ model: opus
 
 把正文用到的确定性数据表在这里集中列一遍，每张表带标题（行动式）、`n`、口径、来源角标。
 表里的数一个都不许改。正文引用过的表这里必须有，没引用过的表不必都放。
+
+**态度（谁在夸什么、骂什么、有多少条）的数字，只能引「UGC 逐条编码」那一套表**
+（逐条读完再判正负）。词表命中的那张表**不在给你的表里**，程序会把它单独挂在附录作参考——
+你拿不到它的数，也不要凭印象写出一个它的数。两套尺子同时进正文，读者只会看到两个
+方向相反的数字（用户 2026-09-09 读稿后拍）。
 
 ## 建议
 

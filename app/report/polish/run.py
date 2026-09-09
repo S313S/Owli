@@ -229,6 +229,36 @@ def basis_table(tables: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+#: 词表命中表的表名。用户 2026-09-09 拍：**正文只留模型逐条编码那一套**（n=287，
+#: 逐条读完再判正负），词表命中表降为附录参考。两张表方向相反过——同一个「价格与付费」，
+#: 词表说正 17 / 负 3，编码说正 6 / 负 19，执行摘要第 2 条引词表、第 3 条引编码，
+#: 读者看不出为什么。落法是把它从三份 SKILL 的 `tables:` 行里拿掉（写手根本看不见它，
+#: `build_prompt` 只投模板点名过的表），再由程序把它挂进附录——
+#: ⛔ 不许两张都投给写手再靠提示词自觉：本项目已证「单靠提示词不够」。
+LEXICON_TABLE = "topic_polarity"
+
+
+def lexicon_reference_table(tables: Mapping[str, Any]) -> str:
+    """词表命中表的附录参考版。写手看不见它，这里由程序照数据照列。"""
+    table = (tables or {}).get(LEXICON_TABLE)
+    if not isinstance(table, Mapping) or not table.get("rows"):
+        return ""
+    columns = [str(c) for c in table.get("columns") or []]
+    if not columns:
+        return ""
+    lines = ["## 词表命中参考（只数触发词，不是情感判断）", "",
+             "（本节由程序按固定词表的命中计数生成，未经改写。这张表只统计触发词出现在多少条"
+             "证据里，**不是情感判断**——一条证据里出现「免费」既可能是在夸也可能是在骂，"
+             "词表分不出来。态度的结论一律以逐条编码那张表为准；两张表口径不同，"
+             "数字对不上是正常的。）", "",
+             "| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+    for row in table.get("rows") or []:
+        lines.append("| " + " | ".join(
+            str(row.get(column, "")).replace("|", "｜") for column in columns) + " |")
+    lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
+    return "\n".join(lines) + "\n"
+
+
 def assemble(parts: Sequence[tuple[str, Path]],
              sources: Sequence[Mapping[str, Any]] = (),
              appendix_blocks: Sequence[str] = ()) -> str:
@@ -707,6 +737,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         missing_table(parse_report(report_text).get("missing") or [],
                       data.get("objectives") or []),
         basis_table(data.get("tables") or {}),
+        # 词表命中表只在这里露面：写手拿不到它，附录给读者留个对照（用户 09-09 拍）。
+        lexicon_reference_table(data.get("tables") or {}),
     ))
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
