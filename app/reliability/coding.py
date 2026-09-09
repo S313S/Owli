@@ -34,6 +34,12 @@ CODING_VERSION = "v2"
 MAX_ATTEMPTS = 3
 CODING_BATCH_MAX = 40
 QUOTE_MAX = 40
+#: 句末标点：quote 结尾落在这里才算把话说完。中英文各摆一套——底料里
+#: reddit 与抖音口播稿都有，只认中文标点会把英文整批判红。
+SENTENCE_TERMINALS = "。！？；…!?;."
+#: 收尾符号：跟在句末标点后面的引号/括号也算句末（「……好用。」）。
+#: ⛔ 单独出现不算——「壞行為」这种句中引号收尾仍是半句。
+SENTENCE_CLOSERS = "」』”’\"）)】》"
 
 AUDIENCES = ("学生", "职场", "创作者", "开发者", "家长", "不明")
 SCENARIOS = ("学习", "写作", "办公", "编程", "生活娱乐", "情感陪伴", "其他")
@@ -95,6 +101,79 @@ def _squeeze(text: str) -> str:
     """比子串时两边都去掉空白：引擎常把换行和空格重排，但不会凭空造字。"""
 
     return "".join(str(text).split())
+
+
+def _squeezed_with_line_ends(text: str) -> tuple[str, list[bool]]:
+    """去空白后的正文 + 「每个字后面在原文里是不是换行（或文末）」。
+
+    换行在 UGC 里就是句号：很多帖子整段不打标点、只靠回车分句。`source_text`
+    又拿 `\n` 接标题与正文，所以标题末尾也落在这里——「整个标题就是一句话」
+    的 quote 才不会被当成半句判红。
+
+    ⛔ 不复用 `_squeeze`：那个函数只回字符串，签名与语义 §WRITE-1 在依赖（它
+    import 去做正式稿的引语子串闸），本包不动它。这里另起一条，两条各管各的。
+    """
+
+    chars: list[str] = []
+    ends: list[bool] = []
+    for ch in str(text):
+        if ch.isspace():
+            if ends:
+                ends[-1] = ends[-1] or ch == "\n"
+            continue
+        chars.append(ch)
+        ends.append(False)
+    if ends:
+        ends[-1] = True
+    return "".join(chars), ends
+
+
+def quote_is_complete(quote: str, source: str) -> bool:
+    """这句 quote 有没有把话说完——结尾落在句末标点、换行，或原文末尾。
+
+    §QUOTE-1 货 1：提示词原来只写「不超过 40 字」，**只管长度不管句子完不完整**，
+    模型就自己觉得摘够了停在半句上——实测 S31 只摘了 16 字（离上限还远），停在
+    「豆包的「壞行為」三大罪狀強行對話」，后面「（Forced Chatting）：開發團隊…」
+    全丢了，端到客户面前是个病句。**所以这不是上限设小了，调大 `QUOTE_MAX` 治不了。**
+    ⛔ 提示词改了也不算过：本项目已证单靠提示词不够，这道程序闸才是判据。
+
+    宽在三处，都是为了别把本来就对的句子判红：
+    1. 模型常把末尾那个句号省掉不摘，所以**紧跟在 quote 后面**的字是句末标点也算过；
+    2. 同一句话在一条正文里可能出现多次，**任何一处**落在句末就算过；
+    3. 原文通篇既没有句末标点、也没有一处换行时**不设闸**（抖音口播稿实测有这种）——
+       那种正文里根本挑不出合规的句子，设了闸整批只会重打三次再整批作废，
+       钱烧完还是一条编码都不落库。
+    """
+
+    squeezed = _squeeze(quote)
+    if not squeezed:
+        return True
+    if squeezed[-1] in SENTENCE_TERMINALS:
+        return True
+    if (len(squeezed) >= 2 and squeezed[-1] in SENTENCE_CLOSERS
+            and squeezed[-2] in SENTENCE_TERMINALS):
+        return True
+    text, line_ends = _squeezed_with_line_ends(source)
+    if not text:
+        return True
+    # ⛔ 判「有没有边界」要看**整段正文**，不是掐掉最后一个字看。第一版写成
+    # `text[:-1]`，结果「通篇只有末尾一个句号」的正文被判成没有边界、整条豁免，
+    # 造红用例里那个半句 quote 当场混过去了（A/B 实测两侧都「过」）。
+    if not any(ch in SENTENCE_TERMINALS for ch in text) and not any(line_ends[:-1]):
+        return True
+    start = text.find(squeezed)
+    while start != -1:
+        end = start + len(squeezed) - 1
+        if line_ends[end]:
+            return True
+        nxt = text[end + 1: end + 2]
+        after = text[end + 2: end + 3]
+        if nxt and nxt in SENTENCE_TERMINALS:
+            return True
+        if nxt and nxt in SENTENCE_CLOSERS and after and after in SENTENCE_TERMINALS:
+            return True
+        start = text.find(squeezed, start + 1)
+    return False
 
 
 def is_coded(item: Mapping[str, Any]) -> bool:
@@ -193,7 +272,11 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
         f"topics 是数组，取值只能来自：{'、'.join(TOPICS)}。可多选，"
         "一个都不沾就给空数组，不要硬塞。\n"
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
-        "要能代表这条的态度。禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
+        "要能代表这条的态度。**必须是把话说完的一句**：结尾要落在句末标点"
+        f"（{SENTENCE_TERMINALS}）上，或落在原文的换行处、结尾处。"
+        "⛔ 不许停在逗号、顿号前，不许话说到一半就断——"
+        f"**{QUOTE_MAX} 字是上限不是目标**，一句话说不完就换一句短的摘，宁可短，不许切一半。"
+        "禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
         "输入文本里，对不上整批退回重打。实在摘不出就给空字符串。\n"
         + naming +
         f"trigger 闭集：{'/'.join(TRIGGERS)}，答的是「这个人为什么开始用或换用」。"
@@ -204,6 +287,39 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
         f"必须把结果写到此精确路径：{output_path}。不得改用其他文件名。\n"
         "输入证据：" + json.dumps(list(items), ensure_ascii=False, separators=(",", ":"))
     )
+
+
+#: 「没把话说完」这类错的认记号。⛔ 是记号不是措辞：`_code_batch` 靠它认出
+#: 「整批只剩这一类错」，改字面等于把兜底那条腿静默拆了。
+_INCOMPLETE_MARK = "停在半句上"
+
+
+def _blank_incomplete_quotes(
+    value: Sequence[Any], inputs: Sequence[Mapping[str, Any]],
+    sources: Mapping[str, str],
+) -> int:
+    """把三轮都没说完的 quote 就地置空，回置空条数。
+
+    ⛔ 这是兜底不是常态：闸是**按条**判的，退回却是**整批**退——一批 40 条里
+    只要一条摘不好，三轮打不过就整批返 None，那 40 条的态度/主题/场景全都不入库。
+    为了一句原声赔掉 40 条聚合数据，方向反了：聚合表是这道工序的主产物，
+    原声只是例子。所以最后一轮只剩这一类错时，作废那几句 quote、保住整批。
+
+    置空**不许静默**：条数落进 `.errors.json`，谁都看得见这批赔过几句原声。
+    """
+
+    blanked = 0
+    for item, source in zip(value, inputs):
+        if not isinstance(item, dict):
+            continue
+        quote = item.get("quote")
+        if not isinstance(quote, str) or not quote:
+            continue
+        body = sources.get(str(item.get("id")), "")
+        if _squeeze(quote) in _squeeze(body) and not quote_is_complete(quote, body):
+            item["quote"] = ""
+            blanked += 1
+    return blanked
 
 
 def coding_errors(
@@ -245,9 +361,17 @@ def coding_errors(
         if len(quote) > QUOTE_MAX:
             errors.append(f"items[{index}].quote 超过 {QUOTE_MAX} 字：{len(quote)}")
         squeezed = _squeeze(quote)
-        text = _squeeze(sources.get(str(identity), ""))
+        source_body = sources.get(str(identity), "")
+        text = _squeeze(source_body)
         if squeezed and squeezed not in text:
             errors.append(f"items[{index}].quote 不是原文子串，不许改写或拼接")
+        # §QUOTE-1 货 1：摘对了字还不够，得把话说完。只在子串闸过了之后判——
+        # 子串都对不上时再报一条「没说完」是噪音，而且退回原因写两条会让
+        # 重打那一轮的提示词把 10 条错误的名额吃掉一半（`_code_batch` 只回传前 10 条）。
+        elif squeezed and not quote_is_complete(quote, source_body):
+            errors.append(
+                f"items[{index}].quote {_INCOMPLETE_MARK}：{quote!r}——"
+                "结尾要落在句末标点或原文换行/结尾处，换一句短的完整句摘")
         # §RPT-2 货 4③：两个字段**可空**，缺字段不算错；填了才守规矩。
         # 老版本（v1）编码的行没有它们，不能因此判整批失败。
         trigger = item.get("trigger")
@@ -332,6 +456,19 @@ async def _code_batch(
         errors = coding_errors(value, compact, sources)
         if not errors:
             return [dict(item) for item in value]
+        # 最后一轮还剩的错**全是**「没把话说完」时，作废那几句 quote 保住整批：
+        # 赔一句原声，不赔 40 条聚合编码。别的错（闭集越界、不是原文子串、
+        # 引反了人）一条都不许这么放行——那些是编错了，不是摘短了。
+        if _attempt == MAX_ATTEMPTS and all(
+            _INCOMPLETE_MARK in error for error in errors
+        ):
+            blanked = _blank_incomplete_quotes(value, compact, sources)
+            if blanked and not coding_errors(value, compact, sources):
+                _write_failure(output_path, items=compact, errors=[
+                    f"{blanked} 条 quote 三轮都停在半句上，已作废置空；"
+                    "该批其余编码照常入库（§QUOTE-1 兜底）",
+                ])
+                return [dict(item) for item in value]
     # 三次都没过就把最后一轮的原因落盘：不落的话失败批只剩「产物不存在」，
     # 死因得回头翻引擎日志才看得到（本轮实测两批死于传输层 socket 断开，
     # 查了一圈日志才认出来）。判死因要读原文，别让它静默。
@@ -449,7 +586,8 @@ async def code_report(
 __all__ = [
     "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
     "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
-    "coding_tables", "coding_targets", "is_coded", "ratio_phrase_offenders",
+    "coding_tables", "coding_targets", "is_coded", "quote_is_complete",
+    "ratio_phrase_offenders",
 ]
 
 

@@ -16,7 +16,11 @@ from app.reliability.coding import (
     source_text,
 )
 
-_TEXT = "豆包写作文真的好用，比我自己憋一晚上强多了"
+# §QUOTE-1 货 1 起，原声还要过「把话说完」那道闸。这里把逗号改成句号，
+# 是让本文件那句共用的样例原声「真的好用」落在句末——**不是把闸改松**：
+# 本文件测的是闭集/子串/批量/落库，样例得先合规，才不会顺带把新闸也测一遍
+# （新闸自己的正反用例在 `test_quote1_complete_sentence.py`）。
+_TEXT = "豆包写作文真的好用。比我自己憋一晚上强多了"
 
 
 def _row(index: int, *, grade: str = "B", kind: str = "user_opinion",
