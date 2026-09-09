@@ -69,3 +69,175 @@ def test_lexicon_reference_table_absent_when_no_rows():
     """没有词表命中行就整块不出——空表会被读成「没人谈」。"""
     assert lexicon_reference_table({"topic_polarity": {**LEXICON_TABLE, "rows": []}}) == ""
     assert lexicon_reference_table({}) == ""
+
+
+# —— 货 2：引语两道程序闸（子串闸 + 等级闸）————————————————————
+
+from app.report.polish.run import (altered_quotes, lowgrade_quotes,  # noqa: E402
+                                   quote_blocks, quote_corpus)
+
+ORIGINAL = "老板批了三天，我白情一假，回来还得加班。"
+QUOTED_OK = f"> {ORIGINAL}\n> —— 微博 · 等级 A [S01]\n"
+QUOTED_ALTERED = f"> {ORIGINAL.replace('白情', '白请')}\n> —— 微博 · 等级 A [S01]\n"
+
+
+def _corpus() -> str:
+    return quote_corpus({"tables": {}}, f"# 工作稿\n\n{ORIGINAL}\n")
+
+
+def test_quote_blocks_把角标按块收不按行收():
+    """角标写在出处行上；按行收会把每一条原声都判成「没有角标」。"""
+    blocks = quote_blocks("正文\n\n" + QUOTED_OK + "\n后文\n")
+    assert len(blocks) == 1
+    line_no, texts, marks = blocks[0]
+    assert (line_no, texts, marks) == (3, [ORIGINAL], [1])
+
+
+def test_子串闸_照抄的原声放行():
+    assert altered_quotes(QUOTED_OK, _corpus()) == []
+
+
+def test_子串闸_改一个字必须退回():
+    """缺陷 3：库里原文「白情一假」是发帖人自己手误，写手顺手改成了「白请一假」。"""
+    problems = altered_quotes(QUOTED_ALTERED, _corpus())
+    assert len(problems) == 1
+    assert "与原文对不上" in problems[0]
+
+
+def test_子串闸_省略号接起来的长引语按段比():
+    """写手常用省略号接两段原文，两段各自仍是子串，不该判红。"""
+    joined = "> 老板批了三天……回来还得加班。\n> —— 微博 · 等级 A [S01]\n"
+    assert altered_quotes(joined, _corpus()) == []
+
+
+def test_子串闸_不比太短的片段():
+    """一两个字撞上原文纯属巧合，判红只会白烧一轮重写。"""
+    assert altered_quotes("> 真香\n> —— 微博 · 等级 A [S01]\n", _corpus()) == []
+
+
+def test_子串闸_出处行不参与比对():
+    """「—— 微博 · 等级 A」是程序规定的出处格式，不是人说的话。"""
+    assert altered_quotes("> —— 微博 · 等级 A 这一行不比\n", _corpus()) == []
+
+
+def test_子串闸_复用_squeeze_不另造归一化函数():
+    """判据 4：换行与空格重排照样认，用的是编码那头同一个 `_squeeze`。"""
+    from app.reliability.coding import _squeeze
+
+    import app.report.polish.run as run_module
+    assert "_squeeze" in run_module.altered_quotes.__code__.co_names
+    assert altered_quotes("> 老板批了三天，\n> 我白情一假\n", _squeeze(ORIGINAL)) == []
+
+
+def test_等级闸_AB_级放行():
+    assert lowgrade_quotes(QUOTED_OK, {1: "A"}) == []
+    assert lowgrade_quotes(QUOTED_OK, {1: "B"}) == []
+
+
+def test_等级闸_C_级必须退回():
+    """缺陷 9：正文自己写明 S39 是 C 级不得作原声，另一段又拿 S39 当案例。"""
+    problems = lowgrade_quotes(QUOTED_OK, {1: "C"})
+    assert len(problems) == 1
+    assert "S01（C 级）" in problems[0]
+
+
+def test_等级闸_未评级与_D_级同样退回():
+    assert lowgrade_quotes(QUOTED_OK, {1: "D"})
+    assert lowgrade_quotes(QUOTED_OK, {})
+
+
+def test_等级闸_块里混着一条_C_级也退回():
+    """一块里 A 和 C 都引了，C 那条照样不许作原声。"""
+    block = f"> {ORIGINAL}\n> —— 微博 · 等级 A [S01][S02]\n"
+    assert lowgrade_quotes(block, {1: "A", 2: "C"})
+
+
+def test_quote_corpus_收编码表摘出的原声():
+    """`quotes` 表那一列在编码那头已程序校验过是正文子串，照抄它必须放行。"""
+    data = {"tables": {"quotes": {"rows": [{"原声": ORIGINAL, "marks": ["S01"]}]}}}
+    assert altered_quotes(QUOTED_OK, quote_corpus(data, "# 工作稿\n")) == []
+
+
+# —— 货 2 端到端：闸接在写作重试路上，退回的是「这一节重写」不是「验收报红」——
+
+import asyncio  # noqa: E402
+
+
+class _GateStore:
+    """两条证据：S01 是 A 级（原声合法），S02 是 C 级（不得作原声）。"""
+
+    def get_report(self, rid):
+        return {"id": rid, "title": "T", "research_question": "q", "plan_snapshot": {},
+                "extra": {"claims": []}}
+
+    def list_evidence(self, rid):
+        return [{"id": "ev-1", "platform": "weibo", "kind": "post", "citation_no": 1,
+                 "title": "帖一", "content_excerpt": ORIGINAL, "grade": "A",
+                 "published_at": None, "extra": "{}"},
+                {"id": "ev-2", "platform": "weibo", "kind": "post", "citation_no": 2,
+                 "title": "帖二", "content_excerpt": "随便一句", "grade": "C",
+                 "published_at": None, "extra": "{}"}]
+
+
+GATE_WORK = (f"# 工作稿\n\n{ORIGINAL}\n\n## 信息源\n\n"
+             "- [S01] [帖一](https://e.com/a)\n- [S02] [帖二](https://e.com/b)\n")
+
+
+def _quoting_adapter(quote_block: str):
+    """每节都写同一段正文 + 同一个原声块。写够 `MIN_SECTION_BYTES`。"""
+
+    class _Adapter:
+        async def run(self, task, ctx, on_event=None):
+            task.output_path.write_text(
+                "这一节的正文[S01]。" * 40 + "\n\n" + quote_block, encoding="utf-8")
+            return type("R", (), {"succeeded": True, "engine_error": None})()
+
+    return _Adapter()
+
+
+def _polish(tmp_path, quote_block):
+    from app.report.polish.run import polish
+
+    return asyncio.run(polish(_GateStore(), "r-gate", tmp_path / "runs", GATE_WORK,
+                              template="consulting",
+                              adapter=_quoting_adapter(quote_block)))
+
+
+def test_照抄的原声一路写到底(tmp_path):
+    """反向对照：同一条路，原声照抄就该通过——闸不能把合法的稿也挡了。"""
+    result = _polish(tmp_path, QUOTED_OK)
+    assert result["status"] == "ok", result.get("errors")
+
+
+def test_改过字的原声被闸退回(tmp_path):
+    """判据 2：造一份把引语改一个字的产物，`polish()` 必须判红，不许落成成稿。"""
+    result = _polish(tmp_path, QUOTED_ALTERED)
+    assert result["status"] == "failed"
+    assert any("与原文对不上" in e for e in result["errors"]), result["errors"]
+    assert result["attempts"] == 2, "改过字要给写手一次重写机会，不是一次就判死"
+
+
+def test_引_C_级作原声被闸退回(tmp_path):
+    """判据 3：造一份拿 C 级角标作原声的产物，`polish()` 必须判红。"""
+    block = f"> {ORIGINAL}\n> —— 微博 · 等级 C [S02]\n"
+    result = _polish(tmp_path, block)
+    assert result["status"] == "failed"
+    assert any("S02（C 级）" in e for e in result["errors"]), result["errors"]
+
+
+def test_把握度那句引用块不是原声_不上闸():
+    """模板要求摘要末尾那句把握度也写成 `>` 块，它是写手自己的话——
+
+    没有原文可比、也没有等级可查。真稿夹具当场抓到过：不作区分的话，
+    摘要那一节每轮都被子串闸退回，两次重写全白烧。
+    """
+    line = "> 本报告结论的把握度为**低**，主要因为绝大多数说法都只有一个来源撑着。\n"
+    assert quote_blocks(line) == []
+    assert altered_quotes(line, _corpus()) == []
+    assert lowgrade_quotes(line, {}) == []
+
+
+def test_带出处行但没角标的原声照样上子串闸():
+    """两样凭据有一样就是原声：出处行在，就算角标漏了也要比对原文。"""
+    block = "> 我白请一假，回来还得加班。\n> —— 微博 · 等级 A\n"
+    assert altered_quotes(block, _corpus())
