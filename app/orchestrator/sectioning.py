@@ -18,7 +18,12 @@ from app.orchestrator.chapter_failure import (
     chapter_failure_reason as section_failure_reason,
 )
 from app.orchestrator.scheduler import CHAPTER_RETRY_INTERVAL_SECONDS, TaskRunResult
-from app.reliability.coding import TOPIC_NONE
+# §QUOTE-2：分档函数与那套标注措辞**从 §QUOTE-1 那边 import，不抄一份**。
+# 抄一份不会立刻出错，会在它哪天改词的时候悄悄分叉，而那时没人会想到来比对两处。
+# `_quote_sort_key` 是私名，仍然 import：跨模块引私名是小味道，两处排序语义各写一版才是真病。
+from app.reliability.coding import (
+    _ENGAGEMENT_NOTES, _quote_sort_key, engagement_tier, TOPIC_NONE,
+)
 from app.reliability.relevance import rows_naming_entities
 from app.report.markdown import (
     merge_section_shards,
@@ -870,12 +875,18 @@ def _ugc_coding_digest(
     """
 
     coded: list[tuple[str, Mapping[str, Any]]] = []
+    # §QUOTE-2：代表原声要按互动量挑，就得摸得到行本身（互动量在行上，不在编码里）。
+    # 不把 `coded` 改成三元组，是因为下面五处聚合都在解二元组，改了等于动五处不相干的地方。
+    rows_by_citation: dict[str, Mapping[str, Any]] = {}
     for item in items:
         row = rows_by_id.get(str(item.get("evidence_id")))
         extra = row.get("extra") if isinstance(row, Mapping) else None
         coding = extra.get("coding") if isinstance(extra, Mapping) else None
         if isinstance(coding, Mapping) and coding.get("coding_version"):
-            coded.append((str(item.get("citation") or ""), coding))
+            citation = str(item.get("citation") or "")
+            coded.append((citation, coding))
+            if isinstance(row, Mapping):
+                rows_by_citation[citation] = row
     if len(coded) < UGC_DIGEST_MIN_ROWS:
         return None
 
@@ -918,12 +929,38 @@ def _ugc_coding_digest(
         "- 场景：" + tally(coding["scenario"] for _, coding in coded),
         "- 人群：" + tally(coding["audience"] for _, coding in coded),
     ]
+    def represent(citation: str, coding: Mapping[str, Any]) -> str:
+        """一句代表原声怎么摆到提示词里；没人理的要当场说出来。
+
+        §QUOTE-2：标注是从 §QUOTE-1 的词表取的，不是本包另写的一版——
+        原声表和提示词是同一份原声的两个出口，两处措辞分叉的话，
+        写手会以为是两回事。
+        """
+
+        note = _ENGAGEMENT_NOTES[engagement_tier(rows_by_citation.get(citation) or {})]
+        return f"{citation}「{coding['quote']}」" + (f"（{note}）" if note else "")
+
     for attitude in ("正", "负", "混合"):
-        quotes = [
-            f"{citation}「{coding['quote']}」"
-            for citation, coding in coded
-            if coding.get("attitude") == attitude and coding.get("quote")
-        ][:UGC_DIGEST_QUOTES_PER_ATTITUDE]
+        # §QUOTE-2：这里原来是「取本节池前两条」，完全不看互动量。
+        # 写手最顺手引的恰恰是提示词递到手边的这两句，不是要自己去表里翻的那些——
+        # 评审实测 S25（微博 0 赞 0 评）被引两次，还进了执行摘要当头号负评，
+        # 就是从这条路进去的。排序**沿用 §QUOTE-1 那把尺子**（有人理 > 零互动 >
+        # 该平台没给互动数，档内按互动量降序），⛔ 别在这儿另写一套档位。
+        # 代价说明：`_quote_sort_key` 同档同分按 id 收尾，所以并列时不再保持池序。
+        # 认下这个代价，是因为「两处排序结果对得上」比「保住池序」要紧：
+        # 池序在这一格里没有含义，而两处不一致会让人以为表和提示词在说两件事。
+        ranked = sorted(
+            (
+                (citation, coding) for citation, coding in coded
+                if coding.get("attitude") == attitude and coding.get("quote")
+            ),
+            key=lambda pair: _quote_sort_key(rows_by_citation.get(pair[0]) or {}),
+        )
+        # ⛔ 零互动是降权不是排除：整格都是零互动时仍要给出原声，靠上面那句标注
+        # 告诉写手它的分量。挖空这一格会被读成「没人这么说」，比一条冷门原声更误导。
+        quotes = [represent(c, coding) for c, coding in ranked][
+            :UGC_DIGEST_QUOTES_PER_ATTITUDE
+        ]
         if quotes:
             lines.append(f"- {attitude}向代表原声：" + "；".join(quotes))
     lines.append(
