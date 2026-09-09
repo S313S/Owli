@@ -197,12 +197,23 @@ def check_citation_collision(args: argparse.Namespace) -> Result:
     planned: dict[str, int] = json.loads(Path(args.citation_numbers).read_text(encoding="utf-8"))
     by_number: dict[int, str] = {int(no): url for url, no in planned.items()}
     clashes: list[dict[str, Any]] = []
+    empty: list[str] = []
     for path in keep:
-        for number, url in _marks_in(path).items():
+        marks = _marks_in(path)
+        if not marks:
+            # 读不出角标不等于没撞号——多半是路径错了或那节格式变了。
+            # 静默判绿正是本项目一天现形七次的那一族（`green-on-existence-not-production`）。
+            empty.append(path.name)
+        for number, url in marks.items():
             other = by_number.get(number)
             if other is not None and other != url:
                 clashes.append({"mark": f"[S{number:02d}]", "不重写的节指向": url,
                                 "本轮要给的": other, "节": path.name})
+    if empty:
+        return Result.red("② 未重写节撞号",
+                          f"{len(empty)} 个不重写的节里一条角标都读不出：{'、'.join(empty)}"
+                          "——多半是路径错了或那节格式变了，这时候判绿是假绿",
+                          读不出角标的节=empty, keep_sections=len(keep))
     if clashes:
         return Result.red("② 未重写节撞号",
                           f"{len(clashes)} 个角标同号不同源（一半对一半错、零报错）",
