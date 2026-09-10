@@ -109,6 +109,15 @@ def clear_stale_parts(runs_root: Path, research_id: str, template: str) -> list[
     return removed
 
 
+#: 附录里由程序生成、写手一个字都不写的那几块。标题在这里定义一次，
+#: 尺子按它切掉程序块再量写手的篇幅——同一个概念两处两个定义是本项目现形过的假绿。
+SOURCES_HEADING = "## 信息源清单"
+MISSING_HEADING = "## 哪些没采到"
+BASIS_HEADING = "## 各表口径"
+LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
+PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING, SOURCES_HEADING)
+
+
 def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """信息源清单：由代码生成，不让写手誊抄。
 
@@ -119,8 +128,10 @@ def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """
     grade_note = {"A": "可独立支撑结论", "B": "较可靠，宜与他源同现",
                   "C": "只作旁证", "D": "线索级"}
-    lines = ["## 信息源清单", "",
-             "（本节由程序按证据库直接生成，未经改写。）", "",
+    lines = [SOURCES_HEADING, "",
+             "（本节由程序按证据库直接生成，未经改写。**角标号沿用证据库里的编号**："
+             "这一轮采到但正文没有引用的证据不出现在这里，所以号码是跳着的，"
+             "不是漏了几条——本报告实际引用的就是下面列出的这些。）", "",
              "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
     for item in sources:
         grade = str(item.get("grade") or "?")
@@ -195,8 +206,8 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
                   objectives: Sequence[Mapping[str, Any]] = ()) -> str:
     """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。"""
     if not missing:
-        return "## 哪些没采到\n\n（本次调研没有缺失的采集段落。）\n"
-    lines = ["## 哪些没采到", "",
+        return f"{MISSING_HEADING}\n\n（本次调研没有缺失的采集段落。）\n"
+    lines = [MISSING_HEADING, "",
              "（本节由程序按调研过程记录生成。）", "",
              "| 缺的是哪一段 | 为什么缺 |", "|---|---|"]
     # 段落名用**这一段在采什么**（目标原话），不用 `goal-x/ch-y`——后者是内部切块方式，
@@ -221,11 +232,41 @@ def basis_table(tables: Mapping[str, Any]) -> str:
             for k, v in (tables or {}).items() if isinstance(v, Mapping)]
     if not rows:
         return ""
-    lines = ["## 各表口径", "",
+    lines = [BASIS_HEADING, "",
              "（本节由程序按每张表登记的口径说明生成。）", "",
              "| 表 | 口径 |", "|---|---|"]
     for title, basis in rows:
         lines.append(f"| {title.replace('|', '｜')} | {basis.replace('|', '｜') or '（未登记）'} |")
+    return "\n".join(lines) + "\n"
+
+
+#: 词表命中表的表名。用户 2026-09-09 拍：**正文只留模型逐条编码那一套**（n=287，
+#: 逐条读完再判正负），词表命中表降为附录参考。两张表方向相反过——同一个「价格与付费」，
+#: 词表说正 17 / 负 3，编码说正 6 / 负 19，执行摘要第 2 条引词表、第 3 条引编码，
+#: 读者看不出为什么。落法是把它从三份 SKILL 的 `tables:` 行里拿掉（写手根本看不见它，
+#: `build_prompt` 只投模板点名过的表），再由程序把它挂进附录——
+#: ⛔ 不许两张都投给写手再靠提示词自觉：本项目已证「单靠提示词不够」。
+LEXICON_TABLE = "topic_polarity"
+
+
+def lexicon_reference_table(tables: Mapping[str, Any]) -> str:
+    """词表命中表的附录参考版。写手看不见它，这里由程序照数据照列。"""
+    table = (tables or {}).get(LEXICON_TABLE)
+    if not isinstance(table, Mapping) or not table.get("rows"):
+        return ""
+    columns = [str(c) for c in table.get("columns") or []]
+    if not columns:
+        return ""
+    lines = [LEXICON_HEADING, "",
+             "（本节由程序按固定词表的命中计数生成，未经改写。这张表只统计触发词出现在多少条"
+             "证据里，**不是情感判断**——一条证据里出现「免费」既可能是在夸也可能是在骂，"
+             "词表分不出来。态度的结论一律以逐条编码那张表为准；两张表口径不同，"
+             "数字对不上是正常的。）", "",
+             "| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+    for row in table.get("rows") or []:
+        lines.append("| " + " | ".join(
+            str(row.get(column, "")).replace("|", "｜") for column in columns) + " |")
+    lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
     return "\n".join(lines) + "\n"
 
 
@@ -400,6 +441,153 @@ def offpool_marks(markdown: str, pool: frozenset[int]) -> list[str]:
     return [f"S{n:02d}" for n in sorted(used - pool)]
 
 
+#: 原声块的出处行（`—— 平台 · 等级 A [S12]`）。角标写在这一行上，所以角标要按
+#: **块**收，不按行收——按行收会把每一条原声都判成「没有角标」。
+_ATTRIBUTION_LINE = re.compile(r"^\s*(?:——|—|--)")
+#: 写手常把长引语用省略号接起来。省略号两侧各自仍应是原文的子串，所以按它切开分段比。
+_ELLIPSIS = re.compile(r"…+|\.{3,}|。{3,}")
+#: 太短的片段不值得比：一两个字撞上原文纯属巧合，判红只会白烧一轮重写。
+QUOTE_MIN_CHARS = 8
+#: 原声只能引这两级（共用规则 §5 与 §5.6 第 4 步）。C 级只作旁证、D 与未评级正文不引。
+QUOTE_GRADES = frozenset({"A", "B"})
+
+
+def quote_blocks(markdown: str) -> list[tuple[int, list[str], list[int]]]:
+    """成稿里的**原声**块：`(起始行号, 引语正文各行, 块内角标号)`。
+
+    连着的 `>` 行算一块；块里以「——」开头的是出处行，不是人说的话。
+
+    ⚠️ 不是每个 `>` 块都是原声：模板要求摘要末尾那句把握度提示
+    （`> 本报告结论的把握度为**低**，主要因为……`）也写成引用块，而它是**写手自己的话**，
+    没有原文可比、也没有等级可查。所以只认**带角标或带出处行**的块——
+    §5.6 第 4 步规定的原声格式两样都有，把握度那句两样都没有。
+    （这一条是真稿夹具当场抓出来的：不加这个判别，摘要那一节每轮都被闸退回。）
+    """
+    blocks: list[tuple[int, list[str], list[int]]] = []
+    start, texts, marks, attributed = 0, [], [], False
+    for index, line in enumerate(markdown.splitlines(), start=1):
+        if line.lstrip().startswith(">"):
+            if not texts and not marks:
+                start = index
+            body = line.lstrip().lstrip(">").strip()
+            marks.extend(int(n) for n in _MARK.findall(body))
+            body = _MARK.sub("", body).strip()
+            if not body:
+                continue
+            if _ATTRIBUTION_LINE.match(body):
+                attributed = True
+            else:
+                texts.append(body)
+            continue
+        if (texts or marks) and (marks or attributed):
+            blocks.append((start, texts, marks))
+        texts, marks, attributed = [], [], False
+    if (texts or marks) and (marks or attributed):
+        blocks.append((start, texts, marks))
+    return blocks
+
+
+def quote_corpus(data: Mapping[str, Any], report_text: str) -> str:
+    """原声比对的底本：编码逐条摘出的原声 + 工作稿全文，都去掉空白。
+
+    两样都是**流水线自己产出的原文**：`quotes` 表那一列在编码那头已经程序校验过
+    是正文子串（`coding.py` 的同一道闸），工作稿正文里的引文同理。写手照抄任一处都过，
+    改一个字就过不了——缺陷 3 里「白情一假」被写成「白请一假」正是这一类。
+    """
+    from app.reliability.coding import _squeeze          # ⛔ 只 import，不改那个文件
+
+    chunks = [str(report_text or "")]
+    for table in (data.get("tables") or {}).values():
+        if not isinstance(table, Mapping):
+            continue
+        for row in table.get("rows") or []:
+            if isinstance(row, Mapping) and row.get("原声"):
+                chunks.append(str(row["原声"]))
+    return _squeeze("\n".join(chunks))
+
+
+def altered_quotes(markdown: str, corpus: str) -> list[str]:
+    """子串闸：`>` 引语行里对不上原文的那些。
+
+    规则早写在共用规则 §5.6 第 4 步「不改写、不润色」里，但正式稿层一直没人执行它
+    ——`offpool_marks` 只查角标越池。稿子自称「逐字校验」，写手却在顺手改对错别字。
+    """
+    from app.reliability.coding import _squeeze          # ⛔ 只 import，不改那个文件
+
+    problems = []
+    for line_no, texts, _ in quote_blocks(markdown):
+        for text in texts:
+            for piece in _ELLIPSIS.split(text):
+                squeezed = _squeeze(piece)
+                if len(squeezed) >= QUOTE_MIN_CHARS and squeezed not in corpus:
+                    problems.append(
+                        f"第 {line_no} 行起的原声与原文对不上：「{piece.strip()[:40]}」。"
+                        "原声必须逐字照抄，一个字都不许改（错别字也照抄，那是发帖人写的）。")
+    return problems
+
+
+def lowgrade_quotes(markdown: str, grade_by_mark: Mapping[int, Any]) -> list[str]:
+    """等级闸：拿 C 级（或 D / 未评级）证据作原声的那些块。
+
+    共用规则 §5 写着「C 级只作旁证，不得单独支撑结论」、§5.6 第 4 步写着原声
+    「只从 A/B 级证据里挑」——同样是没人执行。缺陷 9 里正文自己写明 S39 是 C 级
+    不得作原声，另一段又拿 S39 当案例。
+    """
+    problems = []
+    for line_no, texts, marks in quote_blocks(markdown):
+        if not texts:
+            continue
+        bad = [(n, str(grade_by_mark.get(n) or "未评级")) for n in sorted(set(marks))
+               if str(grade_by_mark.get(n) or "") not in QUOTE_GRADES]
+        if bad:
+            listed = "、".join(f"S{n:02d}（{g} 级）" for n, g in bad)
+            problems.append(
+                f"第 {line_no} 行起的原声引的是 {listed}：原声只能从 A/B 级证据里挑，"
+                "C 级只作旁证、D 与未评级正文不引。换一条 A/B 级的原声，"
+                "或者把这一段改成不带原声的解读。")
+    return problems
+
+
+#: 建议降级区的小标题。共用规则 §6.5.4：全是孤证的想法机械降级放进这里。
+DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: 建议节的节名（含读者不明时的改名与竞品稿自带的那一节）。三处都受同一道门禁管。
+ADVICE_SECTIONS = frozenset({ADVICE_SECTION, "需要回应的点",
+                             ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION})
+_ENTRY_HEAD = re.compile(r"^\s*\d+[.)、]\s")
+
+
+def singlesource_advice(lines: Sequence[str], crossref: Mapping[int, Any]) -> list[str]:
+    """建议门禁：一条建议所引角标若**全是**单源孤证，必须降级到「值得进一步验证的方向」。
+
+    一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把只引孤证的那半行
+    单独判红（09-05 九格实测两格误报）。**按「条」聚合才对。**
+
+    这个函数是**生产与验收共用的那一个**：验收尺子 `check_polished._advice_entry_problems`
+    直接 import 它。同一个概念两处两个定义，是本项目现形过的一种假绿。
+    """
+    problems, entries, current = [], [], []
+    for line in lines:
+        if line.strip().startswith("#"):
+            if DOWNGRADE_HEADING in line:
+                break                   # 降级区之后的都不受门禁管
+            continue
+        if _ENTRY_HEAD.match(line) and current:
+            entries.append(current)
+            current = []
+        current.append(line)
+    if current:
+        entries.append(current)
+    for entry in entries:
+        text = "\n".join(entry)
+        marks = [int(n) for n in re.findall(r"\[?S(\d{2,})\]?", text)]
+        verdicts = {str(crossref.get(n)) for n in marks if crossref.get(n)}
+        if marks and verdicts and verdicts == {"SINGLE"}:
+            problems.append(
+                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」："
+                f"{text.strip()[:46]}")
+    return problems
+
+
 def _ctx(path: Path, research_id: str, runs_root: Path) -> validation.Ctx:
     # runs_root 必须显式传：早先按 `path.parents[3]` 反推，分节目录多一层之后
     # 它指到了研究目录而不是 runs 根，capability 于是把每次 Write 都判成越界
@@ -535,6 +723,14 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
     """
     errors: tuple[str, ...] = ()
     attempts = 0
+    # 两道引语闸的底本，一节只算一次：改过字的引语与 C 级原声都在这里被挡回去。
+    corpus = quote_corpus(data, report_text)
+    grade_by_mark = {int(str(item["mark"])[1:]): item.get("grade")
+                     for item in data.get("sources") or [] if item.get("mark")}
+    # 货 4：建议门禁也移到写作期。共用规则 §6.5.4 早写着「全是孤证的建议不算建议」，
+    # 之前只有验收尺子 ⑧ 在查——查出来时整轮 37.6 分钟已经付掉了。
+    crossref = {int(str(item["mark"])[1:]): item.get("crossref")
+                for item in data.get("sources") or [] if item.get("mark")}
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
         path.unlink(missing_ok=True)
@@ -572,6 +768,14 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
             # 越池改**片级**重写：代价从整节降到一片。
             errors = (f"{unit}引用了信息源池里没有的角标：{'、'.join(offpool)}。"
                       f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
+            continue
+        # 货 2 两道闸：规则早写在共用规则里，正式稿层一直没有程序执行它。
+        # 挡在这里而不是挡在验收尺子里——挡在这里当轮就重写，挡在尺子里要等整轮跑完。
+        quote_problems = altered_quotes(text, corpus) + lowgrade_quotes(text, grade_by_mark)
+        if current in ADVICE_SECTIONS:
+            quote_problems += singlesource_advice(text.splitlines(), crossref)
+        if quote_problems:
+            errors = tuple(f"{unit}{p}" for p in quote_problems)
             continue
         if finding is not None and finding.marks and not any(m in text for m in finding.marks):
             # 片级引用契约：照 D-052「池里每条都要被用到」同思路降级到片级。
@@ -707,6 +911,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         missing_table(parse_report(report_text).get("missing") or [],
                       data.get("objectives") or []),
         basis_table(data.get("tables") or {}),
+        # 词表命中表只在这里露面：写手拿不到它，附录给读者留个对照（用户 09-09 拍）。
+        lexicon_reference_table(data.get("tables") or {}),
     ))
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。

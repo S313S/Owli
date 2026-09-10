@@ -26,6 +26,8 @@ if str(ROOT) not in sys.path:
 
 from app.report.polish.run import (ADVICE_SECTION_UNKNOWN_AUDIENCE,  # noqa: E402
                                    IMPLICATIONS_SECTION)
+from app.report.polish.run import ADVICE_SECTIONS as _RUN_ADVICE_SECTIONS  # noqa: E402
+from app.report.polish.run import DOWNGRADE_HEADING as _RUN_DOWNGRADE_HEADING  # noqa: E402
 from app.report.polish.skills import load_templates  # noqa: E402
 
 #: 内部词：读者不知道也不需要知道研究是怎么切块的，也不需要知道库长什么样。
@@ -65,9 +67,10 @@ OPENING_SECTIONS = frozenset({"执行摘要", "总体倾向"})
 #: 因为按模板名找不到节而静默放行（假绿）。
 #: §RPT-2 货 4 ②：竞品对比稿的「对提问方意味着什么」写的也是「凭这些证据你该怎么看」，
 #: 同样受「弱证据不撑强建议」的门禁管——它和「建议」会同时出现，门禁要两节都过一遍。
-ADVICE_SECTIONS = frozenset({"建议", "需要回应的点",
-                            ADVICE_SECTION_UNKNOWN_AUDIENCE, IMPLICATIONS_SECTION})
-DOWNGRADE_HEADING = "值得进一步验证的方向"
+#: §WRITE-1 货 4：节名与降级区标题都改从 `run.py` 取——生产侧门禁按同一份名单认节，
+#: 两处各写一份的话，加一个模板节名只改一处就是静默漏查。
+ADVICE_SECTIONS = _RUN_ADVICE_SECTIONS
+DOWNGRADE_HEADING = _RUN_DOWNGRADE_HEADING
 #: §RPT-2 货 2 闸 ⑨：主体节（关键发现、正/负/争议/诉求、对比总览…）只讲调研对象。
 #: 「主体节」= 模板声明的节里去掉开篇、建议、集中列表、时间线与附录剩下的那些——
 #: 这样加模板不用回来改尺子。
@@ -326,33 +329,53 @@ def check_advice_gate(markdown: str, template, crossref: dict[int, str]) -> list
 
 
 def _advice_entry_problems(lines: list[str], crossref: dict[int, str]) -> list[str]:
-    # 一条建议横跨两行（建议行 + 依据行），角标分散在两行里；按行判会把
-    # 只引孤证的那半行单独判红（09-05 九格实测两格误报）。按「条」聚合才对。
-    problems, entries, current = [], [], []
-    for line in lines:
-        if line.strip().startswith("#"):
-            if DOWNGRADE_HEADING in line:
-                break          # 降级区之后的都不受门禁管
-            continue
-        if re.match(r"^\s*\d+[.)、]\s", line) and current:
-            entries.append(current)
-            current = []
-        current.append(line)
-    if current:
-        entries.append(current)
-    for entry in entries:
-        text = "\n".join(entry)
-        marks = [int(n) for n in MARK_ANY.findall(text)]
-        verdicts = {crossref.get(n) for n in marks if crossref.get(n)}
-        if marks and verdicts and verdicts == {"SINGLE"}:
-            problems.append(
-                f"这条建议只有单源孤证撑着，应降级到「{DOWNGRADE_HEADING}」：{text.strip()[:46]}")
-    return problems
+    """判据函数与生产侧门禁是**同一个** `run.singlesource_advice`。
+
+    §WRITE-1 货 4：这道门禁原先只在验收这一头查，查出来时整轮 37.6 分钟已经付掉了；
+    现在生产侧写完一节当场查，尺子这边留一个薄壳继续查成稿（两处口径不许分家）。
+    """
+    from app.report.polish.run import singlesource_advice
+
+    return singlesource_advice(lines, crossref)
+
+#: §WRITE-1 货 5：**否定掉的推及不是推及。** 成稿第 270 行原文是
+#: 「…属多源互证；但事件本身单一场景，**尚不能外推为**国内用户普遍关注」——
+#: 这是限定句，是 §5 门禁**要求**写手写的那种话，尺子却只匹配「用户普遍」四字，
+#: 没看见前面的「尚不能外推」，把守规矩的句子判成了违规。
+#: 「量出的异常是尺子的」第七次现形——⛔ 改尺子不改稿。
+#:
+#: 只认**同一小句里、出现在违禁词之前**的否定：写在后面的不算
+#: （「用户普遍不满意」照旧是推及全网的断言，只是断的是负面）。
+NEGATED_EXTRAPOLATION = re.compile(
+    r"不能外推|不可外推|不宜外推|不足以|不代表|不等于|不意味着|不能说明|不能读作|"
+    r"无法据此|并不能|尚不|还不能|谈不上|算不上|不是说")
+#: 小句的边界。整句切太粗：「…属多源互证；但事件本身单一场景，尚不能外推为…」
+#: 里两个分句一个是断言一个是限定，按整行判会互相盖住。
+_CLAUSE_BREAKS = "。！？；\n"
+
+
+def _clause_before(line: str, position: int) -> str:
+    """违禁词所在的那一小句里，它前面的那一截。"""
+    head = line[:position]
+    cut = max(head.rfind(char) for char in _CLAUSE_BREAKS)
+    return head[cut + 1:]
+
+
+def _is_negated(line: str, offender: str, occurrence: int) -> bool:
+    """这一次出现是不是被否定掉的。同一行里同一个词出现多次时逐次判。"""
+    start = -1
+    for _ in range(occurrence + 1):
+        start = line.find(offender, start + 1)
+        if start < 0:
+            return False
+    return bool(NEGATED_EXTRAPOLATION.search(_clause_before(line, start)))
+
 
 def check_ratio_phrases(markdown: str) -> list[str]:
     """§CODE-1：编码是模型判断，正式稿只能写条数，不能推及全网（用户 09-05 拍甲）。
 
     表格行不参与——表里的占比是数据本身，不是写手的断言。
+    被否定掉的那些也不参与（§WRITE-1 货 5），见 `NEGATED_EXTRAPOLATION`。
     """
     from app.reliability.coding import ratio_phrase_offenders
 
@@ -360,7 +383,12 @@ def check_ratio_phrases(markdown: str) -> list[str]:
     for index, line in enumerate(markdown.splitlines(), start=1):
         if line.startswith("|"):
             continue
+        seen: dict[str, int] = {}
         for offender in ratio_phrase_offenders(line):
+            occurrence = seen.get(offender, 0)
+            seen[offender] = occurrence + 1
+            if _is_negated(line, offender, occurrence):
+                continue
             problems.append(
                 f"第 {index} 行的 {offender!r} 把编码结果说成了全网比例；"
                 "编码是模型判断，只能写「N 条里 M 条编码为正向」")
@@ -428,6 +456,53 @@ def hedge_density(markdown: str) -> list[str]:
             problems.append(f"「{name}」节里限定词出现 {count} 处（上限 {HEDGE_PER_SECTION}）"
                             "，把握度在摘要末尾说一次就够")
     return problems
+
+
+#: §WRITE-1 货 3（用户 09-09 拍「2.5 万压到 1.2–1.5 万」）。**单位是字符，不是中文字**：
+#: 底料 `r-3e04f808dffd×consulting` 实测全文 25 197 字符 / 47 314 B / 中文字才 9 933——
+#: 用户读到的「2.5 万」对得上的是**字符数**。开工时按中文字定预算差了三倍，
+#: 会要求这份稿变长（本包实测当场推翻，这是「量出异常先怀疑尺子」第八次现形）。
+#:
+#: 数的是**写手写的那部分**：程序生成的四块（缺失清单 / 各表口径 / 词表命中参考 /
+#: 信息源清单）不计。它们合计 11 041 字符、占全文 44%，其中信息源清单一块就 9 434——
+#: 那是 50 条源的标题与链接，读者不读它、只查它，写手也压不动它。
+#: 全文要真进 1.2–1.5 万，得动信息源清单——那是可追溯性的骨架。
+#: **用户 2026-09-09 拍甲：保住它，全文停在 1.8–2 万字符。** 理由是可追溯正是这份稿
+#: 现在唯一站得住的长处（评审的加分项里三条都指向它），另两个选项各自要拿掉
+#: 「读者点得到原链接」或「哪些采到了但没用上」，都不换。
+#: 所以本尺子只管**写手正文砍一半**：14 154 → 7 000–9 000 字符，程序那四块不计。
+#:
+#: **判黄不判红**——篇幅超了要整稿重写，一轮 37.6 分钟；这条给合流那一轮一个读数。
+LENGTH_MAX_CHARS = 9000
+LENGTH_MIN_CHARS = 7000
+
+
+def writer_length(markdown: str) -> int:
+    """写手写的那部分有多少字符。表格与引语照数——它们也占读者的阅读时间。"""
+    from app.report.polish.run import PROGRAM_APPENDIX_HEADINGS
+
+    text = markdown
+    for heading in PROGRAM_APPENDIX_HEADINGS:
+        cut = text.rfind("\n" + heading)
+        if cut >= 0:
+            # 程序块之间不保证顺序，逐块按「这一块到下一个二级标题」剜掉。
+            rest = text[cut + 1:]
+            end = rest.find("\n## ", len(heading))
+            text = text[:cut + 1] + (rest[end + 1:] if end >= 0 else "")
+    return len(text)
+
+
+def length_budget(markdown: str) -> list[str]:
+    """货 3：篇幅。判黄不判红；本包不出判据，读数留给合流那一轮。"""
+    count = writer_length(markdown)
+    if count > LENGTH_MAX_CHARS:
+        return [f"写手正文 {count} 字符，超出上限 {LENGTH_MAX_CHARS}："
+                "先查同一张表出没出两次、两条发现讲没讲同一件事、"
+                "论据节是不是把关键发现的表重排了一遍。⛔ 不许靠删限定句压"]
+    if count < LENGTH_MIN_CHARS:
+        return [f"写手正文 {count} 字符，低于下限 {LENGTH_MIN_CHARS}——"
+                "压过头了，看是不是把限定句或反证删掉了"]
+    return []
 
 
 #: §RULE-1 货 4（评审 #8，调度拍乙）：正式稿只出表不出图。
@@ -592,7 +667,7 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           "⑮ 归因只引该格内的角标", "⑯ 表格一格 ≤3 个角标")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
-WARNINGS = ("⒜ 限定句密度",)
+WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅")
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -640,7 +715,8 @@ def warnings_of(md_path: Path) -> dict[str, list[str]]:
     """判黄的那几条。与 `run()` 分开返回：调用方（`rpt1_matrix`）按 `run()` 判过不过，
     黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。"""
     markdown = md_path.read_text(encoding="utf-8")
-    return {WARNINGS[0]: hedge_density(markdown)}
+    return {WARNINGS[0]: hedge_density(markdown),
+            WARNINGS[1]: length_budget(markdown)}
 
 
 def main(argv: list[str]) -> int:
