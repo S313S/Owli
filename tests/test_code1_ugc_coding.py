@@ -16,7 +16,11 @@ from app.reliability.coding import (
     source_text,
 )
 
-_TEXT = "豆包写作文真的好用，比我自己憋一晚上强多了"
+# §QUOTE-1 货 1 起，原声还要过「把话说完」那道闸。这里把逗号改成句号，
+# 是让本文件那句共用的样例原声「真的好用」落在句末——**不是把闸改松**：
+# 本文件测的是闭集/子串/批量/落库，样例得先合规，才不会顺带把新闸也测一遍
+# （新闸自己的正反用例在 `test_quote1_complete_sentence.py`）。
+_TEXT = "豆包写作文真的好用。比我自己憋一晚上强多了"
 
 
 def _row(index: int, *, grade: str = "B", kind: str = "user_opinion",
@@ -198,13 +202,41 @@ def test_三次都摘错就整批不写库(tmp_path: Path) -> None:
     assert all("coding" not in row["extra"] for row in store.list_evidence("r-cd"))
 
 
-def test_批量上限不超过四十(tmp_path: Path) -> None:
+def test_批量按双封顶切_条数顶(tmp_path: Path) -> None:
+    """⚠️ 本用例原来断言 `[40, 5]`，锁的是「只封条数、一批最多 40」那套旧语义。
+
+    §QUOTE-1 二班把切批改成**条数 + 字节双封顶**，所以这里改的是**被替换掉的
+    那条语义**，不是把闸改松：一批 40 条实测跑不完（25 条那档两天 0/17，
+    按拟合一批约 757 秒、超适配器 300 秒硬顶两倍多）。
+    `batch_size=41` 仍要报错——那条边界没变，一并留在这里守着。
+    """
     store = _store(tmp_path, count=45)
     engine = _CodingEngine()
     _run(store, tmp_path, engine)
-    assert engine.batch_sizes == [40, 5]
+    from app.reliability.coding import CODING_BATCH_ITEMS
+
+    assert engine.batch_sizes == [CODING_BATCH_ITEMS] * 9, "样例行都很短，该由条数顶说了算"
+    assert sum(engine.batch_sizes) == 45, "一条都不许丢"
     with pytest.raises(ValueError):
         _run(store, tmp_path, _CodingEngine(), batch_size=41)
+
+
+def test_调用方给的批量只能收窄不能放宽(tmp_path: Path) -> None:
+    """脚本的 `--batch-size` 默认 25 在本包改不着（不是本包的文件），
+    所以收窄必须发生在这里；给 2 要听它的，给 25 仍按 5 收窄。"""
+    from app.reliability.coding import CODING_BATCH_ITEMS
+
+    store = _store(tmp_path, count=10)
+    engine = _CodingEngine()
+    _run(store, tmp_path, engine, batch_size=2)
+    assert engine.batch_sizes == [2] * 5, "给得比顶小，要听调用方的"
+
+    other = tmp_path / "b"
+    other.mkdir()
+    store2 = _store(other, count=10)
+    engine2 = _CodingEngine()
+    _run(store2, other, engine2, batch_size=25)
+    assert max(engine2.batch_sizes) <= CODING_BATCH_ITEMS, "给得比顶大，要被收窄"
 
 
 def test_失败批把死因落盘(tmp_path: Path) -> None:

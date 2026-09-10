@@ -33,7 +33,32 @@ AGENT_ID = "ugc-coding"
 CODING_VERSION = "v2"
 MAX_ATTEMPTS = 3
 CODING_BATCH_MAX = 40
+#: 一批最多几条 / 最多多少字节（§QUOTE-1 二班「双封顶」）。
+#:
+#: **为什么要封字节**：原来只封条数。而真行实测单条 172–4,322 字节、
+#: **最胖是中位的 13.3 倍**，于是同样「25 条」可能 4.3 KB、也可能 108 KB——
+#: 一批要跑多久相差一个数量级。本机代理会随机掐断长流（引擎原话
+#: `API Error: The socket connection was closed unexpectedly`），
+#: **跑得越久越躲不过**，胖批就是必死的那批。
+#:
+#: **数从哪来**：287 条真行按原序试切——(25 条, 无字节顶) 出 12 批、
+#: 单批最大 17,587 字节；(5 条, 2,000 字节) 出 86 批、每批中位 4 条。
+#: 按 A 组实测拟合的「一批 ≈ 32 + 29×N 秒」，前者一批约 757 秒、
+#: **是适配器 300 秒硬超时的两倍多**，后者约 134 秒，留足余量。
+#:
+#: ⛔ **抄 `orchestrator/sectioning.py:write_shard_sizes` 的形，不 import**
+#: （那是禁区文件；`report/polish/sharding.py` 当初也是抄形不 import，同一个理由）。
+#: 那边 §D-034 已经付过学费：只按条数切、把溢出全堆进末片，等于
+#: **「为消灭超时做的分片反而在末片把超时造回来」**——所以这里两个顶一起封。
+CODING_BATCH_ITEMS = 5
+CODING_BATCH_BYTES = 2_000
 QUOTE_MAX = 40
+#: 句末标点：quote 结尾落在这里才算把话说完。中英文各摆一套——底料里
+#: reddit 与抖音口播稿都有，只认中文标点会把英文整批判红。
+SENTENCE_TERMINALS = "。！？；…!?;."
+#: 收尾符号：跟在句末标点后面的引号/括号也算句末（「……好用。」）。
+#: ⛔ 单独出现不算——「壞行為」这种句中引号收尾仍是半句。
+SENTENCE_CLOSERS = "」』”’\"）)】》"
 
 AUDIENCES = ("学生", "职场", "创作者", "开发者", "家长", "不明")
 SCENARIOS = ("学习", "写作", "办公", "编程", "生活娱乐", "情感陪伴", "其他")
@@ -97,6 +122,79 @@ def _squeeze(text: str) -> str:
     return "".join(str(text).split())
 
 
+def _squeezed_with_line_ends(text: str) -> tuple[str, list[bool]]:
+    """去空白后的正文 + 「每个字后面在原文里是不是换行（或文末）」。
+
+    换行在 UGC 里就是句号：很多帖子整段不打标点、只靠回车分句。`source_text`
+    又拿 `\n` 接标题与正文，所以标题末尾也落在这里——「整个标题就是一句话」
+    的 quote 才不会被当成半句判红。
+
+    ⛔ 不复用 `_squeeze`：那个函数只回字符串，签名与语义 §WRITE-1 在依赖（它
+    import 去做正式稿的引语子串闸），本包不动它。这里另起一条，两条各管各的。
+    """
+
+    chars: list[str] = []
+    ends: list[bool] = []
+    for ch in str(text):
+        if ch.isspace():
+            if ends:
+                ends[-1] = ends[-1] or ch == "\n"
+            continue
+        chars.append(ch)
+        ends.append(False)
+    if ends:
+        ends[-1] = True
+    return "".join(chars), ends
+
+
+def quote_is_complete(quote: str, source: str) -> bool:
+    """这句 quote 有没有把话说完——结尾落在句末标点、换行，或原文末尾。
+
+    §QUOTE-1 货 1：提示词原来只写「不超过 40 字」，**只管长度不管句子完不完整**，
+    模型就自己觉得摘够了停在半句上——实测 S31 只摘了 16 字（离上限还远），停在
+    「豆包的「壞行為」三大罪狀強行對話」，后面「（Forced Chatting）：開發團隊…」
+    全丢了，端到客户面前是个病句。**所以这不是上限设小了，调大 `QUOTE_MAX` 治不了。**
+    ⛔ 提示词改了也不算过：本项目已证单靠提示词不够，这道程序闸才是判据。
+
+    宽在三处，都是为了别把本来就对的句子判红：
+    1. 模型常把末尾那个句号省掉不摘，所以**紧跟在 quote 后面**的字是句末标点也算过；
+    2. 同一句话在一条正文里可能出现多次，**任何一处**落在句末就算过；
+    3. 原文通篇既没有句末标点、也没有一处换行时**不设闸**（抖音口播稿实测有这种）——
+       那种正文里根本挑不出合规的句子，设了闸整批只会重打三次再整批作废，
+       钱烧完还是一条编码都不落库。
+    """
+
+    squeezed = _squeeze(quote)
+    if not squeezed:
+        return True
+    if squeezed[-1] in SENTENCE_TERMINALS:
+        return True
+    if (len(squeezed) >= 2 and squeezed[-1] in SENTENCE_CLOSERS
+            and squeezed[-2] in SENTENCE_TERMINALS):
+        return True
+    text, line_ends = _squeezed_with_line_ends(source)
+    if not text:
+        return True
+    # ⛔ 判「有没有边界」要看**整段正文**，不是掐掉最后一个字看。第一版写成
+    # `text[:-1]`，结果「通篇只有末尾一个句号」的正文被判成没有边界、整条豁免，
+    # 造红用例里那个半句 quote 当场混过去了（A/B 实测两侧都「过」）。
+    if not any(ch in SENTENCE_TERMINALS for ch in text) and not any(line_ends[:-1]):
+        return True
+    start = text.find(squeezed)
+    while start != -1:
+        end = start + len(squeezed) - 1
+        if line_ends[end]:
+            return True
+        nxt = text[end + 1: end + 2]
+        after = text[end + 2: end + 3]
+        if nxt and nxt in SENTENCE_TERMINALS:
+            return True
+        if nxt and nxt in SENTENCE_CLOSERS and after and after in SENTENCE_TERMINALS:
+            return True
+        start = text.find(squeezed, start + 1)
+    return False
+
+
 def is_coded(item: Mapping[str, Any]) -> bool:
     coding = _extra(item).get("coding")
     return (
@@ -128,6 +226,44 @@ def coding_targets(
             continue
         selected.append(dict(item))
     return selected
+
+
+def coding_batch_sizes(
+    items: Sequence[Mapping[str, Any]], *,
+    max_items: int = CODING_BATCH_ITEMS,
+    max_bytes: int = CODING_BATCH_BYTES,
+) -> list[int]:
+    """按原序切批：条数到顶、或再加一条就超字节顶，就封一批。返回每批条数表。
+
+    量的是 `engine_input` 的 JSON 字节数——**喂进提示词的就是它**，
+    所以这个重量和「这一批要让引擎说多久」直接挂钩，不是拿正文长度估的。
+
+    **单条自己就超预算时自成一批，不丢条**（真行里最胖那条 4,322 字节，
+    比 2,000 的顶还大）。⛔ 宁可让它单独去撞运气，也不许把它丢掉——
+    丢一条证据是内容错误，比慢一点坏得多。
+
+    ⛔ 不做 `write_shard_sizes` 那个「片数超上限就重新均摊」的收尾：
+    那边片数有硬上限（一节只能切这么多片），**这边批数不设上限**——
+    287 条切成 86 批完全正常，多切几批只是多跑几轮，不会把哪一批撑胖。
+    """
+
+    limit_items = max(1, int(max_items))
+    limit_bytes = max(1, int(max_bytes))
+    sizes: list[int] = []
+    count = 0
+    used = 0
+    for item in items:
+        weight = len(
+            json.dumps(engine_input(item), ensure_ascii=False).encode("utf-8")
+        )
+        if count and (count >= limit_items or used + weight > limit_bytes):
+            sizes.append(count)
+            count, used = 0, 0
+        count += 1
+        used += weight
+    if count:
+        sizes.append(count)
+    return sizes
 
 
 def engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -193,7 +329,11 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
         f"topics 是数组，取值只能来自：{'、'.join(TOPICS)}。可多选，"
         "一个都不沾就给空数组，不要硬塞。\n"
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
-        "要能代表这条的态度。禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
+        "要能代表这条的态度。**必须是把话说完的一句**：结尾要落在句末标点"
+        f"（{SENTENCE_TERMINALS}）上，或落在原文的换行处、结尾处。"
+        "⛔ 不许停在逗号、顿号前，不许话说到一半就断——"
+        f"**{QUOTE_MAX} 字是上限不是目标**，一句话说不完就换一句短的摘，宁可短，不许切一半。"
+        "禁止改写、拼接、翻译或补标点——摘出来的字必须原样出现在"
         "输入文本里，对不上整批退回重打。实在摘不出就给空字符串。\n"
         + naming +
         f"trigger 闭集：{'/'.join(TRIGGERS)}，答的是「这个人为什么开始用或换用」。"
@@ -204,6 +344,39 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
         f"必须把结果写到此精确路径：{output_path}。不得改用其他文件名。\n"
         "输入证据：" + json.dumps(list(items), ensure_ascii=False, separators=(",", ":"))
     )
+
+
+#: 「没把话说完」这类错的认记号。⛔ 是记号不是措辞：`_code_batch` 靠它认出
+#: 「整批只剩这一类错」，改字面等于把兜底那条腿静默拆了。
+_INCOMPLETE_MARK = "停在半句上"
+
+
+def _blank_incomplete_quotes(
+    value: Sequence[Any], inputs: Sequence[Mapping[str, Any]],
+    sources: Mapping[str, str],
+) -> int:
+    """把三轮都没说完的 quote 就地置空，回置空条数。
+
+    ⛔ 这是兜底不是常态：闸是**按条**判的，退回却是**整批**退——一批 40 条里
+    只要一条摘不好，三轮打不过就整批返 None，那 40 条的态度/主题/场景全都不入库。
+    为了一句原声赔掉 40 条聚合数据，方向反了：聚合表是这道工序的主产物，
+    原声只是例子。所以最后一轮只剩这一类错时，作废那几句 quote、保住整批。
+
+    置空**不许静默**：条数落进 `.errors.json`，谁都看得见这批赔过几句原声。
+    """
+
+    blanked = 0
+    for item, source in zip(value, inputs):
+        if not isinstance(item, dict):
+            continue
+        quote = item.get("quote")
+        if not isinstance(quote, str) or not quote:
+            continue
+        body = sources.get(str(item.get("id")), "")
+        if _squeeze(quote) in _squeeze(body) and not quote_is_complete(quote, body):
+            item["quote"] = ""
+            blanked += 1
+    return blanked
 
 
 def coding_errors(
@@ -245,9 +418,17 @@ def coding_errors(
         if len(quote) > QUOTE_MAX:
             errors.append(f"items[{index}].quote 超过 {QUOTE_MAX} 字：{len(quote)}")
         squeezed = _squeeze(quote)
-        text = _squeeze(sources.get(str(identity), ""))
+        source_body = sources.get(str(identity), "")
+        text = _squeeze(source_body)
         if squeezed and squeezed not in text:
             errors.append(f"items[{index}].quote 不是原文子串，不许改写或拼接")
+        # §QUOTE-1 货 1：摘对了字还不够，得把话说完。只在子串闸过了之后判——
+        # 子串都对不上时再报一条「没说完」是噪音，而且退回原因写两条会让
+        # 重打那一轮的提示词把 10 条错误的名额吃掉一半（`_code_batch` 只回传前 10 条）。
+        elif squeezed and not quote_is_complete(quote, source_body):
+            errors.append(
+                f"items[{index}].quote {_INCOMPLETE_MARK}：{quote!r}——"
+                "结尾要落在句末标点或原文换行/结尾处，换一句短的完整句摘")
         # §RPT-2 货 4③：两个字段**可空**，缺字段不算错；填了才守规矩。
         # 老版本（v1）编码的行没有它们，不能因此判整批失败。
         trigger = item.get("trigger")
@@ -332,6 +513,19 @@ async def _code_batch(
         errors = coding_errors(value, compact, sources)
         if not errors:
             return [dict(item) for item in value]
+        # 最后一轮还剩的错**全是**「没把话说完」时，作废那几句 quote 保住整批：
+        # 赔一句原声，不赔 40 条聚合编码。别的错（闭集越界、不是原文子串、
+        # 引反了人）一条都不许这么放行——那些是编错了，不是摘短了。
+        if _attempt == MAX_ATTEMPTS and all(
+            _INCOMPLETE_MARK in error for error in errors
+        ):
+            blanked = _blank_incomplete_quotes(value, compact, sources)
+            if blanked and not coding_errors(value, compact, sources):
+                _write_failure(output_path, items=compact, errors=[
+                    f"{blanked} 条 quote 三轮都停在半句上，已作废置空；"
+                    "该批其余编码照常入库（§QUOTE-1 兜底）",
+                ])
+                return [dict(item) for item in value]
     # 三次都没过就把最后一轮的原因落盘：不落的话失败批只剩「产物不存在」，
     # 死因得回头翻引擎日志才看得到（本轮实测两批死于传输层 socket 断开，
     # 查了一圈日志才认出来）。判死因要读原文，别让它静默。
@@ -411,8 +605,16 @@ async def code_report(
             item for item in targets
             if str(item.get("goal_id") or "goal-1") == goal_id
         ]
-        for number, start in enumerate(range(0, len(pending), batch_size), 1):
-            batch = pending[start:start + batch_size]
+        # 双封顶切批：`batch_size` 只是条数上限的**上限**——调用方给 25，
+        # 这里仍按 CODING_BATCH_ITEMS 收窄。⛔ 有意如此：脚本的 --batch-size
+        # 默认 25 在禁区外的文件里改不着，而 25 条一批实测跑不完（0/17）。
+        start = 0
+        sizes = coding_batch_sizes(
+            pending, max_items=min(batch_size, CODING_BATCH_ITEMS),
+        )
+        for number, size in enumerate(sizes, 1):
+            batch = pending[start:start + size]
+            start += size
             labels = await _code_batch(
                 batch, adapter=adapter,
                 output_path=_batch_output_path(
@@ -449,7 +651,9 @@ async def code_report(
 __all__ = [
     "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
     "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
-    "coding_tables", "coding_targets", "is_coded", "ratio_phrase_offenders",
+    "CODING_BATCH_BYTES", "CODING_BATCH_ITEMS", "coding_batch_sizes",
+    "ENGAGEMENT_NOTES", "coding_tables", "coding_targets", "engagement_tier",
+    "is_coded", "quote_is_complete", "ratio_phrase_offenders",
 ]
 
 
@@ -589,13 +793,56 @@ def _names_the_entity(quote: str, accepted: Sequence[str]) -> bool:
     return not accepted or any(mentions(quote, name) for name in accepted)
 
 
-def _quote_sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
-    """原声按互动量降序；取不到互动量的排在后面，同分按 id 稳定。"""
+#: 互动量档位：有人理 → 零互动 → 取不到。**分档要显式写出来**，别靠算术凑：
+#: 原来那行是 `-(value if 是数 else -1.0)`，取不到的行靠 `-(-1.0)=1.0` 恰好排到
+#: 零互动（`-0.0`）后面——结果对，但没人看得出这是有意的，改一个符号就静默失效。
+_ENGAGED, _ZERO_ENGAGEMENT, _UNMEASURED = 0, 1, 2
+#: 档位 → 表里那一列写什么。措辞不出字段名、不出「互动量」这种半机器词：
+#: 读这一列的是写手和客户，要的是「这句话有没有人附和」这个意思。
+_ENGAGEMENT_NOTES = {
+    _ENGAGED: "",
+    _ZERO_ENGAGEMENT: "无人点赞或评论",
+    _UNMEASURED: "该平台未提供互动数",
+}
+#: 同一张表的公开名。§QUOTE-2 在 `sectioning.py` 里给每节提示词的「正向/负向代表原声」
+#: 标同一套话，**要求两处逐字相同**——所以它 import 这张表，不另抄一份：抄一份不会
+#: 立刻出错，会在将来某次改词时悄悄分叉，而那时没人会想到去比对两处措辞。
+#: **改这里的词就是同时改两个包的呈现，改前先报调度。**
+#: 下划线那个名字原样留着（本模块内部在用），这里只是把「有外部消费方」这件事
+#: 写在代码上——下划线在 Python 里明写着「没人从外面用」，而那句话现在是假的。
+ENGAGEMENT_NOTES = _ENGAGEMENT_NOTES
+
+
+def engagement_tier(row: Mapping[str, Any]) -> int:
+    """这条证据在「有没有人理」上属于哪一档。
+
+    §QUOTE-1 货 2：零互动的不许当代表。**降权不是排除**——本包拿真数据试过：
+    287 条已编码行里 80 条互动量正好是 0（小红书评论的 `likes` 天生是 0），
+    排除的话「交互体验/负」那一格唯一的原声就没了，整格空。空格会被读成
+    「没人这么说」，比一条冷门原声更误导，所以留着、降权、并在表里标出来。
+    """
 
     from app.reliability.scoring import engagement_value
 
     value = engagement_value(row)
-    return (-(value if isinstance(value, (int, float)) else -1.0), str(row.get("id")))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return _UNMEASURED
+    return _ENGAGED if value > 0 else _ZERO_ENGAGEMENT
+
+
+def _quote_sort_key(row: Mapping[str, Any]) -> tuple[int, float, str]:
+    """原声先按互动量档位，再按互动量降序，同档同分按 id 稳定。
+
+    ⛔ 档位在前是关键：一格里只要有一条有人理的原声，零互动的就轮不到前面去，
+    与它具体是 0 还是取不到无关。评审实测的病是「一格里大家都是 0 时，随便哪条
+    都能排第一」——那种情况排序救不了，靠的是表里那列标注，见 `polish_tables`。
+    """
+
+    from app.reliability.scoring import engagement_value
+
+    value = engagement_value(row)
+    measured = value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+    return (engagement_tier(row), -float(measured), str(row.get("id")))
 
 
 def coding_tables(
@@ -689,6 +936,11 @@ def coding_tables(
                     ),
                     "platform": item.get("platform"),
                     "engagement": engagement_value(item),
+                    # §QUOTE-1 货 2：光摆一个「0」不够。写手看见一列数字里的 0，
+                    # 照样会把那句话写进执行摘要当「头号负评」（评审实测 S25，
+                    # 微博 0 赞 0 评被引两次）。**得用话告诉它这是什么意思**，
+                    # 所以这里出的是标注不是数字；数字仍在 `engagement` 里。
+                    "engagement_note": _ENGAGEMENT_NOTES[engagement_tier(item)],
                 })
 
     dropped = _dropped_quotes(coded, accepted, marks)
@@ -841,19 +1093,26 @@ def polish_tables(
             coverage=coverage),
         "quotes": _shell(
             "quotes", "UGC 代表原声（每格按互动量取前 3）",
-            ("主题", "态度", "原声", "平台", "互动量"),
+            ("主题", "态度", "原声", "平台", "互动量", "代表性"),
             # 呈现层**永远**只出引得动的：一条角标都没有的原声，写手弃用是浪费、
             # 裸引会被尺子③判红。`coding_tables` 在没给角标表时不过滤（备料、
             # 离线核数要看全量），但走到这里就是要喂给写手了，没有回退。
             [row for row in (
                 {"主题": q["topic"], "态度": q["attitude"], "原声": q["quote"],
                  "平台": q["platform"], "互动量": q["engagement"],
+                 # §QUOTE-1 货 2：0 这个数字本身不会拦住写手。多一列说人话的标注，
+                 # 它把这句写成「头号负评」之前至少看得见「没人附和过」。
+                 # 数字仍留在「互动量」列，尺子④「数字有出处」照收，不受影响。
+                 "代表性": q["engagement_note"],
                  "marks": _row_marks([{"id": q["evidence_id"]}], marks)}
                 for q in data["quotes"]) if row["marks"]],
             n=len(data["quotes"]),
             basis=(
-                "从原文逐字摘出、程序校验过是正文子串的原声；每个主题的正/负各取"
-                "互动量最高的 3 条。原声是**例子不是分布**，读它不能替代读上面的条数表。"
+                "从原文逐字摘出、程序校验过是正文子串**且把话说完**的原声；"
+                "每个主题的正/负各取互动量最高的 3 条——**有人点赞或评论过的排在前面**，"
+                "「代表性」栏标了「无人点赞或评论」的那几条是这一格里没有更好的了才收的，"
+                "⛔ 不得把它们写成多数人的看法、也不得单独拎去当某一方的头号声音。"
+                "原声是**例子不是分布**，读它不能替代读上面的条数表。"
                 + _quotes_footnote(data["quotes_dropped"])
             ),
             coverage=coverage),
