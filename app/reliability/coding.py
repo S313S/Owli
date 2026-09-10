@@ -33,6 +33,25 @@ AGENT_ID = "ugc-coding"
 CODING_VERSION = "v2"
 MAX_ATTEMPTS = 3
 CODING_BATCH_MAX = 40
+#: 一批最多几条 / 最多多少字节（§QUOTE-1 二班「双封顶」）。
+#:
+#: **为什么要封字节**：原来只封条数。而真行实测单条 172–4,322 字节、
+#: **最胖是中位的 13.3 倍**，于是同样「25 条」可能 4.3 KB、也可能 108 KB——
+#: 一批要跑多久相差一个数量级。本机代理会随机掐断长流（引擎原话
+#: `API Error: The socket connection was closed unexpectedly`），
+#: **跑得越久越躲不过**，胖批就是必死的那批。
+#:
+#: **数从哪来**：287 条真行按原序试切——(25 条, 无字节顶) 出 12 批、
+#: 单批最大 17,587 字节；(5 条, 2,000 字节) 出 86 批、每批中位 4 条。
+#: 按 A 组实测拟合的「一批 ≈ 32 + 29×N 秒」，前者一批约 757 秒、
+#: **是适配器 300 秒硬超时的两倍多**，后者约 134 秒，留足余量。
+#:
+#: ⛔ **抄 `orchestrator/sectioning.py:write_shard_sizes` 的形，不 import**
+#: （那是禁区文件；`report/polish/sharding.py` 当初也是抄形不 import，同一个理由）。
+#: 那边 §D-034 已经付过学费：只按条数切、把溢出全堆进末片，等于
+#: **「为消灭超时做的分片反而在末片把超时造回来」**——所以这里两个顶一起封。
+CODING_BATCH_ITEMS = 5
+CODING_BATCH_BYTES = 2_000
 QUOTE_MAX = 40
 #: 句末标点：quote 结尾落在这里才算把话说完。中英文各摆一套——底料里
 #: reddit 与抖音口播稿都有，只认中文标点会把英文整批判红。
@@ -207,6 +226,44 @@ def coding_targets(
             continue
         selected.append(dict(item))
     return selected
+
+
+def coding_batch_sizes(
+    items: Sequence[Mapping[str, Any]], *,
+    max_items: int = CODING_BATCH_ITEMS,
+    max_bytes: int = CODING_BATCH_BYTES,
+) -> list[int]:
+    """按原序切批：条数到顶、或再加一条就超字节顶，就封一批。返回每批条数表。
+
+    量的是 `engine_input` 的 JSON 字节数——**喂进提示词的就是它**，
+    所以这个重量和「这一批要让引擎说多久」直接挂钩，不是拿正文长度估的。
+
+    **单条自己就超预算时自成一批，不丢条**（真行里最胖那条 4,322 字节，
+    比 2,000 的顶还大）。⛔ 宁可让它单独去撞运气，也不许把它丢掉——
+    丢一条证据是内容错误，比慢一点坏得多。
+
+    ⛔ 不做 `write_shard_sizes` 那个「片数超上限就重新均摊」的收尾：
+    那边片数有硬上限（一节只能切这么多片），**这边批数不设上限**——
+    287 条切成 86 批完全正常，多切几批只是多跑几轮，不会把哪一批撑胖。
+    """
+
+    limit_items = max(1, int(max_items))
+    limit_bytes = max(1, int(max_bytes))
+    sizes: list[int] = []
+    count = 0
+    used = 0
+    for item in items:
+        weight = len(
+            json.dumps(engine_input(item), ensure_ascii=False).encode("utf-8")
+        )
+        if count and (count >= limit_items or used + weight > limit_bytes):
+            sizes.append(count)
+            count, used = 0, 0
+        count += 1
+        used += weight
+    if count:
+        sizes.append(count)
+    return sizes
 
 
 def engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -548,8 +605,16 @@ async def code_report(
             item for item in targets
             if str(item.get("goal_id") or "goal-1") == goal_id
         ]
-        for number, start in enumerate(range(0, len(pending), batch_size), 1):
-            batch = pending[start:start + batch_size]
+        # 双封顶切批：`batch_size` 只是条数上限的**上限**——调用方给 25，
+        # 这里仍按 CODING_BATCH_ITEMS 收窄。⛔ 有意如此：脚本的 --batch-size
+        # 默认 25 在禁区外的文件里改不着，而 25 条一批实测跑不完（0/17）。
+        start = 0
+        sizes = coding_batch_sizes(
+            pending, max_items=min(batch_size, CODING_BATCH_ITEMS),
+        )
+        for number, size in enumerate(sizes, 1):
+            batch = pending[start:start + size]
+            start += size
             labels = await _code_batch(
                 batch, adapter=adapter,
                 output_path=_batch_output_path(
@@ -586,6 +651,7 @@ async def code_report(
 __all__ = [
     "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
     "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
+    "CODING_BATCH_BYTES", "CODING_BATCH_ITEMS", "coding_batch_sizes",
     "ENGAGEMENT_NOTES", "coding_tables", "coding_targets", "engagement_tier",
     "is_coded", "quote_is_complete", "ratio_phrase_offenders",
 ]
