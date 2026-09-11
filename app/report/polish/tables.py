@@ -44,12 +44,44 @@ def normalize_quote(text: object) -> str:
     return _QUOTE_NOISE.sub("", str(text or "")).lower()
 
 
+def has_independent_title(row: Mapping[str, Any]) -> bool:
+    """这条证据有没有**独立的**标题——`title` 字段有值不等于它是个标题。
+
+    §D-060 货 1：微博没有标题这个东西，采集器把博文正文同时塞进 `title` 与
+    `content_excerpt`；网页搜索 19/21、抖音 47/107 同病（实测 r-3e04f808dffd，
+    归一后「标题 = 正文开头」），Reddit 0/111。于是真人博文的任何一段都会被
+    `is_speech_quote` 当成「标题」否决——S33「飞书和豆包胜在场景和垂直」就是一段博文结尾。
+    判法按数据不按平台：归一后标题与正文相等、或标题是正文的前缀（采集器截断过的
+    正文拷贝），就没有独立标题；反过来正文是标题的前缀（标题才是全文、正文被截了）
+    同样算拷贝，但只在正文 ≥ MIN_TITLE_OVERLAP 时认，短正文撞车是巧合。
+    没有正文可比时按有标题算——宁可多拦一句原声，也不把闸拆了。
+    """
+    title = normalize_quote(row.get("title"))
+    if not title:
+        return False
+    body = normalize_quote(row.get("content_excerpt"))
+    if not body:
+        return True
+    if title == body or body.startswith(title):
+        return False
+    if len(body) >= MIN_TITLE_OVERLAP and title.startswith(body):
+        return False
+    return True
+
+
+def independent_titles(rows: Iterable[Mapping[str, Any]]) -> list[str]:
+    """「标题名单」：只收真有独立标题的证据的 title——喂给 `is_speech_quote` 的就是它。"""
+    return [str(r.get("title")) for r in rows if has_independent_title(r)]
+
+
 def is_speech_quote(text: object, titles: Iterable[object] = ()) -> bool:
     """这句话能不能当原声。
 
     两条否决：① 它就是某条证据的标题（帖子标题不是人说的话，是编辑写的招牌）；
     ② 它在做发布或推广的宣告（产品公告、服务商广告）。
     两条都不命中才是「人在说自己怎么看」——原声要的是这个。
+    `titles` 要传 `independent_titles(rows)`，别直接传全部 `title` 字段——
+    无独立标题的平台那一栏是正文拷贝，传进来会把真人博文整段否决（§D-060 货 1）。
     """
     body = str(text or "").strip()
     if not body:
@@ -508,6 +540,10 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     # 正文一次都不写。工作稿的信息源行不带这个字段，按角标号回查证据补上。
     fetched_by_mark = {int(r["citation_no"]): r.get("fetched_at") for r in cited}
     crossref_by_mark = _crossref_by_mark(cited, claims)
+    # §D-060 货 1：验收尺子 ⑭ 与候选过滤共用 `is_speech_quote`，但尺子只看得见
+    # tables.json 的 `sources`（没有正文可比），所以「这条源的 title 是不是独立标题」
+    # 在这里算好随源带过去；尺子按它筛名单。缺这个键的老产物按 True 读（旧行为）。
+    independent_by_mark = {int(r["citation_no"]): has_independent_title(r) for r in cited}
     return {
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
@@ -538,7 +574,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "grade": grade_by_mark.get(int(s["citation_no"])) or s.get("grade"),
                      "fetched_at": fetched_by_mark.get(int(s["citation_no"])),
                      # 建议段门禁要按角标核：这条源背后的主张里最强的那个交叉验证结论。
-                     "crossref": crossref_by_mark.get(int(s["citation_no"]))}
+                     "crossref": crossref_by_mark.get(int(s["citation_no"])),
+                     "title_independent": independent_by_mark.get(int(s["citation_no"]), True)}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }
@@ -554,7 +591,9 @@ def _drop_non_speech_quotes(coding: dict[str, Any],
     table = coding.get("quotes")
     if not table or not table.get("rows"):
         return 0
-    titles = [r.get("title") for r in rows]
+    # §D-060 货 1：名单只收有独立标题的——`title` 是正文拷贝的那些进了名单，
+    # 会把微博真人博文全筛掉（微博是本报告仅次于小红书的国内来源）。
+    titles = independent_titles(rows)
     kept = [row for row in table["rows"] if is_speech_quote(row.get("原声"), titles)]
     dropped = len(table["rows"]) - len(kept)
     table["rows"] = kept

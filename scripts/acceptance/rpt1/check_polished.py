@@ -741,8 +741,12 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[10]: check_ratio_phrases(markdown),
         CHECKS[11]: check_uncertainty_once(markdown),
         CHECKS[12]: check_no_charts(markdown),
+        # §D-060 货 1：名单只收有独立标题的源——微博等平台的 `title` 是正文拷贝，
+        # 进了名单会把真人博文判成「标题」（S33）。标志由 `tables.build_tables` 算好随源带来；
+        # 老产物没这个键按 True 读，行为不变。
         CHECKS[13]: check_quotes_are_speech(
-            markdown, [str(s.get("title") or "") for s in data.get("sources") or []]),
+            markdown, [str(s.get("title") or "") for s in data.get("sources") or []
+                       if s.get("title_independent", True)]),
         CHECKS[14]: check_cell_attribution(markdown, data.get("tables") or {}),
         CHECKS[15]: check_marks_per_cell(markdown),
         CHECKS[16]: check_quotes_table_not_in_body(markdown),
