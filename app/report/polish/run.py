@@ -115,7 +115,9 @@ SOURCES_HEADING = "## 信息源清单"
 MISSING_HEADING = "## 哪些没采到"
 BASIS_HEADING = "## 各表口径"
 LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
-PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING, SOURCES_HEADING)
+QUOTES_HEADING = "## 代表原声（逐字摘录，按互动量排序）"
+PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING,
+                             QUOTES_HEADING, SOURCES_HEADING)
 
 
 def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
@@ -266,6 +268,67 @@ def lexicon_reference_table(tables: Mapping[str, Any]) -> str:
     for row in table.get("rows") or []:
         lines.append("| " + " | ".join(
             str(row.get(column, "")).replace("|", "｜") for column in columns) + " |")
+    lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
+    return "\n".join(lines) + "\n"
+
+
+#: 原声表的表名。用户 2026-09-11 拍：**整张表挪到附录**。
+#: 他的取舍是「原话是证据不是论点，放附录和信息源清单在一起更合位置」，
+#: 而且不跟他 09-09 刚拍过的「正文要短」打架——上一轮这张表就是被篇幅预算挤没的，
+#: 表没渲染出来，D-059 修好的那两处（夸竞品那句消失、互动量变真数）用户一点都看不见。
+QUOTES_TABLE = "quotes"
+
+#: ⚠️ 与词表命中表**不同**：那张表是从三份 SKILL 的 `tables:` 行里**拿掉**的，
+#: 写手根本看不见。原声表**必须继续投给写手**，因为共用规则 §5.6 步骤 4 要求
+#: 每个主题段引 2–3 条原声写成引用块（`> 原文…`），而**那是整份稿里唯一让读者
+#: 听见真人的地方**；写手拿不到原话就一句都引不出来。
+#:
+#: ⇒ **「表」和「引用块」是两个产物**：表由程序照列挂附录，引用块仍归写手写在正文。
+#: 正文不许再摆这张**表**（缺陷 8「同一张表出现两次」），但引用块照写、不受影响。
+#: 提示词侧的规矩写在三份 SKILL 的附录节与共用规则 §5.6；⛔ 只靠提示词不够
+#: （本项目已证），所以验收侧另有一道程序门禁 `check_polished` ⑰ 兜底。
+
+
+def _cell(value: Any) -> str:
+    """表格单元格的字面。整数值的浮点去掉小数尾巴：`176.0` 写成 `176`。
+
+    ⛔ 不是为了好看（虽然「176.0 个赞」在给客户的稿子里确实读着别扭）：
+    验收尺子 ④「数字有出处」的白名单是把 `tables.json` 里的数**削掉小数尾巴**
+    收进去的（`check_polished._fmt`），写 `176.0` 等于往稿子里放一个白名单里
+    没有的数——一张程序自己生成的表，反而会被自己的尺子判成「这个数没出处」。
+    两处口径必须同形。
+    """
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value if value is not None else "").replace("|", "｜")
+    text = f"{value:.10f}".rstrip("0").rstrip(".") if isinstance(value, float) else str(value)
+    return text or "0"
+
+
+def quotes_reference_table(tables: Mapping[str, Any]) -> str:
+    """原声表的附录版。写手照样拿得到数据写引用块，这张**表**由程序照列。
+
+    ⛔ 不重新排序、不重新挑句——`coding_tables` 出表时已经按互动量排过、也已经
+    过了实体闸与「这是不是人说的话」那道筛。这里只负责把它渲染出来：
+    再挑一次就会出现「附录这张表和写手引的句子对不上」，而那种不一致是静默的。
+    """
+    table = (tables or {}).get(QUOTES_TABLE)
+    if not isinstance(table, Mapping) or not table.get("rows"):
+        return ""
+    columns = [str(c) for c in table.get("columns") or []]
+    if not columns:
+        return ""
+    lines = [QUOTES_HEADING, "",
+             "（本节由程序按编码结果直接生成，未经改写。每句都是从原文**逐字摘出**、"
+             "程序校验过是正文子串的话，只收**点名了研究对象**的原声——夸别家产品的话"
+             "不在这里。**原声是例子不是分布**：读它不能替代读上面的条数表，"
+             "更不能把某一句写成「多数人的看法」。）", "",
+             "| " + " | ".join([*columns, "角标"]) + " |",
+             "|" + "---|" * (len(columns) + 1)]
+    for row in table.get("rows") or []:
+        cells = [_cell(row.get(column, "")) for column in columns]
+        marks = "".join(f"[{m}]" for m in (row.get("marks") or [])) or "—"
+        lines.append("| " + " | ".join([*cells, marks]) + " |")
     lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
     return "\n".join(lines) + "\n"
 
@@ -913,6 +976,10 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         basis_table(data.get("tables") or {}),
         # 词表命中表只在这里露面：写手拿不到它，附录给读者留个对照（用户 09-09 拍）。
         lexicon_reference_table(data.get("tables") or {}),
+        # 原声表整张挪到附录（用户 09-11 拍）。⚠️ 与上一行不同：写手**仍然拿得到**
+        # 这张表的数据，因为正文每个主题段要引 2–3 条原声写成引用块（共用规则 §5.6
+        # 步骤 4）。挪的是「表」，不是「原话」。
+        quotes_reference_table(data.get("tables") or {}),
     ))
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。

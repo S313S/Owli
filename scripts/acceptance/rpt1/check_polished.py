@@ -477,8 +477,15 @@ LENGTH_MAX_CHARS = 9000
 LENGTH_MIN_CHARS = 7000
 
 
-def writer_length(markdown: str) -> int:
-    """写手写的那部分有多少字符。表格与引语照数——它们也占读者的阅读时间。"""
+def writer_body(markdown: str) -> str:
+    """成稿里写手真正写的那部分：**全部**程序生成块都剜掉。
+
+    ⚠️ 与上面的 `writer_text` 不是一回事，两个都留着是有意的：
+    `writer_text` 只砍文末的信息源清单，好几条老门禁（内部词、不出图…）一直
+    架在它上面，改它等于静默改那几条的判域。新门禁一律用这一个。
+    ⛔ 剜哪些块只有一处答案（`run.PROGRAM_APPENDIX_HEADINGS`）——
+    同一个概念两处两个定义是本项目现形过的假绿。
+    """
     from app.report.polish.run import PROGRAM_APPENDIX_HEADINGS
 
     text = markdown
@@ -489,7 +496,12 @@ def writer_length(markdown: str) -> int:
             rest = text[cut + 1:]
             end = rest.find("\n## ", len(heading))
             text = text[:cut + 1] + (rest[end + 1:] if end >= 0 else "")
-    return len(text)
+    return text
+
+
+def writer_length(markdown: str) -> int:
+    """写手写的那部分有多少字符。表格与引语照数——它们也占读者的阅读时间。"""
+    return len(writer_body(markdown))
 
 
 def length_budget(markdown: str) -> list[str]:
@@ -657,6 +669,34 @@ def check_summary_sample_size(markdown: str, template, counts: dict) -> list[str
     return problems
 
 
+#: 原声表的表头认记号。⛔ 认列名不认表名：写手誊抄时表名常被改成行动式标题
+#: （「用户原话怎么说」），表名对不上就漏判；而那六列的组合是这张表独有的。
+_QUOTE_TABLE_COLUMNS = ("原声", "互动量", "代表性", "态度")
+
+
+def check_quotes_table_not_in_body(markdown: str) -> list[str]:
+    """⑰ 原声表只许出现在附录的程序块里，正文一次都不许摆（用户 2026-09-11 拍）。
+
+    ⛔ 判的是**表**，不是引语：`> 原文…` 那种引用块是共用规则 §5.6 步骤 4 要求的，
+    是整份稿里唯一让读者听见真人的地方，**一条都不许少**。这里只挡表格行。
+
+    为什么要有这道程序闸：同一件事 WRITE-1 已经在提示词里写过规矩（缺陷 8），
+    但**单靠提示词不够**是本项目反复现形过的——原声表的数据现在仍然投给写手
+    （他要拿它挑句子），所以「摆成表格」这件事结构上做得到，只能在验收侧兜住。
+    """
+    problems = []
+    for index, line in enumerate(writer_body(markdown).splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        hit = [name for name in _QUOTE_TABLE_COLUMNS if name in stripped]
+        if "原声" in hit and len(hit) >= 3:
+            problems.append(
+                f"第 {index} 行把原声表摆进了正文：{stripped[:48]}——"
+                "整张表由程序挂在附录，正文只写引用块（共用规则 §5.6 步骤 4）")
+    return problems
+
+
 #: 编号连续了：⑨⑩ 归 §RPT-2（管道自诊不是发现 / 摘要不许单写采集总数），
 #: ⑪ 归 §CODE-1（不许把编码结果说成全网比例）。三包改同一个文件，
 #: 合并序 RPT-1 → RPT-2 → CODE-1；本次 rebase 是 RPT-2 那一棒，⑨⑩ 就位。
@@ -664,7 +704,8 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           "⑥ 评价句写清说谁", "⑦ 摘要口径与把握度", "⑧ 建议门禁",
           "⑨ 管道自诊不占主体节", "⑩ 摘要样本数口径", "⑪ 不许推及全网",
           "⑫ 假设与不确定性只写一次", "⑬ 只出表不出图", "⑭ 原声是人说的话",
-          "⑮ 归因只引该格内的角标", "⑯ 表格一格 ≤3 个角标")
+          "⑮ 归因只引该格内的角标", "⑯ 表格一格 ≤3 个角标",
+          "⑰ 原声表只在附录")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅")
@@ -704,6 +745,7 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
             markdown, [str(s.get("title") or "") for s in data.get("sources") or []]),
         CHECKS[14]: check_cell_attribution(markdown, data.get("tables") or {}),
         CHECKS[15]: check_marks_per_cell(markdown),
+        CHECKS[16]: check_quotes_table_not_in_body(markdown),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(
