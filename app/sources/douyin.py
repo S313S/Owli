@@ -554,8 +554,79 @@ def _to_evidence(
     }
 
 
+#: §ALLOC-1 货 2：同一页最多请求几次（含首次）。TikHub 抖音搜索 v4 的首页在
+#: 2026-09-11 探针里 13 次词级尝试挂了 6 次（5 次 400「Request failed. Please retry.」
+#: + 1 次传输层 URLError），复试即成；此前源层没有重试，一页抛错整词作废、已取到的
+#: 页也丢，一个词约一半概率 0 条。重试之间只走 rate_gate，不另睡——章有墙钟。
+_PAGE_ATTEMPTS = 3
+
+
+def _retryable(error: TikHubError, *, version: str) -> bool:
+    """哪些页级失败值得原地再试：传输层、5xx 两路都试；400 只在 v4 上试。
+
+    同一个 400 在两路上性质不同：v5 自 §D-038 起对任何参数都 400（结构性，重试只是
+    白花钱，而且会拖慢兜底）；v4 的 400 是抖动（探针实证）。401/403/429 与坏响应不试——
+    凭证与限流不是再打一次能好的，429 更不该拿限流的时钟当重试的节拍。
+    """
+    if error.kind == "transport":
+        return True
+    status = error.http_status
+    if isinstance(status, int) and 500 <= status < 600:
+        return True
+    return status == 400 and version == "v4"
+
+
+def _fetch_page(
+    request: Callable[..., Mapping[str, Any]],
+    path: str,
+    *,
+    body: Mapping[str, Any],
+    version: str,
+    page: int,
+    on_event: EventCallback | None,
+) -> Mapping[str, Any]:
+    """请求一页，可重试的失败原地再试到 _PAGE_ATTEMPTS 次；每次重试留事件。"""
+    for attempt in range(1, _PAGE_ATTEMPTS + 1):
+        try:
+            return request(path, body=body)
+        except TikHubError as error:
+            if attempt >= _PAGE_ATTEMPTS or not _retryable(error, version=version):
+                raise
+            _emit(
+                on_event,
+                "source_search_retry",
+                provider="tikhub",
+                search_version=version,
+                page=page,
+                attempt=attempt,
+                closed_reason=error.closed_reason,
+                task_continues=True,
+                **error.event_fields(),
+            )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _keep_partial(
+    on_event: EventCallback | None, error: TikHubError, *, version: str,
+    pages_kept: int, items_kept: int,
+) -> None:
+    """后页重试仍失败：保留已取到的页，留痕后由调用方停止翻页。首页失败不走这里。"""
+    _emit(
+        on_event,
+        "source_search_partial",
+        provider="tikhub",
+        search_version=version,
+        pages_kept=pages_kept,
+        items_kept=items_kept,
+        closed_reason=error.closed_reason,
+        task_continues=True,
+        **error.event_fields(),
+    )
+
+
 def _collect_v5(
     query: str, *, limit: int, request: Callable[..., Mapping[str, Any]],
+    on_event: EventCallback | None = None,
 ) -> list[Mapping[str, Any]]:
     videos: list[Mapping[str, Any]] = []
     pagination: Mapping[str, Any] = {
@@ -563,13 +634,20 @@ def _collect_v5(
     }
     page = 1
     while len(videos) < limit and pagination.get("has_more"):
-        data = request(_SEARCH_PATH_V5, body={
-            "keyword": query,
-            "offset": int(pagination.get("offset") or 0),
-            "page": page,
-            "search_id": str(pagination.get("search_id") or ""),
-            "backtrace": str(pagination.get("backtrace") or ""),
-        })
+        try:
+            data = _fetch_page(request, _SEARCH_PATH_V5, body={
+                "keyword": query,
+                "offset": int(pagination.get("offset") or 0),
+                "page": page,
+                "search_id": str(pagination.get("search_id") or ""),
+                "backtrace": str(pagination.get("backtrace") or ""),
+            }, version="v5", page=page, on_event=on_event)
+        except TikHubError as error:
+            if not videos:
+                raise
+            _keep_partial(on_event, error, version="v5",
+                          pages_kept=page - 1, items_kept=len(videos))
+            break
         page_items = _video_items(data)
         videos.extend(page_items)
         next_pagination = data.get("pagination")
@@ -582,14 +660,24 @@ def _collect_v5(
 
 def _collect_v4(
     query: str, *, limit: int, request: Callable[..., Mapping[str, Any]],
+    on_event: EventCallback | None = None,
 ) -> list[Mapping[str, Any]]:
     videos: list[Mapping[str, Any]] = []
     cursor = 0
+    page = 1
     while len(videos) < limit:
-        data = request(_SEARCH_PATH_V4, body={
-            "keyword": query, "cursor": cursor, "sort_type": "0",
-            "publish_time": "0", "filter_duration": "0", "content_type": "0",
-        })
+        try:
+            data = _fetch_page(request, _SEARCH_PATH_V4, body={
+                "keyword": query, "cursor": cursor, "sort_type": "0",
+                "publish_time": "0", "filter_duration": "0", "content_type": "0",
+            }, version="v4", page=page, on_event=on_event)
+        except TikHubError as error:
+            if not videos:
+                raise
+            _keep_partial(on_event, error, version="v4",
+                          pages_kept=page - 1, items_kept=len(videos))
+            break
+        page += 1
         page_items = _video_items_v4(data)
         videos.extend(page_items)
         next_cursor = _v4_next_cursor(data, cursor)
@@ -698,7 +786,7 @@ def search(
     keyword = query.strip()
     search_version = "v5"
     try:
-        videos = _collect_v5(keyword, limit=limit, request=request)
+        videos = _collect_v5(keyword, limit=limit, request=request, on_event=on_event)
     except TikHubError as primary_error:
         # §D-038：v5 抽风过整整几小时，那期间抖音 0 产出。这里不再直接判源不可用，
         # 先改打 v4；兜底路平时不走，所以**每次触发都留痕**，别让它静默成功也静默失败。
@@ -714,7 +802,7 @@ def search(
         )
         search_version = "v4"
         try:
-            videos = _collect_v4(keyword, limit=limit, request=request)
+            videos = _collect_v4(keyword, limit=limit, request=request, on_event=on_event)
         except TikHubError as fallback_error:
             # 两条路都断了才算源不可用。头条报**主路**的分诊（SRC-1 的契约：
             # `source_unavailable` 的 endpoint/status 指向主要死因），兜底那条的
