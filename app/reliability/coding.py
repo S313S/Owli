@@ -284,13 +284,17 @@ def engine_input(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _plan_entity_names(report: Mapping[str, Any] | None) -> list[str]:
-    """从报告的计划快照取被评实体的全部叫法，取不到就空着（编码照跑，只是不加这条约束）。
+    """从报告的计划快照取**研究主体**的全部叫法，取不到就空着（编码照跑，只是不加这条约束）。
 
-    沿用 `_entity_aliases`——它按 canonical 把「豆包」「Doubao」两张卡并成一个实体。
+    §D-059：走 `quote_gate_names`，与出表那道原声闸**同一个名单**。⛔ 不在这儿
+    另抽一份——这条路喂的是提示词（「quote 必须点名被评实体（…）」），出表那条
+    路喂的是程序闸；两边名单不一样，就会出现「提示词让模型摘豆包的话、闸却放
+    竞品的话过」这种各自都绿的静默错位（§RATE-4 那条 447 行的教训）。
+
     延迟 import：`polish` 那层会反过来 import 本模块，放模块顶层就成环。
     """
 
-    from app.report.polish.tables import _entity_aliases
+    from app.report.polish.tables import quote_gate_names
 
     plan = (report or {}).get("plan_snapshot")
     if isinstance(plan, str):
@@ -300,8 +304,7 @@ def _plan_entity_names(report: Mapping[str, Any] | None) -> list[str]:
             return []
     if not isinstance(plan, Mapping):
         return []
-    return sorted({name for names in _entity_aliases(plan).values() for name in names
-                   if len(str(name).strip()) >= 2})
+    return quote_gate_names(plan)
 
 
 def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,

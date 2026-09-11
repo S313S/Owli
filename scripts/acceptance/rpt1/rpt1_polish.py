@@ -24,8 +24,35 @@ if str(ROOT) not in sys.path:
 from app.report.polish.run import polish  # noqa: E402
 
 
+#: JSON 冻结列：读回来要还原成 Python 值，与 `store/dao.py` 的 `get_report` /
+#: `list_evidence` **逐字同名单**。⛔ 少解一个字段就会出现「同一个库两条读法、
+#: 量出两个世界」——§D-059 实测：`raw_metrics` 留成字符串，`engagement_value`
+#: 只认 dict，于是 S66 明明有 176 个赞，正式稿原声表却写「该平台未提供互动数」，
+#: 「原声按互动量排序」那条判据在生产里整个空转，而验收走真 `Store` 一路全绿。
+_REPORT_JSON_FIELDS = (
+    "plan_snapshot", "decision_balance", "engines_used", "attachments", "extra")
+_EVIDENCE_JSON_FIELDS = ("author_meta", "raw_metrics", "norm_context", "extra")
+
+
+def _decode(row, fields: tuple[str, ...]) -> dict:
+    item = dict(row)
+    for field in fields:
+        value = item.get(field)
+        if isinstance(value, str):
+            try:
+                item[field] = json.loads(value)
+            except json.JSONDecodeError:
+                pass          # 存进去就不是 JSON 的，原样留着，别让整份稿子读不出来
+    return item
+
+
 class ReadOnlyStore:
-    """够 `collect_inputs` 用的最小 store：只有 get_report 与 list_evidence 两个读方法。"""
+    """够 `collect_inputs` 用的最小 store：只有 get_report 与 list_evidence 两个读方法。
+
+    ⚠️ 「最小」只省方法，⛔ 不省**语义**：这两个方法回的行必须和真 `Store` 回的
+    一模一样（JSON 列已还原）。语义省掉一半，下游每个读 `raw_metrics` 的地方
+    都会静默读空，而两边读数各自都是绿的（§D-059 货 2）。
+    """
 
     def __init__(self, database: Path) -> None:
         self.conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
@@ -33,11 +60,12 @@ class ReadOnlyStore:
 
     def get_report(self, research_id: str):
         row = self.conn.execute("select * from reports where id=?", (research_id,)).fetchone()
-        return dict(row) if row else None
+        return _decode(row, _REPORT_JSON_FIELDS) if row else None
 
     def list_evidence(self, research_id: str):
-        return [dict(r) for r in
-                self.conn.execute("select * from evidence where report_id=?", (research_id,))]
+        return [_decode(r, _EVIDENCE_JSON_FIELDS) for r in
+                self.conn.execute(
+                    "select * from evidence where report_id=? order by id", (research_id,))]
 
 
 def work_draft_path(runs_root: Path, research_id: str, report_path: str) -> Path:

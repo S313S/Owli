@@ -193,6 +193,72 @@ def _entity_aliases(plan: Mapping[str, Any]) -> dict[str, list[str]]:
     return {k: sorted(v, key=lambda s: (-len(s), s)) for k, v in merged.items()}
 
 
+def subject_canonicals(plan: Mapping[str, Any]) -> list[str]:
+    """谁是这份研究的**主角**：题面点了名的那些实体（canonical）。点不出就空表。
+
+    §D-059。⛔ 计划里没有「谁是主角」这个机器可读的字段：`subjects` 把主角和
+    对照的竞品塞在同一个列表里（实测 `["豆包","Doubao","DeepSeek","Kimi","文心一言"]`），
+    `entities[].same_product` 答的是**中外名字是不是同一个产品**（Kimi 那条也是
+    `true`），区分只写在 `subjects_justification` 那句人话里。**没有一个字段能直接读。**
+
+    **所以改读题面**（`research_question` / `title`）——那是用户自己写的一句话，
+    研究对象按定义就在里面（「国内大家对**豆包**的看法」）。它有三个好处：
+    ⒜ **老快照也有**，`plan_snapshot` 写死在库里了，加新字段救不了历史报告；
+    ⒝ 它是**用户的原话**，不是模型某次填表的产物，不会因为重跑规划就变；
+    ⒞ 判定走 `mentions`，与原声闸、章节点名闸是**同一把尺子**——不另写一套匹配。
+
+    ⛔ 明确不用的三条路（都试过，都是巧合或读不出）：
+      · `subjects[0]`：本例第一个恰好是豆包，**那是运气**，列表没有约定过顺序；
+      · 出现次数最多的实体：语料里竞品可以比主角还热闹，正是这包要修的那类帖；
+      · `same_product`：它答的不是这个问题（见上）。
+
+    **兜底与失灵**：题面一个实体都点不出时返回空表，调用方据此**退回旧行为**
+    （认全部实体）——宁可不收紧，也不要在读不出主角时把原声池筛空。
+    ⚠️ 已知会走兜底的两类题面：⒜ 不点产品名的（「国产 AI 助手口碑如何」，
+    此时本来也没有单一主角）；⒝ 题面用的叫法实体卡没收录（题面写「字节的豆包」
+    而卡里只有「豆包」仍能命中，因为是包含匹配；真失灵的是题面只用了某个
+    卡外别名的情形）。**走兜底时竞品原声仍会进池**——这条限制是已知的，不是漏网。
+    """
+
+    from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
+
+    topic = " ".join(str(plan.get(key) or "") for key in ("research_question", "title"))
+    if not topic.strip():
+        return []
+    return sorted(
+        canonical for canonical, names in _entity_aliases(plan).items()
+        if any(mentions(topic, name) for name in names if len(str(name).strip()) >= 2)
+    )
+
+
+def quote_gate_names(plan: Mapping[str, Any]) -> list[str]:
+    """原声闸认的叫法：**只认研究主体**的各种叫法，⛔ 不含竞品。
+
+    §D-059。加闸那天（§CODE-2）把「只收点名了**研究对象**的原声」实现成了
+    「只收点名了**计划里任何一个实体**的原声」——`_entity_aliases` 的全部叫法
+    摊平成一个名单（实测 18 个，DeepSeek / Kimi / 月之暗面 全在内）。于是
+    「最重要的是，Kimi 开源，每个人都可以用。」被当成豆包的正面用户原声出表
+    （实测 S89，已进 `tables.json`）。⚠️ 闸本身逐句判、判得没错——**病在名单**。
+
+    实测这份底料 188 条带原声的证据：点名豆包 66 条（该收）、**只点名竞品 22 条
+    （会被错收）**、谁都没点 100 条（本来就排除）。22 条里当时只有 1 条真拿到
+    角标，**其余 21 条是埋着的雷**——换个池就会冒出来。
+
+    主角取不出来时**退回旧形态**（认全部实体），理由与 `_names_the_entity` 的
+    `accepted` 为空同族：宁可少收紧一点，也不要在读不出判据时把原声池筛空。
+    什么情况下会退回、退回后还剩什么风险，见 `subject_canonicals` 的兜底段。
+    """
+
+    aliases = _entity_aliases(plan)
+    subjects = subject_canonicals(plan)
+    groups = [aliases[c] for c in subjects] if subjects else list(aliases.values())
+    # `len >= 2` 与 `coding_tables` 下游那道过滤同口径：一个字的叫法拿去做包含
+    # 匹配满篇都是（和 `plan/lint.py` 同一条规矩）。在这儿先滤掉，是为了让
+    # 「闸认的名单」这件事只有一处答案——两处各滤一次，迟早一处忘了滤。
+    return sorted({str(name).strip() for names in groups for name in names
+                   if len(str(name).strip()) >= 2})
+
+
 def _entity_mentions(rows: Sequence[Mapping[str, Any]], claims: Sequence[Mapping[str, Any]],
                      plan: Mapping[str, Any]) -> dict[str, Any]:
     aliases = _entity_aliases(plan)
@@ -391,8 +457,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # §CODE-2：原声必须点名被评实体。叫法从**这里**取，不在 coding 里另抽一份——
         # `_entity_aliases` 已经把「豆包」与「Doubao」两张卡按 canonical 并成一个实体
         # （骨架把它们当两实体的坑还在），另抽一份必然对不齐，而对不齐是静默的。
-        entity_names=sorted({name for names in _entity_aliases(plan).values()
-                             for name in names}),
+        # §D-059 又收紧了一道：名单里**只留研究主体**，竞品的叫法不进闸——
+        # 不然「Kimi 开源，每个人都可以用」会摆成研究对象的正面用户原声。
+        entity_names=quote_gate_names(plan),
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
