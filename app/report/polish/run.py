@@ -204,9 +204,38 @@ _MISSING_REASON = {
 }
 
 
+def _chapter_label(entry: Mapping[str, Any], section: str | None,
+                   goal_titles: Sequence[str]) -> str:
+    """「缺的是哪一段」：缺的单位是单源子章，不是整个目标——写「渠道（实体）」。"""
+    platforms = "、".join(str(x) for x in (entry.get("platforms") or []) if x)
+    entity = str(entry.get("entity") or "").strip()
+    goal_title = str(entry.get("goal_title") or "").strip()
+    kind = str(entry.get("chapter_type") or "")
+    if kind == "collection" and platforms:
+        return f"{platforms}（{entity}）" if entity else platforms
+    if kind == "report":
+        head = f"「{goal_title}」的报告" if goal_title else "报告"
+        number = section.removeprefix("sec-") if section else ""
+        if number.isdigit() and 0 < int(number) <= len(goal_titles):
+            return f"{head}·第 {number} 节（{goal_titles[int(number) - 1]}）"
+        return head
+    name = str(entry.get("display_name") or "").strip() or "这一段"
+    return f"{name}（{goal_title}）" if goal_title else name
+
+
 def missing_table(missing: Sequence[Mapping[str, Any]],
-                  objectives: Sequence[Mapping[str, Any]] = ()) -> str:
-    """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。"""
+                  objectives: Sequence[Mapping[str, Any]] = (),
+                  chapters: Sequence[Mapping[str, Any]] = ()) -> str:
+    """缺失清单（人话）。由程序生成——它就是工作稿那张表的机械改写。
+
+    §D-060 货 2：`chapters` 是 `tables.chapter_rows` 算好的逐章读数（tables.json 的
+    `chapters` 键），按 (goal_id, 章号) 对上 missing 行：
+    - 「缺的是哪一段」写「渠道（实体）」，如「微信公众号（文心一言）」，不再拿目标原话截句——
+      缺的单位是单源子章，三行同目标会长得一模一样；
+    - `timeout` 且这一章有入库条数 ⇒ 「采到 N 条，但整理步骤超时，未纳入本章分析」。
+      §D-039 之后 timeout 的语义是「超时判 missing、已落库产物不作废」，写「没采到」是假话。
+    不给 `chapters`（老调用方、老产物）行为逐字不变。
+    """
     if not missing:
         return f"{MISSING_HEADING}\n\n（本次调研没有缺失的采集段落。）\n"
     lines = [MISSING_HEADING, "",
@@ -216,15 +245,33 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
     # 读者不需要知道，尺子①也禁。取不到就退成「第 N 段」，两者都不泄露内部编号。
     by_goal = {str(g.get("goal_id")): str(g.get("objective") or "")
                for g in (objectives or []) if isinstance(g, Mapping)}
+    by_chapter = {(str(c.get("goal_id")), str(c.get("chapter_id"))): c
+                  for c in (chapters or []) if isinstance(c, Mapping)}
+    goal_titles: list[str] = []
+    for c in (chapters or []):
+        if isinstance(c, Mapping) and str(c.get("goal_title") or "") not in goal_titles:
+            goal_titles.append(str(c.get("goal_title") or ""))
     for index, item in enumerate(missing, 1):
-        objective = by_goal.get(str(item.get("goal_id") or ""), "")
-        # 目标原话是一长句；按逗号切会切出「从豆包官网」这种不成句的残句，
-        # 所以整句截断加省略号——读者要认出是哪一段，不是读完整句。
-        text = plain_words(objective.strip())
-        where = (text[:34] + "…") if len(text) > 34 else text
+        goal_id = str(item.get("goal_id") or "")
+        chapter_id = str(item.get("chapter_id") or "")
+        parent, _, section = chapter_id.partition("/")
+        entry = by_chapter.get((goal_id, parent))
         reason = str(item.get("reason") or "").strip()
-        lines.append(f"| {where or f'第 {index} 段'} "
-                     f"| {_MISSING_REASON.get(reason, '原因未记录')} |")
+        if entry is not None:
+            where = plain_words(_chapter_label(entry, section or None, goal_titles))
+            yielded = int(entry.get("yielded") or 0)
+            if reason == "timeout" and yielded > 0:
+                why = f"采到 {yielded} 条，但整理步骤超时，未纳入本章分析"
+            else:
+                why = _MISSING_REASON.get(reason, "原因未记录")
+        else:
+            objective = by_goal.get(goal_id, "")
+            # 目标原话是一长句；按逗号切会切出「从豆包官网」这种不成句的残句，
+            # 所以整句截断加省略号——读者要认出是哪一段，不是读完整句。
+            text = plain_words(objective.strip())
+            where = (text[:34] + "…") if len(text) > 34 else text
+            why = _MISSING_REASON.get(reason, "原因未记录")
+        lines.append(f"| {where or f'第 {index} 段'} | {why} |")
     return "\n".join(lines) + "\n"
 
 
@@ -972,7 +1019,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
 
     markdown = assemble(parts, data.get("sources") or [], appendix_blocks=(
         missing_table(parse_report(report_text).get("missing") or [],
-                      data.get("objectives") or []),
+                      data.get("objectives") or [],
+                      chapters=data.get("chapters") or []),
         basis_table(data.get("tables") or {}),
         # 词表命中表只在这里露面：写手拿不到它，附录给读者留个对照（用户 09-09 拍）。
         lexicon_reference_table(data.get("tables") or {}),

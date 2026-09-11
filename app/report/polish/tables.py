@@ -119,6 +119,53 @@ def _table(name: str, title: str, columns: Sequence[str], rows: Sequence[Mapping
             "n": n, "basis": basis, "coverage": dict(coverage or {})}
 
 
+def chapter_rows(plan: Mapping[str, Any],
+                 rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """逐章读数：计划里每个 agent 一行，带「渠道（实体）」与实际入库条数（§D-060 货 2）。
+
+    接缝说明（交活要报接缝）：
+    - 章与 agent 的对应：`plan_snapshot.goals[].agents[].chapter.chapter_id`（缺则退 agent_id），
+      与 `scheduler._chapter_id` / `replay.section._resolve_agent` 同一个判法。
+    - 产量 `yielded`：evidence 按 **agent_name** 计数（`citation_no` 非空的另计 `cited`），
+      与运行期事件 `source_yield_summary.chapters[].yielded` 同一把尺子
+      （`runtime._source_yield_summary` 的 by_chapter 就是 Counter(agent_name)）。
+      ⛔ 不按 (goal_id, agent_name) 计：r-3e04f808dffd 实测证据表把小红书 296 条记在 goal-2、
+      抖音 107 条记在 goal-3，而计划与事件层都记 goal-1——goal 标错是另一张卡，
+      这里按 agent_name 数才写得出真话。
+    - 渠道名走 `app.platforms.PLATFORMS[].display_name`，不在表里的原样。
+    """
+    from app.platforms import PLATFORMS
+
+    by_agent: Counter[str] = Counter(str(r.get("agent_name") or "") for r in rows)
+    cited_by_agent: Counter[str] = Counter(
+        str(r.get("agent_name") or "") for r in rows if r.get("citation_no") is not None)
+    out: list[dict[str, Any]] = []
+    for goal in (plan.get("goals") or []):
+        if not isinstance(goal, Mapping):
+            continue
+        goal_id = str(goal.get("goal_id") or "")
+        for agent in (goal.get("agents") or []):
+            if not isinstance(agent, Mapping):
+                continue
+            agent_id = str(agent.get("agent_id") or "")
+            chapter = agent.get("chapter") if isinstance(agent.get("chapter"), Mapping) else {}
+            capability = agent.get("capability") if isinstance(agent.get("capability"), Mapping) else {}
+            sources = [str(x) for x in (capability.get("sources") or [])]
+            out.append({
+                "goal_id": goal_id,
+                "goal_title": str(goal.get("title") or ""),
+                "chapter_id": str(chapter.get("chapter_id") or agent_id),
+                "chapter_type": str(chapter.get("chapter_type") or ""),
+                "agent_id": agent_id,
+                "display_name": str(agent.get("display_name") or agent_id),
+                "platforms": [PLATFORMS[x].display_name if x in PLATFORMS else x for x in sources],
+                "entity": str(agent.get("entity") or ""),
+                "yielded": by_agent.get(agent_id, 0),
+                "cited": cited_by_agent.get(agent_id, 0),
+            })
+    return out
+
+
 def _text_of(row: Mapping[str, Any]) -> str:
     """一条证据参与词表匹配的全部文本：标题 + 摘要 + 评论正文（评论二跳带来的）。"""
     extra = row.get("_extra") or {}
@@ -550,6 +597,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         "title": view.get("title") or report.get("title"),
         "objectives": [{"goal_id": g.get("goal_id"), "objective": g.get("objective")}
                        for g in (plan.get("goals") or []) if isinstance(g, Mapping)],
+        # §D-060 货 2：逐章「渠道（实体）+ 实际入库条数」，附录「哪些没采到」表按
+        # (goal_id, chapter_id) 对上 missing 行——超时但有货的章要写出条数，不能写「没采到」。
+        "chapters": chapter_rows(plan, rows),
         "entities": sorted(_entity_aliases(plan)),
         # §RPT-2 货 1 ②：读者是谁、他要拿这份报告做什么决定。q-2/q-3 可跳过，
         # 跳过就是「不明」——写手见「不明」要把建议节写成「对不同读者的含义」。
