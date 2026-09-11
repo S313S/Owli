@@ -781,6 +781,27 @@ def _dropped_quotes(
     }
 
 
+def _quotable_grade(item: Mapping[str, Any], marks: Mapping[str, int],
+                    grades: Mapping[int, Any]) -> bool:
+    """这条证据的等级，正文引得了吗。`grades` 为空 = 不按等级筛，行为与加闸前一字不差。
+
+    §D-059 货 4。等级集合直接从 `run` 取，⛔ 不在这儿另写一份 `{"A","B"}`——
+    两处各写一份，迟早一处放行一处拦下，而**两边读数都是绿的**（§RATE-4 那条
+    447 行不一致的教训）。这正是本闸要解的那个死锁的同款成因。
+    """
+
+    if not grades:
+        return True
+    from app.report.polish.run import QUOTE_GRADES      # 延迟 import：避免成环
+
+    number = marks.get(str(item.get("id")))
+    if number is None:
+        # 没角标的行本来就进不了表（上面那条 `marks` 判据已挡），这里不重复判死：
+        # 备料路径不给 citations 时 marks 为空，那时不该因为查不到号就把人全筛掉。
+        return True
+    return str(grades.get(int(number)) or "") in QUOTE_GRADES
+
+
 def _names_the_entity(quote: str, accepted: Sequence[str]) -> bool:
     """这句原声点没点被评实体的名。`accepted` 为空 = 不设闸，行为与加闸前一字不差。
 
@@ -851,6 +872,7 @@ def _quote_sort_key(row: Mapping[str, Any]) -> tuple[int, float, str]:
 def coding_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
     entity_names: Sequence[str] | None = None,
+    grade_by_mark: Mapping[int, Any] | None = None,
 ) -> dict[str, Any]:
     """把已编码的行聚成正式稿要的确定性表（用户 09-05 拍乙的表型）。
 
@@ -861,6 +883,15 @@ def coding_tables(
     `entity_names` 是被评实体的全部叫法（中文名/英文名/别名，已按 canonical 归一）。
     §CODE-2：给了就只出**点名了被评实体**的原声，其余丢弃并计数；不给不设闸。
     调用方从计划的实体卡取名，别在这儿另抽一份——名字空间对不齐是静默的。
+
+    `grade_by_mark` 是 角标号 → 证据等级。§D-059 货 4：给了就**只收正文引得了的
+    等级**（`run.QUOTE_GRADES` = A/B）。⛔ 这条不是锦上添花，是解一个死锁：
+    共用规则 §5.6 步骤 4 与写作期闸 `run.lowgrade_quotes` 都只许引 A/B 级，
+    而这张表以前不看等级——真机实测「回答质量·负」那一格唯一的候选 S39 是 C 级，
+    写手要给这格写引语只有它可选，引了必被闸打回，**重试 7 次全废、整轮 35.6 分钟没出稿**。
+    摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（§RULE-1 货 5 同一条教训）。
+
+    不给就不按等级筛，与 `entity_names` 为空同族：备料与离线核数要看全量。
     """
 
     from app.reliability.scoring import engagement_value
@@ -870,6 +901,7 @@ def coding_tables(
     # 一个字的叫法（"X"）拿去做包含匹配满篇都是，和 `plan/lint.py` 同一条规矩。
     accepted = [str(name).strip() for name in (entity_names or [])
                 if len(str(name).strip()) >= 2]
+    grades = dict(grade_by_mark or {})
     attitude_by_topic: list[dict[str, Any]] = []
     cells: dict[tuple[str, str], int] = {}
     for item in coded:
@@ -912,6 +944,7 @@ def coding_tables(
                     # 不给角标表时（备料、离线核数）不过滤，行为不变。
                     and (not marks or str(item.get("id")) in marks)
                     and _names_the_entity(item["coding"]["quote"], accepted)
+                    and _quotable_grade(item, marks, grades)
                 ),
                 key=_quote_sort_key,
             )
@@ -1022,6 +1055,7 @@ def _row_marks(items: Iterable[Mapping[str, Any]], marks: Mapping[str, int]) -> 
 def polish_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
     total_evidence: int | None = None, entity_names: Sequence[str] | None = None,
+    grade_by_mark: Mapping[int, Any] | None = None,
 ) -> dict[str, Any]:
     """把 `coding_tables` 的聚合结果包成正式稿要的三张标准壳表。
 
@@ -1031,7 +1065,8 @@ def polish_tables(
 
     rows = list(rows)
     marks = dict(citations or {})
-    data = coding_tables(rows, citations=citations, entity_names=entity_names)
+    data = coding_tables(rows, citations=citations, entity_names=entity_names,
+                         grade_by_mark=grade_by_mark)
     coded = coded_rows(rows)
     n = len(coded)
     total = len(rows) if total_evidence is None else total_evidence

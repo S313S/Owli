@@ -218,9 +218,39 @@ def test_有编码但原声筛空时_只缺原声表():
 
 
 def test_三张表都出得来时_omitted为空():
-    data = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4)])
+    # §D-059 货 4 起，原声表还要过一道等级闸（只收 A/B，与正文的引语闸同口径），
+    # 所以夹具要给 `grade`——不给等于「未评级」，那一行本来就不许进正文当原声。
+    data = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4, grade="B")])
     assert data["omitted_tables"] == {}
     assert "quotes" in data["tables"]
+
+
+def test_原声表只收正文引得了的等级():
+    """§D-059 货 4：C 级证据不得进原声表。
+
+    ⛔ 这不是收紧口味，是解一个死锁：共用规则 §5.6 步骤 4 与写作期闸
+    `run.lowgrade_quotes` 都只许引 A/B 级，而这张表以前不看等级。真机实测
+    「回答质量·负」那一格唯一的候选是 C 级，写手要给这格写引语只有它可选，
+    引了必被闸打回——**重试 7 次全废、整轮 35.6 分钟没出稿**。
+    """
+    from app.report.polish.run import QUOTE_GRADES
+
+    assert "C" not in QUOTE_GRADES and set(QUOTE_GRADES) == {"A", "B"}
+
+    c_level = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4, grade="C")])
+    assert "quotes" not in c_level["tables"], "C 级原声不许进表——摆出来写手就会引"
+
+    for grade in ("A", "B"):
+        ok = _build([dict(_coded(1, topics=["功能与能力"]), citation_no=4, grade=grade)])
+        assert "quotes" in ok["tables"], f"{grade} 级是正文引得了的，不该被挡"
+
+
+def test_没给等级表时不按等级筛():
+    """备料与离线核数要看全量，与 `entity_names` 为空同族。"""
+    from app.reliability.coding import coding_tables
+
+    rows = [dict(_coded(1, topics=["功能与能力"]), citation_no=4)]
+    assert coding_tables(rows, citations={"ev-001": 4})["quotes"], "不给等级表就不该过滤"
 
 
 def test_从库里真读出来的行也认得出编码(tmp_path):

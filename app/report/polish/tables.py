@@ -450,6 +450,13 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     # 依赖拉进模块顶层，也免了将来谁给 coding 加个 polish import 就成环。
     from app.reliability.coding import polish_tables
 
+    # §D-059 货 4：角标 → 等级。**一处定义，两处用**——下面喂给原声表，
+    # 再往下喂给 `sources`（写作期的引语闸 `run.lowgrade_quotes` 读的就是它）。
+    # ⛔ 不许在原声表那边另读一份库：等级口径分两处，迟早一处认 C 一处不认，
+    # 而那正是这一轮死锁的形状（表挑了 C 级、闸只认 A/B，重试 7 次全废）。
+    cited_rows = [r for r in rows if r.get("citation_no") is not None]
+    grade_by_mark = {int(r["citation_no"]): r.get("grade") for r in cited_rows}
+
     coding = polish_tables(
         evidence,
         citations={str(r.get("id")): int(r["citation_no"]) for r in rows
@@ -460,6 +467,11 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # §D-059 又收紧了一道：名单里**只留研究主体**，竞品的叫法不进闸——
         # 不然「Kimi 开源，每个人都可以用」会摆成研究对象的正面用户原声。
         entity_names=quote_gate_names(plan),
+        # §D-059 货 4：原声表只收正文**引得了**的等级。共用规则 §5.6 步骤 4 与
+        # `run.lowgrade_quotes` 都写着「原声只从 A/B 级挑」，而这张表以前不看等级——
+        # 摆出来的候选写手就会用（§RULE-1 货 5 同一条教训），于是「回答质量·负」
+        # 那一格唯一的候选 S39 是 C 级，写手引它必被闸打回，**重试多少次都过不去**。
+        grade_by_mark=grade_by_mark,
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
@@ -491,8 +503,7 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     timeline = _timeline(rows)
     if timeline is not None:
         tables["timeline"] = timeline
-    cited = [r for r in rows if r.get("citation_no") is not None]
-    grade_by_mark = {int(r["citation_no"]): r.get("grade") for r in cited}
+    cited = cited_rows
     # §RULE-1 货 1：抓取时间只在信息源清单那一列露面（`run.sources_table` 渲染），
     # 正文一次都不写。工作稿的信息源行不带这个字段，按角标号回查证据补上。
     fetched_by_mark = {int(r["citation_no"]): r.get("fetched_at") for r in cited}
