@@ -245,6 +245,40 @@ def test_原声表只收正文引得了的等级():
         assert "quotes" in ok["tables"], f"{grade} 级是正文引得了的，不该被挡"
 
 
+def test_等级筛掉的条数要在表注里交代():
+    """⛔ 又加一道闸却不交代，读者会把「这一格没有原声」读成「没人这么说」。
+
+    表注的契约是 `_quotes_footnote` 自己写的：「行数少的时候必须自己交代是筛短的」。
+    ⚠️ 等级那一刀要**单独**说，不能并进实体那一刀——两刀砍的不是同一件事：
+    一个是「这句没在说研究对象」，一个是「说的是研究对象，但证据只够作旁证」。
+    合成一句会让读者以为原声少是因为没人谈，而实情是证据不够硬。
+    """
+    from app.report.polish.tables import build_tables
+
+    # ⚠️ 表注只在**实体闸真设上**时才出（`dropped["设闸"]`），所以夹具必须给真计划——
+    # `plan={}` 的话叫法表是空的、闸不设，整段表注不出，这条用例会绿着什么也没验。
+    plan = {"research_question": "大家对豆包的看法", "title": "大家对豆包的看法",
+            "entities": [{"id": "豆包", "canonical": "豆包",
+                          "names": {"zh": "豆包", "en": "Doubao", "aliases": []}}]}
+    data = build_tables(
+        report={"id": "r-1"}, plan=plan, claims=[], view={"title": "t", "sources": []},
+        evidence=[
+            dict(_coded(1, topics=["功能与能力"], quote="豆包挺好用的，省了不少事。"),
+                 citation_no=4, grade="B"),
+            # 点名了研究对象，但证据只够作旁证 → 该被等级那一刀砍掉并计数
+            dict(_coded(2, topics=["回答质量"], attitude="负",
+                        quote="豆包答得很敷衍，没法用。"), citation_no=5, grade="C"),
+            # 谁都没点名 → 该被实体那一刀砍掉，两刀要分开说
+            dict(_coded(3, topics=["回答质量"], attitude="负",
+                        quote="隔壁那家真香，谁用谁知道。"), citation_no=6, grade="B"),
+        ])
+    basis = data["tables"]["quotes"]["basis"]
+
+    assert "只够作旁证（C 级）" in basis, "等级那一刀必须交代"
+    assert "同一把尺子" in basis, "要说清和正文用的是同一个口径"
+    assert "没提到研究对象" in basis, "实体那一刀原样保留，两刀分开说"
+
+
 def test_没给等级表时不按等级筛():
     """备料与离线核数要看全量，与 `entity_names` 为空同族。"""
     from app.reliability.coding import coding_tables

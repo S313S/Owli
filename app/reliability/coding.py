@@ -980,6 +980,16 @@ def coding_tables(
                 })
 
     dropped = _dropped_quotes(coded, accepted, marks)
+    # §D-059 货 4：等级闸筛掉的也要数出来。这张表的表注契约是「行数少的时候必须
+    # 自己交代是筛短的」（见 `_quotes_footnote`）——又加一道闸却不交代，
+    # 读者就会把「这一格没有原声」读成「没人这么说」，而那是个假结论。
+    dropped["等级不够"] = sum(
+        1 for item in coded
+        if item["coding"].get("quote")
+        and (not marks or str(item.get("id")) in marks)
+        and _names_the_entity(item["coding"]["quote"], accepted)
+        and not _quotable_grade(item, marks, grades)
+    )
     audience = Counter(item["coding"]["audience"] for item in coded)
     unknown = audience.get("不明", 0)
     return {
@@ -1024,10 +1034,19 @@ def _quotes_footnote(dropped: Mapping[str, Any]) -> str:
 
     if not dropped.get("设闸") or not dropped.get("丢弃"):
         return ""
+    # §D-059 货 4：等级那一刀单独交代。它和上面那刀砍的是**不同的东西**——
+    # 上面是「这句没在说研究对象」，这里是「这句说的是研究对象，但撑它的那条证据
+    # 只够作旁证」。合成一句会让读者以为原声少是因为没人谈，而实情是证据不够硬。
+    grade_note = (
+        f"另有 {dropped['等级不够']} 条点名了研究对象的原声，因为撑它的那条证据只够"
+        f"作旁证（C 级）或还没评级而未收——正文引用原声只认可独立支撑结论的那两档，"
+        f"这张表与正文用的是同一把尺子。"
+    ) if dropped.get("等级不够") else ""
     return (
         f"本表只收**点名了研究对象**的原声：另有 {dropped['本可入表被丢']} 条原本够格"
         f"进表的原声通篇没提到研究对象（多半在说别的产品，或与研究对象无关），已排除；"
         f"全部已编码原声里同样没点名的共 {dropped['丢弃']} 条。"
+        + grade_note +
         f"所以**行数少是筛选后的结果**——既不代表没人讨论这个产品，"
         f"也不代表没有采到某个平台的声音。"
     )
