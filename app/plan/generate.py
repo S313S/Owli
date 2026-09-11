@@ -1362,12 +1362,32 @@ def _entities_merged_event(
     )
 
 
+def _protagonists(
+    query: str, subjects: Sequence[str], entities: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """§ALLOC-1：分配表定稿前先定「谁是主角」——沿用 §D-059 的题面判法，⛔ 不新造。
+
+    判法读的是题面（用户原话）× 实体卡叫法，与原声闸、章节点名闸是同一把尺子；
+    `subjects[0]` / 出现次数 / `same_product` 三条猜法都在那边被否过，理由见
+    `app/report/polish/tables.subject_canonicals`。题面点不出主角时返回空表，
+    分配表据此退回旧行为（实体轮转）。
+    """
+    from app.report.polish.tables import subject_canonicals  # 延迟 import：report 层反向依赖 plan
+
+    return subject_canonicals({
+        "research_question": query, "title": "",
+        "subjects": list(subjects), "entities": list(entities or []),
+    })
+
+
 def _allocation_skipped_event(
     research_id: str, skipped: list[dict[str, str]],
 ) -> NormalizedEvent:
-    """§ENT-3：跨语域候选装不下时只记账，不把计划判死。"""
+    """§ENT-3：跨语域候选装不下时只记账，不把计划判死。§ALLOC-1 起也记竞品让位。"""
 
-    summary = "、".join(f"{item['source_id']}·{item['entity']}" for item in skipped)
+    summary = "、".join(
+        f"{item['source_id'] or item['reason']}·{item['entity']}" for item in skipped
+    )
     return dataclasses.replace(
         _progress_event(research_id, f"跨语域采集位尽力跳过：{summary}"),
         raw={"cross_locale_slots_skipped": list(skipped)},
@@ -1566,6 +1586,7 @@ async def generate_plan(
         scale=scale,
         entity_slot_target=original_subject_count,
         skipped=skipped_slots,
+        protagonists=_protagonists(normalized_query, subjects, entities),
     ))
     (workspace.root / "allocation.json").write_text(
         json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",

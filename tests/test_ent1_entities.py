@@ -120,6 +120,13 @@ def test_实体卡随计划落盘且规划期不因它变慢地打网络() -> No
     skeleton["goals"][2]["agents"].insert(
         0, _agent("微博数据抓取·飞书", "采集研究主体的国内讨论"),
     )
+    # §ALLOC-1：主角在本语域每个主源各占一位，HN 之外还有 X / Product Hunt / Reddit。
+    for goal_index, name in (
+        (0, "X 数据抓取·飞书"), (1, "Product Hunt 数据抓取·飞书"), (2, "Reddit 数据抓取·飞书"),
+    ):
+        skeleton["goals"][goal_index]["agents"].insert(
+            0, _agent(name, "采集研究主体的海外讨论"),
+        )
     with tempfile.TemporaryDirectory() as raw:
         plan, _, engine = _generate(
             Path(raw), [skeleton], bilingual_entities=True,

@@ -95,6 +95,29 @@ def cross_locale_slots_budget(
     return 3 if profile.max_chapters_per_goal is not None else 4
 
 
+#: §ALLOC-1（用户 2026-09-11 拍甲）：fast 档主角在**本市场语域的主源**里先占几位。
+#: 3 = 小红书 + 微博 + 抖音（按 `_SOURCE_PRIORITY["cn_product"]` 的序取本语域前三个）；
+#: 公众号是第四个，自然落在外面——那一位在真机整跑里 yielded 0，谁占都是白占。
+#: standard 章数无上限，主角占**每个**本语域主源。⛔ 不靠加 goal / 章 / 每 goal 源数扩容：
+#: fast 仍是 6 位，主角多占 ⇒ 竞品少占（6 = 主角 3 + 跨语域 1 + 竞品 2）。
+PROTAGONIST_HOME_SLOTS: Mapping[str, int | None] = {"fast": 3, "standard": None}
+
+#: 竞品排位之前给主角跨语域留的位（fast）。留 1 不留 3：跨语域预算 3 在 fast 下从来
+#: 只装得下 1（见 `test_ent2_只有单侧叫法…` 的「补位只补得下 1 个」），留 3 会把竞品挤光。
+PROTAGONIST_CROSS_LOCALE_RESERVE = 1
+
+
+def protagonist_home_slots(
+    profile: ResearchScaleProfile, *, scale: str | None = None,
+) -> int | None:
+    """主角在本语域主源里先占几位；None = 每个主源各一位（章数无上限的档位）。"""
+    if scale is not None:
+        if scale not in PROTAGONIST_HOME_SLOTS:
+            raise ValueError(f"scale 只能取 fast 或 standard，实际为 {scale!r}")
+        return PROTAGONIST_HOME_SLOTS[scale]
+    return PROTAGONIST_HOME_SLOTS["fast" if profile.max_chapters_per_goal is not None else "standard"]
+
+
 def ordered_sources(
     market_profile: str,
     entities: Sequence[Mapping[str, Any]] | None = None,
@@ -154,8 +177,18 @@ def allocate_collections(
     scale: str | None = None,
     entity_slot_target: int | None = None,
     skipped: list[dict[str, str]] | None = None,
+    protagonists: Sequence[str] | None = None,
 ) -> dict[str, list[CollectionSlot]]:
     """每个 subject 至少一个采集位；无 depends_on 的 goal 先分，再按序号轮转。
+
+    §ALLOC-1：传了 `protagonists`（主角 canonical，由题面推出——⛔ 不是 `subjects[0]`，
+    见 `app/report/polish/tables.subject_canonicals`）且恰好一个主角在 subjects 里时，
+    走「主角先占各主源，竞品再排」：主角先在本市场语域的主源里占 `protagonist_home_slots`
+    位，竞品再按主源优先序**同源**排位（每竞品一位；先填满优先序最前的源，两竞品都落
+    小红书就是设计——同源才可比，且不落只装预采集词的微博池），最后跨语域那套原样跑。
+    装不下的竞品记入 `skipped`（reason=protagonist_first）不抛错。
+    其余情形（没传主角 / 题面点不出 / 点出两个以上 / 主角在本语域没叫法 / 没有实体卡）
+    **逐字退回旧行为**——旧行为是「实体按源优先序轮转」，主角只因为叫法多才多占源。
 
     §ENT-3 第二轮：中外都有叫法的主角按偏好序补对面语域，fast 3 位、standard
     4 位。第二轮尽力而为——章预算或每 goal 源数装不下就记入 `skipped` 后跳过，
@@ -182,6 +215,77 @@ def allocate_collections(
     goal_sources: dict[str, set[str]] = {goal_id: set() for goal_id in plan}
     pointer = 0
     taken: set[tuple[str, str]] = set()
+    protagonist_plan = _protagonist_first(
+        subjects, market_profile, sources, entities, protagonists,
+        profile, scale=scale,
+    )
+    if protagonist_plan is not None:
+        lead, home_sources, competitors = protagonist_plan
+        for source in home_sources:
+            chosen, pointer = _place(
+                source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
+            )
+            if chosen is None:
+                break
+            plan[chosen].append(CollectionSlot(lead, source, collectors[source]))
+            goal_sources[chosen].add(source)
+            taken.add((source, lead))
+        capacity = collection_capacity(len(scaffolds), profile)
+        cross_candidates = _cross_locale_slots(
+            [lead], sources, entities, taken,
+            cross_locale_slots_budget(profile, scale=scale),
+        )
+        reserve = PROTAGONIST_CROSS_LOCALE_RESERVE if cross_candidates else 0
+        competitor_budget = (
+            None if capacity is None else max(capacity - len(taken) - reserve, 0)
+        )
+        main_sources = [
+            source for source in _SOURCE_PRIORITY[market_profile] if source in sources
+        ]
+        pending = list(competitors)
+        for source in main_sources:
+            for entity in list(pending):
+                if competitor_budget is not None and (
+                    len(taken) - len(home_sources) >= competitor_budget
+                ):
+                    break
+                chosen, pointer = _place(
+                    source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
+                )
+                if chosen is None:
+                    continue
+                plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
+                goal_sources[chosen].add(source)
+                taken.add((source, entity))
+                pending.remove(entity)
+            if not pending:
+                break
+        if skipped is not None:
+            skipped.extend(
+                {"entity": entity, "source_id": "", "reason": "protagonist_first"}
+                for entity in pending
+            )
+            # 旧快照里主角有两条 subject（`豆包`/`Doubao`）：位全记在第一条名下，
+            # 其余几条不占位也不算丢，单独记一笔让规则 25 的红有处可查。
+            skipped.extend(
+                {"entity": entity, "source_id": "", "reason": "same_protagonist"}
+                for entity in subjects
+                if entity != lead and entity not in competitors
+            )
+        for entity, source in cross_candidates:
+            chosen, pointer = _place(
+                source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
+            )
+            if chosen is None:
+                if skipped is not None:
+                    skipped.append({
+                        "entity": entity, "source_id": source, "reason": "capacity",
+                    })
+                continue
+            plan[chosen].append(CollectionSlot(entity, source, collectors[source]))
+            goal_sources[chosen].add(source)
+            taken.add((source, entity))
+        return plan
     for position, entity in enumerate(subjects):
         source = sources[position % len(sources)]
         chosen, pointer = _place(
@@ -234,6 +338,56 @@ def allocate_collections(
         goal_sources[chosen].add(source)
         taken.add((source, entity))
     return plan
+
+
+def _protagonist_first(
+    subjects: Sequence[str],
+    market_profile: str,
+    sources: Sequence[str],
+    entities: Sequence[Mapping[str, Any]] | None,
+    protagonists: Sequence[str] | None,
+    profile: ResearchScaleProfile,
+    *,
+    scale: str | None,
+) -> tuple[str, list[str], list[str]] | None:
+    """主角优先模式的三元组 (主角 subject, 主角本语域主源, 竞品 subjects)；不适用返回 None。
+
+    「不适用」的每一条都退回旧行为，理由写在 `allocate_collections` 的 docstring。
+    主角 subject 用 subjects 里 canonical 命中的**第一个**——§ENT-3 之后同一实体只剩
+    一个 subject，这里的「第一个」只为兼容旧快照里 `豆包`/`Doubao` 并存的形态。
+    """
+    if not protagonists or not entities:
+        return None
+    by_id = {
+        str(card.get("id") or card.get("canonical") or ""): card
+        for card in entities if isinstance(card, Mapping)
+    }
+    wanted = {str(name).strip() for name in protagonists if str(name).strip()}
+    lead_subjects = [
+        subject for subject in subjects
+        if str(by_id.get(subject, {}).get("canonical") or subject).strip() in wanted
+    ]
+    if len({
+        str(by_id.get(subject, {}).get("canonical") or subject).strip()
+        for subject in lead_subjects
+    }) != 1:
+        return None
+    lead = lead_subjects[0]
+    home_locale = "zh" if market_profile == "cn_product" else "en"
+    card = by_id.get(lead)
+    if card is None or home_locale not in entity_locales([card]):
+        return None
+    home_sources = [
+        source for source in _SOURCE_PRIORITY[market_profile]
+        if source in sources and _SOURCE_LOCALES.get(source) == home_locale
+    ]
+    cap = protagonist_home_slots(profile, scale=scale)
+    if cap is not None:
+        home_sources = home_sources[:cap]
+    if not home_sources:
+        return None
+    competitors = [subject for subject in subjects if subject not in lead_subjects]
+    return lead, home_sources, competitors
 
 
 def _cross_locale_slots(

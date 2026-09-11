@@ -78,6 +78,14 @@ def test_整条规划链_有中文名的海外产品会被排一张国内源采�
         skeleton["goals"][1]["agents"].insert(
             0, _agent(name, "采集研究主体的国内讨论"),
         )
+    # §ALLOC-1：题面点得出主角后，主角在本语域每个主源各占一位（standard 不封顶），
+    # HN 之外还有 X / Product Hunt / Reddit 三张；骨架须逐张落实，否则规则 31 正确打回。
+    for goal_index, name in (
+        (0, "X 数据抓取·飞书"), (1, "Product Hunt 数据抓取·飞书"), (2, "Reddit 数据抓取·飞书"),
+    ):
+        skeleton["goals"][goal_index]["agents"].insert(
+            0, _agent(name, "采集研究主体的海外讨论"),
+        )
     with tempfile.TemporaryDirectory() as raw:
         plan, _, _ = _generate(Path(raw), [skeleton], bilingual_entities=True)
         allocation = json.loads(
