@@ -299,6 +299,7 @@ def _goal_prompt(
     scale_config: ResearchScaleConfig | None = None,
     collection_slots: Sequence[Mapping[str, str]] | None = None,
     previous: str | None = None,
+    baseline_slots: Sequence[Mapping[str, str]] | None = None,
 ) -> str:
     profile = _scale_profile(scale, scale_config)
     retry = ""
@@ -313,9 +314,25 @@ def _goal_prompt(
         f"本 goal 非采集章最多 {max(profile.max_chapters_per_goal - len(slots), 1)} 个；"
         if per_goal is not None and profile.max_chapters_per_goal is not None else ""
     )
+    # §ALLOC-2：溢到本 goal 的主角卡只是对照基线，不是本 goal 的实体——写在清单旁边，
+    # 引擎起草验收条时才不会要求本 goal「讲透」主角（D-062 的验收条闸也按此理解）。
+    baseline_names = "、".join(
+        f"{s['collector_name']}·{s['entity']}"
+        for s in (collection_slots or [])
+        if any(
+            b.get("source_id") == s.get("source_id") and b.get("entity") == s.get("entity")
+            for b in (baseline_slots or [])
+        )
+    )
+    baseline_rule = (
+        f"其中「{baseline_names}」是主角对照基线卡（非本 goal 实体，只供对照，"
+        "验收条不得要求本 goal 讲透该实体）；"
+        if baseline_names else ""
+    )
     allocation_rule = (
         "本 goal 必采清单（硬性，系统分配，逐条建采集 agent，name 逐字用「注册表原名·实体」），"
-        f"必采清单 JSON={slots_json}，即 {slot_names}；清单外可加采集章但不得与清单及上游重复 "
+        f"必采清单 JSON={slots_json}，即 {slot_names}；{baseline_rule}"
+        "清单外可加采集章但不得与清单及上游重复 "
         "(source_id, entity) 组合，且须在章预算内；{non_collection_budget}"
     ).replace("{non_collection_budget}", non_collection_budget)
     sources = "、".join(
@@ -1394,6 +1411,22 @@ def _allocation_skipped_event(
     )
 
 
+def _allocation_baseline_event(
+    research_id: str, baseline: list[dict[str, str]],
+) -> NormalizedEvent:
+    """§ALLOC-2：溢到竞品 goal 的主角卡记一笔——它是对照基线，不是那个 goal 的实体。"""
+
+    summary = "；".join(
+        f"{item['goal_id']}={item['source_id']}·{item['entity']}" for item in baseline
+    )
+    return dataclasses.replace(
+        _progress_event(
+            research_id, f"主角对照基线卡（非本 goal 实体，只供对照）：{summary}",
+        ),
+        raw={"protagonist_baseline_slots": list(baseline)},
+    )
+
+
 def _allocation_event(
     research_id: str, collection_plan: Mapping[str, list[dict[str, str]]],
 ) -> NormalizedEvent:
@@ -1580,6 +1613,7 @@ async def generate_plan(
 
     # §ENT-2 货 2：分配表在这里才定稿——实体的中外叫法决定排哪些源。
     skipped_slots: list[dict[str, str]] = []
+    baseline_slots: list[dict[str, str]] = []
     collection_plan = collection_plan_dict(allocate_collections(
         subjects, market_profile, scaffolds,
         product_scale_config.profile(scale), entities,
@@ -1587,6 +1621,7 @@ async def generate_plan(
         entity_slot_target=original_subject_count,
         skipped=skipped_slots,
         protagonists=_protagonists(normalized_query, subjects, entities),
+        baseline=baseline_slots,
     ))
     (workspace.root / "allocation.json").write_text(
         json.dumps(collection_plan, ensure_ascii=False, indent=2) + "\n",
@@ -1595,6 +1630,8 @@ async def generate_plan(
     await _emit(store, _allocation_event(research_id, collection_plan))
     if skipped_slots:
         await _emit(store, _allocation_skipped_event(research_id, skipped_slots))
+    if baseline_slots:
+        await _emit(store, _allocation_baseline_event(research_id, baseline_slots))
 
     expansions: dict[str, dict[str, Any]] = {}
 
@@ -1618,6 +1655,9 @@ async def generate_plan(
                 scale_config=product_scale_config,
                 collection_slots=collection_plan.get(goal_id, []),
                 previous=workspace.previous_text(goal_id) if errors else None,
+                baseline_slots=[
+                    item for item in baseline_slots if item.get("goal_id") == goal_id
+                ],
             ),
             adapter,
             on_retry=lambda retry, error: _emit(
