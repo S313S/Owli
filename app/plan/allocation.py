@@ -439,16 +439,20 @@ def _place_affine(
 ) -> tuple[str | None, int]:
     """逐层找一个装得下的 goal；返回 (goal_id, 命中的层号)，找不到 (None, -1)。
 
-    每层内部仍按 `_place` 的轮转（层各自带一个 pointer），同层多个 goal 都有位时
-    不会全堆到第一个。
+    同层多个 goal 时**按 goal 序填满一个再下一个**（无依赖的 goal 排前，见
+    `allocate_collections` 的 `goal_ids`），⛔ 不轮转。小跑 `r-alloc2-0913-a` 实测：骨架
+    「豆包基本盘 / 竞品对照 / 豆包归纳」两个 goal 标题都点名主角，层内轮转把小红书与
+    抖音拆到两个 goal（goal-1 小红书+微博、goal-3 抖音+Reddit），甲-2「主角 goal 留
+    小红书+抖音」就落空了；填满再下一个才让排在前面的主线 goal 拿到最厚的两源。
+    `pointers` 只为兼容签名保留，不再参与决策。
     """
 
+    del pointers
     for level, goal_ids in enumerate(tiers):
         if not goal_ids:
             continue
-        chosen, pointers[level] = _place(
-            source, plan, goal_sources, goal_ids, per_goal, profile,
-            pointers.get(level, 0) % len(goal_ids),
+        chosen, _pointer = _place(
+            source, plan, goal_sources, goal_ids, per_goal, profile, 0,
         )
         if chosen is not None:
             return chosen, level

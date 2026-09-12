@@ -150,6 +150,26 @@ def test_按性质分段的骨架_只有objective点名主角_主角卡分摊三
     assert baseline == []
 
 
+def test_小跑骨架_两个goal标题都点名主角_排前的主线goal填满小红书加抖音再轮到归纳goal() -> None:
+    """r-alloc2-0913-a 实况：goal-3「国内舆论对豆包看法的结构化归纳」标题也点名豆包。"""
+    skeleton = _skeleton()
+    scaffolds = [
+        {"title": "豆包产品定位与国内用户口碑基本盘", "objective": "采集豆包在国内的口碑。", "depends_on": []},
+        {"title": "国内同类对手 DeepSeek 与 Kimi 的对照评价", "objective": "采集 DeepSeek 与 Kimi 的对照素材。", "depends_on": []},
+        {"title": "国内舆论对豆包看法的结构化归纳", "objective": "梳理国内对豆包的看法，与 DeepSeek、Kimi 对比。", "depends_on": ["goal-1", "goal-2"]},
+    ]
+    baseline: list[dict[str, str]] = []
+    plan = collection_plan_dict(allocate_collections(
+        skeleton["subjects"], "cn_product", scaffolds, FAST, _cards(),
+        scale="fast", entity_slot_target=3, protagonists=["豆包"], baseline=baseline,
+    ))
+    got = {g: [f"{s['source_id']}·{s['entity']}" for s in v] for g, v in plan.items()}
+    assert got["goal-1"] == ["xhs·豆包", "douyin·豆包"], "层内按 goal 序填满再下一个，不轮转"
+    assert set(got["goal-2"]) == {"xhs·DeepSeek", "xhs·Kimi"}
+    assert got["goal-3"] == ["weibo·豆包", "reddit·豆包"]
+    assert baseline == [], "goal-3 标题就点名豆包，溢过去的主角卡不是对照基线"
+
+
 def test_goal提示词_溢出的基线卡有一句非本goal实体说明_主角goal没有() -> None:
     baseline: list[dict[str, str]] = []
     skeleton = _skeleton()
