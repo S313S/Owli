@@ -74,6 +74,38 @@ SECTION_EVIDENCE_POOL_LIMIT = 30
 #: 取 20 与 `EVIDENCE_POOL_GOAL_FLOOR` 同源：一节论证需要的号数；
 #: 剩下 10 个位留给跨 goal 对照证据（货 5 放开的那条用法）。
 SECTION_GOAL_FLOOR = 20
+#: §SEC-1：同一个 goal 名下的撰写章与交叉验证章，原先拿到的是**逐条相同**的 30 条
+#: （判据：`_evidence_index` 入参只有 `(rows, allowed_goal_ids, section_goal_id)`，
+#: 同入参必同条目；`r-3e04f808dffd` 12 条 `section_pool_composed` 事件六对指纹
+#: 逐字相同。详见 docs/worklog/2026-09-12-secq1-section-evidence-quota.md）。
+#:
+#: 「这一节要讲什么」唯一能机读的来源是**章的 `agent_kind`**（闭集
+#: `SECTIONED_CHAPTER_KINDS`，不是词表，没有「没命中怎么办」的问题）。
+#: ⛔ 节标题不可用：`_section_specs` 按 `plan.goals` 造节，`title` 直接等于
+#: `goal.title`，**同 goal 各节标题逐字相同**，拿它分类等于没分。
+#:
+#: 口径按两种章的活对证据的真实诉求定，动的是**本 goal 保底席位数**：
+#: - 撰写章要把本 goal 讲透 → 本 goal 席位多（24/6）；
+#: - 交叉验证章的活是核对说法、找分歧，**要对照就得有对照物** → 对照席位多（15/15）。
+#: 闭集外的 kind 与 None 一律退回 `SECTION_GOAL_FLOOR`，与本包之前逐字相同
+#: （既有用例锁的就是那一档）。
+#:
+#: ⛔ 这里只换「哪几条进池」，不换席位总数（仍 30）、不碰全报告角标编号
+#: （编号在 `_numbered_evidence_rows` 里先算完，与本节选池无关 = 不等于 rescore）、
+#: 不碰 `EVIDENCE_POOL_LIMIT`。与 §QUOTA-1 的边界：那一包调**平台**配比，
+#: 本包调**内容**——同类型两节的平台配比在本包改动下不变。
+SECTION_GOAL_FLOOR_BY_CHAPTER_KIND = {
+    "report_writing": 24,
+    "cross_validation": 15,
+}
+
+
+def _section_goal_floor(chapter_kind: str | None) -> int:
+    """本节 goal 的保底席位数；章类型不在闭集里就退回旧口径。"""
+
+    return SECTION_GOAL_FLOOR_BY_CHAPTER_KIND.get(
+        str(chapter_kind or ""), SECTION_GOAL_FLOOR,
+    )
 
 #: §D-031 撰写/交叉节分片。M6-e 关账整跑九个节里八个 timeout（两个死法各半：
 #: `claude.py` 300 s 适配器硬顶、节墙钟 330 s 跑满），成稿只剩占位、全库角标全空。
@@ -707,6 +739,7 @@ def _section_evidence_rows(
     section_goal_id: str | None,
     *,
     limit: int = SECTION_EVIDENCE_POOL_LIMIT,
+    chapter_kind: str | None = None,
 ) -> list[dict[str, Any]]:
     """本节 goal 先占位，剩下的名额再按平台轮转。
 
@@ -716,6 +749,11 @@ def _section_evidence_rows(
     而 `sec(goal-3)` 名下 27 条抖音也只进得去 10 条。
     现在先给本节 goal 留够 `SECTION_GOAL_FLOOR` 个位（不足则有多少给多少），
     余额再按老规矩跨平台轮转，跨 goal 对照证据仍进得来（货 5 要用）。
+
+    §SEC-1：保底席位数改由 `chapter_kind` 决定（见
+    `SECTION_GOAL_FLOOR_BY_CHAPTER_KIND`）——这是「这一节要讲什么」唯一参与
+    选证据的入口。不传就是旧口径。**保底是下限不是配额**：余额轮转时本 goal
+    的平台还会再分到几个，所以实际本 goal 条数恒 ≥ floor。
     """
 
     if section_goal_id is None:
@@ -723,7 +761,8 @@ def _section_evidence_rows(
 
     own = [row for row in rows if str(row.get("goal_id")) == section_goal_id]
     others = [row for row in rows if str(row.get("goal_id")) != section_goal_id]
-    floor = min(limit, SECTION_GOAL_FLOOR)
+    # §SEC-1：保底席位按章类型给，让撰写章与交叉验证章选出不同的那几条。
+    floor = min(limit, _section_goal_floor(chapter_kind))
     selected = _round_robin_by_platform(own, section_goal_id, floor)
     taken = {id(row) for row in selected}
     remainder = [row for row in own if id(row) not in taken] + others
@@ -981,8 +1020,14 @@ def _evidence_index(
     allowed_goal_ids: set[str],
     *,
     section_goal_id: str | None = None,
+    chapter_kind: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    """先按全报告稳定编号，再生成不超过 30 条的本节可见子集。"""
+    """先按全报告稳定编号，再生成不超过 30 条的本节可见子集。
+
+    §SEC-1：`chapter_kind` 只影响**本节可见子集选哪几条**，
+    ⛔ 不影响返回的 `citations`（全报告角标编号）——那一路在
+    `_numbered_evidence_rows` 里先算完，与章类型无关。动它等于 rescore。
+    """
 
     identified = [row for row in rows if str(row.get("id") or "").strip()]
     # §RATE-1 货 4：D 级不进池——评级要真的决定「引不引」，就必须在这里生效。
@@ -1016,7 +1061,9 @@ def _evidence_index(
         # evidence 已存在却被 goal 过滤成空集时，回退到本 research 全池。
         eligible = numbered
         eligible_count = len(ordered)
-    visible = _section_evidence_rows(eligible, section_goal_id)
+    visible = _section_evidence_rows(
+        eligible, section_goal_id, chapter_kind=chapter_kind,
+    )
     visible.sort(key=lambda row: citation_by_id[str(row["id"])])
     items: list[dict[str, Any]] = []
     for row in visible:
@@ -2574,6 +2621,9 @@ async def run_sectioned_task(
                 evidence_rows,
                 allowed_goal_ids,
                 section_goal_id=str(section["goal_id"]),
+                # §SEC-1：「这一节属于哪种章」从这里进选池。撰写章与交叉验证章
+                # 的活对证据的诉求不同，给的保底席位也不同。
+                chapter_kind=base_task.agent_kind,
             )
             # §OBS-1 货 1：组池出口发组成事件（只加事件，零语义改动）。
             if section["section_id"] not in pool_composed_section_ids:
@@ -2603,6 +2653,16 @@ async def run_sectioned_task(
                         "platform_distribution": platform_counts,
                         "grade_distribution": grade_counts,
                         "d_gate_filtered": int(evidence_pool["d_gate_filtered"]),
+                        # §SEC-1 判据 3（落库不落日志）：同 goal 两节的构成不再
+                        # 逐字相同，而差异要「人读一眼说得出为什么」——所以把
+                        # 决定分席的那个入参一起落库。
+                        # ⚠️ `section_id` 里的 chapter_id 跨 goal 会撞名
+                        # （ch-5 在 goal-1 是撰写章、在 goal-2/3 是交叉验证章），
+                        # 所以光看 section_id 认不出章类型，必须有这一格。
+                        "chapter_kind": str(base_task.agent_kind or ""),
+                        "section_goal_floor": _section_goal_floor(
+                            base_task.agent_kind
+                        ),
                     },
                     "is_error": False,
                 })
