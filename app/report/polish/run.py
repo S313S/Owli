@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
@@ -819,12 +821,95 @@ def findings_for(skill: Template, section: str, parts: Sequence[tuple[str, Path]
     return findings if should_shard(findings) else []
 
 
+#: 打回事件的 type。⛔ 不新建表——`events` 是既有的，payload 里带全字段就够了。
+REJECT_EVENT_TYPE = "polish_reject"
+#: 货 2 的早停线：同一节/同一片连续被**同一道闸**打回这么多次，就不再往下重试。
+#: 09-11 调度给的就是这个数（「同一条判词连续打回 3 次就停」）。
+REJECT_STREAK_DEFAULT = 3
+#: ⛔ 开关默认 **off**：环境变量不设、设成空或 0，`_write_target` 逐字还是老行为。
+#: 放环境变量不放 `app/config.py`——那个文件的数值行是禁区。
+REJECT_STREAK_ENV = "OWLI_POLISH_REJECT_STREAK"
+
+
+def reject_streak_limit() -> int:
+    """早停线的 N。0 = 关（默认）。`on/true/yes` 等同于默认的 3。
+
+    读不懂的值一律当**关**处理：观测性开关写错一个字母就把正稿跑法改掉，
+    是比没有这个开关更坏的事。
+    """
+    raw = (os.environ.get(REJECT_STREAK_ENV) or "").strip()
+    if not raw:
+        return 0
+    if raw.lower() in {"on", "true", "yes"}:
+        return REJECT_STREAK_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return value if value > 0 else 0
+
+
+def rejects_path(runs_root: Path, research_id: str, template: str) -> Path:
+    """这一格的打回台账：`runs/<id>/goals/polished/<template>.rejects.jsonl`。
+
+    与引擎草稿同目录（`GOAL_ID`），一行一条 JSON，追加写不覆盖。
+    """
+    return Path(runs_root) / research_id / "goals" / GOAL_ID / f"{template}.rejects.jsonl"
+
+
+def record_reject(store: Any, *, runs_root: Path, research_id: str, template: str,
+                  section: str, shard: int | None, attempt: int, gate: str,
+                  errors: Sequence[str], streak: int = 1) -> dict[str, Any]:
+    """每被打回一次落一行（jsonl）+ 发一条 `polish_reject` 事件。
+
+    **它是读数不是闸**：一个字都不改重试逻辑、不改早停、不改 prompt 文本，
+    只是把本来就有的判词多写一份（§OBS-6 货 1）。
+
+    为什么非要这一份：打回原因原先只拼进下一轮 prompt（`build_prompt` 末尾
+    「上一轮被打回的原因」那一区），而 **prompt 不进转录**；账本又只在一格跑完
+    才落盘。于是 09-11 那条早停线「同一条判词连续打回 3 次就停」根本没有读数可读，
+    包终端只能自造尺子，结果把写手正确遵守规则的限定句数成了「被打回」，
+    13:43 差点掐掉一轮健康的跑。
+
+    落盘与发事件**双双吞异常**：这是观测，不许因为观测本身把一轮正稿跑挂——
+    `store` 可能是只读副本，也可能是不带 `append_event` 的测试替身。
+    """
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "template": template,
+        "section": section,
+        "shard": shard,
+        "attempt": attempt,
+        "gate": gate,
+        # 这一条判词已经连着打回第几次了。早停线读的就是它——把「连续」算在
+        # 写的那一刻，读的人不必再自己按 ts 排一遍（自造尺子正是 09-11 的病根）。
+        "streak": streak,
+        "errors": list(errors),
+    }
+    try:
+        path = rejects_path(runs_root, research_id, template)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001 — 观测落盘失败不许影响正稿
+        pass
+    append = getattr(store, "append_event", None)
+    if callable(append):
+        try:
+            append(research_id, event_type=REJECT_EVENT_TYPE,
+                   payload={"type": REJECT_EVENT_TYPE, **entry},
+                   created_at=entry["ts"])
+        except Exception:  # noqa: BLE001 — 同上：观测不许反噬正稿
+            pass
+    return entry
+
+
 async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
                         report_text: str, *, path: Path, label: str, unit: str,
                         research_id: str, runs_root: Path, pool: frozenset[int],
                         parts: Sequence[tuple[str, Path]], current: str,
                         finding: Finding | None = None, findings: Sequence[Finding] = (),
-                        on_event: Any = None,
+                        on_event: Any = None, store: Any = None,
                         deadline: float | None = None) -> tuple[bool, tuple[str, ...], int]:
     """写一个目标——整节或一片，最多 `MAX_ATTEMPTS` 次。返回 (成功, 最后的错误, 尝试数)。
 
@@ -833,6 +918,29 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
     """
     errors: tuple[str, ...] = ()
     attempts = 0
+
+    # 货 2：同一道闸连着打回几次了。⛔ `streak_limit == 0`（默认）时它只是个计数，
+    # 一个分支都不参与——老行为逐字不变。
+    streak, streak_gate = 0, ""
+    streak_limit = reject_streak_limit()
+
+    def _reject(gate: str) -> None:
+        """把这一次打回落进台账与 events（§OBS-6 货 1）。只写，不判。
+
+        每个 `errors = (...)` 后面各跟一句，`gate` 就是那一条判词的出处；
+        少跟一处，读数就会比 `attempts` 少一条，判据 1 当场量得出来。
+
+        顺带把「连续第几次」算在写的那一刻。换了一道闸就从 1 重新数——
+        「引语被退两次、又越池一次」不是同一条判词连打三次，早停线不该被它触发。
+        """
+        nonlocal streak, streak_gate
+        streak = streak + 1 if gate == streak_gate else 1
+        streak_gate = gate
+        record_reject(store, runs_root=runs_root, research_id=research_id,
+                      template=skill.name, section=current,
+                      shard=finding.index if finding is not None else None,
+                      attempt=attempts, gate=gate, errors=errors, streak=streak)
+
     # 两道引语闸的底本，一节只算一次：改过字的引语与 C 级原声都在这里被挡回去。
     corpus = quote_corpus(data, report_text)
     grade_by_mark = {int(str(item["mark"])[1:]): item.get("grade")
@@ -842,6 +950,15 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
     crossref = {int(str(item["mark"])[1:]): item.get("crossref")
                 for item in data.get("sources") or [] if item.get("mark")}
     for _ in range(MAX_ATTEMPTS):
+        # 货 2 的早停线，挡在**下一轮起跑前**：同一条判词已经连着打回 N 次，
+        # 再付一轮引擎也是同样的判词。判完走的是现成的「片失败」路（D-051 语义：
+        # 片失败节不判 done、半份稿只进 .rejected），⛔ 不新开失败路径。
+        # `streak_limit == 0` 时这个 if 恒假——默认 off，老行为一个字不变。
+        if streak_limit and streak >= streak_limit:
+            errors = errors + (
+                f"「{label}」同一条判词（{streak_gate}）连着打回 {streak} 次，"
+                f"到了早停线（{REJECT_STREAK_ENV}={streak_limit}），不再重试。",)
+            break
         attempts += 1
         path.unlink(missing_ok=True)
         body = build_prompt(skill, data, report_text, path, errors, parts, current,
@@ -860,17 +977,20 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
             # 到点就不再重试——再进来一次剩余已是负数，包装器立刻抛，白走一圈。
             errors = (f"「{label}」没写完，这一节的总墙钟到点了（上限 = 片数 × "
                       f"{SECTION_TIMEOUT_SECONDS:g} 秒）。这是墙钟，不是引擎崩。",)
+            _reject("wallclock")
             break
         except Exception as exc:        # noqa: BLE001
             # SDK 子进程整个崩掉时（09-05 实测「Error in hook callback」→「Stream closed」）
             # 异常会冲出 adapter。一片崩了只算这一片一次失败，别丢掉已经写好的别的片。
             errors = (f"「{label}」这一轮引擎进程异常退出：{type(exc).__name__}: {exc}"[:400],)
+            _reject("engine_crash")
             continue
         # 判据落在产物上不落在返回码上：传输层报错但落盘了就认；返回 succeeded 但没落盘判没写。
         if not path.is_file() or path.stat().st_size < MIN_SECTION_BYTES:
             detail = _failure_detail(result)
             errors = (f"「{label}」{unit}没写出来或写得过短。" + detail
                       + _timeout_hint(detail, finding),)
+            _reject("missing_or_short")
             continue
         text = path.read_text(encoding="utf-8")
         offpool = offpool_marks(text, pool)
@@ -878,6 +998,7 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
             # 越池改**片级**重写：代价从整节降到一片。
             errors = (f"{unit}引用了信息源池里没有的角标：{'、'.join(offpool)}。"
                       f"池内只有 {len(pool)} 个角标，把越池的那几处删掉或换成池内角标。",)
+            _reject("offpool")
             continue
         # 货 2 两道闸：规则早写在共用规则里，正式稿层一直没有程序执行它。
         # 挡在这里而不是挡在验收尺子里——挡在这里当轮就重写，挡在尺子里要等整轮跑完。
@@ -886,12 +1007,14 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
             quote_problems += singlesource_advice(text.splitlines(), crossref)
         if quote_problems:
             errors = tuple(f"{unit}{p}" for p in quote_problems)
+            _reject("quote")
             continue
         if finding is not None and finding.marks and not any(m in text for m in finding.marks):
             # 片级引用契约：照 D-052「池里每条都要被用到」同思路降级到片级。
             # 这条发现自己一个角标都没有时不要求——不能要求引用不存在的东西。
             errors = (f"{unit}一个自带角标都没引到。这条发现在执行摘要里带的角标是 "
                       f"{'、'.join(finding.marks)}，至少要引到其中一个。",)
+            _reject("finding_marks")
             continue
         return True, (), attempts
     return False, errors, attempts
@@ -976,7 +1099,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
             ok, errors, used = await _write_target(
                 adapter, skill, data, report_text, path=path, label=name, unit="这一节",
                 research_id=research_id, runs_root=runs_root, pool=pool, parts=parts,
-                current=name, on_event=on_event)
+                current=name, on_event=on_event, store=store)
             attempts += used
             if not ok:
                 return _failed(name, path, errors)
@@ -999,7 +1122,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                 adapter, skill, data, report_text, path=spath, label=label, unit="这一片",
                 research_id=research_id, runs_root=runs_root, pool=pool, parts=parts,
                 current=name, finding=finding, findings=findings, on_event=on_event,
-                deadline=deadline)
+                store=store, deadline=deadline)
             attempts += used
             if not ok:
                 # D-051：任一片没写成，这一节不算 done——残缺的合并稿不许往下走。
