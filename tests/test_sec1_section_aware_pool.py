@@ -199,3 +199,28 @@ def test_角标编号不因章类型而漂() -> None:
         # 池里每条的角标都取自同一套全报告编号。
         numbers = {item["citation"] for item in pool["items"]}
         assert len(numbers) == len(pool["items"]), kind
+
+
+# ── 适用边界：本节 goal 零条时本包不生效（实测，不是推测）──────────
+
+def test_本节goal零条时两种章仍拿到同一批_本包不覆盖这一支() -> None:
+    """⚠️ 这条不是绿，是把**适用边界**钉下来，免得以后有人以为覆盖了。
+
+    `_evidence_index` 里 `eligible` 为空会回退全池，于是所有行都算跨 goal，
+    「本 goal 先占位」这个杠杆无从发挥——两种章类型必然拿到同一批。
+
+    实测 `r-3e04f808dffd` 沙盒重放：节讲 goal-1 时池构成两种章逐条相同
+    （证据表 goal-1 零行，已立卡「证据表 goal_id 与计划层不一致」）。
+    **要让官方资料节也吃到本包的效果，得先修那张卡**，不是再加一个杠杆。
+    """
+
+    from app.orchestrator.sectioning import _section_evidence_rows
+
+    rows = _rows([("goal-2", "weibo", 20), ("goal-3", "reddit", 20)])
+    pools = {
+        kind: [r["id"] for r in _section_evidence_rows(
+            rows, "goal-1", chapter_kind=kind,
+        )]
+        for kind in ("cross_validation", "report_writing")
+    }
+    assert pools["cross_validation"] == pools["report_writing"]
