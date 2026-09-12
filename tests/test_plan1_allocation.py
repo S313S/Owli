@@ -157,15 +157,21 @@ class ObedientEngine(FakeEngine):
             for s in slots
         ]
         self._used |= {(s["source_id"], s["entity"]) for s in slots}
-        goal_sources = {s["source_id"] for s in slots}
-        if len(agents) < 2 and rng.random() < 0.5:
-            # 只在本 goal 已分配的源内加同源异实体，避免抢占后续 goal 的必采对。
-            pool = sorted(goal_sources)
-            options = [(src, e) for src in pool for e in FAST_TEA if (src, e) not in self._used]
-            if options:
-                src, entity = rng.choice(options)
-                self._used.add((src, entity))
-                agents.append({"name": f"{CN_SOURCES[src]}·{entity}", "task": "采集证据", "output": {"shape": "array"}})
+        # §D-061 起，「听话」= 照必采清单起草，**不多不少**。
+        #
+        # 这里原先还会按随机数多加一张「同一个源、换一个实体」的卡，注释写的是
+        # 「只在本 goal 已分配的源内加，避免抢占后续 goal 的必采对」——PLAN-1 当年
+        # 防的是**夺位**，认为顺手多采一张无害，所以那样也算听话（lint 规则 31 只查
+        # 「表⊆计划」，多出来的卡确实一条规则都不违反）。
+        #
+        # D-061 改判：多出来的那张卡会真去采数。微博这类读池薄源命中口径宽
+        # （批次词互为子串或正文含该词），实测 DeepSeek 搜池 17 条里 14 条来自
+        # 通义听悟/飞书妙记/workbuddy 等无关旧批次，却被当成「DeepSeek 的微博证据」
+        # 入库。而「同一个薄源去采另一个实体」正是最容易串号的那一种，害处只多不少。
+        # 所以分配表从声明升格为闸：表外的 (source_id, entity) 一律删。
+        #
+        # ⛔ 别把这段加回来：加回来这个桩就不再「听话」，第 198 行那条
+        # 「听话引擎不该触发任何机械修正」的断言会红，而红得有理——不是尺子坏了。
         if 4 - len(agents) >= 2 and rng.random() < 0.7:
             agents.append({"name": "交叉验证", "task": "交叉验证证据一致性", "output": {"shape": "object"}})
         agents.append({"name": "报告撰写", "task": "撰写带角标的 Markdown 报告", "output": {"shape": "object"}})

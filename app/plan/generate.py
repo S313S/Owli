@@ -1686,7 +1686,11 @@ async def generate_plan(
                 entities=entities,
                 repairs=repairs,
             )
-            repairs.extend(normalize_plan(plan))
+            repairs.extend(normalize_plan(
+                plan,
+                collection_plan=collection_plan,
+                per_goal_capacity=per_goal_capacity(product_scale_config.profile(scale)),
+            ))
             await _emit_repairs(store, research_id, repairs)
             errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
@@ -1746,7 +1750,11 @@ async def generate_plan(
                 only_chapters=only_chapters,
                 lint_errors=chapter_errors,
             )
-            await _emit_repairs(store, research_id, normalize_plan(plan))
+            await _emit_repairs(store, research_id, normalize_plan(
+                plan,
+                collection_plan=collection_plan,
+                per_goal_capacity=per_goal_capacity(product_scale_config.profile(scale)),
+            ))
             chapter_errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
                 collection_plan=collection_plan,

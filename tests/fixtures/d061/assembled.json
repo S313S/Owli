@@ -1,0 +1,158 @@
+{
+  "goals": [
+    {
+      "title": "豆包国内舆论主线采集",
+      "objective": "围绕豆包收集其产品定位、迭代节点、活跃场景，以及国内媒体报道、社交平台讨论、应用商店与知乎小红书评测中的正负面观点，形成主体评价证据基线。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "doubao_domestic_opinion_baseline.json",
+        "description": "整合豆包及对照竞品在小红书与微博的用户讨论与评价，形成国内舆论主线证据基线的节化文档。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "文档顶层为对象，含「豆包」「Kimi」「DeepSeek」三个实体的证据分节及跨实体对照小节。",
+        "报告分节必须覆盖产品定位、迭代节点、活跃场景、正负面观点四类主题标签，且每类下至少引用两条采集条目。",
+        "所有采集产物顶层为数组，每条记录包含 permalink 与 fetched_at 字段，缺字段条目占比低于 5%。",
+        "引用外部内容一律使用中文引号「」，字符串内部不出现未转义英文双引号。",
+        "对任一 (源, 实体) 组合采集条数不足预期时，需给出结构化缺口口径，包含实际条数、目标条数、缺口原因。",
+        "报告须显式标注豆包与 Kimi、DeepSeek 在同一话题下的对照差异，避免只写单一实体。"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·豆包",
+          "task": "在小红书检索并抓取围绕「豆包」「Doubao」「豆包AI」「字节豆包」「豆包大模型」的笔记与评论，limit=25，输出含笔记标题、正文、话题标签、互动指标、作者、permalink、fetched_at 的原始数组。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "小红书数据抓取·Kimi",
+          "task": "在小红书检索并抓取围绕「Kimi智能助手」「Kimi」「kimi」「月之暗面」「Moonshot」「Kimi Chat」的笔记与评论，limit=25，输出含笔记标题、正文、话题标签、互动指标、作者、permalink、fetched_at 的原始数组。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·DeepSeek",
+          "task": "在微博检索并抓取围绕「深度求索」「DeepSeek」「DeepSeek-R1」「DeepSeek-V3」的博文与热门评论，limit=25，输出含博文正文、发布者、话题、转评赞、permalink、fetched_at 的原始数组，用于沉淀国内舆论对照证据。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "汇总三路采集数据，按「豆包」「Kimi」「DeepSeek」分节梳理产品定位、迭代节点、活跃场景与正负面观点，突出豆包国内舆论主线并对照竞品差异，写入节化文档信封对象，每条论断需回链具体 permalink 证据。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Kimi 对照视角采集",
+      "objective": "以豆包评价基线为参照，采集 Kimi 在国内用户与媒体中的能力口碑、长文本亮点与吐槽点，用来定位豆包在同类国产 AI 助手里的相对位置。",
+      "depends_on": [
+        "goal-1"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-2.json",
+        "description": "Kimi 对照视角采集汇总产物，含微博端「豆包」评价语料、小红书端「DeepSeek」评价语料，以及基于三方对照的交叉验证与相对定位报告，用于把豆包放进国产 AI 助手同类坐标系。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 取值为「goal-2.json」，顶层为 JSON object，含采集章引用与节化报告字段。",
+        "「微博数据抓取·豆包」产物顶层为数组，条数不超过 weibo limit=25，每条记录含 permalink 与 fetched_at 字段。",
+        "「小红书数据抓取·DeepSeek」产物顶层为数组，条数不超过 xhs limit=25，每条记录含 permalink 与 fetched_at 字段。",
+        "「交叉验证」章节输出为 object，显式引用 goals/goal-1/data-collection-2.json（小红书 Kimi 语料）、goals/goal-1/data-collection.json（小红书豆包语料）、goals/goal-1/data-collection-3.json（微博 DeepSeek 语料）以完成三方对照。",
+        "「报告撰写」章节输出为 object，明确给出豆包在 Kimi、DeepSeek 三方口碑坐标中的相对位置、长文本亮点、共性吐槽点，并对样本不足维度写出结构化缺口口径。",
+        "本 goal 采集章仅使用 weibo 与 xhs 两个 source_id，且不与上游 goal-1 出现相同的 (source_id, entity) 组合。",
+        "所有 JSON 字符串值内部未出现未转义英文双引号，引用名称统一使用中文引号「」。"
+      ],
+      "agents": [
+        {
+          "name": "微博数据抓取·豆包",
+          "task": "在微博端围绕「豆包」「Doubao」「豆包AI」「字节豆包」「豆包大模型」检索国内用户帖文、媒体号推文与热门评论，使用 weibo limit=25 抓取正文、互动量、发帖账号、发布时间、话题标签等字段，输出顶层为数组的 JSON，每条包含 permalink 与 fetched_at，用于建立微博端评价基线并与小红书端语料交叉。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "小红书数据抓取·DeepSeek",
+          "task": "在小红书端围绕「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」检索国内用户笔记、评论与合集，使用 xhs limit=25 抓取标题、正文、点赞收藏评论数、作者标签、发布时间等字段，输出顶层为数组的 JSON，每条包含 permalink 与 fetched_at，为三方对照补足小红书端 DeepSeek 侧证据。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "整合本 goal 微博端豆包语料与小红书端 DeepSeek 语料，并引用 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json 三份上游产物，比对豆包、Kimi、DeepSeek 在长文本处理、通用问答、创作辅助、稳定性、免费额度等维度的口径一致性，标注跨源一致证据与冲突证据，对样本量不足的实体记录结构化缺口口径，产物为节化文档信封形 object。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "以豆包为研究主角，以 Kimi 为对照基线，以 DeepSeek 为侧翼参照，基于本 goal 采集章与交叉验证节化结果，撰写相对定位报告，覆盖能力口碑、长文本亮点、共性吐槽点、跨平台差异四个板块，并在结尾单独设「数据缺口与不确定性」小节说明样本偏差与结构化缺口口径，产物为节化文档信封形 object。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "DeepSeek 对照视角采集",
+      "objective": "以豆包评价基线为参照，采集 DeepSeek 在国内舆论中的能力认知、开发者与大众用户观感差异，用来补齐豆包在推理/开源赛道的相对评价面。",
+      "depends_on": [
+        "goal-1"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-3.json",
+        "description": "以豆包评价基线为参照，产出 DeepSeek 在国内舆论中的能力认知与开发者/大众用户观感差异对照报告，用来补齐豆包在推理与开源赛道的相对评价面。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为「goal-3.json」，顶层为节化信封 object，包含 DeepSeek 能力认知、开发者视角、大众用户视角、豆包对照四个小节",
+        "两个必采采集章「抖音数据抓取·豆包」与「Reddit 数据抓取·豆包」均产出顶层为数组的 JSON，每条记录含 permalink 与 fetched_at 字段",
+        "抖音采集章严格按 limit=25 执行，Reddit 采集章严格按 limit=25 执行，任务文本仅使用豆包实体合法叫法（豆包、Doubao、豆包AI、字节豆包、豆包大模型），未出现 Kimi 或 DeepSeek 的任何叫法",
+        "交叉验证章在 inputs 中显式消费本 goal 两份采集产物路径以及上游「goals/goal-1/data-collection-3.json」「goals/goal-2/data-collection-5.json」两条 DeepSeek 相关产物，未新增重复 (source_id, entity) 组合",
+        "报告撰写章按开发者视角与大众用户视角分别呈现 DeepSeek 观感，并给出以豆包为基线的差异对照表，条目均可回溯至具体采集条目 permalink",
+        "全部实体称呼仅使用闭集叫法：豆包/Doubao/豆包AI/字节豆包/豆包大模型、Kimi智能助手/Kimi/kimi/月之暗面/Moonshot/Kimi Chat、深度求索/DeepSeek/DeepSeek-R1/DeepSeek-V3",
+        "任一维度数据不足时以结构化缺口口径记录（缺口维度、缺口原因、影响判断），不写死未采集实体的最小条数",
+        "章节总数不超过 4，非采集章不超过 2，采集章仅覆盖 applicable_sources 中的 douyin 与 reddit"
+      ],
+      "agents": [
+        {
+          "name": "抖音数据抓取·豆包",
+          "task": "在抖音检索「豆包」「Doubao」「豆包AI」「字节豆包」「豆包大模型」相关短视频与评论，limit=25，聚焦大众用户对豆包在推理、写作、日常问答、与同类 AI 助手横向对照场景中的观感表达，用来形成本 goal 所需的豆包大众基线；输出顶层为数组，每条包含 permalink、fetched_at、作者、正文/字幕、互动数据字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Reddit 数据抓取·豆包",
+          "task": "在 Reddit 相关 sub（含 r/ChineseLanguage、r/ChatGPTCoding、r/LocalLLaMA、r/China 等）检索「豆包」「Doubao」「豆包AI」「字节豆包」「豆包大模型」的讨论帖与评论，limit=25，重点捕捉海外华人与开发者视角下对豆包在推理与开源赛道的评价语，用于构建豆包侧写基线；输出顶层为数组，每条包含 permalink、fetched_at、subreddit、标题、正文、评分与评论摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "消费本 goal 两份采集产物与上游「goals/goal-1/data-collection-3.json」（DeepSeek 微博）、「goals/goal-2/data-collection-5.json」（DeepSeek 小红书），在能力认知（推理、代码、长文、开源生态）与观感分层（开发者 vs 大众用户）两条主线上做条目级比对，标注一致证据、冲突证据与缺口维度，并生成对照证据卡列表。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于交叉验证结论撰写「DeepSeek 对照视角采集」报告，包含：（一）DeepSeek 能力认知画像；（二）开发者视角关键词与代表证据；（三）大众用户视角关键词与代表证据；（四）以豆包基线做对照的差异表；（五）对豆包在推理与开源赛道相对评价面的补齐建议；所有引用一律使用「」中文引号，并附证据条目 permalink 与 fetched_at。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

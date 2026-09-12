@@ -97,10 +97,26 @@ def test_规则30_评级章多连一章也报红() -> None:
 def test_评级章的章规格确定性生成_不吃一次章扩写引擎调用(tmp_path) -> None:
     from tests.test_plan_generate import _generate
 
+    # §D-061 起分配表是闸：表外的 (源, 实体) 采集卡会被机械修正删掉。这条用例要的
+    # 只是「两张采集卡各带一个评级章」，不在乎是哪两个源、也不在乎它们在不在同一个
+    # goal，所以改成按分配表真给出的两位起草——多一个研究实体，表就从 1 位变 2 位
+    # （无实体卡时分配表是「每个 subject 恰好一位」，轮转着放）。
+    # ⛔ 别改回「goal-1 塞两张卡」：无实体卡时一个 goal 只排得到一位，第二张必被删。
     skeleton = _valid_skeleton()
+    skeleton["subjects"] = ["飞书", "Notion"]
+    skeleton["subjects_justification"] = "研究主体为飞书，Notion 作同类对照。"
+    # 末位那张「报告撰写」是必需的：`_align_deliverable_shape` 会把**末位** agent 的
+    # 产物对齐 goal deliverable，goal-1 若只剩采集卡，它的 output.path 就被改成
+    # stage-1，评级章的 inputs 断言当场对不上。
     skeleton["goals"][0]["agents"] = [
         _agent("HN 数据抓取·飞书", "通过 API 抓取 Hacker News 证据"),
-        _agent("网页搜索数据抓取·飞书", "补齐网页搜索证据"),
+        _agent("报告撰写", "撰写带角标的 Markdown 报告"),
+    ]
+    # goal-2 只放采集卡：原先那张「可靠度审计」会占掉 reliability-audit-2 这个
+    # agent_id，把本包排出的第二个评级章顶到 -3，断言就对不上了。
+    skeleton["goals"][1]["agents"] = [
+        _agent("Product Hunt 数据抓取·Notion", "采集 Notion 的 Product Hunt 证据"),
+        _agent("报告撰写", "撰写带角标的 Markdown 报告"),
     ]
     plan, _, engine = _generate(tmp_path, [skeleton])
 

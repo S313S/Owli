@@ -144,16 +144,23 @@ class PlanEngine:
 
 
 def test_多源计划生成由注册表补齐能力与产物契约(tmp_path: Path) -> None:
-    from app.adapters.routing import RoutedAdapter
-    from app.plan.generate import generate_plan
+    # 验的是**源注册表怎么给采集卡补齐 capability/tools/产物契约**，那一步在
+    # `_build_plan` 里。原先借 `generate_plan` 整条链造这四张卡，§D-061 起分配表
+    # 成了闸，而无实体卡时分配表是「每个 subject 恰好一位」——四张里三张会被删掉，
+    # 这条用例就再也造不出它要测的输入。改成直连被测函数，断言一字未动。
+    from app.plan.generate import _build_plan
 
-    engine = PlanEngine(_multi_source_skeleton())
-    store = PlanStore(tmp_path)
-    adapter = RoutedAdapter(
-        adapters={"claude": engine, "codex": engine},
+    skeleton = _multi_source_skeleton()
+    plan = _build_plan(
+        skeleton,
+        query="飞书竞品优缺点",
+        research_id="r-m3-wiring",
+        timestamp="2026-09-12T00:00:00+00:00",
+        market_profile=skeleton["market_profile"],
+        market_profile_justification=skeleton["market_profile_justification"],
+        subjects=skeleton["subjects"],
+        subjects_justification=skeleton["subjects_justification"],
     )
-
-    plan = asyncio.run(generate_plan("飞书竞品优缺点", store, adapter))
 
     # §RATE-1 货 2：每个采集章后面跟着自动排出的评级章，这里只看采集章。
     collectors = [
@@ -167,6 +174,18 @@ def test_多源计划生成由注册表补齐能力与产物契约(tmp_path: Pat
         assert agent.output["format"] == "json"
         assert "json_array_min_items:1" in agent.output["validators"]
         assert "each_item_has:permalink,fetched_at" in agent.output["validators"]
+    # 提示词那一段仍走整条链：它验的是「规划提示词里带没带源清单」，源清单来自
+    # 源注册表、与卡数无关，所以用一份**照分配表起草**（goal-1 就那一位）的骨架去跑，
+    # 免得被 §D-061 的闸删卡。
+    from app.adapters.routing import RoutedAdapter
+    from app.plan.generate import generate_plan
+
+    prompt_skeleton = _multi_source_skeleton()
+    # 只留分配表真给出的那一张（`_goal()` 已经给它补过 output 契约，别自己手写）。
+    prompt_skeleton["goals"][0]["agents"] = prompt_skeleton["goals"][0]["agents"][:1]
+    engine = PlanEngine(prompt_skeleton)
+    adapter = RoutedAdapter(adapters={"claude": engine, "codex": engine})
+    asyncio.run(generate_plan("飞书竞品优缺点", PlanStore(tmp_path), adapter))
     planning_prompt = engine.tasks[1].body
     assert all(
         name in planning_prompt

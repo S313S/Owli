@@ -395,8 +395,14 @@ def test_交叉验证保留节化契约且末级可靠度审计沿用findings契
         "每条 statement 关联 evidence_id",
         "单一来源写 is_singleton，冲突与缺口分别写 conflicts、gaps",
     ]
+    # §D-061 起分配表是闸，表外的 (源, 实体) 卡会被删。无实体卡时分配表是
+    # 「每个 subject 恰好一位」轮转着放，所以多一个研究实体，goal-1 得 HN·飞书、
+    # goal-2 正好得 Product Hunt·Notion——这条用例要的结构一字不用改。
+    # ⛔ 别改回「Product Hunt·飞书」：飞书的那一位排在 goal-1 且是 HN，这张会被删。
+    skeleton["subjects"] = ["飞书", "Notion"]
+    skeleton["subjects_justification"] = "研究主体为飞书，Notion 作同类对照。"
     goal["agents"] = [
-        _agent("Product Hunt 数据抓取·飞书", "采集 Product Hunt 证据"),
+        _agent("Product Hunt 数据抓取·Notion", "采集 Product Hunt 证据"),
         _agent("交叉验证", "聚合 pros/cons，识别 conflicts 与 gaps"),
         _agent("可靠度审计", "复核 findings 的支撑证据与 confidence"),
     ]
@@ -515,15 +521,28 @@ def test_每个落盘_agent_都具有当前_goal_写权限(tmp_path) -> None:
 
 
 def test_X_采集角色由系统派生_source_x_工具与来源槽位(tmp_path) -> None:
+    # 验的是**X 这个源的 capability/tools/来源槽位怎么由系统派生**，那一步在
+    # `_build_plan` 里。原先靠「清单外加章」把这张卡塞进整条链——§D-061 起分配表
+    # 是闸，清单外的卡一律删，而 X 这个源在默认骨架的分配表里排不到位
+    # （无实体卡时每个 subject 只得一位，飞书那位是 HN）。
+    # 改成直连被测函数，断言一字未动。
+    del tmp_path
+    from app.plan.generate import _build_plan
+
     skeleton = _valid_skeleton()
     skeleton["goals"][0]["agents"] = [
         _agent("X 数据抓取·飞书", "通过 recent search 采集 X 证据")
     ]
-    # §PLAN-1：分配表把「飞书」派给 goal-1 走 HN；X 采集是清单外加章，
-    # 主体覆盖仍要有人按清单采（规则 31 允许挪 goal，不允许丢）。
-    _add_coverage_collector(skeleton)
-
-    plan, _, _ = _generate(tmp_path, [skeleton])
+    plan = _build_plan(
+        skeleton,
+        query="飞书竞品优缺点",
+        research_id="r-x-slot",
+        timestamp="2026-09-12T00:00:00+00:00",
+        market_profile=skeleton["market_profile"],
+        market_profile_justification=skeleton["market_profile_justification"],
+        subjects=skeleton["subjects"],
+        subjects_justification=skeleton["subjects_justification"],
+    )
 
     capability = plan.goals[0].agents[0].capability
     assert capability["profile"] == "web-collector"
