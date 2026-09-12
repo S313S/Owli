@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping, Sequence
 
 from app.plan.model import Agent, Goal, Plan
@@ -33,6 +34,7 @@ def normalize_plan(
     """
 
     return _repair_rule_31_reverse(plan, collection_plan, per_goal_capacity) \
+        + _repair_acceptance(plan) \
         + _repair_rule_26(plan)
 
 
@@ -185,6 +187,143 @@ def _gate_goal(goal: Goal, table: set[tuple[str, str]], capacity: int | None,
         kept.append(agent)
     goal.agents = kept
     return notes
+
+
+#: §D-062：验收条里的反向约束语境。无卡实体出现在这些词所在的**子句**里，说明这条
+#: 是在禁止它（「未出现 Kimi 或 DeepSeek 的任何叫法」「仅使用闭集叫法：…」），那是防串号
+#: 的闸，不能摘。误判方向不对称：豁免只在「本来要摘」时启用，误豁免 = 回到现状，不会更坏。
+_ACCEPTANCE_NEGATION_WORDS = (
+    "未出现", "不出现", "不得", "禁止", "不写", "仅使用", "只使用", "仅限",
+    "不含", "不包含", "不允许", "不许", "不引用", "未引用", "闭集", "白名单",
+)
+_ACCEPTANCE_CLAUSE_SPLIT = re.compile(r"[，,；;。]")
+_ACCEPTANCE_PRODUCT_PATH = re.compile(r"goals/goal-[1-9][0-9]*/[A-Za-z0-9_.\-]+")
+#: 一个 goal 的验收条被摘光时的兜底——规则 4 要求至少一条；这条不提任何实体。
+_ACCEPTANCE_FALLBACK = (
+    "交付物文件存在且通过 validators；对本 goal 没有采集卡的实体不作内容要求，"
+    "数据不足以结构化缺口口径记录"
+)
+
+
+def _repair_acceptance(plan: Plan) -> list[str]:
+    """§D-062：验收条要求写「没有采集卡的实体」或引用「已删卡的产物」——整条摘。
+
+    **为什么要有这一步**：D-061 删掉表外卡后，规则 26 只把实体从报告章的
+    `closing.entities` 摘掉，`goal.acceptance` 原样不动；而 `runtime.py` 把验收条逐字
+    拼进写手提示词。goal-1 第 1 条仍写「含豆包、Kimi、DeepSeek 三个实体的证据分节」，
+    写手手里没有 DeepSeek 任何数据却被要求写——要么编，要么章反复被打回。lint 规则 4
+    只查「至少一条」「不含不可判定表述」，不查提到的实体有没有卡 ⇒ 规划期静默、执行期发作。
+
+    口径（§一′，调度 09-12 代拍）：
+    - **可达口径**：一条验收条「在说哪个实体」按实体全部叫法（id / canonical / zh / en /
+      aliases）匹配；提到的实体 ⊄「本 goal 或其传递上游 goal 有卡的实体」⇒ **整条摘**，
+      不做句内删改（句内删会产出病句）。只看本 goal 会误伤 goal-2 消费 goal-1 Kimi 语料的条。
+    - **反向约束豁免**：无卡实体出现在否定/限定语境的子句里（词表见上）不摘。
+    - **第三类按路径判**：验收条写死的 `goals/<goal>/<file>` 不在现存产物集合
+      （所有 agent 的 output.path + 各 goal 的 deliverable.path）里 ⇒ 整条摘。实体可达
+      ≠ 那份产物还在：goal-2 第 4 条三个实体都可达，引的却是被删卡的产物。
+    - ⛔ 必须排在删卡闸之后（看的是删完还在的卡），规则 26 之前（与它无依赖，只是同一批留痕）。
+      不动 lint 规则 4 的语义，不改引擎提示词求它自己判。
+
+    留痕号用「[修正4]」：验收条可判定性是规则 4 的领地，一条要求写无卡实体的验收条在
+    实践上就是不可判定的。摘到空列表时兜底一条不提实体的验收条（规则 4 要至少一条）。
+    """
+
+    matchers = _entity_matchers(plan)
+    outputs: set[str] = set()
+    cards: dict[str, set[str]] = {}
+    for goal in plan.goals:
+        path = str((goal.deliverable or {}).get("path", "")).strip()
+        if path:
+            outputs.add(path)
+        cards[goal.goal_id] = set()
+        for agent in goal.agents:
+            path = str((agent.output or {}).get("path", "")).strip()
+            if path:
+                outputs.add(path)
+            if _is_collector(agent) and str(agent.entity or "").strip():
+                cards[goal.goal_id].add(str(agent.entity).strip())
+    ancestors = _ancestors(plan)
+    notes: list[str] = []
+    for goal in plan.goals:
+        reachable = set(cards[goal.goal_id])
+        for upstream in ancestors.get(goal.goal_id, set()):
+            reachable |= cards.get(upstream, set())
+        kept: list[str] = []
+        for index, item in enumerate(goal.acceptance):
+            text = str(item)
+            reasons: list[str] = []
+            missing = [
+                path for path in _ACCEPTANCE_PRODUCT_PATH.findall(text) if path not in outputs
+            ]
+            if missing:
+                reasons.append(f"引用的产物 {'、'.join(missing)} 不存在（已删卡或从未起草）")
+            unreachable = [
+                entity_id for entity_id, patterns in matchers
+                if entity_id not in reachable and _mentioned_outside_negation(text, patterns)
+            ]
+            if unreachable:
+                reasons.append(
+                    f"提到 {'、'.join(unreachable)}，但本 goal 及其上游没有这些实体的采集卡"
+                )
+            if reasons:
+                notes.append(
+                    f"[修正4] {goal.goal_id}.acceptance[{index}] 已摘：{'；'.join(reasons)}"
+                    f"——原文「{text}」"
+                )
+                continue
+            kept.append(item)
+        if len(kept) == len(goal.acceptance):
+            continue
+        if not kept:
+            kept = [_ACCEPTANCE_FALLBACK]
+            notes.append(
+                f"[修正4] {goal.goal_id}.acceptance 被摘光，兜底一条不提实体的验收条"
+                "（规则 4 要求至少一条）"
+            )
+        goal.acceptance = kept
+    return notes
+
+
+def _entity_matchers(plan: Plan) -> list[tuple[str, list[re.Pattern[str]]]]:
+    """每个实体卡 → 它全部叫法的匹配器。
+
+    中文名按子串；ASCII 名按**整词**（前后不接字母数字）且忽略大小写——DeepSeek 的
+    别名表里有「DS」，裸子串会把「HEADS」「IDS」都判成提到。没有实体卡的历史计划
+    （`entities=[]`）返回空表，按实体那一半就不动。
+    """
+
+    result: list[tuple[str, list[re.Pattern[str]]]] = []
+    for entity in plan.entities:
+        names = {entity.id, entity.canonical, entity.names.get("zh"), entity.names.get("en"),
+                 *entity.names.get("aliases", [])}
+        patterns: list[re.Pattern[str]] = []
+        for name in names:
+            name = str(name or "").strip()
+            if not name:
+                continue
+            if any("一" <= ch <= "鿿" for ch in name):
+                patterns.append(re.compile(re.escape(name)))
+            else:
+                patterns.append(re.compile(
+                    rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.IGNORECASE))
+        if patterns:
+            result.append((entity.id.strip(), patterns))
+    return result
+
+
+def _mentioned_outside_negation(text: str, patterns: list[re.Pattern[str]]) -> bool:
+    """这条验收条是不是在「要求写」这个实体：按子句看，提到它且子句里没有否定/限定词。
+
+    全部提及都落在否定子句里（「未出现 Kimi 或 DeepSeek 的任何叫法」）⇒ False，不摘。
+    """
+
+    for clause in _ACCEPTANCE_CLAUSE_SPLIT.split(text):
+        if not any(pattern.search(clause) for pattern in patterns):
+            continue
+        if not any(word in clause for word in _ACCEPTANCE_NEGATION_WORDS):
+            return True
+    return False
 
 
 def _ancestors(plan: Plan) -> dict[str, set[str]]:
