@@ -200,9 +200,12 @@ _ACCEPTANCE_NEGATION_WORDS = (
     "未出现", "不出现", "不得", "禁止", "不写", "仅使用", "只使用", "仅限",
     "不含", "不包含", "不允许", "不许", "不引用", "未引用", "闭集", "白名单",
     "仅出现", "只出现", "越界", "混入", "混进", "未写入", "未提及", "不提及",
-    "排除", "避免", "严禁", "杜绝", "勿",
+    "排除", "避免", "严禁", "杜绝", "勿", "不重复", "不与",
 )
-_ACCEPTANCE_CLAUSE_SPLIT = re.compile(r"[，,；;。]")
+_ACCEPTANCE_CLAUSE_SEPARATORS = frozenset("，,；;。")
+#: 括号里的逗号不切子句：引擎写 `(xhs, 豆包语音输入法)` 这种组合元组，按英文逗号切会把
+#: 实体切到没有否定词的半截里（r-d062fu-0913-a 现形）。
+_ACCEPTANCE_BRACKETS = {"(": ")", "（": "）", "[": "]", "【": "】", "「": "」"}
 #: 产物路径：全形 `goals/goal-N/<file>`，或引擎常写的短形 `goal-N/<file>`（前面不接
 #: 路径字符，免得把全形里的那段再抓一遍）。§D-062-fu 起短形也判，见 `_acceptance_paths`。
 _ACCEPTANCE_PRODUCT_PATH = re.compile(
@@ -350,13 +353,33 @@ def _entity_matchers(plan: Plan) -> list[tuple[str, list[re.Pattern[str]]]]:
     return result
 
 
+def _acceptance_clauses(text: str) -> list[str]:
+    """按「，,；;。」切子句，但括号 / 引号里的分隔符不切（不配对的括号按到句尾算）。"""
+
+    clauses: list[str] = []
+    buffer: list[str] = []
+    closers: list[str] = []
+    for ch in text:
+        if ch in _ACCEPTANCE_BRACKETS:
+            closers.append(_ACCEPTANCE_BRACKETS[ch])
+        elif closers and ch == closers[-1]:
+            closers.pop()
+        elif not closers and ch in _ACCEPTANCE_CLAUSE_SEPARATORS:
+            clauses.append("".join(buffer))
+            buffer = []
+            continue
+        buffer.append(ch)
+    clauses.append("".join(buffer))
+    return clauses
+
+
 def _mentioned_outside_negation(text: str, patterns: list[re.Pattern[str]]) -> bool:
     """这条验收条是不是在「要求写」这个实体：按子句看，提到它且子句里没有否定/限定词。
 
     全部提及都落在否定子句里（「未出现 Kimi 或 DeepSeek 的任何叫法」）⇒ False，不摘。
     """
 
-    for clause in _ACCEPTANCE_CLAUSE_SPLIT.split(text):
+    for clause in _acceptance_clauses(text):
         if not any(pattern.search(clause) for pattern in patterns):
             continue
         if not any(word in clause for word in _ACCEPTANCE_NEGATION_WORDS):

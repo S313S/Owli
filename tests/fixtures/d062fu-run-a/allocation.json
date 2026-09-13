@@ -1,0 +1,38 @@
+{
+  "goal-1": [
+    {
+      "entity": "豆包语音输入法",
+      "source_id": "xhs",
+      "collector_name": "小红书数据抓取"
+    },
+    {
+      "entity": "豆包语音输入法",
+      "source_id": "douyin",
+      "collector_name": "抖音数据抓取"
+    }
+  ],
+  "goal-2": [
+    {
+      "entity": "讯飞输入法",
+      "source_id": "xhs",
+      "collector_name": "小红书数据抓取"
+    },
+    {
+      "entity": "搜狗输入法",
+      "source_id": "xhs",
+      "collector_name": "小红书数据抓取"
+    }
+  ],
+  "goal-3": [
+    {
+      "entity": "豆包语音输入法",
+      "source_id": "weibo",
+      "collector_name": "微博数据抓取"
+    },
+    {
+      "entity": "豆包语音输入法",
+      "source_id": "reddit",
+      "collector_name": "Reddit 数据抓取"
+    }
+  ]
+}

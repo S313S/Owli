@@ -30,18 +30,22 @@ FIXTURES = Path(__file__).parent / "fixtures" / "d062fu"
 REVERSE = "未越界写入「DeepSeek」「Kimi」等其他实体叫法"
 
 
-def _real_plan() -> Plan:
-    skeleton = json.loads((FIXTURES / "skeleton.json").read_text(encoding="utf-8"))
-    assembled = json.loads((FIXTURES / "assembled.json").read_text(encoding="utf-8"))
+RUN_A = Path(__file__).parent / "fixtures" / "d062fu-run-a"
+
+
+def _real_plan(fixtures: Path = FIXTURES, query: str = "国内大家对豆包的看法",
+               research_id: str = "r-50600e09f7dd") -> Plan:
+    skeleton = json.loads((fixtures / "skeleton.json").read_text(encoding="utf-8"))
+    assembled = json.loads((fixtures / "assembled.json").read_text(encoding="utf-8"))
     entities = []
     for index in (1, 2, 3):
-        card = json.loads((FIXTURES / f"entity-{index}.json").read_text(encoding="utf-8"))
+        card = json.loads((fixtures / f"entity-{index}.json").read_text(encoding="utf-8"))
         card.setdefault("id", card["canonical"])
         entities.append(card)
     return _build_plan(
         assembled,
-        query="国内大家对豆包的看法",
-        research_id="r-50600e09f7dd",
+        query=query,
+        research_id=research_id,
         timestamp="2026-09-12T18:31:00+00:00",
         scale="fast",
         market_profile=skeleton["market_profile"],
@@ -53,13 +57,13 @@ def _real_plan() -> Plan:
     )
 
 
-def _allocation() -> dict:
-    return json.loads((FIXTURES / "allocation.json").read_text(encoding="utf-8"))
+def _allocation(fixtures: Path = FIXTURES) -> dict:
+    return json.loads((fixtures / "allocation.json").read_text(encoding="utf-8"))
 
 
-def _normalize(plan: Plan) -> list[str]:
+def _normalize(plan: Plan, fixtures: Path = FIXTURES) -> list[str]:
     # 生产那条路的参数形状（generate.py:1729）；fast 档每 goal 两张。
-    return normalize_plan(plan, collection_plan=_allocation(), per_goal_capacity=2)
+    return normalize_plan(plan, collection_plan=_allocation(fixtures), per_goal_capacity=2)
 
 
 # —— 判据 1：真夹具造红 ————————————————————————————————
@@ -85,6 +89,33 @@ def test_真夹具_goal3的上游goal并列不是短形路径():
     assert line in plan.goals[2].acceptance
 
 
+def _run_a_plan() -> Plan:
+    return _real_plan(RUN_A, query="豆包语音输入法的竞品分析", research_id="r-d062fu-0913-a")
+
+
+def test_小跑a_括号元组里的逗号不切子句_不重复消费条不许摘():
+    """本包第一轮小跑 r-d062fu-0913-a 现形：goal-2 第 7 条「本 goal 不重复消费上游 goal-1
+    已完成的 (xhs, 豆包语音输入法) 与 (douyin, 豆包语音输入法) 组合，…」被摘。
+    两个病：① 子句按英文逗号切，把「(xhs, 豆包语音输入法)」切成两半，豆包落进没有否定词
+    的半截；② 「不重复」不在词表。它提到豆包是为了**禁止**重复采，是反向约束。
+    """
+    plan = _run_a_plan()
+    goal2 = list(plan.goals[1].acceptance)
+    assert "不重复消费上游 goal-1" in goal2[6]
+    notes = [n for n in _normalize(plan, RUN_A) if n.startswith("[修正4]")]
+    assert goal2[6] in plan.goals[1].acceptance, notes
+    assert goal2[5] in plan.goals[1].acceptance, "「不混入主角豆包语音输入法」那条也得留"
+
+
+def test_小跑a_被删卡产物的路径条照摘():
+    """反面判据：goal-3 第 7 条引了 D-061 删掉的 web_search·讯飞输入法 卡产物，照摘——
+    全计划 [修正4] 只剩这一条。"""
+    plan = _run_a_plan()
+    notes = [n for n in _normalize(plan, RUN_A) if n.startswith("[修正4]")]
+    assert len(notes) == 1 and notes[0].startswith("[修正4] goal-3.acceptance[6]"), notes
+    assert "goals/goal-2/data-collection-5.json" in notes[0]
+
+
 # —— 词表：按子句判，新增写法 ————————————————————————————
 
 
@@ -98,6 +129,8 @@ def test_真夹具_goal3的上游goal并列不是短形路径():
     "不混入 Kimi 的任何叫法",
     "严禁写入 Kimi 叫法",
     "勿引入 Kimi 的语料",
+    "本 goal 不重复采集上游已完成的 (xhs, Kimi) 组合",
+    "采集组合不与上游 (xhs, Kimi)、(douyin, Kimi) 重复",
 ])
 def test_反向约束新写法_不摘(line):
     plan = _plan_with([("goal-1", "xhs", "豆包")], {"goal-1": [line]},
@@ -109,7 +142,8 @@ def test_反向约束新写法_不摘(line):
 def test_词表扩了_正向要求照摘():
     """反面判据：扩词表不许把「要求写 Kimi」的条也豁免掉。"""
     lines = ["报告须含 Kimi 对照小节，仅出现一次的结论需标注样本量",
-             "报告须分别呈现豆包与 Kimi 的口碑"]
+             "报告须分别呈现豆包与 Kimi 的口碑",
+             "报告须汇总 (xhs, Kimi) 组合的高频词，不得遗漏 permalink"]
     plan = _plan_with([("goal-1", "xhs", "豆包")], {"goal-1": lines + ["文件存在"]},
                       [_entity("豆包"), _entity("Kimi")])
     normalize_plan(plan)

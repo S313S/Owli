@@ -1,0 +1,18 @@
+{
+  "canonical": "讯飞输入法",
+  "names": {
+    "zh": "讯飞输入法",
+    "en": "iFlytek IME",
+    "aliases": [
+      "讯飞",
+      "iFlytek输入法",
+      "科大讯飞输入法"
+    ]
+  },
+  "official_handles": {
+    "weibo": "讯飞输入法",
+    "wechat_mp": "讯飞输入法"
+  },
+  "same_product": true,
+  "note": "科大讯飞推出的手机输入法，以语音输入（含方言、多语种实时翻译）著称，是豆包语音输入法的直接竞品。"
+}

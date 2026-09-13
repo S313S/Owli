@@ -1,0 +1,15 @@
+{
+  "canonical": "豆包语音输入法",
+  "names": {
+    "zh": "豆包爱说输入法",
+    "en": "Doubao Voice Input",
+    "aliases": [
+      "豆包输入法",
+      "豆包爱说",
+      "爱说输入法"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "字节跳动豆包团队推出的AI语音输入法App，主打高准确率的语音转文字、方言识别、语音指令改写润色等能力，也叫豆包爱说输入法。"
+}
