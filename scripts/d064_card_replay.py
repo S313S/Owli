@@ -138,13 +138,22 @@ def main(argv: list[str] | None = None) -> int:
         connection.close()
     kinds = Counter(str(kind) for kind, _, _ in rows)
     keywords = Counter(str(keyword) for kind, _, keyword in rows if kind != "comment")
-    task = result.task_result
-    conclusion = getattr(task, "conclusion", None)
-    unmet = list(getattr(conclusion, "unmet", None) or [])
+    task = result.task_result  # TaskRunResult：没有 conclusion，自报结论读引擎侧留档
+    last_message = output.with_name(f".{output.stem}-codex-last-message.json")
+    conclusion: dict = {}
+    if last_message.is_file() and last_message.stat().st_mtime >= started:
+        try:
+            conclusion = json.loads(last_message.read_text(encoding="utf-8"))
+        except ValueError:
+            conclusion = {}
+    unmet = [str(item) for item in conclusion.get("unmet") or []]
     readings = {
         "elapsed_seconds": round(elapsed, 1),
         "succeeded": bool(getattr(task, "succeeded", False)),
-        "conclusion_status": getattr(conclusion, "status", None),
+        "chapter_status": getattr(task, "chapter_status", None),
+        "reason": getattr(task, "reason", None),
+        "actual_count": getattr(task, "actual_count", None),
+        "conclusion_status": conclusion.get("status"),
         "engine_error": getattr(task, "engine_error", None),
         "artifact_written": output.is_file(),
         "source_calls": len(calls),
