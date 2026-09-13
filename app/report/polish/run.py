@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
+from app.observability.cost import UsageMeteringAdapter
 from app.adapters import validation
 from app.adapters.capability import Capability, FileSystemScope
 from app.adapters.contracts import EngineTask
@@ -1074,6 +1075,9 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                 "errors": blockers}
     if adapter is None:
         adapter = default_adapter()
+    # §OBS-7 货 2：正式稿不进章账本，终态 usage 记到 reports.extra.llm_usage_offledger。
+    adapter = UsageMeteringAdapter(adapter, store=store, research_id=research_id,
+                                   path_name=f"polish:{skill.name}")
     parts = section_paths(runs_root, research_id, skill.name, sections_for(skill, data))
     parts[0][1].parent.mkdir(parents=True, exist_ok=True)
     # 开跑前清全部旧分节/旧分片，再进节循环（D-041/D-042 销账；见 clear_stale_parts）。

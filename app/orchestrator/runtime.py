@@ -20,6 +20,7 @@ from app.adapters.capability import Capability
 from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
+from app.observability.cost import UsageMeteringAdapter
 from app.observability.pricing import engine_key, priced_usage
 from app.orchestrator.background import guard_task
 from app.orchestrator.scheduler import (
@@ -2859,7 +2860,11 @@ class RuntimeCoordinator:
         # §D-043：包成可取消的任务并登记，`/stop`（以及任何别的取消者）才掐得到
         # 它手里的引擎调用；杀子进程那半段由 D-041 的 adapter 取消路径完成。
         run = asyncio.ensure_future(backfill_report(
-            self.store, research_id, adapter=adapter, runs_root=self.runs_root,
+            self.store, research_id,
+            # §OBS-7 货 2：回填不进章账本，终态 usage 记到 reports.extra.llm_usage_offledger。
+            adapter=UsageMeteringAdapter(adapter, store=self.store, research_id=research_id,
+                                         path_name="reliability_backfill"),
+            runs_root=self.runs_root,
             # §OBS-1 货 2：回填批次进度直通事件流，X-1「回填期间零事件」挂账收口。
             on_event=lambda payload: self.events.publish(research_id, payload),
         ))
