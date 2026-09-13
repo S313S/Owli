@@ -779,7 +779,9 @@ class RuntimeCoordinator:
         if str(agent.output.get("path")) == str(goal.deliverable.get("path")):
             acceptance = "；".join(str(item) for item in goal.acceptance)
             body = f"{body}\nGoal 验收条件：{acceptance}"
-        query_hint = self._source_query_hint(plan, agent, sources)
+        query_hint = self._source_query_hint(
+            plan, agent, sources, item_limit=source_item_limit,
+        )
         if query_hint:
             body = f"{body}\n\n{query_hint}"
         chapter = agent.chapter if isinstance(agent.chapter, dict) else None
@@ -836,7 +838,9 @@ class RuntimeCoordinator:
             runs_root=self.runs_root,
         )
 
-    def _source_query_hint(self, plan: Plan, agent: Any, sources: list[str]) -> str:
+    def _source_query_hint(
+        self, plan: Plan, agent: Any, sources: list[str], *, item_limit: int | None = None,
+    ) -> str:
         """§D-064：告诉采集卡「一次调用系统实际搜了哪几个词」，别为凑叫法反复调源。
 
         源工具在适配层会把模型给的 query 换成本实体在本源语域下的 ≤2 个叫法
@@ -890,6 +894,15 @@ class RuntimeCoordinator:
             "只会把章墙钟烧光、产物写不出来。"
             "只有工具返回明确失败（带 closed_reason）时，才按信息源手册第 3 条处理。"
         )
+        if len(queries) > 1:
+            # 重放 green2 实测：单次调用 167 s 后，模型又花 110 s 把 50 条收敛成 25 条、
+            # 三次 jq 校验，300 s 引擎线掐在最后一次校验上——调用次数治好了，收尾还在烧。
+            quota = f"{item_limit} 条" if item_limit else "本章名额"
+            hint += (
+                f"返回的笔记可能多于名额（每个检索词各取一份后合并，最多约 {len(queries)} 倍）："
+                f"按互动量取前 {quota} 写进产物即可，评论行随所属笔记保留、不另算名额；"
+                "一次写成、只做一次格式校验，校验报错只改报错处，不要反复重写整个文件。"
+            )
         if others:
             hint += (
                 f"任务文本里的其他叫法（{'、'.join(others)}）本章不再检索，"

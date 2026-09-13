@@ -83,6 +83,12 @@ def test_小红书采集卡_提示写明实际检索词_只调一次_其余叫�
     # 其余叫法按 casefold 去重：Doubao / doubao 只算一个
     assert "（Doubao、字节豆包）" in hint
     assert "doubao" not in hint
+    # 名额没传时不写具体条数；传了写进去（重放 green2：50 条收敛 25 条烧掉 110 s）
+    assert "按互动量取前 本章名额" in hint
+    limited = runtime._source_query_hint(
+        _plan(), _agent("data-collection", ["xhs"]), ["xhs"], item_limit=25,
+    )
+    assert "按互动量取前 25 条" in limited and "只做一次格式校验" in limited
 
 
 def test_抖音卡同形覆盖_Reddit卡换英文语域的词(tmp_path: Path) -> None:
