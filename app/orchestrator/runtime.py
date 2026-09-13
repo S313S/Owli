@@ -779,6 +779,9 @@ class RuntimeCoordinator:
         if str(agent.output.get("path")) == str(goal.deliverable.get("path")):
             acceptance = "；".join(str(item) for item in goal.acceptance)
             body = f"{body}\nGoal 验收条件：{acceptance}"
+        query_hint = self._source_query_hint(plan, agent, sources)
+        if query_hint:
+            body = f"{body}\n\n{query_hint}"
         chapter = agent.chapter if isinstance(agent.chapter, dict) else None
         if chapter is not None:
             body = (
@@ -832,6 +835,68 @@ class RuntimeCoordinator:
             source_store_path=getattr(self.store, "_database_path", None),
             runs_root=self.runs_root,
         )
+
+    def _source_query_hint(self, plan: Plan, agent: Any, sources: list[str]) -> str:
+        """§D-064：告诉采集卡「一次调用系统实际搜了哪几个词」，别为凑叫法反复调源。
+
+        源工具在适配层会把模型给的 query 换成本实体在本源语域下的 ≤2 个叫法
+        分别检索再去重（§ENT-1 货 4）。模型看不见这一步：任务文本写着四个叫法，
+        返回行只带两个，它就按剩下的叫法一个个重调——而每次又被换回同样两个词，
+        70–130 s 一次，三次就烧光 fast 章墙钟（r-50600e09f7dd 三张小红书卡 timeout）。
+
+        检索词**直接调适配层同一个函数算**，不在这里重写一份规则：提示里写的词
+        与源工具实际搜的词必须同源，否则提示本身就是假的。算不出（没实体卡、
+        源不在语域表、没库）时适配层会原样用模型的 query，此时不加提示。
+        """
+
+        if self._agent_kind(agent) not in {"data_collection", "browser_automation"}:
+            return ""
+        if len(sources) != 1 or not agent.entity:
+            return ""
+        if getattr(self.store, "_database_path", None) is None:
+            return ""  # 源子进程拿不到库就不会换词，提示会说谎
+        from app.adapters.source_mcp import MAX_QUERIES_PER_ENTITY, SourceToolAdapter
+
+        source_id = str(sources[0])
+        try:
+            queries = SourceToolAdapter(store=self.store)._locale_queries(
+                source_id, "", research_id=plan.research_id, agent_id=agent.agent_id,
+            )
+        except Exception:
+            logger.exception("D-064 检索词提示计算失败，不加提示：%s", agent.agent_id)
+            return ""
+        queries = [item for item in queries if str(item).strip()]
+        if not queries:
+            return ""
+        entity = next((item for item in plan.entities if item.id == agent.entity), None)
+        names = entity.names if entity is not None else {}
+        searched = {item.casefold() for item in queries}
+        others: list[str] = []
+        for name in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]:
+            text = str(name or "").strip()
+            if text and text.casefold() not in searched:
+                searched.add(text.casefold())
+                others.append(text)
+        tool = f"source.{source_id}"
+        cap = MAX_QUERIES_PER_ENTITY
+        quoted = "、".join(f"「{item}」" for item in queries)
+        hint = (
+            f"检索词由系统固定（重要，决定本章会不会超时）：你调用 {tool} 时，"
+            f"不论 query 写什么，系统都会改用 {quoted} 分别检索并合并去重"
+            f"（系统检索词上限 {cap} 个，"
+            "每次调用含详情与评论二跳，耗时 1–2 分钟）。"
+            f"所以本章只调用 {tool} 一次：返回后立即把结果写进产物落盘。"
+            "不要为了覆盖别的叫法、换查询式或「怕不够」再次调用——再调仍是同样的检索词，"
+            "只会把章墙钟烧光、产物写不出来。"
+            "只有工具返回明确失败（带 closed_reason）时，才按信息源手册第 3 条处理。"
+        )
+        if others:
+            hint += (
+                f"任务文本里的其他叫法（{'、'.join(others)}）本章不再检索，"
+                "请在 unmet 与结构化缺口里各记一条，写明"
+                f"「{'、'.join(others)} 未单独检索：系统检索词上限 {cap}」。"
+            )
+        return hint
 
     def _plain(self, value: Any) -> Any:
         if value is None or isinstance(value, (str, int, float, bool)):
