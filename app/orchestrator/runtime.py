@@ -20,6 +20,7 @@ from app.adapters.capability import Capability
 from app.adapters.contracts import EngineRunResult, EngineTask, OwliResult
 from app.adapters.routing import RoutedAdapter
 from app.config import ResearchScaleConfig, load_research_scale_config
+from app.observability.pricing import engine_key, priced_usage
 from app.orchestrator.background import guard_task
 from app.orchestrator.scheduler import (
     CHAPTER_RETRY_INTERVAL_SECONDS, Scheduler, TaskRunResult,
@@ -90,6 +91,7 @@ from app.store.evidence_artifacts import load_evidence_payloads
 
 
 AdapterFactory = Callable[[], Any]
+
 logger = logging.getLogger(__name__)
 
 #: 哪些章状态的产物可以投影入库（§SRC-1 货 4）。
@@ -123,6 +125,10 @@ EMPTY_LLM_USAGE = {
     "cost_usd": 0.0,
     "calls": 0,
     "costed_calls": 0,
+    # §OBS-7：标价折算与引擎报价分列；按实际引擎分桶。
+    "estimated_cost_usd": 0.0,
+    "estimated_calls": 0,
+    "by_engine": {},
 }
 
 REUSE_CONCLUSION_GUARD = "只复用方法与来源配置，不沿用旧报告结论。"
@@ -883,11 +889,19 @@ class RuntimeCoordinator:
             research_usage = None
             if isinstance(usage, dict):
                 try:
+                    # §OBS-7：引擎没报价（Codex 恒如此）就按标价表折算；记这次调用
+                    # **实际**跑的引擎——让路后它和章的计划引擎不是同一个。
+                    actual_engine = engine_key(getattr(event, "engine", None))
+                    ledger_usage, cost_source = priced_usage(
+                        actual_engine, usage, model=getattr(agent, "model", None)
+                    )
                     self.store.record_chapter_usage(
                         plan.research_id,
                         context.goal_id,
                         chapter_id,
-                        usage,
+                        ledger_usage,
+                        engine=actual_engine,
+                        cost_source=cost_source,
                     )
                     research_usage = self._research_usage(plan.research_id)
                     state = self.researches.get(plan.research_id)

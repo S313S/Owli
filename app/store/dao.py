@@ -95,6 +95,123 @@ _USAGE_TOKEN_FIELDS = (
 _GENERIC_REPORT_TAGS = {"调研", "报告"}
 
 
+_USAGE_COST_SOURCES = frozenset({"reported", "estimated"})
+
+
+def _normalize_llm_usage(usage: Mapping[str, Any]) -> dict[str, int | float | None]:
+    normalized: dict[str, int | float | None] = {}
+    for key in _USAGE_TOKEN_FIELDS:
+        value = usage.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"usage.{key} 必须是非负整数")
+        normalized[key] = value
+    raw_cost = usage.get("cost_usd")
+    if raw_cost is None:
+        normalized["cost_usd"] = None
+    elif (
+        isinstance(raw_cost, bool)
+        or not isinstance(raw_cost, (int, float))
+        or raw_cost < 0
+        or not math.isfinite(float(raw_cost))
+    ):
+        raise ValueError("usage.cost_usd 必须是非负有限数或 null")
+    else:
+        normalized["cost_usd"] = float(raw_cost)
+    return normalized
+
+
+def _check_cost_source(normalized: Mapping[str, Any], cost_source: str | None) -> None:
+    if cost_source is not None and cost_source not in _USAGE_COST_SOURCES:
+        raise ValueError(f"cost_source 不在闭集：{cost_source}")
+    if cost_source is not None and normalized.get("cost_usd") is None:
+        raise ValueError("声明了 cost_source 就必须带 cost_usd")
+
+
+def _empty_usage_bucket() -> dict[str, Any]:
+    return {
+        **{key: 0 for key in _USAGE_TOKEN_FIELDS},
+        "cost_usd": None,
+        "calls": 0,
+        "costed_calls": 0,
+        "estimated_cost_usd": 0.0,
+        "estimated_calls": 0,
+    }
+
+
+def _merge_usage_bucket(target: dict[str, Any], bucket: Mapping[str, Any]) -> None:
+    """把一个已累加好的 usage 桶并进汇总（汇总里的 cost_usd 由调用方定初值）。"""
+    for key in (*_USAGE_TOKEN_FIELDS, "calls", "costed_calls", "estimated_calls"):
+        target[key] += int(bucket.get(key, 0) or 0)
+    target["cost_usd"] = float(target["cost_usd"] or 0.0) + float(bucket.get("cost_usd") or 0.0)
+    target["estimated_cost_usd"] += float(bucket.get("estimated_cost_usd") or 0.0)
+
+
+def _add_usage_call(
+    previous: Any, normalized: Mapping[str, Any], cost_source: str | None
+) -> dict[str, Any]:
+    previous = previous if isinstance(previous, dict) else {}
+    accumulated: dict[str, Any] = {
+        key: int(previous.get(key, 0)) + int(normalized[key] or 0)
+        for key in _USAGE_TOKEN_FIELDS
+    }
+    new_cost = normalized["cost_usd"]
+    reported = new_cost if cost_source == "reported" else None
+    estimated = new_cost if cost_source == "estimated" else None
+    previous_cost = previous.get("cost_usd")
+    known_cost = float(previous_cost) if isinstance(previous_cost, (int, float)) else 0.0
+    accumulated["cost_usd"] = (
+        # 「上一次有 cost、这一次没有」这一组合下 float(None) 会抛
+        # TypeError（§RATE-2 重放实测 6 次）；未知这次的花费按 0 累加，
+        # 「有几次真报了花费」仍由 costed_calls 单记，口径不糊。
+        known_cost + float(reported or 0.0)
+        if reported is not None or previous_cost is not None
+        else None
+    )
+    accumulated["calls"] = int(previous.get("calls", 0)) + 1
+    accumulated["costed_calls"] = int(previous.get("costed_calls", 0)) + int(
+        reported is not None
+    )
+    accumulated["estimated_cost_usd"] = float(
+        previous.get("estimated_cost_usd") or 0.0
+    ) + float(estimated or 0.0)
+    accumulated["estimated_calls"] = int(previous.get("estimated_calls", 0) or 0) + int(
+        estimated is not None
+    )
+    return accumulated
+
+
+def accumulate_llm_usage(
+    previous: Any,
+    usage: Mapping[str, Any],
+    *,
+    engine: str | None = None,
+    cost_source: str | None = None,
+) -> dict[str, Any]:
+    """§OBS-7：把一次调用并进已有 usage 桶（纯函数，章账本与账外记账共用）。
+
+    - `cost_usd` / `costed_calls`：**引擎报价**（Claude SDK `total_cost_usd`）。
+    - `estimated_cost_usd` / `estimated_calls`：**标价折算**（token × 标价表）。
+    - `by_engine`：按**实际跑的引擎**分桶，字段同上。OBS-7 之前落的旧行没有这一层，
+      所以旧行 `by_engine` 之和可以小于总数。
+    未声明 `cost_source` 时沿用老语义：有 cost_usd 就算引擎报价。
+    """
+    normalized = _normalize_llm_usage(usage)
+    if cost_source is None and normalized["cost_usd"] is not None:
+        cost_source = "reported"
+    _check_cost_source(normalized, cost_source)
+    previous = previous if isinstance(previous, dict) else {}
+    accumulated = _add_usage_call(previous, normalized, cost_source)
+    by_engine = {
+        str(key): value
+        for key, value in (previous.get("by_engine") or {}).items()
+        if isinstance(value, dict)
+    }
+    engine_key = str(engine).strip().casefold() if engine else "unknown"
+    by_engine[engine_key] = _add_usage_call(by_engine.get(engine_key), normalized, cost_source)
+    accumulated["by_engine"] = by_engine
+    return accumulated
+
+
 class PlanSnapshotConflict(RuntimeError):
     """reports.plan_snapshot 的乐观锁版本不匹配。"""
 
@@ -1018,28 +1135,19 @@ class Store:
         goal_id: str,
         chapter_id: str,
         usage: Mapping[str, Any],
+        *,
+        engine: str | None = None,
+        cost_source: str | None = None,
     ) -> None:
-        """把一次引擎终态实测量原子累加进当前章的受控 extra。"""
+        """把一次引擎终态实测量原子累加进当前章的受控 extra。
 
-        normalized: dict[str, int | float | None] = {}
-        for key in _USAGE_TOKEN_FIELDS:
-            value = usage.get(key, 0)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"usage.{key} 必须是非负整数")
-            normalized[key] = value
-        raw_cost = usage.get("cost_usd")
-        if raw_cost is None:
-            normalized["cost_usd"] = None
-        elif (
-            isinstance(raw_cost, bool)
-            or not isinstance(raw_cost, (int, float))
-            or raw_cost < 0
-            or not math.isfinite(float(raw_cost))
-        ):
-            raise ValueError("usage.cost_usd 必须是非负有限数或 null")
-        else:
-            normalized["cost_usd"] = float(raw_cost)
+        §OBS-7：`engine` 是**这次调用实际跑的引擎**（让路后会与章的计划引擎不同），
+        `cost_source` 区分「引擎报价」（reported）与「标价折算」（estimated），
+        两者分列累加，口径见 `accumulate_llm_usage`。
+        """
 
+        normalized = _normalize_llm_usage(usage)
+        _check_cost_source(normalized, cost_source)
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -1053,32 +1161,9 @@ class Store:
             extra = json.loads(row["extra"])
             if not isinstance(extra, dict):
                 raise TypeError("chapter_progress.extra 必须是 object")
-            previous = extra.get("usage")
-            previous = previous if isinstance(previous, dict) else {}
-            accumulated: dict[str, int | float | None] = {
-                key: int(previous.get(key, 0)) + int(normalized[key] or 0)
-                for key in _USAGE_TOKEN_FIELDS
-            }
-            previous_cost = previous.get("cost_usd")
-            known_cost = (
-                float(previous_cost)
-                if isinstance(previous_cost, (int, float))
-                else 0.0
+            extra["usage"] = accumulate_llm_usage(
+                extra.get("usage"), normalized, engine=engine, cost_source=cost_source
             )
-            new_cost = normalized["cost_usd"]
-            accumulated["cost_usd"] = (
-                # 「上一次有 cost、这一次没有」这一组合下 float(None) 会抛
-                # TypeError（§RATE-2 重放实测 6 次）；未知这次的花费按 0 累加，
-                # 「有几次真报了花费」仍由 costed_calls 单记，口径不糊。
-                known_cost + float(new_cost or 0.0)
-                if new_cost is not None or previous_cost is not None
-                else None
-            )
-            accumulated["calls"] = int(previous.get("calls", 0)) + 1
-            accumulated["costed_calls"] = int(previous.get("costed_calls", 0)) + int(
-                new_cost is not None
-            )
-            extra["usage"] = accumulated
             connection.execute(
                 """
                 UPDATE chapter_progress SET extra = ?
@@ -1087,22 +1172,24 @@ class Store:
                 (_extra_text(extra), research_id, goal_id, chapter_id),
             )
 
-    def aggregate_research_usage(self, research_id: str) -> dict[str, int | float]:
-        """逐字段汇总章账本；已知成本与计价覆盖调用数分开返回。"""
+    def aggregate_research_usage(self, research_id: str) -> dict[str, Any]:
+        """逐字段汇总章账本；引擎报价、标价折算与各自覆盖调用数分开返回。"""
 
-        result: dict[str, int | float] = {
-            **{key: 0 for key in _USAGE_TOKEN_FIELDS},
-            "cost_usd": 0.0,
-            "calls": 0,
-            "costed_calls": 0,
-        }
+        result: dict[str, Any] = _empty_usage_bucket()
+        result["cost_usd"] = 0.0
+        by_engine: dict[str, dict[str, Any]] = {}
         for row in self.list_chapters(research_id):
             usage = row["extra"].get("usage")
             if not isinstance(usage, dict):
                 continue
-            for key in (*_USAGE_TOKEN_FIELDS, "calls", "costed_calls"):
-                result[key] += int(usage.get(key, 0) or 0)
-            result["cost_usd"] += float(usage.get("cost_usd") or 0.0)
+            _merge_usage_bucket(result, usage)
+            for engine, bucket in (usage.get("by_engine") or {}).items():
+                if isinstance(bucket, dict):
+                    target = by_engine.setdefault(str(engine), _empty_usage_bucket())
+                    _merge_usage_bucket(target, bucket)
+        for bucket in by_engine.values():
+            bucket["cost_usd"] = float(bucket["cost_usd"] or 0.0)
+        result["by_engine"] = by_engine
         return result
 
     def list_chapters(self, research_id: str) -> list[dict[str, Any]]:

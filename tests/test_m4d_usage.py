@@ -174,6 +174,24 @@ def test_章账本_usage累加且_research聚合逐字段等于各章之和(tmp_
         "cost_usd": 0.09417375,
         "calls": 2,
         "costed_calls": 1,
+        # §OBS-7：新增两列与按实际引擎分桶；没传 engine 的老调用方落「unknown」桶。
+        "estimated_cost_usd": 0.0,
+        "estimated_calls": 0,
+        "by_engine": {
+            "unknown": {
+                "input_tokens": 72139,
+                "cached_input_tokens": 70134,
+                "cache_creation_input_tokens": 11127,
+                "cache_write_input_tokens": 0,
+                "output_tokens": 1220,
+                "reasoning_output_tokens": 59,
+                "cost_usd": 0.09417375,
+                "calls": 2,
+                "costed_calls": 1,
+                "estimated_cost_usd": 0.0,
+                "estimated_calls": 0,
+            },
+        },
     }
 
 
