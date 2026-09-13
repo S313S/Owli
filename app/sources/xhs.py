@@ -532,12 +532,40 @@ def fetch_note_detail(
     }
 
 
+def _unavailable_reconciled(
+    on_event: EventCallback | None,
+    *,
+    search_calls: int,
+    reason: str,
+    forced: bool,
+    error: TikHubError | None = None,
+) -> list[dict[str, Any]]:
+    """§OBS-7 货 4：原来的不可用事件照发（带上 calls），紧跟一条对账事件报**已拿到响应的调用次数**。
+
+    只加发射点：不改采集、不改重试与限流。详情二跳在搜索成功后才发生，失败轮恒为 0。
+    顺序与池源一致（先不可用、后对账），「第一条事件就是分诊」这条 SRC-1 契约不变。
+    """
+    calls = {"search_notes": search_calls, "get_image_note_detail": 0}
+    result = _unavailable(on_event, reason=reason, forced=forced, error=error, calls=calls)
+    _emit(
+        on_event,
+        "source_usage_reconciled",
+        provider="tikhub",
+        calls=calls,
+        returned=0,
+        outcome="unavailable",
+        task_continues=True,
+    )
+    return result
+
+
 def _unavailable(
     on_event: EventCallback | None,
     *,
     reason: str,
     forced: bool,
     error: TikHubError | None = None,
+    calls: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     _emit(
         on_event,
@@ -549,6 +577,7 @@ def _unavailable(
         forced=forced,
         task_continues=True,
         **(error.event_fields() if error is not None else {}),
+        **({"calls": dict(calls)} if calls is not None else {}),
     )
     return []
 
@@ -647,12 +676,16 @@ def search(
     if store is not None and (not report_id or not goal_id):
         raise ValueError("入库时 report_id 与 goal_id 必填")
     if force_unavailable:
-        return _unavailable(on_event, reason="tikhub_forced_unavailable", forced=True)
+        return _unavailable_reconciled(
+            on_event, search_calls=0, reason="tikhub_forced_unavailable", forced=True,
+        )
 
     try:
         api_token = token or _load_token()
     except RuntimeError:
-        return _unavailable(on_event, reason="tikhub_credential_missing", forced=False)
+        return _unavailable_reconciled(
+            on_event, search_calls=0, reason="tikhub_credential_missing", forced=False,
+        )
 
     requested_filter = _time_filter(int(matched.group(1)))
     request_count = 0
@@ -700,8 +733,9 @@ def search(
                 )
             page = int(next_page) if isinstance(next_page, int) else page + 1
     except TikHubError as error:
-        return _unavailable(
-            on_event, reason=error.closed_reason, forced=False, error=error,
+        return _unavailable_reconciled(
+            on_event, search_calls=request_count, reason=error.closed_reason,
+            forced=False, error=error,
         )
 
     kept = collected[:limit]

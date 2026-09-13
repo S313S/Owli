@@ -168,7 +168,9 @@ def source_fee_summary(connection_or_store: Any, research_id: str) -> dict[str, 
     ):
         data = (json.loads(payload) or {}).get("data") or {}
         providers = {data.get("provider")} if data.get("provider") else {
-            item.get("provider") for item in data.get("failures") or [] if isinstance(item, dict)
+            # Reddit 全挂时 failures 是 ["prowlo_unavailable", ...] 这种字符串
+            (item.get("provider") if isinstance(item, dict) else str(item).split("_")[0])
+            for item in data.get("failures") or []
         }
         if providers & PAID_PROVIDERS and not isinstance(data.get("calls"), dict):
             missing += 1

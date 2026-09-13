@@ -239,6 +239,18 @@ def test_小红书可强制走tool_unavailable且不发真实请求() -> None:
             "fallback_available": False,
             "forced": True,
             "task_continues": True,
+            # §OBS-7 货 4：付费源每轮都报调用次数，一次没打也报 0。
+            "calls": {"search_notes": 0, "get_image_note_detail": 0},
+        },
+    }, {
+        "type": "source_usage_reconciled",
+        "data": {
+            "source": "xhs",
+            "provider": "tikhub",
+            "calls": {"search_notes": 0, "get_image_note_detail": 0},
+            "returned": 0,
+            "outcome": "unavailable",
+            "task_continues": True,
         },
     }]
 

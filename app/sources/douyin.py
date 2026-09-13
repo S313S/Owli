@@ -687,6 +687,42 @@ def _collect_v4(
     return videos
 
 
+#: §OBS-7 货 4：一次都没打出去的轮次也发对账事件（全 0），保证「付费源每轮一条」。
+_ZERO_CALLS = {"video_search_v5": 0, "video_search_v4": 0, "video_comments": 0}
+
+
+def _unavailable_reconciled(
+    on_event: EventCallback | None,
+    calls: Mapping[str, int],
+    *,
+    reason: str,
+    forced: bool,
+    search_version: str | None = None,
+    error: TikHubError | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """§OBS-7 货 4：原来的不可用事件照发（带上 calls），紧跟一条对账事件报**已打出的调用次数**。
+
+    只加发射点：不改采集、不改重试与限流。顺序与池源一致（先不可用、后对账），
+    所以「第一条事件就是分诊」这条 SRC-1 契约不变。
+    """
+    result = _unavailable(
+        on_event, reason=reason, forced=forced, error=error,
+        extra={**(dict(extra) if extra else {}), "calls": dict(calls)},
+    )
+    _emit(
+        on_event,
+        "source_usage_reconciled",
+        provider="tikhub",
+        calls=dict(calls),
+        **({"search_version": search_version} if search_version else {}),
+        returned=0,
+        outcome="unavailable",
+        task_continues=True,
+    )
+    return result
+
+
 def _unavailable(
     on_event: EventCallback | None,
     *,
@@ -748,11 +784,15 @@ def search(
     if store is not None and (not report_id or not goal_id):
         raise ValueError("入库时 report_id 与 goal_id 必填")
     if force_unavailable:
-        return _unavailable(on_event, reason="tikhub_forced_unavailable", forced=True)
+        return _unavailable_reconciled(
+            on_event, _ZERO_CALLS, reason="tikhub_forced_unavailable", forced=True,
+        )
     try:
         api_token = token or _load_token()
     except RuntimeError:
-        return _unavailable(on_event, reason="tikhub_credential_missing", forced=False)
+        return _unavailable_reconciled(
+            on_event, _ZERO_CALLS, reason="tikhub_credential_missing", forced=False,
+        )
 
     request_counts = {"video_search_v5": 0, "video_search_v4": 0, "video_comments": 0}
 
@@ -807,10 +847,12 @@ def search(
             # 两条路都断了才算源不可用。头条报**主路**的分诊（SRC-1 的契约：
             # `source_unavailable` 的 endpoint/status 指向主要死因），兜底那条的
             # 分诊挂在 `fallback_*` 字段上，两个状态码都查得到。
-            return _unavailable(
+            return _unavailable_reconciled(
                 on_event,
+                request_counts,
                 reason=primary_error.closed_reason,
                 forced=False,
+                search_version=search_version,
                 error=primary_error,
                 extra={
                     "fallback_version": "v4",

@@ -220,6 +220,27 @@ class ProwloClient:
         raise RuntimeError(f"Prowlo {name} 未返回结构化结果")
 
 
+#: §OBS-7 货 4：Prowlo MCP 工具名 → 对账事件里的端点计数名（与 `_prowlo_items` 回报同名）。
+_PROWLO_TOOL_COUNTERS = {
+    "search_dataset": "dataset_search",
+    "get_record": "dataset_get_record",
+    "social_search": "live_read",
+}
+
+
+def _prowlo_tool_name(body: bytes | None) -> str | None:
+    """只读请求体里的 `tools/call` 工具名；读不出来就不计数（绝不抛）。"""
+    try:
+        payload = json.loads(body or b"")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, Mapping) or payload.get("method") != "tools/call":
+        return None
+    params = payload.get("params")
+    name = params.get("name") if isinstance(params, Mapping) else None
+    return name if isinstance(name, str) else None
+
+
 def _prowlo_time(days: int) -> str:
     if days <= 1:
         return "day"
@@ -611,10 +632,20 @@ def search(
     usage: dict[str, int] = {}
     failures: list[str] = []
 
+    # §OBS-7 货 4：Prowlo 半路失败时 `_prowlo_items` 的计数跟着异常丢了，这里在传输层
+    # 旁路数一份（只数、不改请求）。成功路仍以 `_prowlo_items` 的回报为准，口径不变。
+    prowlo_attempted = {"dataset_search": 0, "dataset_get_record": 0, "live_read": 0}
+
+    def counted_prowlo_request(method, url, headers, body, timeout):
+        tool = _prowlo_tool_name(body)
+        if tool in _PROWLO_TOOL_COUNTERS:
+            prowlo_attempted[_PROWLO_TOOL_COUNTERS[tool]] += 1
+        return http_request(method, url, headers, body, timeout)
+
     if primary_token:
         try:
             client = ProwloClient(
-                primary_token, http_request=http_request,
+                primary_token, http_request=counted_prowlo_request,
                 timeout_seconds=min(timeout_seconds, 60.0),
             )
             items, usage = _prowlo_items(
@@ -623,6 +654,11 @@ def search(
             provider = "prowlo"
         except RuntimeError:
             failures.append("prowlo_unavailable")
+            _emit(
+                on_event, "source_usage_reconciled", provider="prowlo",
+                calls=dict(prowlo_attempted), returned=0, outcome="unavailable",
+                task_continues=True,
+            )
             _emit(on_event, "source_route", provider="prowlo", state="fallback")
     else:
         failures.append("prowlo_credential_missing")
@@ -657,14 +693,20 @@ def search(
     unique = _deduplicate(items)[:limit]
     if not unique:
         if provider:
+            # §OBS-7 货 4：搜空也打了接口，次数照报（与成功路同一份 usage）。
             _emit(
                 on_event, "source_empty", provider=provider,
-                reason="empty_result", task_continues=True,
+                reason="empty_result", task_continues=True, calls=dict(usage),
+            )
+            _emit(
+                on_event, "source_usage_reconciled", provider=provider,
+                calls=dict(usage), returned=0, outcome="empty", task_continues=True,
             )
         else:
             _emit(
                 on_event, "source_unavailable", reason="all_providers_unavailable",
                 failures=failures, task_continues=True,
+                calls=dict(prowlo_attempted),
             )
         return []
 

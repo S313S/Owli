@@ -101,7 +101,9 @@ def verdict_failure_rounds(connection: sqlite3.Connection, research_id: str) -> 
         data = json.loads(payload).get("data") or {}
         provider = data.get("provider")
         providers = {provider} if provider else {
-            str(item.get("provider")) for item in data.get("failures") or [] if isinstance(item, dict)
+            # Reddit 全挂时 failures 是 ["prowlo_unavailable", ...] 这种字符串
+            (str(item.get("provider")) if isinstance(item, dict) else str(item).split("_")[0])
+            for item in data.get("failures") or []
         }
         if not providers & PAID_PROVIDERS:
             continue
