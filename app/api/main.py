@@ -922,6 +922,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="调研任务不存在")
         return envelope({"chapters": store.list_chapters(research_id)})
 
+    @application.get("/api/researches/{research_id}/cost")
+    async def get_research_cost(research_id: str) -> dict:
+        """§OBS-7 货 3：研究级费用（模型费 + 源费），口径「标价折算」，不是实付。"""
+        from app.observability.cost import research_cost_summary
+
+        if research_id not in researches and store.get_report(research_id) is None:
+            raise HTTPException(status_code=404, detail="调研任务不存在")
+        return envelope(research_cost_summary(store, research_id))
+
     def transcript_file(research_id: str, goal_id: str, chapter: str) -> Path | None:
         """把 goal + 章（或 agent_id）解成 transcript 文件路径；越界一律 None。
 
