@@ -1,0 +1,16 @@
+{
+  "canonical": "Kimi",
+  "names": {
+    "zh": "Kimi智能助手",
+    "en": "Kimi",
+    "aliases": [
+      "kimi",
+      "Kimi Chat",
+      "月之暗面",
+      "Moonshot"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "Kimi 是北京月之暗面科技（Moonshot AI）开发的生成式 AI 聊天助手，主打超长上下文与文档/URL 解析，与研究需求中的『豆包』（字节跳动旗下）为不同公司的独立产品。"
+}

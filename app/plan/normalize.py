@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from app.plan.model import Agent, Goal, Plan
@@ -192,12 +193,21 @@ def _gate_goal(goal: Goal, table: set[tuple[str, str]], capacity: int | None,
 #: §D-062：验收条里的反向约束语境。无卡实体出现在这些词所在的**子句**里，说明这条
 #: 是在禁止它（「未出现 Kimi 或 DeepSeek 的任何叫法」「仅使用闭集叫法：…」），那是防串号
 #: 的闸，不能摘。误判方向不对称：豁免只在「本来要摘」时启用，误豁免 = 回到现状，不会更坏。
+#: §D-062-fu 补：r-50600e09f7dd 的「仅出现闭集内的实体叫法…，未越界写入「DeepSeek」「Kimi」…」
+#: 第二子句里一个旧词都没有，被当成「要求写 DeepSeek」摘了。补的是「限定 / 越界 / 混入 /
+#: 排除 / 避免」几族写法；⛔ 不收裸「不」「无」——「不少于 Kimi 3 条」是正向要求。
 _ACCEPTANCE_NEGATION_WORDS = (
     "未出现", "不出现", "不得", "禁止", "不写", "仅使用", "只使用", "仅限",
     "不含", "不包含", "不允许", "不许", "不引用", "未引用", "闭集", "白名单",
+    "仅出现", "只出现", "越界", "混入", "混进", "未写入", "未提及", "不提及",
+    "排除", "避免", "严禁", "杜绝", "勿",
 )
 _ACCEPTANCE_CLAUSE_SPLIT = re.compile(r"[，,；;。]")
-_ACCEPTANCE_PRODUCT_PATH = re.compile(r"goals/goal-[1-9][0-9]*/[A-Za-z0-9_.\-]+")
+#: 产物路径：全形 `goals/goal-N/<file>`，或引擎常写的短形 `goal-N/<file>`（前面不接
+#: 路径字符，免得把全形里的那段再抓一遍）。§D-062-fu 起短形也判，见 `_acceptance_paths`。
+_ACCEPTANCE_PRODUCT_PATH = re.compile(
+    r"(?<![A-Za-z0-9_./\-])(?:goals/)?goal-[1-9][0-9]*/[A-Za-z0-9_.\-]+")
+_GOAL_ID = re.compile(r"goal-[1-9][0-9]*")
 #: 一个 goal 的验收条被摘光时的兜底——规则 4 要求至少一条；这条不提任何实体。
 _ACCEPTANCE_FALLBACK = (
     "交付物文件存在且通过 validators；对本 goal 没有采集卡的实体不作内容要求，"
@@ -253,9 +263,7 @@ def _repair_acceptance(plan: Plan) -> list[str]:
         for index, item in enumerate(goal.acceptance):
             text = str(item)
             reasons: list[str] = []
-            missing = [
-                path for path in _ACCEPTANCE_PRODUCT_PATH.findall(text) if path not in outputs
-            ]
+            missing = _missing_paths(text, outputs)
             if missing:
                 reasons.append(f"引用的产物 {'、'.join(missing)} 不存在（已删卡或从未起草）")
             unreachable = [
@@ -283,6 +291,36 @@ def _repair_acceptance(plan: Plan) -> list[str]:
             )
         goal.acceptance = kept
     return notes
+
+
+def _acceptance_paths(text: str) -> list[str]:
+    """验收条里引用的产物路径，一律归一成全形 `goals/goal-N/<file>`。
+
+    - 短形 `goal-1/data-collection.json` 补 `goals/` 前缀（D-062 挂账：旧闸只认全形，
+      引擎用短形引一份被删卡的产物就拦不到）。
+    - 句末英文句点不算文件名（「…data-collection-1.json.」）。
+    - ⛔ `goal-1/goal-2` 这种 goal 并列不是路径——叶子本身是 goal id 的整段跳过。
+    """
+
+    paths: list[str] = []
+    for raw in _ACCEPTANCE_PRODUCT_PATH.findall(text):
+        raw = raw.rstrip(".")
+        leaf = raw.rsplit("/", 1)[-1]
+        if not leaf or _GOAL_ID.fullmatch(leaf):
+            continue
+        paths.append(raw if raw.startswith("goals/") else f"goals/{raw}")
+    return paths
+
+
+def _missing_paths(text: str, outputs: set[str]) -> list[str]:
+    """引用了但不在现存产物里的路径。没写扩展名的（`goal-2/data-collection-3`）按主干比。"""
+
+    stems = {PurePosixPath(path).with_suffix("").as_posix() for path in outputs}
+    return [
+        path for path in _acceptance_paths(text)
+        if path not in outputs
+        and not (PurePosixPath(path).suffix == "" and path in stems)
+    ]
 
 
 def _entity_matchers(plan: Plan) -> list[tuple[str, list[re.Pattern[str]]]]:

@@ -48,7 +48,7 @@ with sqlite3.connect(DB) as connection:
 from app.adapters.routing import RoutedAdapter  # noqa: E402
 from app.plan.generate import generate_plan  # noqa: E402
 from app.plan.normalize import (  # noqa: E402
-    _ACCEPTANCE_PRODUCT_PATH, _ancestors, _entity_matchers, _mentioned_outside_negation,
+    _ancestors, _entity_matchers, _mentioned_outside_negation, _missing_paths,
 )
 from app.store.dao import Store  # noqa: E402
 
@@ -120,15 +120,22 @@ async def main() -> int:
     # 逐 goal 逐条读数：提到了谁 / 谁不可达 / 引了哪些不存在的路径
     bad_entity: list[str] = []
     bad_path: list[str] = []
+    exempted: list[str] = []   # §D-062-fu：提到无卡实体、但只在否定/限定子句里 ⇒ 豁免保住
     print("\n— 计划里每个 goal 的验收条（摘完之后） —")
     for goal in plan.goals:
         print(f"{goal.goal_id} 可达实体 {sorted(reachable[goal.goal_id])}")
         for i, line in enumerate(goal.acceptance):
             mentioned = [e for e, pats in matchers if _mentioned_outside_negation(line, pats)]
             unreachable = [e for e in mentioned if e not in reachable[goal.goal_id]]
-            missing = [p for p in _ACCEPTANCE_PRODUCT_PATH.findall(line) if p not in outputs]
+            # §D-062-fu：短形 goal-N/<file> 也归一成全形再判（生产那份，不重实现）。
+            missing = _missing_paths(line, outputs)
             flag = ("×" if (unreachable or missing) else "✓")
             print(f"  {flag} [{i}] 提到{mentioned or '-'} {line[:110]}")
+            named = [e for e, pats in matchers if any(p.search(line) for p in pats)]
+            shielded = [e for e in named
+                        if e not in reachable[goal.goal_id] and e not in mentioned]
+            if shielded:
+                exempted.append(f"{goal.goal_id}[{i}] {shielded} {line[:120]}")
             if unreachable:
                 bad_entity.append(f"{goal.goal_id}[{i}] {unreachable}")
             if missing:
@@ -149,10 +156,16 @@ async def main() -> int:
         print("\n— events 里的 [修正31] —")
         for t in repairs31:
             print("  ", t[:220])
+    print(f"\n— §D-062-fu：反向约束豁免保住的验收条 {len(exempted)} 条 —")
+    for t in exempted:
+        print("  ", t)
     if repairs4:
-        print("\n— events 里的 [修正4] —")
+        print("\n— events 里的 [修正4]（逐条人读：原文是不是在「禁止写」某实体）—")
         for t in repairs4:
-            print("  ", t[:260])
+            original = t.split("——原文「", 1)[-1] if "——原文「" in t else ""
+            hint = "⚠️ 原文含否定/限定字样，人工核" if any(
+                w in original for w in ("未", "不", "仅", "只", "禁", "勿", "避免", "排除")) else ""
+            print("  ", t[:400], hint)
     else:
         print("\n（本轮引擎起草的验收条没提无卡实体、没引不存在的产物，④ 只证明通路，"
               "没证明它拦得住——拦得住由 tests/test_d062_acceptance_gate.py 的真夹具造红证明）")

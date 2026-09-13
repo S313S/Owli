@@ -1,0 +1,31 @@
+{
+  "market_profile": "cn_product",
+  "market_profile_justification": "题面明确「国内大家对豆包的看法」，面向中文舆论与国内受众，按规则取 cn_product。",
+  "subjects": [
+    "豆包",
+    "DeepSeek",
+    "Kimi"
+  ],
+  "subjects_justification": "主体为字节跳动旗下 AI 助手「豆包」，同时纳入国内用户最常拿来对比的两款同赛道产品 DeepSeek 与 Kimi，用作理解「大家看法」的对照坐标，均为可逐个采集的具体产品专名。",
+  "goals": [
+    {
+      "title": "豆包产品定位与国内舆论采集",
+      "objective": "采集豆包的官方定位、功能矩阵、用户规模与增长数据，以及国内社媒、应用商店评论、科技媒体评测与知乎问答等中文舆论对其体验、内容质量、商业化与合规的正负面评价。",
+      "depends_on": []
+    },
+    {
+      "title": "DeepSeek 作为国内对照参照的采集",
+      "objective": "采集 DeepSeek 在国内市场的产品特性、用户口碑与在开发者与普通用户群体中的评价定位，用于对照理解豆包在能力、开放度与形象上的相对位置。",
+      "depends_on": [
+        "goal-1"
+      ]
+    },
+    {
+      "title": "Kimi 作为国内对照参照的采集",
+      "objective": "采集 Kimi 智能助手在国内的产品叙事、长文本等差异化卖点与中文用户评价，用于对照豆包在使用场景、口碑热度与用户画像上的差异。",
+      "depends_on": [
+        "goal-1"
+      ]
+    }
+  ]
+}
