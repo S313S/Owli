@@ -53,11 +53,19 @@ def verdict_llm(connection: sqlite3.Connection, research_id: str) -> dict:
         totals["estimated_usd"] += float(usage.get("estimated_cost_usd") or 0.0)
         for engine, bucket in (usage.get("by_engine") or {}).items():
             by_engine[engine]["calls"] += int(bucket.get("calls", 0) or 0)
+            by_engine[engine]["costed_calls"] += int(bucket.get("costed_calls", 0) or 0)
+            by_engine[engine]["estimated_calls"] += int(bucket.get("estimated_calls", 0) or 0)
             by_engine[engine]["reported_usd"] += float(bucket.get("cost_usd") or 0.0)
             by_engine[engine]["estimated_usd"] += float(bucket.get("estimated_cost_usd") or 0.0)
     uncosted = totals["calls"] - totals["reported_calls"] - totals["estimated_calls"]
     rate = uncosted / totals["calls"] if totals["calls"] else 0.0
+    # OBS-7 之后落的调用都带 by_engine；只看这一层才是「新码下每次调用都有价」的判据，
+    # 重放导入的旧章账本行（没有 by_engine）不拿来判绿。
+    new_calls = sum(bucket["calls"] for bucket in by_engine.values())
+    new_costed = sum(bucket["costed_calls"] + bucket["estimated_calls"] for bucket in by_engine.values())
     return {
+        "new_code_calls": new_calls,
+        "new_code_uncosted_calls": new_calls - new_costed,
         "calls": totals["calls"],
         "chapter_calls": totals["chapter_calls"],
         "offledger_calls": totals["offledger_calls"],
