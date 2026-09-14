@@ -73,7 +73,7 @@ def test_套壳记账_事件照转_属性透传_按路径分桶(tmp_path: Path) 
     polish = extra[OFFLEDGER_KEY]["polish:consulting"]
     assert polish["calls"] == 2
     assert polish["costed_calls"] == 1 and polish["estimated_calls"] == 1
-    assert polish["by_engine"]["codex"]["estimated_cost_usd"] == pytest.approx(0.45)
+    assert polish["by_engine"]["codex"]["estimated_cost_usd"] == pytest.approx(0.68)  # §OBS-7-fu terra 价
     assert extra[OFFLEDGER_KEY]["reliability_backfill"]["calls"] == 2
 
 

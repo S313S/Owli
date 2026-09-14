@@ -13,7 +13,7 @@ import inspect
 import logging
 from typing import Any
 
-from app.observability.pricing import engine_key, priced_usage
+from app.observability.pricing import engine_key, price_table_note, priced_usage
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +213,7 @@ def llm_cost_summary(store: Any, research_id: str) -> dict[str, Any]:
         "uncosted_calls": uncosted,
         "cost_usd": total["cost_usd"] + total["estimated_cost_usd"],
         "by_engine": by_engine,
+        "price_table": price_table_note(),
         "chapters": chapters,
         "offledger": offledger,
     }

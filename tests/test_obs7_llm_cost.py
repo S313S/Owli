@@ -49,8 +49,8 @@ def _store(tmp_path: Path):
 def test_Codex_标价折算_缓存含在输入里且推理含在输出里() -> None:
     from app.observability.pricing import estimate_cost_usd
 
-    # (200k 新输入 × 1.25 + 800k 缓存 × 0.125 + 10k 输出 × 10) / 1M
-    assert estimate_cost_usd("Codex", CODEX_USAGE) == pytest.approx(0.25 + 0.1 + 0.1)
+    # §OBS-7-fu 按 gpt-5.6-terra：(200k 新输入 × 2 + 800k 缓存 × 0.2 + 10k 输出 × 12) / 1M
+    assert estimate_cost_usd("Codex", CODEX_USAGE) == pytest.approx(0.4 + 0.16 + 0.12)
 
 
 def test_Claude_标价折算_四项分列计价() -> None:
@@ -68,7 +68,7 @@ def test_不认识的引擎不瞎折算_引擎报了价就原样用() -> None:
     usage, source = priced_usage("claude", {**CLAUDE_USAGE, "cost_usd": 0.42})
     assert usage["cost_usd"] == 0.42 and source == "reported"
     usage, source = priced_usage("codex", CODEX_USAGE)
-    assert source == "estimated" and usage["cost_usd"] == pytest.approx(0.45)
+    assert source == "estimated" and usage["cost_usd"] == pytest.approx(0.68)
 
 
 def test_账本分列引擎报价与标价折算_并按实际引擎分桶(tmp_path: Path) -> None:
