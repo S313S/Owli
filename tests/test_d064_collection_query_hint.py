@@ -97,7 +97,8 @@ def test_抖音卡同形覆盖_Reddit卡换英文语域的词(tmp_path: Path) ->
     assert "「豆包」、「豆包AI」" in douyin and "只调用 source.douyin 一次" in douyin
 
     reddit = runtime._source_query_hint(_plan(), _agent("data-collection-2", ["reddit"]), ["reddit"])
-    assert "「Doubao」、「doubao」" in reddit
+    # §D-066：Doubao / doubao 按 casefold 去重是同一个叫法，这张卡英文语域只剩一个词，不凑数
+    assert "改用 「Doubao」 分别检索" in reddit and "doubao」" not in reddit
     assert "（豆包、豆包AI、字节豆包）" in reddit
 
 

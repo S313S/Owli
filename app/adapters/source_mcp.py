@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import sys
+import unicodedata
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -623,8 +624,16 @@ def entity_queries(
         picked.append(canonical)
     if not picked and fallback.strip():
         picked.append(fallback.strip())
+    # §D-066：`Kimi` / `kimi`、全角 `ＫＩＭＩ`、多空白算同一个叫法，不占名额；
+    # 先去重再截断，空出的名额自然落到下一个候选叫法上。只有一个叫法就只搜一个，不凑数。
     seen: set[str] = set()
-    unique = [name for name in picked if not (name in seen or seen.add(name))]
+    unique: list[str] = []
+    for name in picked:
+        text = " ".join(name.split())
+        key = unicodedata.normalize("NFKC", text).casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append(text)
     return unique[:MAX_QUERIES_PER_ENTITY]
 
 
@@ -647,6 +656,77 @@ def _dedupe_evidence(batches: list[Any]) -> Any:
                 seen.add(key)
             merged.append(item)
     return merged
+
+
+def _batch_is_empty(batch: Any) -> bool:
+    """只认「列表 / 带 evidence 列表的映射」形状的空；别的形状不替源下结论。"""
+    if isinstance(batch, list):
+        return not batch
+    if isinstance(batch, Mapping) and isinstance(batch.get("evidence"), list):
+        return not batch["evidence"]
+    return False
+
+
+def _query_failure(query: str, events: list[Any]) -> dict[str, Any] | None:
+    """本检索词这一轮发出的第一条 `source_unavailable` → 失败说明；没有就是真搜空。
+
+    源（抖音/小红书/Reddit/池源）失败时都已经发了带 closed_reason 的事件（SRC-1 / OBS-7），
+    这里只是把它从事件文件里捞回到工具返回值上，不在适配层重新判一遍死因。
+    """
+    for event in events:
+        normalized = _jsonable(event)
+        if not isinstance(normalized, Mapping):
+            continue
+        if normalized.get("type") != "source_unavailable":
+            continue
+        data = normalized.get("data")
+        data = data if isinstance(data, Mapping) else {}
+        detail = str(data.get("detail") or "")
+        if not detail and data.get("failures"):
+            detail = _json_text({"failures": data["failures"]})
+        return {
+            "query": query,
+            "closed_reason": str(
+                data.get("closed_reason") or data.get("reason") or "source_unavailable"
+            ),
+            "http_status": data.get("http_status"),
+            "detail": detail[:200],
+        }
+    return None
+
+
+def _failure_text(failures: list[Mapping[str, Any]]) -> str:
+    parts = []
+    for failure in failures:
+        extra = "：".join(
+            str(item) for item in (
+                f"HTTP {failure['http_status']}" if failure.get("http_status") else "",
+                failure.get("detail") or "",
+            ) if item
+        )
+        parts.append(
+            f"检索词「{failure['query']}」{failure['closed_reason']}"
+            + (f"（{extra}）" if extra else "")
+        )
+    return "；".join(parts)
+
+
+class SourceUnavailableError(RuntimeError):
+    """§D-066：检索词失败且合并后一条都没有——这是「源不可用」，不是「搜到 0 条」。
+
+    D-064 真机：TikHub 402 时两个检索词各自发 source_unavailable 并返回 []，
+    合并后回 `result=[] error=null`，模型把缺口写成 empty_result，余额问题伪装成
+    「这个平台没人讨论」。抛出后 MCP 载荷 `error` 非空、`isError=true`。
+    """
+
+    def __init__(self, source_id: str, failures: list[Mapping[str, Any]]) -> None:
+        self.source_id = source_id
+        self.failures = [dict(item) for item in failures]
+        super().__init__(
+            f"源不可用：source.{source_id} 本次没有取到任何内容，失败原因——"
+            f"{_failure_text(self.failures)}。这不是「该平台搜到 0 条」，"
+            "缺口原因请写「源不可用：<上面的原因>」。"
+        )
 
 
 class SourceToolAdapter:
@@ -873,7 +953,19 @@ class SourceToolAdapter:
                 source_id, query, research_id=research_id, agent_id=agent_id,
                 on_event=capture,
             )
-            batches = [await run_once(text) for text in queries]
+            batches: list[Any] = []
+            failures: list[dict[str, Any]] = []
+            for text in queries:
+                start = len(buffered_events)
+                batch = await run_once(text)
+                batches.append(batch)
+                if _batch_is_empty(batch):
+                    failure = _query_failure(text, buffered_events[start:])
+                    if failure is not None:
+                        failures.append(failure)
+            # §D-066：有检索词失败、合并后又一条没有 → 报源不可用，别吞成空结果。
+            if failures and all(_batch_is_empty(batch) for batch in batches):
+                raise SourceUnavailableError(source_id, failures)
             result = _dedupe_evidence(batches) if len(batches) > 1 else batches[0]
             if self._store is not None and not store_passed:
                 _persist_returned_evidence(
@@ -889,6 +981,16 @@ class SourceToolAdapter:
                 source_id, result, with_comments,
                 research_id, goal_id, agent_id, capture,
             )
+            if failures:
+                # 部分检索词失败：成功行照留，失败说明挂在返回值上让模型看得见。
+                note = (
+                    f"部分检索词失败，下面只含其余检索词的结果：{_failure_text(failures)}。"
+                    "缺口里请把失败的检索词记为「源不可用：<原因>」。"
+                )
+                if isinstance(result, list):
+                    result = {"evidence": result}
+                if isinstance(result, Mapping):
+                    result = {**dict(result), "query_failures": failures, "note": note}
             return result
         finally:
             if on_event is not None:
