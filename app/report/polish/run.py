@@ -496,9 +496,12 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     objectives = "\n".join(f"- {g.get('objective')}" for g in data.get("objectives") or []
                            if g.get("objective"))
     verdicts = {"PASS": "多源互证", "CONFLICT": "多源冲突", "WEAK": "证据偏弱", "SINGLE": "单源孤证"}
+    # §RPT-3 货 2：A/B 级评论行在末尾多一栏「原话：…」（`tables.quote_prefix`，程序截取）。
+    # 写手按**评论内容**归题、可直接从这一栏摘原声；没有这一栏的行照旧只有标题。
     pool = "\n".join(
         f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
         f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
+        + (f"｜原话：{s['quote_prefix']}" if s.get("quote_prefix") else "")
         for s in data.get("sources") or [])
     # 按中文表名交给写手，机器表名（topic_polarity 之类）一律不进提示词——
     # 首稿里「来源：见 topic_polarity」就是照抄 JSON 键来的（用户 09-05 裁决条 3）。
@@ -518,7 +521,8 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 这份报告给谁看\n{_audience_view(data)}",
         f"# 本次研究的目标\n{objectives}",
         f"# 涉及的实体\n{'、'.join(data.get('entities') or [])}",
-        f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论）\n{pool}",
+        f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论；"
+        f"带「原话」栏的是评论，标题是它挂的父帖，归题看原话不看标题）\n{pool}",
         f"# 确定性数据表（数字的唯一来源，一个数都不许改）\n```json\n{tables}\n```",
         f"# 工作稿\n\n{_work_view(data, report_text)}",
     ]
@@ -610,6 +614,10 @@ def quote_corpus(data: Mapping[str, Any], report_text: str) -> str:
     from app.reliability.coding import _squeeze          # ⛔ 只 import，不改那个文件
 
     chunks = [str(report_text or "")]
+    # §RPT-3 货 2：写手池里的原话栏也是底本——那是程序从 content_excerpt 截的原文前缀，
+    # 写手照抄它必须过闸，改一个字照样过不了。
+    chunks += [str(s["quote_prefix"]) for s in data.get("sources") or []
+               if isinstance(s, Mapping) and s.get("quote_prefix")]
     for table in (data.get("tables") or {}).values():
         if not isinstance(table, Mapping):
             continue

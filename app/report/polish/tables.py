@@ -591,6 +591,10 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     # tables.json 的 `sources`（没有正文可比），所以「这条源的 title 是不是独立标题」
     # 在这里算好随源带过去；尺子按它筛名单。缺这个键的老产物按 True 读（旧行为）。
     independent_by_mark = {int(r["citation_no"]): has_independent_title(r) for r in cited}
+    # §RPT-3 货 2：A/B 级评论行带原话前缀进写手池。评论行的 title 是父帖标题加
+    # 「评论 · 」前缀，评论正文只在 content_excerpt——池里不带，写手就只能按父帖标题
+    # 归题（09-14 实测：S28「智能体数据迁到猫箱」被写成付费化注脚），原声也一句引不出。
+    quote_prefix_by_mark = {int(r["citation_no"]): quote_prefix(r) for r in cited}
     return {
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
@@ -625,10 +629,32 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "fetched_at": fetched_by_mark.get(int(s["citation_no"])),
                      # 建议段门禁要按角标核：这条源背后的主张里最强的那个交叉验证结论。
                      "crossref": crossref_by_mark.get(int(s["citation_no"])),
-                     "title_independent": independent_by_mark.get(int(s["citation_no"]), True)}
+                     "title_independent": independent_by_mark.get(int(s["citation_no"]), True),
+                     "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }
+
+
+#: 写手池里评论原话的长度上限（字符）。提货单口径：99 行池 × 120 字封顶。
+QUOTE_PREFIX_CHARS = 120
+
+
+def quote_prefix(row: Mapping[str, Any]) -> str | None:
+    """A/B 级评论行的原话前缀：`content_excerpt` 的前 120 个字，程序截取、不经模型。
+
+    只收评论（`kind=comment`）且等级引得了（`run.QUOTE_GRADES`）的行——C/D 级不许作原声，
+    帖子行的标题本来就是正文或招牌，给了反而诱导把标题当原话。空白压成单个空格
+    只为让池子一行一条；逐字闸（`run.altered_quotes`）比对时本来就去空白，不影响判定。
+    """
+    from app.report.polish.run import QUOTE_GRADES      # 延迟 import：避免成环
+
+    if str(row.get("kind") or "post") != "comment":
+        return None
+    if str(row.get("grade") or "") not in QUOTE_GRADES:
+        return None
+    text = " ".join(str(row.get("content_excerpt") or "").split())
+    return text[:QUOTE_PREFIX_CHARS] or None
 
 
 def _drop_non_speech_quotes(coding: dict[str, Any],
