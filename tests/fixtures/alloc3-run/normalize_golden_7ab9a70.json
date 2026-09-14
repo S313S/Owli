@@ -11,7 +11,7 @@
    "[修正4] goal-3.acceptance[3] 已摘：引用的产物 goals/goal-1/data-collection-3.json 不存在（已删卡或从未起草）；提到 DeepSeek，但本 goal 及其上游没有这些实体的采集卡——原文「交叉验证章在 inputs 中显式消费本 goal 两份采集产物路径以及上游「goals/goal-1/data-collection-3.json」「goals/goal-2/data-collection-5.json」两条 DeepSeek 相关产物，未新增重复 (source_id, entity) 组合」",
    "[修正4] goal-3.acceptance[4] 已摘：提到 DeepSeek，但本 goal 及其上游没有这些实体的采集卡——原文「报告撰写章按开发者视角与大众用户视角分别呈现 DeepSeek 观感，并给出以豆包为基线的差异对照表，条目均可回溯至具体采集条目 permalink」"
   ],
-  "plan_sha256": "7497c06284f8fe9233eea1746fa8dfecbf09e6b45e5d2334d6e55d09c9bc6e7c"
+  "plan_sha256": "1476472f870ccbab336652c7e5ec0aa08fc6ad4a3b63dc0ca903c3d2ed533ea1"
  },
  "alloc2/fast": {
   "notes": [
@@ -25,11 +25,11 @@
    "[修正4] goal-3.acceptance[3] 已摘：引用的产物 goals/goal-1/data-collection-3.json 不存在（已删卡或从未起草）；提到 DeepSeek，但本 goal 及其上游没有这些实体的采集卡——原文「交叉验证章在 inputs 中显式消费本 goal 两份采集产物路径以及上游「goals/goal-1/data-collection-3.json」「goals/goal-2/data-collection-5.json」两条 DeepSeek 相关产物，未新增重复 (source_id, entity) 组合」",
    "[修正4] goal-3.acceptance[4] 已摘：提到 DeepSeek，但本 goal 及其上游没有这些实体的采集卡——原文「报告撰写章按开发者视角与大众用户视角分别呈现 DeepSeek 观感，并给出以豆包为基线的差异对照表，条目均可回溯至具体采集条目 permalink」"
   ],
-  "plan_sha256": "b84e5148b6ffb2635b73e123e0123034c07ded26602f7c8c39cfabf6c7d58679"
+  "plan_sha256": "40001ef7ca5b0ef5c00beb4e63f3114c5d33c69cfa390aab1ba81f1f6e8a4d23"
  },
  "d062fu/fast": {
   "notes": [],
-  "plan_sha256": "3196a608b568216db6ee77ae1b9a13c04c7f5f2af5d4c75ed64e6d63a51813f2"
+  "plan_sha256": "eca4fda90bb85702b96d7f5d199a27bfc4d912a75c80a2b5a730dfe49918e57a"
  },
  "d062fu-run-a/fast": {
   "notes": [
@@ -38,7 +38,7 @@
    "[修正31] 以下章的 depends_on 摘掉了已删卡：goal-2/report-writing-2",
    "[修正4] goal-3.acceptance[6] 已摘：引用的产物 goals/goal-2/data-collection-5.json 不存在（已删卡或从未起草）——原文「交叉验证章显式引用并消费上游五个产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-2/data-collection-3.json、goals/goal-2/data-collection-4.json、goals/goal-2/data-collection-5.json 以及本 goal 两个新增采集产物」"
   ],
-  "plan_sha256": "64df9d26ccb7c1f14d786d5fb7f5c37d4203c2b23cd0ec6ad89d0f4acab2dfff"
+  "plan_sha256": "328094645a07eb7da7933f0f54652078d3f71cb35737c4c2761e4beec7eff238"
  },
  "d065/standard": {
   "notes": [
@@ -46,6 +46,6 @@
    "[修正31] 以下 goal 的 depends_on 改接被移出 goal 的上游：goal-6（goal-4、goal-5 → goal-1、goal-5）",
    "[修正31] 以下章摘掉了指向被移出 goal 的输入：goal-6/data-cleaning-6"
   ],
-  "plan_sha256": "54cd29939b26f58d788dbbc21bdef002a1d3c52d945aad141bddff49ea85d513"
+  "plan_sha256": "7fb7008bfdc649a50924d6afab85567254e193b0e66d7bc37b60c53b29dad8fe"
  }
 }

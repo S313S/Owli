@@ -7,8 +7,10 @@ goal-3 媒体 = 公众号·豆包），但 goal-1「产品与定位基础」先�
 
 夹具是真的：`r-alloc3-0914-a` 的 skeleton / allocation / entity-1 / assembled（assembled 是规则 21 打回
 之后的最终组装，即「两张卡在 goal-1、goal-2/3 没有」的形态）。首稿形态（goal-2/3 各自照表建了卡）
-按 events 里规则 21 那条原文补回两张卡构造。`normalize_golden_d6e390e.json` 是**改前代码**在 d061 / alloc2 /
-d062fu / d062fu-run-a（fast）与 d065（standard）上的修正说明 + 计划 sha256，逐字锁住不退化。
+按 events 里规则 21 那条原文补回两张卡构造。`normalize_golden_7ab9a70.json` 是**改前代码**在 d061 / alloc2 /
+d062fu / d062fu-run-a（fast）与 d065（standard）上的修正说明 + 计划 sha256（**去掉各章 prompt 正文**再算：
+prompt 是规划提示词渲染出来的，隔壁包改提示词就会变，与删卡闸无关——d6e390e 与 7ab9a70 两个底座去 prompt 后逐字相同，
+不去 prompt 则 D-066 续修一合就全红），逐字锁住不退化。
 用户 2026-09-14 拍甲（经调度）是「一律按 goal 删、表里那个 goal 没建交规则 31 打回」；施工实测一律按 goal 删
 打红 19 条整链用例（挪了 goal 的卡被删、重生时上游清单仍叫它「禁止重复」，三轮收不敛整份计划作废），
 本终端收窄为本文件首行口径并呈调度追认。
@@ -30,7 +32,7 @@ from app.plan.normalize import empty_goal_removal, normalize_plan
 
 FIXTURES = Path(__file__).parent / "fixtures"
 RUN = FIXTURES / "alloc3-run"
-GOLDEN = json.loads((RUN / "normalize_golden_d6e390e.json").read_text(encoding="utf-8"))
+GOLDEN = json.loads((RUN / "normalize_golden_7ab9a70.json").read_text(encoding="utf-8"))
 
 
 def _build(name: str, scale: str, assembled: dict | None = None) -> Plan:
@@ -56,6 +58,15 @@ def _build(name: str, scale: str, assembled: dict | None = None) -> Plan:
         entities=cards,
         repairs=[],
     )
+
+
+def _without_prompts(value):
+    """计划 dict 去掉各章 `prompt`（提示词渲染结果，随提示词改动漂移，与删卡闸无关）。"""
+    if isinstance(value, dict):
+        return {k: _without_prompts(v) for k, v in value.items() if k != "prompt"}
+    if isinstance(value, list):
+        return [_without_prompts(v) for v in value]
+    return value
 
 
 def _allocation(name: str = "alloc3-run") -> dict:
@@ -164,6 +175,6 @@ def test_不退化_既有夹具修正说明与计划和改前代码逐字相同(
         notes = normalize_plan(plan, collection_plan=_allocation(name), per_goal_capacity=2)
     assert notes == GOLDEN[key]["notes"]
     digest = hashlib.sha256(
-        json.dumps(plan.to_dict(), ensure_ascii=False, sort_keys=True).encode()
+        json.dumps(_without_prompts(plan.to_dict()), ensure_ascii=False, sort_keys=True).encode()
     ).hexdigest()
     assert digest == GOLDEN[key]["plan_sha256"]

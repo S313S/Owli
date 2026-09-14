@@ -24,7 +24,10 @@ from app.plan.allocation import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = json.loads((FIXTURES / "alloc3" / "golden_4df32c7.json").read_text(encoding="utf-8"))
-PROTAGONIST = {"alloc2": "豆包", "d062fu": "豆包", "d062fu-run-a": "豆包语音输入法", "alloc3": "豆包"}
+PROTAGONIST = {
+    "alloc2": "豆包", "d062fu": "豆包", "d062fu-run-a": "豆包语音输入法", "alloc3": "豆包",
+    "alloc3-run-b": "豆包",
+}
 
 
 def _load(name: str) -> tuple[dict, list[dict], list[dict]]:
@@ -126,6 +129,22 @@ def test_A甲_只有严格更高才挪_标题不点名别的实体_竞品goal不
     plan = _run("alloc3", "standard", scaffolds)["plan"]
     assert plan["goal-4"] == []
     assert {"xhs", "douyin", "weibo"} <= {s["source_id"] for s in plan["goal-1"]}
+
+
+def test_候选同分时取性质更纯的_媒体评价goal不抢口碑goal的卡() -> None:
+    """小跑 r-alloc3-0914-b：goal-2「国内媒体与行业侧对豆包的评价」口碑词「评价」+ 媒体词都记 2，
+    goal-3「国内普通用户在社交与内容平台的口碑」只有口碑 2。旧 tie-break 按 goal 序，口碑 goal 零卡。"""
+    old = json.loads((FIXTURES / "alloc3-run-b" / "allocation.json").read_text(encoding="utf-8"))
+    assert old["goal-3"] == [] and len(old["goal-2"]) == 4, "红：小跑分配表口碑 goal 零卡、媒体 goal 四张"
+    new = _run("alloc3-run-b", "standard")
+    assert _short(new["plan"]) == {
+        "goal-1": ["reddit·豆包", "x·豆包", "hacker_news·豆包", "product_hunt·豆包"],
+        "goal-2": ["wechat_mp·豆包"],
+        "goal-3": ["xhs·豆包", "douyin·豆包", "weibo·豆包"],
+        "goal-4": [],
+        "goal-5": [],
+    }
+    assert _pairs(new["plan"]) == _pairs(old)
 
 
 def test_打分_标题2_只有objective1_平台名也算_媒体词命中公众号() -> None:

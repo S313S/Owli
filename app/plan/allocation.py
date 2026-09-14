@@ -646,8 +646,13 @@ def _route_by_nature(
     只挪不增删，`(source, entity)` 集合与挪前完全相同（D-061 闸按全局对匹配，不受影响）。
     候选 goal = objective 以上点名主角、标题不点名别的实体（竞品 goal 不收主角卡）、标题
     不是汇总类（C）。候选里取匹配分最高的，**严格高于**这张卡当前所在 goal 才挪（A 甲）；
-    同分取 goal 序靠前的，与当前 goal 同分就留在原处。只在 `per_goal is None` 时调用——
-    fast 每 goal 2 位的摆法是 ALLOC-2 甲-2 定死的，⛔ 不走这里。
+    与当前 goal 同分就留在原处。只在 `per_goal is None` 时调用——fast 每 goal 2 位的摆法是
+    ALLOC-2 甲-2 定死的，⛔ 不走这里。
+
+    候选之间同分时，先取**另一种性质分更低**的（性质更纯），再取 goal 序靠前的。小跑
+    `r-alloc3-0914-b`：「国内媒体与行业侧对豆包的**评价**」标题里「评价」是口碑词、「媒体/行业」
+    是媒体词，两种性质都记 2；「国内普通用户在社交与内容平台的**口碑**」只有口碑 2。只按 goal 序
+    取前，小红书/抖音/微博全进媒体 goal，口碑 goal 零卡。
     """
 
     index = {f"goal-{number}": scaffold for number, scaffold in enumerate(scaffolds, start=1)}
@@ -665,10 +670,16 @@ def _route_by_nature(
         for slot in list(plan[goal_id]):
             if slot.entity != lead or slot.source_id not in SOURCE_NATURE:
                 continue
+            others = [
+                source for source, nature in SOURCE_NATURE.items()
+                if nature != SOURCE_NATURE[slot.source_id]
+            ]
             best = max(
                 candidates,
                 key=lambda target: (
-                    nature_score(index[target], slot.source_id), -goal_ids.index(target),
+                    nature_score(index[target], slot.source_id),
+                    -max((nature_score(index[target], other) for other in others), default=0),
+                    -goal_ids.index(target),
                 ),
             )
             if nature_score(index[best], slot.source_id) <= nature_score(
