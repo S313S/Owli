@@ -1,0 +1,94 @@
+{
+ "wx1-run-0914-1425/standard": {
+  "notes": [
+   "[修正31] goal-1/data-collection-5 采集卡「web_search·豆包」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-1/data-collection-6 采集卡「wechat_mp·豆包」分配表归 goal-3、goal-3 也建了且不在本 goal 上游，本 goal 这张已删除（留表里那个 goal 的卡）",
+   "[修正31] goal-1/data-collection-7 采集卡「weibo·豆包」分配表归 goal-4、goal-4 也建了且不在本 goal 上游，本 goal 这张已删除（留表里那个 goal 的卡）",
+   "[修正31] goal-1/data-collection-8 采集卡「web_search·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-2/data-collection-10 采集卡「weibo·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-2/data-collection-11 采集卡「wechat_mp·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-2/data-collection-12 采集卡「web_search·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-3/data-collection-14 采集卡「web_search·豆包」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-3/data-collection-15 采集卡「weibo·豆包」分配表归 goal-4、goal-4 也建了且不在本 goal 上游，本 goal 这张已删除（留表里那个 goal 的卡）",
+   "[修正31] goal-5/data-collection-19 采集卡「reddit·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-5/data-collection-20 采集卡「x·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-6/data-collection-21 采集卡「hacker_news·字节跳动」不在分配表里，已删除（分配表是闸不是建议；表外源采回来的多是别家批次的语料）",
+   "[修正31] goal-1/reliability-audit-5 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-1/reliability-audit-6 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-1/reliability-audit-7 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-1/reliability-audit-8 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-2/reliability-audit-10 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-2/reliability-audit-11 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-2/reliability-audit-12 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-3/reliability-audit-14 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-3/reliability-audit-15 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-5/reliability-audit-19 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-5/reliability-audit-20 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-6/reliability-audit-21 的上游采集卡已删、这一章再没有输入，一并删除",
+   "[修正31] goal-5「豆包在国内 AI 助手竞争格局中的位置」自带的采集卡已删，但它依赖上游 goal（goal-3、goal-4）：综合章 data-cleaning-5、cross-validation-5、report-writing-5 不删、改接上游 goal 产物（链头 data-cleaning-5 的 depends_on 清空，inputs 接上游交付物 2 份 + 上游采集产物 9 份；交付物章 report-writing-5 的 inputs 补上游交付物）",
+   "[修正31] goal-6「国内对豆包看法的综合结论」自带的采集卡已删，但它依赖上游 goal（goal-2、goal-5）：综合章 cross-validation-6、consistency-check-3、report-writing-6 不删、改接上游 goal 产物（链头 cross-validation-6 的 depends_on 清空，inputs 接上游交付物 2 份 + 上游采集产物 9 份；交付物章 report-writing-6 的 inputs 补上游交付物）",
+   "[修正31] 以下章的 depends_on 摘掉了已删卡：goal-1/data-cleaning、goal-2/data-cleaning-2、goal-3/data-cleaning-3",
+   "[修正4] goal-2.acceptance[0] 已摘：提到 豆包，但本 goal 及其上游没有这些实体的采集卡——原文「产物文件名为 bytedance-doubao-strategy.json，顶层为 JSON object，且至少包含组织架构、投入规模、商业化布局、对外表态四个小节键。」",
+   "[修正4] goal-2.acceptance[4] 已摘：提到 豆包，但本 goal 及其上游没有这些实体的采集卡——原文「报告章节在字节跳动相关论断处引用本 goal 的清洗结果，在豆包背景处引用 goal-1 的四份上游产物（goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json）中的至少两份。」",
+   "[修正4] goal-3.acceptance[5] 已摘：引用的产物 goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json 不存在（已删卡或从未起草）——原文「上游产物 goals/goal-2/data-collection-7.json 与 goals/goal-2/data-collection-8.json 被下游节化章节以 inputs 形式消费并在证据链中引用。」"
+  ],
+  "plan_sha256": "348020220698b1da8dfd86a3409e8d06b24d840e125b0ed0aa4691ef21f76872",
+  "acceptance": {
+   "goal-1": [
+    "报告顶层为 object，至少含产品形态、功能矩阵、版本迭代、面向用户群、官方口径、缺口口径六个节点。",
+    "每一节所有陈述均可追溯到至少一条采集产物中的 permalink 与 fetched_at。",
+    "必采清单 Reddit、X、Hacker News、Product Hunt 四条采集 agent 均在 agents 中出现且各输出顶层为数组的采集产物。",
+    "所有采集产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段。",
+    "任何维度若源侧样本不足，均以结构化缺口口径注明缺口原因与后续补采建议，不得留空。",
+    "全文只出现 豆包 与 字节跳动 两个研究实体，任何闭集外实体名均触发不通过。"
+   ],
+   "goal-2": [
+    "四份采集产物顶层均为 JSON 数组，每条记录含 permalink 与 fetched_at 字段。",
+    "采集章任务文本仅使用闭集叫法「字节跳动」或「ByteDance」，不出现其它实体叫法。",
+    "小红书数据抓取·字节跳动 作为本 goal 必采项已排入并产出独立数组文件。",
+    "交叉验证章输出对象包含一致点、冲突点与信息缺口三类字段，冲突条目附证据 permalink。",
+    "同一 (source_id, entity) 组合在本 goal 内不重复出现，且不与上游 goal-1 的 (reddit,豆包)、(x,豆包)、(hacker_news,豆包)、(product_hunt,豆包) 冲突。",
+    "任一采集章因平台限流或结果不足时，按结构化缺口口径记录缺失原因与已尝试查询词，不虚构条数。"
+   ],
+   "goal-3": [
+    "deliverable.path 为「media-review-report.json」且顶层为 object 信封结构，包含 sections、sources、gaps 三个键。",
+    "报告 sections 至少覆盖「能力评价」「体验评价」「生态与商业化评价」「争议与批评」四个小节，每节标注支撑证据条目的 permalink。",
+    "所有采集章产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段，缺失时以结构化缺口口径在 gaps 中登记。",
+    "必采组合「微信公众号·豆包」以 agent「微信公众号数据抓取·豆包」实现，且未与上游 (source_id, entity) 组合重复。",
+    "报告中的实体表述只使用闭集叫法：豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance，未出现闭集外的别名。",
+    "JSON 字符串值内部引用名称统一使用中文引号「」，未出现未转义的英文双引号。",
+    "交叉验证章输出 object 信封，标注每条主流叙事至少两条不同来源的支撑或冲突记录。"
+   ],
+   "goal-4": [
+    "报告 JSON 顶层为 object，至少包含情感分布、话题聚类、代表性样本、平台对比、缺口说明五个键。",
+    "小红书、抖音、微博三份采集产物顶层均为数组，且每条记录含 permalink 与 fetched_at 字段。",
+    "三个采集 agent 的 task 文本仅使用「豆包」实体闭集叫法（豆包、Doubao、豆包AI、豆包大模型），不出现「字节跳动」等其他实体叫法。",
+    "数据清洗输出剔除空正文、明显广告号与重复内容，按平台分组，保留 permalink、fetched_at、正文与互动量字段。",
+    "标签输出对每条样本至少覆盖情感极性、话题类别、用户人设三个维度。",
+    "交叉验证输出对三源出现的同类观点做互证与冲突标注，冲突项给出至少两条来源 permalink。",
+    "样本量不足或平台限流时，报告在缺口说明中以结构化字段标注被压制的 source_id、原因与已获得样本数，不假设未采源数据。"
+   ],
+   "goal-5": [
+    "产物文件位于 goals/goal-5/goal-5-report.json，顶层为 object，包含 meta、sections、citations、gaps 四个键",
+    "sections 至少覆盖「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四个小节，且每一小节都标注引用来源路径",
+    "citations 引用清单必须包含上游 14 条 output.path 与本 goal 新增 2 条采集 output.path，共计 16 条不重复条目",
+    "新增采集章的 (source_id, entity) 组合仅为「reddit·字节跳动」「x·字节跳动」，与上游 14 条 (source_id, entity) 组合无重复",
+    "采集章 source_id 全部来自 applicable_sources 闭集 douyin/hacker_news/product_hunt/reddit/web_search/wechat_mp/weibo/x/xhs",
+    "每份新增采集 JSON 顶层为数组，且每条记录含 permalink 与 fetched_at 字段",
+    "采集章任务文本涉及研究对象时仅使用本实体叫法闭集：字节跳动→字节跳动、ByteDance；不得混入豆包的叫法",
+    "报告与中间产物中所有引用名称一律使用中文引号「」，JSON 字符串值内部不出现未转义英文双引号",
+    "当某一维度的数据不足以支撑结论时，在 gaps 小节以结构化缺口口径记录（source_id、entity、缺口描述），不写死上游无法保证的实体最小条数",
+    "交叉验证与报告撰写章 output.shape 均为 object，与 deliverable.shape 保持一致的节化文档信封形"
+   ],
+   "goal-6": [
+    "报告主体依次覆盖公司背景、媒体评论、用户口碑、竞争位置四个章节，且每章均给出小结",
+    "在总体结论部分明确区分共识、争议、缺口三类信息，每类不少于两条并标注证据来源",
+    "至少列出三条国内不同人群（媒体、开发者、普通用户、行业观察者）对「豆包」看法的主要分歧点，并注明对应源的 permalink 或上游产物路径",
+    "所有事实性陈述均可回溯至 goal-1 至 goal-5 的产物 output.path 或本 goal 采集数据的 permalink",
+    "报告与所有中间产物中引用的名称一律使用中文「」引号，JSON 字符串值内部不出现未转义的英文双引号",
+    "数据缺口部分以结构化缺口口径列出缺失的源与实体组合，不写死具体最小条数",
+    "本 goal 新增采集章的 (source_id, entity) 组合与上游及必采清单均不重复"
+   ]
+  }
+ }
+}

@@ -36,7 +36,7 @@ def normalize_plan(
     一个 0 章 goal 不论怎么来的，留在计划里执行期都会冻结。
     """
 
-    deleted_cards: dict[str, list[str]] = {}
+    deleted_cards: dict[str, list[tuple[str, str, str]]] = {}
     notes = _repair_rule_31_reverse(plan, collection_plan, per_goal_capacity, deleted_cards)
     notes += _repair_empty_goals(plan)
     notes += _repair_acceptance(plan, deleted_cards)
@@ -166,7 +166,7 @@ def _repair_rule_31_reverse(
     plan: Plan,
     collection_plan: Mapping[str, Sequence[Mapping[str, Any]]] | None,
     capacity: int | None,
-    deleted_cards: dict[str, list[str]] | None = None,
+    deleted_cards: dict[str, list[tuple[str, str, str]]] | None = None,
 ) -> list[str]:
     """分配表变闸：表外的采集卡删掉，每 goal 采集位不超档位容量。
 
@@ -193,7 +193,8 @@ def _repair_rule_31_reverse(
     空表（`None` 或 `{}`）一律当「没给」处理，**不是**「表里一张都没有」——
     按后者理解会把整个计划的采集卡删光。
 
-    `deleted_cards` 给了就回填「goal_id → 本 goal 被删采集卡的显示名」，交验收条闸（§D-067 货 2）。
+    `deleted_cards` 给了就回填「goal_id → 本 goal 被删采集卡的 (显示名, source_id, entity)」，交验收条闸
+    （§D-067 货 2 用显示名；§D-068 起加组合，验收条常写「reddit·字节跳动」这种组合而不写卡名）。
     """
 
     if not collection_plan:
@@ -214,15 +215,15 @@ def _repair_rule_31_reverse(
     notes: list[str] = []
     dropped: set[str] = set()
     names = {
-        agent.agent_id: (goal.goal_id, agent.display_name)
+        agent.agent_id: (goal.goal_id, (agent.display_name, *_slot_key(agent)))
         for goal in plan.goals for agent in goal.agents if _is_collector(agent)
     }
     for goal in plan.goals:
         notes.extend(_gate_goal(goal, owners, capacity, dropped, present, ancestors))
     if deleted_cards is not None:
         for agent_id in sorted(dropped & set(names), key=list(names).index):
-            goal_id, name = names[agent_id]
-            deleted_cards.setdefault(goal_id, []).append(name)
+            goal_id, card = names[agent_id]
+            deleted_cards.setdefault(goal_id, []).append(card)
     if dropped:
         notes.extend(_drop_orphans(plan, dropped))
     return notes
@@ -504,6 +505,18 @@ _ACCEPTANCE_CLAUSE_SEPARATORS = frozenset("，,；;。")
 #: 缺什么，不是要本 goal 交补采产物——缺口语境词豁免。误豁免 = 回到现状，不会更坏。
 _ACCEPTANCE_BACKFILL = "补采"
 _ACCEPTANCE_GAP_WORDS = ("所需", "需要补", "需补", "建议", "待补", "缺口", "gap", "不足")
+#: §D-068：空心 goal 的验收条不一定写「补采」——r-wx1-0914-1425 写的是「本 goal 新增 2 条采集 output.path」
+#: 「新增采集章的 (source_id, entity) 组合仅为…」「每份新增采集 JSON」「采集章 source_id 全部来自…」。
+#: 这些主语**指代本 goal 自己的采集章**；本 goal 一张采集卡都不剩时，这条要么在要不存在的产物，要么在规定
+#: 不存在的章，都摘。`新增` 与 `采集` 之间容几个字（「新增 2 条采集」）。「上游 / goal-N 的采集章」说的是别人的章，不算。
+_ACCEPTANCE_OWN_COLLECTION = re.compile(
+    r"补采|本\s*goal\s*(?:的\s*)?(?:新增\s*)?采集|新增[^，,；;。「」]{0,6}?采集|采集章|采集卡"
+)
+_ACCEPTANCE_OTHERS_COLLECTION = re.compile(r"(?:上游|goal-[1-9][0-9]*)\s*(?:的\s*)?$")
+#: 选择性表述：「…上游产物 output.path 或本 goal 采集数据的 permalink」只是给了一条可选出处，不是要求。
+_ACCEPTANCE_OPTIONAL_WORDS = ("或", "可选", "如有", "若有", "如果有")
+#: 组合元组的分隔：「reddit·字节跳动」「(reddit, 字节跳动)」「reddit/字节跳动」。
+_ACCEPTANCE_SLOT_SEPARATOR = r"\s*[·・,，、/]\s*"
 #: 括号里的逗号不切子句：引擎写 `(xhs, 豆包语音输入法)` 这种组合元组，按英文逗号切会把
 #: 实体切到没有否定词的半截里（r-d062fu-0913-a 现形）。
 _ACCEPTANCE_BRACKETS = {"(": ")", "（": "）", "[": "]", "【": "】", "「": "」"}
@@ -544,6 +557,11 @@ def _repair_acceptance(plan: Plan, deleted_cards: Mapping[str, Sequence[str]] | 
       顶层为数组…）⇒ 整条摘，同名卡在别处还活着不算；要求「补采」的（「本 goal 2 项补采共 28 项」）
       同样摘——没点卡名，但要的是那几张卡的产物。都按子句判：否定词表豁免，「补采」另加缺口语境词表
       （「所需补采」「建议补采」这种写缺口的）豁免。前三类已判摘的条不追加理由。
+    - **第四类改结构判（§D-068）**：「补采」词判漏了 r-wx1-0914-1425——空心 goal-5 写的是「本 goal 新增
+      2 条采集 output.path，共计 16 条」「新增采集章的组合仅为「reddit·字节跳动」…」。结构线索依次看：
+      被删卡显示名 → 被删卡的 (source_id, entity) 组合（组合在别处还活着不算）→ 指代本 goal 采集章的主语
+      （见 `_asks_own_collection`）。计数类（「共计 16 条」）整条摘不改写：句内改数字就是引擎没写过的新要求，
+      上游那「14 条」本身也含已删卡。还有卡的 goal 照旧不动。
     留痕号用「[修正4]」：验收条可判定性是规则 4 的领地，一条要求写无卡实体的验收条在
     实践上就是不可判定的。摘到空列表时兜底一条不提实体的验收条（规则 4 要至少一条）。
     """
@@ -564,6 +582,7 @@ def _repair_acceptance(plan: Plan, deleted_cards: Mapping[str, Sequence[str]] | 
                 cards[goal.goal_id].add(str(agent.entity).strip())
     ancestors = _ancestors(plan)
     alive = {agent.display_name for goal in plan.goals for agent in goal.agents if _is_collector(agent)}
+    alive_slots = {_slot_key(agent) for goal in plan.goals for agent in goal.agents if _is_collector(agent)}
     notes: list[str] = []
     for goal in plan.goals:
         # 第四类只看「自带采集卡被删光」的 goal（D-067 救下的综合 goal 就是这种）：还有卡的 goal
@@ -571,10 +590,17 @@ def _repair_acceptance(plan: Plan, deleted_cards: Mapping[str, Sequence[str]] | 
         hollow = bool((deleted_cards or {}).get(goal.goal_id)) and not any(
             _is_collector(agent) for agent in goal.agents
         )
+        dead = list(dict.fromkeys((deleted_cards or {}).get(goal.goal_id, []))) if hollow else []
         dead_names = [
             (name, [re.compile(re.escape(name))])
-            for name in dict.fromkeys((deleted_cards or {}).get(goal.goal_id, []))
-            if hollow and name and name not in alive
+            for name in dict.fromkeys(name for name, _, _ in dead)
+            if name and name not in alive
+        ]
+        dead_slots = [
+            (f"{source}·{entity}", [re.compile(
+                re.escape(source) + _ACCEPTANCE_SLOT_SEPARATOR + re.escape(entity), re.IGNORECASE)])
+            for source, entity in dict.fromkeys((source, entity) for _, source, entity in dead)
+            if source and entity and (source, entity) not in alive_slots
         ]
         reachable = set(cards[goal.goal_id])
         for upstream in ancestors.get(goal.goal_id, set()):
@@ -598,10 +624,19 @@ def _repair_acceptance(plan: Plan, deleted_cards: Mapping[str, Sequence[str]] | 
             named = [] if reasons else [
                 name for name, patterns in dead_names if _mentioned_outside_negation(text, patterns)
             ]
+            slots = [] if reasons or named else [
+                label for label, patterns in dead_slots if _mentioned_outside_negation(text, patterns)
+            ]
+            own = None if reasons or named or slots or not hollow else _asks_own_collection(text)
             if named:
                 reasons.append(f"点名的采集卡「{'」「'.join(named)}」已被删卡闸删除，产物不会存在")
-            elif not reasons and hollow and _asks_backfill(text):
+            elif slots:
+                reasons.append(f"点名的采集组合「{'」「'.join(slots)}」只在本 goal 已删的采集卡上，产物不会存在")
+            elif own == _ACCEPTANCE_BACKFILL:
+                # D-067 货 2 的留痕逐字不变（用例锁着）
                 reasons.append("要求本 goal 的补采产物，但本 goal 的采集卡已被删卡闸删光")
+            elif own:
+                reasons.append(f"规定的是本 goal 自己的采集章（「{own}」），但本 goal 的采集卡已被删卡闸删光")
             if reasons:
                 notes.append(
                     f"[修正4] {goal.goal_id}.acceptance[{index}] 已摘：{'；'.join(reasons)}"
@@ -621,15 +656,29 @@ def _repair_acceptance(plan: Plan, deleted_cards: Mapping[str, Sequence[str]] | 
     return notes
 
 
-def _asks_backfill(text: str) -> bool:
-    """这条验收条是不是在要本 goal 的「补采」产物：按子句，提到补采且不在否定 / 缺口语境里。"""
+def _asks_own_collection(text: str) -> str | None:
+    """这条验收条是不是在要本 goal 自己的采集产物 / 规定本 goal 的采集章：返回命中的主语，不是就 None。
+
+    按子句判（§D-068 起取代 D-067 货 2 的「补采」词判）：
+    - 子句里有缺口语境词（「所需补采」「建议补采」）⇒ 在描述缺什么，不算；
+    - 主语**前面**有否定 / 限定词（「不引用任何补采产物」）或选择词（「…或本 goal 采集数据」）⇒ 被否定的、
+      可选的正是本 goal 的采集产物，不算。**只看前面**：「本 goal 新增采集章的组合与上游均不重复」「采集章
+      source_id 全部来自…闭集」里的否定 / 限定落在采集章的属性上，主语本身仍在断言这些章存在——D-067 货 2
+      看整个子句，这两种都被当成反向约束放过了；
+    - 主语紧跟在「上游」「goal-N 的」后面 ⇒ 说的是别人的采集章，不算。
+    """
 
     for clause in _acceptance_clauses(text):
-        if _ACCEPTANCE_BACKFILL not in clause:
+        if any(word in clause for word in _ACCEPTANCE_GAP_WORDS):
             continue
-        if not any(word in clause for word in _ACCEPTANCE_NEGATION_WORDS + _ACCEPTANCE_GAP_WORDS):
-            return True
-    return False
+        for match in _ACCEPTANCE_OWN_COLLECTION.finditer(clause):
+            before = clause[: match.start()]
+            if _ACCEPTANCE_OTHERS_COLLECTION.search(before):
+                continue
+            if any(word in before for word in _ACCEPTANCE_NEGATION_WORDS + _ACCEPTANCE_OPTIONAL_WORDS):
+                continue
+            return match.group(0)
+    return None
 
 
 def _acceptance_paths(text: str) -> list[str]:

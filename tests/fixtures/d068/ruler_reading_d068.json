@@ -1,0 +1,349 @@
+{
+  "code_root": "../Owli-d068 (d068-hollow-acceptance)",
+  "target": {
+    "hollow_goals": [
+      "goal-5",
+      "goal-6"
+    ],
+    "goals": {
+      "goal-1": {
+        "hollow": false,
+        "acceptance_sha": "374509deb919c34b7ab4f869cf2586b766d348b49f4475857273028f741d8a0f",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "报告顶层为 object，至少含产品形态、功能矩阵、版本迭代、面向用户群、官方口径、缺口口径六个节点。",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "每一节所有陈述均可追溯到至少一条采集产物中的 permalink 与 fetched_at。",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "必采清单 Reddit、X、Hacker News、Product Hunt 四条采集 agent 均在 agents 中出现且各输出顶层为数组的采集产物。",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "所有采集产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段。",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "任何维度若源侧样本不足，均以结构化缺口口径注明缺口原因与后续补采建议，不得留空。",
+            "hits": []
+          },
+          {
+            "index_final": 5,
+            "text": "全文只出现 豆包 与 字节跳动 两个研究实体，任何闭集外实体名均触发不通过。",
+            "hits": []
+          }
+        ],
+        "removed": []
+      },
+      "goal-2": {
+        "hollow": false,
+        "acceptance_sha": "8e0c5607e8ea422bdb1d093d5a2809618d928384463a187720879714744afefd",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "四份采集产物顶层均为 JSON 数组，每条记录含 permalink 与 fetched_at 字段。",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "采集章任务文本仅使用闭集叫法「字节跳动」或「ByteDance」，不出现其它实体叫法。",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "小红书数据抓取·字节跳动 作为本 goal 必采项已排入并产出独立数组文件。",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "交叉验证章输出对象包含一致点、冲突点与信息缺口三类字段，冲突条目附证据 permalink。",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "同一 (source_id, entity) 组合在本 goal 内不重复出现，且不与上游 goal-1 的 (reddit,豆包)、(x,豆包)、(hacker_news,豆包)、(product_hunt,豆包) 冲突。",
+            "hits": []
+          },
+          {
+            "index_final": 5,
+            "text": "任一采集章因平台限流或结果不足时，按结构化缺口口径记录缺失原因与已尝试查询词，不虚构条数。",
+            "hits": []
+          }
+        ],
+        "removed": [
+          {
+            "index_draft": 0,
+            "hits": [],
+            "note_has_original": true
+          },
+          {
+            "index_draft": 4,
+            "hits": [],
+            "note_has_original": true
+          }
+        ]
+      },
+      "goal-3": {
+        "hollow": false,
+        "acceptance_sha": "afcad7aeade43323305df5d74e685910e4a4dad729307d0c73f9d144b2e29246",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "deliverable.path 为「media-review-report.json」且顶层为 object 信封结构，包含 sections、sources、gaps 三个键。",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "报告 sections 至少覆盖「能力评价」「体验评价」「生态与商业化评价」「争议与批评」四个小节，每节标注支撑证据条目的 permalink。",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "所有采集章产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段，缺失时以结构化缺口口径在 gaps 中登记。",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "必采组合「微信公众号·豆包」以 agent「微信公众号数据抓取·豆包」实现，且未与上游 (source_id, entity) 组合重复。",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "报告中的实体表述只使用闭集叫法：豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance，未出现闭集外的别名。",
+            "hits": []
+          },
+          {
+            "index_final": 5,
+            "text": "JSON 字符串值内部引用名称统一使用中文引号「」，未出现未转义的英文双引号。",
+            "hits": []
+          },
+          {
+            "index_final": 6,
+            "text": "交叉验证章输出 object 信封，标注每条主流叙事至少两条不同来源的支撑或冲突记录。",
+            "hits": []
+          }
+        ],
+        "removed": [
+          {
+            "index_draft": 5,
+            "hits": [],
+            "note_has_original": true
+          }
+        ]
+      },
+      "goal-4": {
+        "hollow": false,
+        "acceptance_sha": "84b3c9d335905489f02e7974cfc2808b5e6b05f75d952f39f5073ee95bddefeb",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "报告 JSON 顶层为 object，至少包含情感分布、话题聚类、代表性样本、平台对比、缺口说明五个键。",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "小红书、抖音、微博三份采集产物顶层均为数组，且每条记录含 permalink 与 fetched_at 字段。",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "三个采集 agent 的 task 文本仅使用「豆包」实体闭集叫法（豆包、Doubao、豆包AI、豆包大模型），不出现「字节跳动」等其他实体叫法。",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "数据清洗输出剔除空正文、明显广告号与重复内容，按平台分组，保留 permalink、fetched_at、正文与互动量字段。",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "标签输出对每条样本至少覆盖情感极性、话题类别、用户人设三个维度。",
+            "hits": []
+          },
+          {
+            "index_final": 5,
+            "text": "交叉验证输出对三源出现的同类观点做互证与冲突标注，冲突项给出至少两条来源 permalink。",
+            "hits": []
+          },
+          {
+            "index_final": 6,
+            "text": "样本量不足或平台限流时，报告在缺口说明中以结构化字段标注被压制的 source_id、原因与已获得样本数，不假设未采源数据。",
+            "hits": []
+          }
+        ],
+        "removed": []
+      },
+      "goal-5": {
+        "hollow": true,
+        "acceptance_sha": "d13acf96e77abe59456e909f9e2768e1ec7448e0d39cd650cb3015905ad36572",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "产物文件位于 goals/goal-5/goal-5-report.json，顶层为 object，包含 meta、sections、citations、gaps 四个键",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "sections 至少覆盖「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四个小节，且每一小节都标注引用来源路径",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "报告与中间产物中所有引用名称一律使用中文引号「」，JSON 字符串值内部不出现未转义英文双引号",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "当某一维度的数据不足以支撑结论时，在 gaps 小节以结构化缺口口径记录（source_id、entity、缺口描述），不写死上游无法保证的实体最小条数",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "交叉验证与报告撰写章 output.shape 均为 object，与 deliverable.shape 保持一致的节化文档信封形",
+            "hits": []
+          }
+        ],
+        "removed": [
+          {
+            "index_draft": 2,
+            "hits": [
+              "主语 新增 2 条采集"
+            ],
+            "note_has_original": true
+          },
+          {
+            "index_draft": 3,
+            "hits": [
+              "组合 reddit·字节跳动",
+              "组合 x·字节跳动",
+              "主语 新增采集"
+            ],
+            "note_has_original": true
+          },
+          {
+            "index_draft": 4,
+            "hits": [
+              "主语 采集章"
+            ],
+            "note_has_original": true
+          },
+          {
+            "index_draft": 5,
+            "hits": [
+              "主语 新增采集"
+            ],
+            "note_has_original": true
+          },
+          {
+            "index_draft": 6,
+            "hits": [
+              "主语 采集章"
+            ],
+            "note_has_original": true
+          }
+        ]
+      },
+      "goal-6": {
+        "hollow": true,
+        "acceptance_sha": "669dad2fd69d7d82c0fd07602d80e4fd05a00fb11d940f2cebe20ef8be5637f6",
+        "remaining_hit_items": 0,
+        "remaining": [
+          {
+            "index_final": 0,
+            "text": "报告主体依次覆盖公司背景、媒体评论、用户口碑、竞争位置四个章节，且每章均给出小结",
+            "hits": []
+          },
+          {
+            "index_final": 1,
+            "text": "在总体结论部分明确区分共识、争议、缺口三类信息，每类不少于两条并标注证据来源",
+            "hits": []
+          },
+          {
+            "index_final": 2,
+            "text": "至少列出三条国内不同人群（媒体、开发者、普通用户、行业观察者）对「豆包」看法的主要分歧点，并注明对应源的 permalink 或上游产物路径",
+            "hits": []
+          },
+          {
+            "index_final": 3,
+            "text": "所有事实性陈述均可回溯至 goal-1 至 goal-5 的产物 output.path 或本 goal 采集数据的 permalink",
+            "hits": []
+          },
+          {
+            "index_final": 4,
+            "text": "报告与所有中间产物中引用的名称一律使用中文「」引号，JSON 字符串值内部不出现未转义的英文双引号",
+            "hits": []
+          },
+          {
+            "index_final": 5,
+            "text": "数据缺口部分以结构化缺口口径列出缺失的源与实体组合，不写死具体最小条数",
+            "hits": []
+          }
+        ],
+        "removed": [
+          {
+            "index_draft": 6,
+            "hits": [
+              "主语 新增采集"
+            ],
+            "note_has_original": true
+          }
+        ]
+      }
+    },
+    "hollow_remaining_hit_items": 0,
+    "notes_sha": "bee2f6bbeda2f722816497c480c6f3dbe2b9d6a5c430364089e98eb30a35ee68",
+    "plan_sha": "be8234d2b7952ccd997c9b122c424b18a2a9bd778803d485f378adb98cfb66a0"
+  },
+  "regression": {
+    "d061/fast": {
+      "notes_sha": "54bb71b6ab70e9f3bc0ffe43a901ce5ad296acccc37516a57b6c1bd2900fab6f",
+      "plan_sha": "1476472f870ccbab336652c7e5ec0aa08fc6ad4a3b63dc0ca903c3d2ed533ea1"
+    },
+    "alloc2/fast": {
+      "notes_sha": "54bb71b6ab70e9f3bc0ffe43a901ce5ad296acccc37516a57b6c1bd2900fab6f",
+      "plan_sha": "40001ef7ca5b0ef5c00beb4e63f3114c5d33c69cfa390aab1ba81f1f6e8a4d23"
+    },
+    "d062fu/fast": {
+      "notes_sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "plan_sha": "eca4fda90bb85702b96d7f5d199a27bfc4d912a75c80a2b5a730dfe49918e57a"
+    },
+    "d062fu-run-a/fast": {
+      "notes_sha": "d5bbe77e5798ed9f4c1e6d2629588876b15a7c03d921c87c14a70cbb0cef9286",
+      "plan_sha": "328094645a07eb7da7933f0f54652078d3f71cb35737c4c2761e4beec7eff238"
+    },
+    "d065/standard": {
+      "notes_sha": "f8fecaf0cde7619fb487aa79273468a45a35d1bc03a1abd3dabc33e39fb7ddca",
+      "plan_sha": "7fb7008bfdc649a50924d6afab85567254e193b0e66d7bc37b60c53b29dad8fe"
+    },
+    "d067/alloc3-run-b/standard": {
+      "notes_sha": "5501d528b8d720a292ae2a293fa5cc97c5e5cfe2fa9deb2cdc765cfb9fd8d2d5",
+      "plan_sha": "1d66b1f43989227f8f9f9fcb41cfb74b72e5f410069ad5e3fb8c16fa2e240cf9"
+    },
+    "d067/wx1-run-0914-1239/standard": {
+      "notes_sha": "f8ad45fc97e5b59fe9a43ab895ef4af32626e5f672463413dc7802e966b3adca",
+      "plan_sha": "52b458dc7857144c6415dbc4814f6f32afc472cf547a00c7f0f0fdb231f47649",
+      "goal4_removed": [
+        "[修正4] goal-4.acceptance[1]",
+        "[修正4] goal-4.acceptance[2]"
+      ],
+      "goal4_acceptance_len": 6
+    },
+    "d067/wx1-run-0914-1239-no-upstream/standard": {
+      "notes_sha": "acc36fc51f7499878586e6166de13d99a818877b2594ec327dc0bdbdc32bc714",
+      "plan_sha": "f5a47897b1ce45f7aed57e29f7f2337564aa631b28d42dfd40749b0a9d003ac6"
+    }
+  }
+}
