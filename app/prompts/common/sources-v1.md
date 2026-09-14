@@ -32,7 +32,20 @@
 
 - **先换查询式，别换工具。** 关键词拆细、去掉 OR、换同义词，通常比重试有用。
   （检索词由系统代填的卡除外：换查询式不改变实际检索词，见第 2 条。）
+- **「源不可用」和「搜到 0 条」是两回事。** 工具报错且消息以「源不可用：」开头
+  （`SourceUnavailableError`），说明是源本身出了问题，不是这个平台没人讨论。
+  消息里逐个写了检索词的 `closed_reason`、HTTP 状态和上游原文。常见的是余额不足（402）、
+  限流（429）、上游 5xx / 网络抖动、全部供应商不可用（`all_providers_unavailable`）。
+  这时缺口原因写「源不可用：<原因>」，**不要写成 empty_result 或「没有相关讨论」**。
+  只有工具正常返回空列表时，才算真的搜到 0 条。
+- **部分检索词失败**时，工具返回 `{evidence, query_failures, note}`，不是列表：
+  - `evidence` 是其余检索词取到的行，照常使用、照常写进产物；
+  - `query_failures` 每条是 `{query, closed_reason, http_status, detail}`，
+    把失败的检索词记进缺口，写「源不可用：<原因>」；
+  - `note` 是给你看的一句话说明。
 - 工具返回了明确的失败原因（`closed_reason`），照它办：
+  - `tikhub_http_402` —— 供应商余额不足（`Insufficient balance`），**你解决不了**，
+    重试也没用。别再调用，如实记缺口「源不可用：tikhub_http_402 余额不足」。
   - `tikhub_http_429` —— 打太快了，慢一点、少调几次，不要立刻重试同一个词。
   - `tikhub_auth` —— 凭证问题，**你解决不了**，如实记缺口，不要绕道。
   - `tikhub_http_5xx` / `tikhub_transport` —— 供应商或网络抖动，可以隔一会儿

@@ -598,14 +598,24 @@ def _agent_entity_id(store: Any, research_id: str, agent_id: str) -> str:
     return ""
 
 
-def entity_queries(
-    entity: Mapping[str, Any], locale: str, fallback: str,
-) -> list[str]:
-    """按语域取本实体的检索名，最多 MAX_QUERIES_PER_ENTITY 个。
+def source_locale(source_id: str, market_profile: str) -> str:
+    """源的检索语域（zh / en）；不在语域表的源返回空串（适配层不换词）。"""
+    locale = _SOURCE_LOCALES.get(source_id, "")
+    if locale is None:  # 跨语域源（网页搜索）跟着计划的市场属性走
+        locale = "zh" if market_profile == "cn_product" else "en"
+    return locale if locale in {"zh", "en"} else ""
 
-    **分别查询再合并去重，不拼 OR**（`sources-v1.md` 已有「去掉 OR」的经验：
-    OR 串在几家源上都会把召回打到 0）。超出上限的别名不进检索，只留给去重匹配。
-    `same_product=false` 的实体天然不会跨语域借名——对方的名字压根不在本卡里。
+
+def query_name_key(name: str) -> str:
+    """叫法去重键：`Kimi` / `kimi` / 全角 `ＫＩＭＩ` / 多空白是同一个叫法。"""
+    return unicodedata.normalize("NFKC", " ".join(str(name).split())).casefold()
+
+
+def locale_names(entity: Mapping[str, Any], locale: str) -> list[str]:
+    """本语域下**有资格**进检索的叫法（按候选顺序，未去重未截断）。
+
+    语域主名 + 书写系统与语域一致的别名。`entity_queries` 从这里截前 2 个；
+    D-064 提示也用它区分「同语域超名额」与「不属于本源语域」，两边同源。
     """
     names = entity.get("names") if isinstance(entity.get("names"), Mapping) else {}
     picked: list[str] = []
@@ -619,6 +629,19 @@ def entity_queries(
         is_zh = any("一" <= char <= "鿿" for char in text)
         if (locale == "zh") == is_zh:
             picked.append(text)
+    return picked
+
+
+def entity_queries(
+    entity: Mapping[str, Any], locale: str, fallback: str,
+) -> list[str]:
+    """按语域取本实体的检索名，最多 MAX_QUERIES_PER_ENTITY 个。
+
+    **分别查询再合并去重，不拼 OR**（`sources-v1.md` 已有「去掉 OR」的经验：
+    OR 串在几家源上都会把召回打到 0）。超出上限的别名不进检索，只留给去重匹配。
+    `same_product=false` 的实体天然不会跨语域借名——对方的名字压根不在本卡里。
+    """
+    picked = locale_names(entity, locale)
     canonical = str(entity.get("canonical") or entity.get("id") or "").strip()
     if not picked and canonical:
         picked.append(canonical)
@@ -630,7 +653,7 @@ def entity_queries(
     unique: list[str] = []
     for name in picked:
         text = " ".join(name.split())
-        key = unicodedata.normalize("NFKC", text).casefold()
+        key = query_name_key(text)
         if key not in seen:
             seen.add(key)
             unique.append(text)
@@ -825,10 +848,8 @@ class SourceToolAdapter:
         )
         if entity is None:
             return [query]
-        locale = _SOURCE_LOCALES.get(source_id, "")
-        if locale is None:  # 跨语域源（网页搜索）跟着计划的市场属性走
-            locale = "zh" if market_profile == "cn_product" else "en"
-        if locale not in {"zh", "en"}:
+        locale = source_locale(source_id, market_profile)
+        if not locale:
             return [query]
         queries = entity_queries(entity, locale, query)
         if len(queries) <= 1:

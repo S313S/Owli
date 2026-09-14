@@ -81,7 +81,10 @@ def test_小红书采集卡_提示写明实际检索词_只调一次_其余叫�
     assert "只调用 source.xhs 一次" in hint
     assert "系统检索词上限 2" in hint
     # 其余叫法按 casefold 去重：Doubao / doubao 只算一个
-    assert "（Doubao、字节豆包）" in hint
+    # 其余叫法按原因分开写（D-066 续）：同语域超名额 → 上限 2；英文叫法在中文源 → 不属于本源语域
+    assert "「字节豆包 未单独检索：系统检索词上限 2」" in hint
+    assert "「Doubao 未单独检索：不属于本源语域」" in hint
+    assert "Doubao、字节豆包" not in hint and "Doubao 未单独检索：系统检索词上限" not in hint
     assert "doubao" not in hint
     # 名额没传时不写具体条数；传了写进去（重放 green2：50 条收敛 25 条烧掉 110 s）
     assert "按互动量取前 本章名额" in hint
@@ -99,7 +102,9 @@ def test_抖音卡同形覆盖_Reddit卡换英文语域的词(tmp_path: Path) ->
     reddit = runtime._source_query_hint(_plan(), _agent("data-collection-2", ["reddit"]), ["reddit"])
     # §D-066：Doubao / doubao 按 casefold 去重是同一个叫法，这张卡英文语域只剩一个词，不凑数
     assert "改用 「Doubao」 分别检索" in reddit and "doubao」" not in reddit
-    assert "（豆包、豆包AI、字节豆包）" in reddit
+    # Reddit 卡：中文叫法是语域不同，不是名额不够，不能混写成上限 2
+    assert "「豆包、豆包AI、字节豆包 未单独检索：不属于本源语域」" in reddit
+    assert "系统检索词上限 2」" not in reddit
 
 
 def test_不该带提示的卡(tmp_path: Path) -> None:

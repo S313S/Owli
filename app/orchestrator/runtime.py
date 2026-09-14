@@ -859,7 +859,10 @@ class RuntimeCoordinator:
             return ""
         if getattr(self.store, "_database_path", None) is None:
             return ""  # 源子进程拿不到库就不会换词，提示会说谎
-        from app.adapters.source_mcp import MAX_QUERIES_PER_ENTITY, SourceToolAdapter
+        from app.adapters.source_mcp import (
+            MAX_QUERIES_PER_ENTITY, SourceToolAdapter, _plan_entities, locale_names,
+            query_name_key, source_locale,
+        )
 
         source_id = str(sources[0])
         try:
@@ -874,13 +877,21 @@ class RuntimeCoordinator:
             return ""
         entity = next((item for item in plan.entities if item.id == agent.entity), None)
         names = entity.names if entity is not None else {}
-        searched = {item.casefold() for item in queries}
-        others: list[str] = []
+        # §D-066 续：没检索的叫法按原因分开——同语域排在名额外 vs 本就不属于本源语域。
+        # 语域与候选叫法都问适配层同一套函数，不在这里重判书写系统。
+        _entities, market_profile = _plan_entities(self.store, plan.research_id)
+        locale = source_locale(source_id, market_profile)
+        eligible = {query_name_key(item) for item in locale_names({"names": names}, locale)}
+        searched = {query_name_key(item) for item in queries}
+        over_cap: list[str] = []
+        off_locale: list[str] = []
         for name in [names.get("zh"), names.get("en"), *(names.get("aliases") or [])]:
             text = str(name or "").strip()
-            if text and text.casefold() not in searched:
-                searched.add(text.casefold())
-                others.append(text)
+            key = query_name_key(text)
+            if not text or key in searched:
+                continue
+            searched.add(key)
+            (over_cap if key in eligible else off_locale).append(text)
         tool = f"source.{source_id}"
         cap = MAX_QUERIES_PER_ENTITY
         quoted = "、".join(f"「{item}」" for item in queries)
@@ -903,11 +914,20 @@ class RuntimeCoordinator:
                 f"按互动量取前 {quota} 写进产物即可，评论行随所属笔记保留、不另算名额；"
                 "一次写成、只做一次格式校验，校验报错只改报错处，不要反复重写整个文件。"
             )
-        if others:
+        reasons = [
+            f"「{'、'.join(group)} 未单独检索：{why}」"
+            for group, why in (
+                (over_cap, f"系统检索词上限 {cap}"),
+                (off_locale, "不属于本源语域"),
+            )
+            if group
+        ]
+        if reasons:
+            others = "、".join([*over_cap, *off_locale])
             hint += (
-                f"任务文本里的其他叫法（{'、'.join(others)}）本章不再检索，"
-                "请在 unmet 与结构化缺口里各记一条，写明"
-                f"「{'、'.join(others)} 未单独检索：系统检索词上限 {cap}」。"
+                f"任务文本里的其他叫法（{others}）本章不再检索，"
+                "请在 unmet 与结构化缺口里各记一条，按原因分别写明"
+                f"{'，'.join(reasons)}。"
             )
         return hint
 
