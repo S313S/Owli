@@ -122,6 +122,26 @@ PROTAGONIST_GOAL_KEEP: tuple[str, ...] = ("xhs", "douyin")
 #: 据此知道这张卡「不是本 goal 的实体」，只是对照基线。
 PROTAGONIST_BASELINE_REASON = "protagonist_baseline"
 
+#: §ALLOC-3（用户 2026-09-14 拍 甲/B1/C）：standard 章数无上限，「同层按 goal 序填满」会把
+#: 主角卡全塞第一个点名主角的 goal（WX-1 小跑 r-wx1-0913-1355：八张豆包卡全进「产品画像」，
+#: 「社媒口碑」「媒体评论」两个 goal 零卡）。这里按**源的内容性质**把主角卡投到性质匹配的 goal。
+#: 性质词沿用各源证据行写死的 `content_kind`（`dao._CONTENT_KINDS` 闭集）：小红书/抖音在适配器里、
+#: 微博/公众号在 `precollect.PLATFORM_PROFILES`——`tests/test_alloc3_standard_goal_nature.py` 守一致。
+#: 只列国内四源：B1 拍板海外社区四源（reddit/x/hn/ph）不参与，留在第一个点名主角的 goal。
+SOURCE_NATURE: Mapping[str, str] = {
+    "xhs": "user_opinion", "douyin": "user_opinion", "weibo": "user_opinion",
+    "wechat_mp": "industry_view",
+}
+
+#: 行业/媒体性质词：仓里没有现成词表，新写。口碑词沿用竞品矩阵的「国内用户口碑」维度，见
+#: `_nature_cues`。
+INDUSTRY_VIEW_CUES: tuple[str, ...] = (
+    "媒体", "行业", "分析师", "观察者", "KOL", "报道", "长文", "深度", "公众号",
+)
+
+#: 汇总类 goal（C 拍板）：标题含这些词的 goal 讲的是整合上游，不作性质投递的候选。
+SUMMARY_GOAL_CUES: tuple[str, ...] = ("综合", "研判", "归纳", "整合", "汇总")
+
 
 def protagonist_home_slots(
     profile: ResearchScaleProfile, *, scale: str | None = None,
@@ -248,11 +268,14 @@ def allocate_collections(
         lead, home_sources, competitors = protagonist_plan
         affinity = goal_affinity(scaffolds, entities, subjects)
         if affinity:
-            return _allocate_affine(
+            plan = _allocate_affine(
                 lead, home_sources, competitors, subjects, market_profile, sources,
                 entities, profile, plan, goal_sources, goal_ids, per_goal,
                 collectors, affinity, scale=scale, skipped=skipped, baseline=baseline,
             )
+            if per_goal is None:
+                _route_by_nature(plan, lead, subjects, scaffolds, goal_ids, affinity)
+            return plan
         for source in home_sources:
             chosen, pointer = _place(
                 source, plan, goal_sources, goal_ids, per_goal, profile, pointer,
@@ -577,6 +600,83 @@ def _allocate_affine(
                 "reason": PROTAGONIST_BASELINE_REASON,
             })
     return plan
+
+
+def _nature_cues(source: str) -> tuple[str, ...]:
+    """这个源的性质词 + 平台显示名；不参与性质投递的源返回空。"""
+
+    # 延迟导入：正式稿词表模块会连带拉起 report/reliability/store，规划模块载入时不背这条链。
+    from app.platforms import PLATFORMS
+    from app.report.polish.tables import DIMENSIONS
+
+    nature = SOURCE_NATURE.get(source)
+    if nature == "user_opinion":
+        cues = (*DIMENSIONS["国内用户口碑"], "社媒")
+    elif nature == "industry_view":
+        cues = INDUSTRY_VIEW_CUES
+    else:
+        return ()
+    platform = PLATFORMS.get(source)
+    return (*cues, platform.display_name) if platform is not None else cues
+
+
+def nature_score(scaffold: Mapping[str, Any], source: str) -> int:
+    """goal 与源性质的匹配分：标题含性质词/平台名 = 2，只有 objective 含 = 1，否则 0。"""
+
+    cues = _nature_cues(source)
+    if not cues:
+        return 0
+    if any(cue in str(scaffold.get("title") or "") for cue in cues):
+        return 2
+    if any(cue in str(scaffold.get("objective") or "") for cue in cues):
+        return 1
+    return 0
+
+
+def _route_by_nature(
+    plan: dict[str, list[CollectionSlot]],
+    lead: str,
+    subjects: Sequence[str],
+    scaffolds: Sequence[Mapping[str, Any]],
+    goal_ids: Sequence[str],
+    affinity: Mapping[str, Mapping[str, int]],
+) -> None:
+    """§ALLOC-3：standard 下把已落位的主角卡挪到性质更匹配的 goal（原地改 plan）。
+
+    只挪不增删，`(source, entity)` 集合与挪前完全相同（D-061 闸按全局对匹配，不受影响）。
+    候选 goal = objective 以上点名主角、标题不点名别的实体（竞品 goal 不收主角卡）、标题
+    不是汇总类（C）。候选里取匹配分最高的，**严格高于**这张卡当前所在 goal 才挪（A 甲）；
+    同分取 goal 序靠前的，与当前 goal 同分就留在原处。只在 `per_goal is None` 时调用——
+    fast 每 goal 2 位的摆法是 ALLOC-2 甲-2 定死的，⛔ 不走这里。
+    """
+
+    index = {f"goal-{number}": scaffold for number, scaffold in enumerate(scaffolds, start=1)}
+    candidates = [
+        goal_id for goal_id in goal_ids
+        if affinity.get(goal_id, {}).get(lead, 0) >= 1
+        and not any(
+            affinity.get(goal_id, {}).get(other, 0) == 2 for other in subjects if other != lead
+        )
+        and not any(cue in str(index[goal_id].get("title") or "") for cue in SUMMARY_GOAL_CUES)
+    ]
+    if not candidates:
+        return
+    for goal_id in goal_ids:
+        for slot in list(plan[goal_id]):
+            if slot.entity != lead or slot.source_id not in SOURCE_NATURE:
+                continue
+            best = max(
+                candidates,
+                key=lambda target: (
+                    nature_score(index[target], slot.source_id), -goal_ids.index(target),
+                ),
+            )
+            if nature_score(index[best], slot.source_id) <= nature_score(
+                index[goal_id], slot.source_id,
+            ):
+                continue
+            plan[goal_id].remove(slot)
+            plan[best].append(slot)
 
 
 def _protagonist_first(

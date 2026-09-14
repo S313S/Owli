@@ -1,0 +1,19 @@
+{
+  "canonical": "DeepSeek",
+  "names": {
+    "zh": "深度求索",
+    "en": "DeepSeek",
+    "aliases": [
+      "DS",
+      "深度求索",
+      "deepseek",
+      "DeepSeek-R1"
+    ]
+  },
+  "official_handles": {
+    "x": "deepseek_ai",
+    "weibo": "DeepSeek_AI"
+  },
+  "same_product": true,
+  "note": "DeepSeek（深度求索）是由中国公司深度求索开发的大语言模型及AI助手，代表产品包括DeepSeek-V3、DeepSeek-R1等，与字节跳动旗下的豆包属于不同公司的竞品。"
+}
