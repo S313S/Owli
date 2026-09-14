@@ -252,6 +252,15 @@ async def main() -> int:
             kinds[kind] = kinds.get(kind, 0) + 1
     print(f"\n耗时 {time.time() - T0:.1f}s｜goal {len(plan.goals)}｜章(agent) {chapters} {kinds}"
           f"｜采集卡 {len(cards)}｜移出 {removed or '无'}｜候选 {candidates}")
+    # D-069 挂账读数（不作红）：竞品横向比较 / 综合类 goal 的自带卡数与上游 goal 输入份数。
+    for goal in plan.goals:
+        if goal.goal_id in rivalry_goals or any(c in goal.title for c in SUMMARY_GOAL_CUES):
+            own = sum(1 for g, _s, _e in cards if g == goal.goal_id)
+            upstream_in = sum(1 for a in goal.agents for item in (a.inputs or [])
+                              if isinstance(item, dict) and item.get("from_goal")
+                              and item.get("from_goal") != goal.goal_id)
+            print(f"  [挂账读数] {goal.goal_id}「{goal.title}」自带卡 {own}｜上游 goal 输入 {upstream_in} 份"
+                  f"｜depends={goal.depends_on}")
     for goal in plan.goals:
         sc = by_goal.get(goal.goal_id, {"title": goal.title, "objective": ""})
         scores = {s: nature_score(sc, s) for s in SOURCE_NATURE}
