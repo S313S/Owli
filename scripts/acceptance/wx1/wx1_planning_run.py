@@ -1,4 +1,8 @@
-"""§WX-1 判据 2：standard 档真跑一次**规划期**——主线 goal 含公众号·豆包，D-061/D-062 两闸不退化。
+"""§WX-1 判据 2：standard 档真跑一次**规划期**——口碑 goal 有国内社媒豆包卡、媒体 goal 有公众号·豆包，D-061/D-062 两闸不退化。
+
+rebase 到 712a004（含 ALLOC-3 性质投递、D-065 空 goal 移出）后复验：「哪个 goal 是口碑类/媒体类」
+不另写分类，调生产 `allocation.nature_score` 与 ALLOC-3 同一把尺子；0 章 goal 与 D-065 移出留痕
+用生产 `normalize.empty_goal_removal` 从事件里认。
 
     ../Owli/.venv/bin/python scripts/acceptance/wx1/wx1_planning_run.py var/wx1-run r-wx1-0913-xxxx
 
@@ -89,11 +93,14 @@ def _cards(plan):
 
 import copy  # noqa: E402
 
-from app.plan.allocation import goal_affinity  # noqa: E402
-from app.plan.normalize import _repair_acceptance  # noqa: E402
+from app.plan.allocation import (  # noqa: E402
+    SOURCE_NATURE, SUMMARY_GOAL_CUES, goal_affinity, nature_score,
+)
+from app.plan.normalize import _repair_acceptance, empty_goal_removal  # noqa: E402
 
 LEAD = "豆包"
-HOME = ("xhs", "douyin", "weibo", "wechat_mp")
+USER_OPINION = ("xhs", "douyin", "weibo")
+INDUSTRY_VIEW = ("wechat_mp",)
 
 
 async def main() -> int:
@@ -112,16 +119,14 @@ async def main() -> int:
     for card in entities:
         card.setdefault("id", card.get("canonical"))
     scaffolds = [{"title": g["title"], "objective": g["objective"]} for g in skeleton["goals"]]
+    by_goal = {f"goal-{i}": sc for i, sc in enumerate(scaffolds, start=1)}
     affinity = goal_affinity(scaffolds, entities, subjects)
     cards = _cards(plan)
-    pairs_plan = sorted((s, e) for _, s, e in cards)
-    pairs_alloc = sorted((str(s["source_id"]), str(s["entity"]).strip())
-                         for v in allocation.values() for s in v)
-    lead_goals = [g for g in affinity if affinity[g].get(LEAD, 0) == 2]
-    main_goal = next((g for g in allocation if any(
-        str(s["entity"]).strip() == LEAD for s in allocation[g])), None)
-    main_sources = {s for g, s, e in cards if g == main_goal and e == LEAD}
+    triples_plan = sorted(cards)
+    triples_alloc = sorted((g, str(s["source_id"]), str(s["entity"]).strip())
+                           for g, v in allocation.items() for s in v)
     residual = _repair_acceptance(copy.deepcopy(plan))
+    empty_goals = [goal.goal_id for goal in plan.goals if not goal.agents]
 
     conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     rows = [json.loads(r[0]) for r in conn.execute(
@@ -129,23 +134,62 @@ async def main() -> int:
     conn.close()
     texts = [str((r.get("data") or {}).get("text", "")) for r in rows]
     fixes = [t for t in texts if t.startswith("机械修正") or "[修正" in t]
+    removed = [hit for t in fixes
+               if (hit := empty_goal_removal(t.removeprefix("机械修正：").strip())) is not None]
+
+    # 候选 = objective 以上点名主角、标题不点名别的实体、非汇总标题（与 `_route_by_nature` 同口径）
+    candidates = [
+        g for g, sc in by_goal.items()
+        if affinity.get(g, {}).get(LEAD, 0) >= 1
+        and not any(affinity[g].get(o, 0) == 2 for o in subjects if o != LEAD)
+        and not any(cue in sc["title"] for cue in SUMMARY_GOAL_CUES)
+    ]
+
+    def top_goals(source: str) -> list[str]:
+        scores = {g: nature_score(by_goal[g], source) for g in candidates}
+        best = max(scores.values(), default=0)
+        return [g for g, v in scores.items() if v == best and v > 0]
+
+    def holders(source: str) -> list[str]:
+        return [g for g, s, e in cards if s == source and e == LEAD]
+
+    opinion_goals = sorted({g for s in USER_OPINION for g in top_goals(s)})
+    media_goals = sorted({g for s in INDUSTRY_VIEW for g in top_goals(s)})
+    opinion_ok = bool(opinion_goals) and all(
+        set(holders(s)) & set(top_goals(s)) for s in USER_OPINION)
+    media_ok = bool(media_goals) and all(
+        set(holders(s)) & set(top_goals(s)) for s in INDUSTRY_VIEW)
+    removed_ids = {hit["goal_id"] for hit in removed}
 
     checks = [
-        ("〇 主角是豆包且至少一个 goal 标题点名豆包", bool(lead_goals), f"affinity={affinity}"),
-        ("① 主线 goal 含 小红书/抖音/微博/公众号·豆包 四张卡",
-         set(HOME) <= main_sources, f"{main_goal} 豆包卡源={sorted(main_sources)}"),
-        ("② D-061 不退化：计划采集卡 == 分配表（表外卡 0、缺卡 0）",
-         pairs_plan == pairs_alloc,
-         f"表外={sorted(set(pairs_plan) - set(pairs_alloc))} 缺={sorted(set(pairs_alloc) - set(pairs_plan))}"),
-        ("③ D-062 不退化：最终计划再过验收条闸摘出 0 条", not residual, f"{residual[:3]}"),
+        ("〇 主角是豆包且至少一个 goal 标题点名豆包",
+         any(v.get(LEAD, 0) == 2 for v in affinity.values()), f"affinity={affinity}"),
+        ("① 口碑类 goal（性质分最高）有 小红书/抖音/微博·豆包",
+         opinion_ok, f"口碑类={opinion_goals} 实落={ {s: holders(s) for s in USER_OPINION} }"),
+        ("② 媒体类 goal（性质分最高）有 公众号·豆包",
+         media_ok, f"媒体类={media_goals} 实落={ {s: holders(s) for s in INDUSTRY_VIEW} }"),
+        ("③ 计划里无 0 章 goal（被 D-065 移出的另列）", not empty_goals,
+         f"0 章={empty_goals} 已移出={sorted(removed_ids)}"),
+        ("④ D-061 不退化：每张采集卡的 goal 与分配表相等（表外 0、缺 0；已移出 goal 在表里本就无卡）",
+         triples_plan == triples_alloc,
+         f"表外={sorted(set(triples_plan) - set(triples_alloc))} 缺={sorted(set(triples_alloc) - set(triples_plan))}"),
+        ("⑤ D-062 不退化：最终计划再过验收条闸摘出 0 条", not residual, f"{residual[:3]}"),
     ]
     for label, ok, detail in checks:
         print(f"{'✓' if ok else '×'} {label}" + (f"    {detail}" if detail else ""))
     chapters = sum(len(goal.agents) for goal in plan.goals)
-    print(f"\n耗时 {time.time() - T0:.1f}s｜goal {len(plan.goals)}｜章(agent) {chapters}｜采集卡 {len(cards)}")
+    kinds: dict[str, int] = {}
     for goal in plan.goals:
+        for agent in goal.agents:
+            kind = str(agent.capability.get("profile") or "")
+            kinds[kind] = kinds.get(kind, 0) + 1
+    print(f"\n耗时 {time.time() - T0:.1f}s｜goal {len(plan.goals)}｜章(agent) {chapters} {kinds}"
+          f"｜采集卡 {len(cards)}｜移出 {removed or '无'}｜候选 {candidates}")
+    for goal in plan.goals:
+        sc = by_goal.get(goal.goal_id, {"title": goal.title, "objective": ""})
+        scores = {s: nature_score(sc, s) for s in SOURCE_NATURE}
         print(f"  {goal.goal_id} 「{goal.title}」 depends={goal.depends_on} 章 {len(goal.agents)}"
-              f" 卡 {[(s, e) for g, s, e in cards if g == goal.goal_id]}")
+              f" 性质分 {scores} 卡 {[(s, e) for g, s, e in cards if g == goal.goal_id]}")
     for text in fixes:
         print("  修正:", text[:240])
     return 0 if all(ok for _, ok, _ in checks) else 1
