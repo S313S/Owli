@@ -32,7 +32,7 @@ from app.plan.lint import (
     _SOURCE_MARKET_PROFILES, applicable_sources, duplicate_collection_goal_ids,
     duplicate_entity_errors, lint,
 )
-from app.plan.normalize import normalize_plan
+from app.plan.normalize import empty_goal_removal, normalize_plan
 from app.plan.model import (
     DEFAULT_RETRY_POLICY, Plan, SECTIONED_CHAPTER_KINDS, rating_rows_path,
     rating_task_text,
@@ -1335,11 +1335,18 @@ def _progress_event(research_id: str, text: str) -> NormalizedEvent:
 
 
 async def _emit_repairs(store: Any, research_id: str, repairs: list[str]) -> None:
-    """§PLAN-1 货 2：每条机械修正各发一条事件，工作板与探针都看得见。"""
+    """§PLAN-1 货 2：每条机械修正各发一条事件，工作板与探针都看得见。
+
+    §D-065：「空 goal 移出计划」另带结构化 `empty_goal_removed`，报告附注据此列缺席 goal。
+    """
 
     for note in repairs:
         event = _progress_event(research_id, f"机械修正：{note}")
-        await _emit(store, dataclasses.replace(event, raw={"repair": note}))
+        raw: dict[str, Any] = {"repair": note}
+        removal = empty_goal_removal(note)
+        if removal is not None:
+            raw["empty_goal_removed"] = removal
+        await _emit(store, dataclasses.replace(event, raw=raw))
 
 
 def _entities_event(

@@ -32,11 +32,119 @@ def normalize_plan(
     报告章补一条指向「马上要被删掉那张卡」的 inputs，删完就成了悬空引用。
     2026-09-12 那一轮的现场正是如此：三条规则 26 的修正事件里，DeepSeek 补的
     就是表外那张卡的产物——表外卡不但没被删，下游还把它当合法卡接纳了。
+    空 goal 移除（§D-065）紧跟删卡、同样排在规则 26 之前，且不看 `collection_plan`：
+    一个 0 章 goal 不论怎么来的，留在计划里执行期都会冻结。
     """
 
     return _repair_rule_31_reverse(plan, collection_plan, per_goal_capacity) \
+        + _repair_empty_goals(plan) \
         + _repair_acceptance(plan) \
         + _repair_rule_26(plan)
+
+
+_EMPTY_GOAL_NOTE = re.compile(r"^\[修正31\] (?P<goal_id>\S+)「(?P<title>.*)」一章不剩，已移出计划")
+
+
+def empty_goal_removal(note: str) -> dict[str, str] | None:
+    """从一条修正说明认出「空 goal 移出计划」，给事件 raw 与报告附注用；不是就 None。
+
+    说明文案与这条正则同在本模块，改一边必须改另一边（用例锁着）。
+    """
+
+    match = _EMPTY_GOAL_NOTE.match(note)
+    if match is None:
+        return None
+    return {"goal_id": match["goal_id"], "title": match["title"]}
+
+
+def _repair_empty_goals(plan: Plan) -> list[str]:
+    """0 章 goal 移出计划，下游改接它的上游、摘掉指向它的输入（§D-065）。
+
+    **病根**：删卡闸（`_gate_goal` + `_drop_orphans`）能把一个 goal 的章删光，
+    goal 本身却留着。执行器等它收尾等不到，依赖它的 goal 永不起跑、研究永不
+    completed、报告永不组装，零报错。WX-1 小跑 r-wx1-0913-1355 的 goal-4「口碑」
+    唯一一张卡是表外卡，删完 0 章，goal-6 综合研判还依赖它。
+
+    - `goal.depends_on`：被删 goal 换成它自己的上游（递归穿过连续的空 goal），保序去重。
+      下游的执行顺序约束不丢，只是跳过了一个不会产出任何东西的节点。
+    - `agent.inputs`：摘掉 `from_goal` 是被删 goal 的项——否则 lint 规则 3
+      （from_goal 必须在祖先链里）当场报错；
+    - `chapter.opening.inputs`：摘掉指向那些产物、或落在 `goals/<被删 goal>/` 下的路径。
+      被删 goal 没有章，那个目录下永远不会有文件。
+    - goal_id 不重编号：删除留下的 id 空洞不复用是既有口径（`model.next_goal_id`）。
+    """
+
+    empty = {goal.goal_id: goal for goal in plan.goals if not goal.agents}
+    if not empty:
+        return []
+
+    def upstream(goal_id: str) -> list[str]:
+        result: list[str] = []
+        for dep in empty[goal_id].depends_on:
+            result.extend(upstream(dep) if dep in empty else [dep])
+        return result
+
+    plan.goals = [goal for goal in plan.goals if goal.goal_id not in empty]
+    notes = [
+        f"[修正31] {goal_id}「{goal.title}」一章不剩，已移出计划"
+        "（它的采集卡都不在分配表里被删了，连带的章跟着删光；留着执行期会一直等它）"
+        for goal_id, goal in empty.items()
+    ]
+    rewired: list[str] = []
+    stripped: list[str] = []
+    for goal in plan.goals:
+        deps: list[str] = []
+        for dep in goal.depends_on:
+            for item in (upstream(dep) if dep in empty else [dep]):
+                if item not in deps:
+                    deps.append(item)
+        if deps != list(goal.depends_on):
+            rewired.append(
+                f"{goal.goal_id}（{'、'.join(goal.depends_on)} → {'、'.join(deps) or '无'}）"
+            )
+            goal.depends_on = deps
+        for agent in goal.agents:
+            if _strip_empty_goal_inputs(agent, set(empty)):
+                stripped.append(f"{goal.goal_id}/{agent.agent_id}")
+    if rewired:
+        notes.append(f"[修正31] 以下 goal 的 depends_on 改接被移出 goal 的上游：{'、'.join(rewired)}")
+    if stripped:
+        notes.append(f"[修正31] 以下章摘掉了指向被移出 goal 的输入：{'、'.join(stripped)}")
+    return notes
+
+
+def _strip_empty_goal_inputs(agent: Agent, removed: set[str]) -> bool:
+    dead_paths = {
+        str(item.get("artifact", ""))
+        for item in agent.inputs
+        if isinstance(item, dict) and item.get("from_goal") in removed
+    }
+    changed = False
+    kept = [
+        item for item in agent.inputs
+        if not (isinstance(item, dict) and item.get("from_goal") in removed)
+    ]
+    if len(kept) != len(agent.inputs):
+        agent.inputs = kept
+        changed = True
+    opening = (agent.chapter or {}).get("opening")
+    inputs = opening.get("inputs") if isinstance(opening, dict) else None
+    if isinstance(inputs, list):
+        prefixes = tuple(f"goals/{goal_id}/" for goal_id in removed)
+        kept_opening = [
+            item for item in inputs
+            if not (
+                isinstance(item, dict)
+                and (
+                    str(item.get("path", "")) in dead_paths
+                    or str(item.get("path", "")).startswith(prefixes)
+                )
+            )
+        ]
+        if len(kept_opening) != len(inputs):
+            opening["inputs"] = kept_opening
+            changed = True
+    return changed
 
 
 def _is_collector(agent: Agent) -> bool:

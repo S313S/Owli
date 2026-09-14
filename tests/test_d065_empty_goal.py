@@ -161,3 +161,125 @@ def test_空_goal_的上游失败时照常连带跳过_不被当成_done():
     }
     assert _empty_goal_gates(events) == []
     assert started == ["goal-1"]
+
+
+# ── 规划层（A）──────────────────────────────────────────────────────────
+
+
+def _goal(plan, goal_id):
+    return next(goal for goal in plan.goals if goal.goal_id == goal_id)
+
+
+def _points_at(plan, goal_id: str) -> list[str]:
+    hits: list[str] = []
+    for goal in plan.goals:
+        for agent in goal.agents:
+            for item in agent.inputs:
+                if item.get("from_goal") == goal_id:
+                    hits.append(f"{agent.agent_id}.inputs:{item.get('artifact')}")
+            opening = (agent.chapter or {}).get("opening") or {}
+            for item in opening.get("inputs", []):
+                if str(item.get("path", "")).startswith(f"goals/{goal_id}/"):
+                    hits.append(f"{agent.agent_id}.opening:{item.get('path')}")
+    return hits
+
+
+def test_wx1_真夹具_规划层移出空_goal_下游改接且_lint_全过():
+    from app.plan.lint import lint
+    from app.plan.normalize import empty_goal_removal, normalize_plan
+
+    plan = _wx1_plan()
+    assert _points_at(plan, "goal-4")  # 尺子通电：旧计划确有指向 goal-4 的输入
+
+    notes = normalize_plan(plan)
+
+    assert [goal.goal_id for goal in plan.goals] == [
+        "goal-1", "goal-2", "goal-3", "goal-5", "goal-6",
+    ]
+    assert _goal(plan, "goal-6").depends_on == ["goal-1", "goal-5"]
+    assert _goal(plan, "goal-5").depends_on == ["goal-1", "goal-2", "goal-3"]
+    assert _points_at(plan, "goal-4") == []
+    removals = [empty_goal_removal(note) for note in notes]
+    assert [item for item in removals if item] == [
+        {"goal_id": "goal-4", "title": "国内社媒与用户口碑对豆包的评价采集"},
+    ]
+    assert any("goal-6（goal-4、goal-5 → goal-1、goal-5）" in note for note in notes)
+    assert any("goal-6/data-cleaning-6" in note for note in notes)
+    allocation = json.loads(
+        (FIXTURE.parent / "plan-segments" / "allocation.json").read_text(encoding="utf-8")
+    )
+    assert lint(plan, collection_plan=allocation)["errors"] == []
+    assert normalize_plan(plan) == []  # 章级第二次 normalize 不再重复留痕
+
+
+def test_最小夹具_规划层移出空_goal_再交_scheduler_照常完成():
+    from app.plan.normalize import normalize_plan
+
+    plan = _minimal_plan()
+    notes = normalize_plan(plan)
+
+    assert [goal.goal_id for goal in plan.goals] == ["goal-1", "goal-3"]
+    last = _goal(plan, "goal-3")
+    assert last.depends_on == ["goal-1"]
+    assert last.agents[0].inputs == [
+        {"from_goal": "goal-1", "artifact": "goals/goal-1/agent-1.md"},
+    ]
+    assert last.agents[0].chapter["opening"]["inputs"] == [
+        {"path": "goals/goal-1/agent-1.md"},
+    ]
+    assert notes[0].startswith("[修正31] goal-2「阶段 2 证据产物」一章不剩，已移出计划")
+
+    scheduler, events, started = asyncio.run(_drive_to_idle(plan))
+    assert scheduler.status == "completed"
+    assert scheduler.goal_statuses == {"goal-1": "done", "goal-3": "done"}
+    assert started == ["goal-1", "goal-3"]
+
+
+def test_连续空_goal_改接穿透到非空上游():
+    from app.plan.model import Plan
+    from app.plan.normalize import normalize_plan
+
+    source = make_plan_dict()
+    goals = [make_goal(number) for number in range(1, 5)]
+    goals[1]["agents"] = []
+    goals[2]["agents"] = []
+    goals[3]["depends_on"] = ["goal-3", "goal-1"]
+    source["goals"] = goals
+    source["baseline"] = None
+    plan = Plan.from_dict(source)
+
+    normalize_plan(plan)
+
+    assert [goal.goal_id for goal in plan.goals] == ["goal-1", "goal-4"]
+    assert _goal(plan, "goal-4").depends_on == ["goal-1"]
+
+
+def test_没有空_goal_时规划层一条不动():
+    from app.plan.model import Plan
+    from app.plan.normalize import _repair_empty_goals
+
+    source = make_plan_dict()
+    source["baseline"] = None
+    plan = Plan.from_dict(source)
+    before = plan.to_dict()
+
+    assert _repair_empty_goals(plan) == []
+    assert plan.to_dict() == before
+
+
+def test_空_goal_修正事件带结构化记录_别的修正不带():
+    from app.plan.generate import _emit_repairs
+
+    captured: list[Any] = []
+
+    class Sink:
+        def on_plan_event(self, event):
+            captured.append(event)
+
+    asyncio.run(_emit_repairs(Sink(), "r-x", [
+        "[修正31] goal-4「口碑」一章不剩，已移出计划（原因）",
+        "[修正31] goal-1/x 采集卡「weibo·豆包」不在分配表里，已删除",
+    ]))
+
+    assert captured[0].raw["empty_goal_removed"] == {"goal_id": "goal-4", "title": "口碑"}
+    assert "empty_goal_removed" not in captured[1].raw
