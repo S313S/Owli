@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 平台采集与「Doubao」「豆包」相关的官方账号推文、行业观察者点评、产品发布追踪与海外传播讨论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、tweet_text、like_count、retweet_count、reply_count、created_at 字段，用于抓取豆包发布节奏与海外声量。",
+    "acceptance": [
+      "输出为顶层数组的 JSON 文件，写入 goals/goal-1/data-collection-6.json",
+      "每条记录包含 permalink、fetched_at、author、tweet_text、like_count、retweet_count、reply_count、created_at 全部字段且非空",
+      "内容围绕「Doubao」「豆包」相关的官方账号推文、行业观察者点评、产品发布追踪与海外传播讨论",
+      "覆盖豆包发布节奏与海外声量的关键讨论，去重且 permalink 可访问"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-6.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "X",
+      "language_scope": [
+        "中文",
+        "英文"
+      ],
+      "content_types": [
+        "官方账号推文",
+        "行业观察者点评",
+        "产品发布追踪",
+        "海外传播讨论"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "tweet_text",
+        "like_count",
+        "retweet_count",
+        "reply_count",
+        "created_at"
+      ],
+      "keywords": [
+        "Doubao",
+        "豆包"
+      ],
+      "purpose": "抓取豆包发布节奏与海外声量"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "以清洗后的多源数据为输入，对「豆包」「Doubao」「豆包AI」「豆包大模型」的产品定位、能力矩阵、版本时间线、用户规模、商业化路径关键事实点进行跨源比对，输出节化对象含 aligned_facts、divergences、adjudication_notes 三节，分歧优先采纳官方发布与长文本证据并注明来源编号。",
+    "acceptance": [
+      "输出为单一 JSON 对象且包含 aligned_facts、divergences、adjudication_notes 三节",
+      "aligned_facts 覆盖产品定位、能力矩阵、版本时间线、用户规模、商业化路径五个维度",
+      "divergences 每条列明冲突事实、涉及来源编号与差异幅度",
+      "adjudication_notes 明确采纳规则并优先采信官方发布与长文本证据",
+      "所有事实点均可追溯至输入的 data-collection 章来源编号"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "aligned_facts",
+        "divergences",
+        "adjudication_notes"
+      ],
+      "dimensions": [
+        "产品定位",
+        "能力矩阵",
+        "版本时间线",
+        "用户规模",
+        "商业化路径"
+      ],
+      "adjudication_priority": [
+        "官方发布",
+        "长文本证据",
+        "多源一致",
+        "时间就近"
+      ],
+      "source_traceability": "每条事实需注明 data-collection 来源编号",
+      "aliases": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ]
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的官方通稿、媒体报道、KOL 评述与用户讨论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、weibo_text、repost_count、comment_count、like_count、publish_time 字段，覆盖豆包版本迭代与用户规模相关公开表述。",
+    "acceptance": [
+      "输出文件为顶层数组的合法 JSON，位于 goals/goal-1/data-collection-3.json",
+      "每条记录包含 permalink、fetched_at、author、weibo_text、repost_count、comment_count、like_count、publish_time 全部字段且非空",
+      "内容覆盖豆包官方通稿、媒体报道、KOL 评述与用户讨论四类来源",
+      "涉及豆包版本迭代与用户规模的公开表述被明确收录",
+      "关键词覆盖「豆包」「豆包AI」「豆包大模型」「Doubao」四种表述",
+      "permalink 为微博平台可访问的原始链接，fetched_at 采用 ISO8601 时间格式"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微博",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "豆包大模型",
+        "Doubao"
+      ],
+      "source_types": [
+        "官方通稿",
+        "媒体报道",
+        "KOL评述",
+        "用户讨论"
+      ],
+      "coverage_focus": [
+        "版本迭代",
+        "用户规模"
+      ],
+      "record_schema": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "weibo_text",
+        "repost_count",
+        "comment_count",
+        "like_count",
+        "publish_time"
+      ],
+      "output_format": "顶层为数组的 JSON"
+    }
+  }
+}

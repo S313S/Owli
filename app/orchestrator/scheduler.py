@@ -591,9 +591,10 @@ class Scheduler:
             self.status = "completed"
 
     async def _settle_goals(self) -> None:
+        await self._settle_empty_goals()
         for goal in self.plan.goals:
             goal_status = self.goal_statuses[goal.goal_id]
-            if goal_status not in {"pending", "running"}:
+            if goal_status not in {"pending", "running"} or not goal.agents:
                 continue
             statuses = [self.agent_statuses[agent.agent_id] for agent in goal.agents]
             if self._chapter_ledger is None and any(
@@ -624,6 +625,32 @@ class Scheduler:
                         continue
                 await self._set_goal_status(goal.goal_id, "awaiting_intervention")
                 await self._create_intervention_card(goal)
+
+    async def _settle_empty_goals(self) -> None:
+        """0 章 goal：上游就绪即判 done，不发核对卡、不走收尾钩子（§D-065）。
+
+        扫到不动为止：空 goal 的上游也可能是空 goal，计划顺序又不保证拓扑序。
+
+        下面那条 `statuses and all(...)` 对空列表恒假，0 章 goal 从前永远停在
+        pending：依赖它的 goal 永不就绪、研究永不 completed、报告永不组装，零报错。
+        ⛔ 不判 skipped——计划里 goal 默认 `on_upstream_failure=skip`，判 skipped
+        会把下游（常常是出最终报告的综合 goal）连带跳掉。没有章可核对，也就不发卡；
+        缺席要可见，所以发一条 `goal_gate` reason=empty_goal。
+        上游失败/跳过的空 goal 仍由 `_propagate_upstream_failures` 照常跳过。
+        """
+
+        changed = True
+        while changed:
+            changed = False
+            for goal in self.plan.goals:
+                if goal.agents or not self._goal_ready(goal):
+                    continue
+                await self._set_goal_status(goal.goal_id, "done")
+                await self._emit({
+                    "type": "goal_gate",
+                    "data": {"goal_id": goal.goal_id, "reason": "empty_goal"},
+                })
+                changed = True
 
     async def _fail_goal(self, goal_id: str, reason: str) -> None:
         if self.goal_statuses[goal_id] in {"done", "failed", "skipped"}:

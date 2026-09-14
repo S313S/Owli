@@ -1,0 +1,100 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "核对全篇对「豆包」「字节跳动」「DeepSeek」「Kimi」四实体称谓是否落入允许叫法闭集，检查同一维度不同来源口径是否自洽，产出不一致清单与建议修订，并对超出闭集的表述给出替换方案",
+    "acceptance": [
+      "四实体的每一处出现均已判定是否落入允许叫法闭集，超出闭集的表述均给出替换方案",
+      "同一维度跨来源口径差异均已列入不一致清单，每条含来源路径、原文摘录与建议修订",
+      "输出文件位于 goals/goal-5/consistency-check-2.md，含称谓闭集、命中/超集统计与修订建议三节"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/consistency-check-2.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动",
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "allowed_alias_sets": {
+        "豆包": [
+          "豆包"
+        ],
+        "字节跳动": [
+          "字节跳动",
+          "ByteDance"
+        ],
+        "DeepSeek": [
+          "DeepSeek",
+          "深度求索"
+        ],
+        "Kimi": [
+          "Kimi",
+          "月之暗面 Kimi"
+        ]
+      },
+      "dimensions_checked": [
+        "产品定位",
+        "模型版本",
+        "价格口径",
+        "用户规模",
+        "功能范围"
+      ],
+      "inconsistency_list_format": [
+        "source_path",
+        "entity",
+        "dimension",
+        "quoted_text",
+        "suggested_revision"
+      ],
+      "out_of_set_handling": "对超出闭集的表述在清单中标注 replacement，并在修订建议节汇总",
+      "cross_reference_sources": [
+        "goals/goal-5/cross-validation-5.json",
+        "goals/goal-5/tagging-2.md",
+        "goals/goal-5/data-cleaning-5.md"
+      ]
+    }
+  }
+}

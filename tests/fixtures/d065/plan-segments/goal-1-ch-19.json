@@ -1,0 +1,41 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于数据清洗与交叉验证结果撰写《豆包产品画像与发展脉络》节化文档，输出对象含 product_positioning、capability_matrix、version_timeline、user_scale、commercialization_paths、source_appendix 六节，每条论述附来源引用编号并回溯到 source_appendix 中的具体采集条目，未覆盖事实以结构化缺口",
+    "acceptance": [
+      "输出 JSON 顶层必须包含 product_positioning、capability_matrix、version_timeline、user_scale、commercialization_paths、source_appendix 六节，缺一不可",
+      "product_positioning/capability_matrix/version_timeline/user_scale/commercialization_paths 每条论述均需附来源引用编号（citation_ids），并可在 source_appendix 中定位到具体采集条目 (goal_id + agent_id + 原始字段)",
+      "source_appendix 为数组，每项含 citation_id、source_path、collection_agent_id、original_snippet、reliability_note，与前五节引用编号一一对应",
+      "对于清洗/交叉验证未覆盖或存在冲突的事实，必须以结构化 gaps 数组列出，字段含 section、missing_fact、reason、suggested_followup，不得以自由文本掩盖",
+      "输出写入 goals/goal-1/doubao_product_profile.json，UTF-8 编码，可被 JSON 解析器直接加载"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/doubao_product_profile.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 6,
+    "notes": {
+      "sections": [
+        "product_positioning",
+        "capability_matrix",
+        "version_timeline",
+        "user_scale",
+        "commercialization_paths",
+        "source_appendix"
+      ],
+      "citation_policy": "每条论述附 citation_ids 数组，编号回溯 source_appendix 具体条目",
+      "gap_policy": "未被数据清洗/交叉验证覆盖的事实以 gaps 数组结构化列出，字段 section/missing_fact/reason/suggested_followup",
+      "upstream_reference": {
+        "cross_validation": "goals/goal-1/cross-validation.json",
+        "data_cleaning": "goals/goal-1/data-cleaning.md"
+      },
+      "encoding": "UTF-8",
+      "format": "JSON"
+    }
+  }
+}

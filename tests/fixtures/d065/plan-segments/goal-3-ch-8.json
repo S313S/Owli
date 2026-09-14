@@ -1,0 +1,40 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "对「DeepSeek」与「Kimi」在产品定位陈述、代表能力描述、口碑标签与国内用户基础四维上做跨源一致性核验，标记同源不同语气与跨源冲突。",
+    "acceptance": [
+      "四维（产品定位陈述、代表能力描述、口碑标签、国内用户基础）均对 DeepSeek 与 Kimi 分别给出跨源一致性判定（一致/部分一致/冲突）。",
+      "对每一处冲突标注涉及的源文件与原文摘录，并区分「同源不同语气」与「跨源冲突」两类标签。",
+      "输出结论写入 goals/goal-3/consistency-check.md，并对未达成一致的条目给出可追溯的证据链。",
+      "notes 中 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五个字段完整覆盖 DeepSeek 与 Kimi 的对照要点。"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/consistency-check.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "positioning": "对照 DeepSeek（开源推理/研究导向）与 Kimi（长上下文对话助手/C 端场景）在各源中的定位陈述差异，标记同源不同语气（如官网正式表述 vs. 媒体宣传）与跨源冲突（如厂商定位 vs. 第三方评测归类）。",
+      "pricing": "核验两者在 API 计费、订阅/免费额度与企业方案上的跨源一致性；对 DeepSeek 低价 API 叙述与 Kimi 免费长上下文叙述的口径差异做冲突/一致判定。",
+      "feature_differences": "以代表能力描述为核心，比较 DeepSeek 在推理/代码/数学与 Kimi 在长文本/联网/文件解析上的能力叙述在不同源之间是否收敛，登记冲突项与含糊表述。",
+      "social_proof": "汇总口碑标签与国内用户基础相关证据（榜单、下载量、活跃用户、媒体口碑），标注跨源数量口径差异与语气极化（褒/贬）分歧。",
+      "strengths_weaknesses": "分别归纳 DeepSeek 与 Kimi 在跨源综述中反复出现的优势/劣势标签，突出同源不同语气（官方口径 vs. 社区评价）与跨源冲突（正向报道 vs. 负向反馈）之处，作为一致性核验结论支撑。"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "对「DeepSeek」与「Kimi」跨源出现的口碑标签、代表能力主张与国内用户基础数据进行交叉验证，输出证据链清单，区分一致证据与冲突证据。",
+    "acceptance": [
+      "覆盖 DeepSeek 与 Kimi 两个实体，且分别引用各自采集章的原始条目",
+      "对每一条待验证主张（口碑标签/能力主张/用户基础数据）至少提供 2 条独立来源的证据链",
+      "输出结果显式区分「一致证据」与「冲突证据」两类，并对冲突证据标注差异幅度与可能原因",
+      "所有引用条目均可追溯到 opening.inputs 中列出的采集章 output.path",
+      "结果写入 goals/goal-3/cross-validation-3.json，并可被下游一致性检查章直接消费"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/cross-validation-3.json"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "validation_dimensions": [
+        "口碑标签",
+        "代表能力主张",
+        "国内用户基础数据"
+      ],
+      "evidence_categories": [
+        "consistent",
+        "conflicting"
+      ],
+      "cross_source_min_sources_per_claim": 2,
+      "conflict_handling": "标注差异幅度、来源可信度与可能原因",
+      "traceability": "每条证据引用 opening.inputs 中的采集章 output.path 与条目 id",
+      "downstream": "goals/goal-3/consistency-check.md"
+    }
+  }
+}

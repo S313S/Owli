@@ -1,0 +1,70 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "消费八条必采清单的原始采集产物，对字段命名、时间格式、重复条目与无关内容进行统一清洗，剔除与「豆包」「Doubao」「豆包AI」「豆包大模型」无关的噪声记录，输出对象含 per_source 分源统计（条目数、时间范围、字段完整率）与 unified_records 统一记录列表，供交叉验证与报告章消费。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-cleaning.md 并可被下游章节读取",
+      "字段命名统一（如 title/url/publish_time/source/content 等），时间格式统一为 ISO8601（YYYY-MM-DDTHH:MM:SSZ 或含时区偏移）",
+      "重复条目（按 URL 或标题+来源）被合并或剔除，剔除策略在 notes 中说明",
+      "剔除与「豆包」「Doubao」「豆包AI」「豆包大模型」无关的噪声记录，保留判定依据字段",
+      "per_source 包含每个来源的条目数、最早/最晚时间范围、关键字段完整率（%）",
+      "unified_records 为统一 schema 的记录数组，可直接供 cross_validation 与 report 章消费"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "goal-1 八条必采清单的原始采集产物清洗",
+      "sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json"
+      ],
+      "aliases": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "field_normalization": {
+        "title": "string",
+        "url": "string",
+        "publish_time": "ISO8601",
+        "source": "string",
+        "author": "string|null",
+        "content": "string",
+        "tags": "array<string>"
+      },
+      "time_format": "ISO8601 (YYYY-MM-DDTHH:MM:SSZ)",
+      "dedup_strategy": "按 url 主键去重；无 url 时按 title+source+publish_time 复合键去重",
+      "noise_filter_rule": "标题与正文均不包含任一别名（豆包/Doubao/豆包AI/豆包大模型）的记录判定为无关噪声并剔除",
+      "output_structure": {
+        "per_source": {
+          "item_count": "int",
+          "time_range": {
+            "min": "ISO8601",
+            "max": "ISO8601"
+          },
+          "field_completeness": "map<field, percent>"
+        },
+        "unified_records": "array<record>"
+      },
+      "downstream": [
+        "cross_validation",
+        "report"
+      ]
+    }
+  }
+}

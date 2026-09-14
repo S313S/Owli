@@ -1,0 +1,58 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗后的观点条目集合，审计不同来源对「豆包」的看法共识与冲突，按能力、体验、生态、价格、内容安全、竞品对比六个主题分组列出共识清单与冲突清单，冲突条目须记录双侧来源、证据摘录与 permalink，用于后续报告的可复核证据链",
+    "acceptance": [
+      "输出文件位于 goals/goal-6/consistency-check-3.md，且严格按能力/体验/生态/价格/内容安全/竞品对比六个主题分节",
+      "每个主题下同时给出「共识清单」与「冲突清单」两个子表，缺失部分需显式标注为空",
+      "冲突条目必须包含双侧来源标识、双侧证据摘录（原文引用）与可点击的 permalink，缺一不可",
+      "所有条目均可回溯至上游清洗结果 goals/goal-6/data-cleaning-6.md 中的观点 ID，形成证据链",
+      "共识与冲突条目的合计数量与清洗后条目总数一致，无遗漏、无重复计入"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/consistency-check-3.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "themes": [
+        "能力",
+        "体验",
+        "生态",
+        "价格",
+        "内容安全",
+        "竞品对比"
+      ],
+      "consensus_fields": [
+        "theme",
+        "claim",
+        "supporting_sources",
+        "evidence_quotes",
+        "permalinks"
+      ],
+      "conflict_fields": [
+        "theme",
+        "claim_a",
+        "claim_b",
+        "source_a",
+        "source_b",
+        "evidence_quote_a",
+        "evidence_quote_b",
+        "permalink_a",
+        "permalink_b",
+        "note"
+      ],
+      "upstream": {
+        "data_cleaning": "goals/goal-6/data-cleaning-6.md"
+      },
+      "evidence_chain": "每条共识/冲突需回链至 data-cleaning-6.md 的观点 ID 与原采集章 permalink",
+      "conflict_requirements": "冲突条目必须双侧同时给出来源、证据摘录与 permalink",
+      "review_ready": true
+    }
+  }
+}

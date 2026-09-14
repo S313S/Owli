@@ -1,0 +1,96 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "doubao_product_profile.json",
+    "description": "豆包产品画像与发展脉络的节化汇总文档，覆盖产品定位、能力矩阵、版本迭代、用户规模、商业化路径与来源附录，作为后续舆论解读的锚点产物。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable 顶层为 object，包含 product_positioning、capability_matrix、version_timeline、user_scale、commercialization_paths、source_appendix 六节，缺口一律以结构化缺口口径对象写入而非留空。",
+    "八条必采清单（小红书、抖音、微博、微信公众号、Reddit、X、HN、Product Hunt）各输出一份顶层为数组的采集 JSON，每条记录包含 permalink 与 fetched_at 字段。",
+    "所有采集与汇总章的任务文本涉及研究实体时只使用允许叫法：豆包→豆包/Doubao/豆包AI/豆包大模型；字节跳动→字节跳动/ByteDance；DeepSeek→深度求索/DeepSeek/deepseek/DeepSeek-R1；Kimi→Kimi智能助手/Kimi/Kimi Chat/kimi/月之暗面Kimi/Kimi.ai。",
+    "HN 数据抓取章采用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 三项固定参数。",
+    "数据清洗章消费全部八份采集产物，输出对象含 per_source 分源统计与 unified_records 统一记录，且剔除与豆包/Doubao/豆包AI/豆包大模型无关的噪声。",
+    "交叉验证章至少给出 3 条跨源可对齐的事实点，对分歧点写入 adjudication_notes 并说明证据优先级。",
+    "报告撰写章输出的六节文档对每条论述附来源引用编号，编号可回溯到 source_appendix 中的具体采集条目。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·豆包",
+      "task": "在小红书采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的产品介绍、上手体验、版本更新解读与商业化玩法笔记，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、note_title、note_body、like_count、collect_count、comment_count、publish_time 字段，用于沉淀豆包在小红书语境下的产品画像素材。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·豆包",
+      "task": "在抖音采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的官方账号视频、产品演示片、KOL 评测与用户口碑短视频，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、video_desc、tags、play_count、like_count、comment_count、publish_time 字段，用于捕捉豆包的定位表达与迭代节点信号。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的官方通稿、媒体报道、KOL 评述与用户讨论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、weibo_text、repost_count、comment_count、like_count、publish_time 字段，覆盖豆包版本迭代与用户规模相关公开表述。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的深度稿件、行业分析、评测长文与商业化路径梳理，输出顶层为数组的 JSON，每条含 permalink、fetched_at、account_name、article_title、article_summary、read_count_bucket、like_count、publish_time 字段，作为能力矩阵与商业化路径的主要长文本来源。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·豆包",
+      "task": "在 Reddit 采集与「Doubao」「豆包」相关的英文讨论帖、海外用户上手评价、能力对比与商业化观察，输出顶层为数组的 JSON，每条含 permalink、fetched_at、subreddit、post_title、post_body、score、num_comments、created_utc 字段，用于补齐豆包的国际视角画像。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·豆包",
+      "task": "在 X 平台采集与「Doubao」「豆包」相关的官方账号推文、行业观察者点评、产品发布追踪与海外传播讨论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、tweet_text、like_count、retweet_count、reply_count、created_at 字段，用于抓取豆包发布节奏与海外声量。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·豆包",
+      "task": "在 Hacker News 使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 参数检索与「Doubao」「豆包」相关的故事及评论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、story_title、story_url、points、num_comments、created_at_i、author 字段，用于沉淀技术社区对豆包的关注度与讨论重点。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Product Hunt 数据抓取·豆包",
+      "task": "在 Product Hunt 采集与「Doubao」「豆包」相关的产品条目、发布页、评论与投票信息，输出顶层为数组的 JSON，每条含 permalink、fetched_at、product_name、tagline、description、upvotes、comment_count、launched_at 字段，用于确认豆包在海外产品社区的定位与曝光度。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "消费八条必采清单的原始采集产物，对字段命名、时间格式、重复条目与无关内容进行统一清洗，剔除与「豆包」「Doubao」「豆包AI」「豆包大模型」无关的噪声记录，输出对象含 per_source 分源统计（条目数、时间范围、字段完整率）与 unified_records 统一记录列表，供交叉验证与报告章消费。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "以清洗后的多源数据为输入，对「豆包」「Doubao」「豆包AI」「豆包大模型」的产品定位、能力矩阵、版本时间线、用户规模、商业化路径关键事实点进行跨源比对，输出节化对象含 aligned_facts、divergences、adjudication_notes 三节，分歧优先采纳官方发布与长文本证据并注明来源编号。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于数据清洗与交叉验证结果撰写《豆包产品画像与发展脉络》节化文档，输出对象含 product_positioning、capability_matrix、version_timeline、user_scale、commercialization_paths、source_appendix 六节，每条论述附来源引用编号并回溯到 source_appendix 中的具体采集条目，未覆盖事实以结构化缺口口径写入。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "report.json",
+    "description": "面向国内社媒与应用商店评论的豆包用户口碑综合报告，含好评点、吐槽点、典型情绪与热门话题四个小节及可回溯样例",
+    "shape": "object"
+  },
+  "acceptance": [
+    "采集章「网页搜索·豆包」输出 JSON 顶层为数组，且每条记录同时包含 permalink 与 fetched_at 两个字段",
+    "所有 agent 的 task 文本在引用豆包时仅使用闭集叫法「豆包」「Doubao」「豆包AI」「豆包大模型」之一，未出现其他实体的叫法",
+    "数据清洗章明确消费上游产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-collection-6.json、goals/goal-1/data-collection-7.json、goals/goal-1/data-collection-8.json 与本 goal 「网页搜索·豆包」产物",
+    "标签章至少覆盖情绪极性、话题类别、平台来源三类标签维度",
+    "交叉验证章跨小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索九个来源比对同一话题在豆包口碑上的一致性并输出冲突清单",
+    "报告撰写章至少含好评点、吐槽点、典型情绪、热门话题四个小节，每小节至少引用 3 条样例 permalink",
+    "本 goal 新增的采集组合与上游 goal-1 的 (source_id, entity) 集合不重叠，且 source_id 均属于 applicable_sources 集合",
+    "当某来源可用条目不足以支撑结论时，报告以结构化缺口口径披露而非编造样本量"
+  ],
+  "agents": [
+    {
+      "name": "网页搜索·豆包",
+      "task": "在网页搜索中检索普通用户对「豆包」「Doubao」「豆包AI」「豆包大模型」的使用体验、吐槽点与好评点，覆盖知乎回答、B 站视频页、应用商店评论页、门户测评稿等中文长文与短评页面；输出顶层为数组，每条至少包含 permalink 与 fetched_at 字段，并保留原文摘录、发布时间、平台与作者标识",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "读取上游 goals/goal-1/data-collection.json（小红书·豆包）、goals/goal-1/data-collection-2.json（抖音·豆包）、goals/goal-1/data-collection-3.json（微博·豆包）、goals/goal-1/data-collection-4.json（微信公众号·豆包）、goals/goal-1/data-collection-5.json（Reddit·豆包）、goals/goal-1/data-collection-6.json（X·豆包）、goals/goal-1/data-collection-7.json（Hacker News·豆包）、goals/goal-1/data-collection-8.json（Product Hunt·豆包），以及本 goal 「网页搜索·豆包」产物；按 permalink 去重、统一时间戳与来源字段、剔除广告与站内推广稿，保留原文摘录与作者标识以供回溯",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "标签",
+      "task": "对清洗后的豆包用户口碑条目逐条打标签，标签维度包括情绪极性（正面／负面／中性）、话题类别（性能与效果、界面与交互、使用场景、价格与会员、生态与集成、内容安全）与平台来源（小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索）；引用主体时仅使用「豆包」「Doubao」「豆包AI」「豆包大模型」",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt 与网页搜索九个来源，比对同一话题在「豆包」相关口碑上的一致性；输出话题→来源的支持度矩阵、共识话题清单与冲突话题清单，并为每条结论保留至少 2 条代表性 permalink 作为证据",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "撰写「国内社媒与用户口碑对豆包的评价」信封形综合报告，包含好评点、吐槽点、典型情绪、热门话题四个小节，每小节引用 3 条以上样例 permalink；结尾附一节将「豆包」与「DeepSeek」「Kimi」在同类话题上的用户口碑做相对坐标对照，数据不足时以结构化缺口口径说明",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

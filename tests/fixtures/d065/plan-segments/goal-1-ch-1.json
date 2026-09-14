@@ -1,0 +1,52 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的产品介绍、上手体验、版本更新解读与商业化玩法笔记，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、note_title、note_body、like_count、collect_count、comment_count、publish_time 字段，用于沉淀豆包在小红书语境下的产品画像",
+    "acceptance": [
+      "输出为顶层数组的 JSON 文件，写入 goals/goal-1/data-collection.json",
+      "每条笔记包含 permalink、fetched_at、author、note_title、note_body、like_count、collect_count、comment_count、publish_time 全部字段且非空缺失需显式标注",
+      "笔记内容与「豆包」「豆包AI」「豆包大模型」「Doubao」相关，涵盖产品介绍、上手体验、版本更新解读与商业化玩法四类主题",
+      "permalink 为小红书笔记的可访问链接，fetched_at 使用 ISO-8601 时间戳",
+      "like_count、collect_count、comment_count 为整数，publish_time 为 ISO-8601 或原始平台时间字符串"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "entity": "豆包",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "豆包大模型",
+        "Doubao"
+      ],
+      "topic_scope": [
+        "产品介绍",
+        "上手体验",
+        "版本更新解读",
+        "商业化玩法"
+      ],
+      "record_schema": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "note_title",
+        "note_body",
+        "like_count",
+        "collect_count",
+        "comment_count",
+        "publish_time"
+      ],
+      "output_format": "顶层为数组的 JSON",
+      "purpose": "沉淀豆包在小红书语境下的产品画像"
+    }
+  }
+}

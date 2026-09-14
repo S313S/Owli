@@ -1736,8 +1736,9 @@ class RuntimeCoordinator:
                 for agent_state in goal_state["agents"]:
                     agent_state["status"] = scheduler.agent_statuses[agent_state["id"]]
             state["progress"] = {
+                # §D-065：0 章 goal 没有章要跑，恢复时算完成（scheduler 续跑也会判 done）。
                 "done": sum(
-                    bool(goal.agents) and all(
+                    all(
                         scheduler.agent_statuses[agent.agent_id] in {"done", "missing"}
                         for agent in goal.agents
                     )

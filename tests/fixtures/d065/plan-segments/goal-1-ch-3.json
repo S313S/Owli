@@ -1,0 +1,54 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在抖音采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的官方账号视频、产品演示片、KOL 评测与用户口碑短视频，输出顶层为数组的 JSON，每条含 permalink、fetched_at、author、video_desc、tags、play_count、like_count、comment_count、publish_time 字段，用于捕捉豆包的定位表达与迭代节点信号。",
+    "acceptance": [
+      "输出为顶层数组的 JSON 文件，路径为 goals/goal-1/data-collection-2.json",
+      "每条记录必须包含 permalink、fetched_at、author、video_desc、tags、play_count、like_count、comment_count、publish_time 九个字段",
+      "采集来源限定于抖音平台，覆盖官方账号视频、产品演示片、KOL 评测与用户口碑短视频四类内容",
+      "关键词覆盖「豆包」「豆包AI」「豆包大模型」「Doubao」四类检索词",
+      "记录能够反映豆包的定位表达与迭代节点信号"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "抖音",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "豆包大模型",
+        "Doubao"
+      ],
+      "content_types": [
+        "官方账号视频",
+        "产品演示片",
+        "KOL 评测",
+        "用户口碑短视频"
+      ],
+      "signal_focus": [
+        "定位表达",
+        "迭代节点信号"
+      ],
+      "record_schema": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "video_desc",
+        "tags",
+        "play_count",
+        "like_count",
+        "comment_count",
+        "publish_time"
+      ],
+      "output_format": "顶层为数组的 JSON"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 采集与「Doubao」「豆包」相关的英文讨论帖、海外用户上手评价、能力对比与商业化观察，输出顶层为数组的 JSON，每条含 permalink、fetched_at、subreddit、post_title、post_body、score、num_comments、created_utc 字段，用于补齐豆包的国际视角画像。",
+    "acceptance": [
+      "输出为顶层数组的 JSON，写入 goals/goal-1/data-collection-5.json",
+      "每条记录包含 permalink、fetched_at、subreddit、post_title、post_body、score、num_comments、created_utc 全部字段",
+      "采集内容聚焦 Reddit 上与 Doubao/豆包 相关的英文讨论帖、海外用户上手评价、能力对比与商业化观察",
+      "permalink 唯一且指向 reddit.com 有效链接，fetched_at 使用 ISO8601 UTC 时间戳",
+      "created_utc 为 Unix 时间戳数值，score 与 num_comments 为整数"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-5.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "reddit",
+      "language": "en",
+      "query_terms": [
+        "Doubao",
+        "豆包",
+        "ByteDance Doubao"
+      ],
+      "focus": [
+        "英文讨论帖",
+        "海外用户上手评价",
+        "能力对比",
+        "商业化观察"
+      ],
+      "dedup_key": "permalink",
+      "time_field": "created_utc"
+    }
+  }
+}

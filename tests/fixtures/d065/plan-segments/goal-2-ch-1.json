@@ -1,0 +1,88 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "为 goal-2 制定字节跳动 AI 战略与资源投入采集的章节顺序、四源覆盖矩阵、交叉验证维度以及报告结构，输出可执行的规划文档并标注对 goal-1 上游产物 goals/goal-1/data-collection.json 等的复用点。",
+    "acceptance": [
+      "输出文件 goals/goal-2/goal-planning.md 存在且为可读的 Markdown",
+      "文档包含章节顺序（采集→交叉验证→比较→报告）与每章依赖关系说明",
+      "文档包含四源覆盖矩阵（官方/媒体/行业报告/社交），并逐源列出候选信息源",
+      "文档包含交叉验证维度清单（战略主张、资源投入金额、组织架构、产品矩阵、时间线）",
+      "文档包含最终报告结构大纲（executive summary/战略/资源/风险/结论）",
+      "文档显式标注对 goal-1 上游产物 goals/goal-1/data-collection.json 至 goals/goal-1/data-collection-8.json 的复用点与复用方式"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/goal-planning.md"
+    },
+    "entities": [
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_order": [
+        "data-collection",
+        "cross_validation",
+        "comparison",
+        "report"
+      ],
+      "four_source_matrix": {
+        "official": [
+          "字节跳动官网",
+          "火山引擎官网",
+          "豆包产品页",
+          "官方公告/招股说明相关披露"
+        ],
+        "media": [
+          "财新",
+          "36氪",
+          "界面新闻",
+          "路透/彭博中文"
+        ],
+        "industry_report": [
+          "IDC",
+          "Gartner",
+          "艾瑞咨询",
+          "沙利文"
+        ],
+        "social": [
+          "微博官方账号",
+          "知乎话题",
+          "脉脉",
+          "小红书讨论"
+        ]
+      },
+      "cross_validation_dimensions": [
+        "战略主张一致性",
+        "资源投入金额（资本开支/研发投入/人才招聘）",
+        "组织架构与治理（Seed/Flow/火山引擎归属）",
+        "产品矩阵与发布节奏",
+        "时间线与里程碑"
+      ],
+      "report_structure": [
+        "executive_summary",
+        "战略定位与愿景",
+        "资源投入（资金/算力/人才）",
+        "组织与治理",
+        "产品与技术矩阵",
+        "风险与不确定性",
+        "结论与展望"
+      ],
+      "reuse_points_from_goal1": {
+        "goals/goal-1/data-collection.json": "复用豆包产品定位与官方信息，作为字节 AI 消费级产品线证据",
+        "goals/goal-1/data-collection-2.json": "复用豆包媒体报道口径，作为战略叙事参照",
+        "goals/goal-1/data-collection-3.json": "复用行业报告对豆包份额的估算，用于推断资源投入产出",
+        "goals/goal-1/data-collection-4.json": "复用社交口碑数据，映射到用户侧对战略执行的反馈",
+        "goals/goal-1/data-collection-5.json": "复用价格/商业化字段，衔接资源投入回收路径",
+        "goals/goal-1/data-collection-6.json": "复用功能差异化条目，反推研发投入方向",
+        "goals/goal-1/data-collection-7.json": "复用竞品对比片段，辅助 goal-2 的战略对标",
+        "goals/goal-1/data-collection-8.json": "复用优劣势总结，作为 SWOT 输入"
+      },
+      "downstream_hooks": [
+        "goals/goal-2/data-collection-9.json 作为 goal-2 主采集产物",
+        "后续 comparison/cross_validation 章需在 opening.inputs 中原文引用上述 output.path"
+      ]
+    }
+  }
+}

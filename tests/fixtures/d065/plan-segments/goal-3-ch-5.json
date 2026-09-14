@@ -1,0 +1,42 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News 检索涉及「DeepSeek」「DeepSeek-R1」的英文讨论，查询固定使用 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000，用于校准「DeepSeek」海外技术圈口碑与国内讨论的落差；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/data-collection-23.json 且顶层为 JSON 数组",
+      "查询参数满足 created_at_i > (当前 UTC epoch - 7776000)、points > 50、hitsPerPage = 1000",
+      "每条记录必须包含 permalink 与 fetched_ 字段",
+      "检索关键词覆盖「DeepSeek」与「DeepSeek-R1」两个英文表述",
+      "仅保留英文讨论，用于对比海外技术圈口碑与国内讨论的落差"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-23.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Hacker News (Algolia Search API)",
+      "query_window_seconds": 7776000,
+      "filters": {
+        "points_gt": 50,
+        "hitsPerPage": 1000,
+        "created_at_i_gt": "execution_time_utc_epoch - 7776000"
+      },
+      "keywords": [
+        "DeepSeek",
+        "DeepSeek-R1"
+      ],
+      "language": "en",
+      "record_required_fields": [
+        "permalink",
+        "fetched_"
+      ],
+      "purpose": "校准 DeepSeek 海外技术圈口碑与国内讨论的落差"
+    }
+  }
+}
