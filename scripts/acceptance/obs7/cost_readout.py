@@ -8,6 +8,9 @@
     按研究号×平台×供应商聚合调用次数；与读侧汇总函数（app.observability.cost）逐字对。
 判据 3（失败轮次，量在 events 表）：
     TikHub/Prowlo 源的 source_unavailable / source_empty 轮次里，没带调用次数的轮数。红 = > 0。
+§OBS-7-fu Codex 标价对照（量在章账本 + 账外路径的 by_engine.codex 分项 token 累计）：
+    按旧 GPT-5 系价与现行 gpt-5.6-terra 价各重算一次（折算对 token 线性，桶累计可直接乘价）；
+    `ledger_estimated_usd` 是账本里当时记下的折算额，旧码写的行应与 old_usd 对上。
 """
 
 from __future__ import annotations
@@ -123,6 +126,46 @@ def verdict_failure_rounds(connection: sqlite3.Connection, research_id: str) -> 
             "red": sum(missing.values()) > 0}
 
 
+TOKEN_FIELDS = ("input_tokens", "cached_input_tokens", "cache_creation_input_tokens",
+                "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens")
+
+
+def verdict_codex_reprice(connection: sqlite3.Connection, research_id: str) -> dict:
+    from app.observability.pricing import ENGINE_PRICES, ModelPrice, estimate_cost_usd  # noqa: PLC0415
+    import app.observability.pricing as pricing  # noqa: PLC0415
+
+    tokens: Counter = Counter()
+    calls = 0
+    ledger_usd = 0.0
+    for _origin, usage in _usage_rows(connection, research_id):
+        bucket = (usage.get("by_engine") or {}).get("codex")
+        if not isinstance(bucket, dict):
+            continue
+        calls += int(bucket.get("calls", 0) or 0)
+        ledger_usd += float(bucket.get("estimated_cost_usd") or 0.0)
+        for key in TOKEN_FIELDS:
+            tokens[key] += int(bucket.get(key, 0) or 0)
+    new_usd = estimate_cost_usd("codex", tokens)
+    # OBS-7 原表：GPT-5 系 1.25 / 0.125 / 10，无缓存写价
+    old_price = ModelPrice(input=1.25, cached_input=0.125, cache_write=0.0, output=10.0,
+                           cached_within_input=True)
+    current = ENGINE_PRICES["codex"]
+    try:
+        pricing.ENGINE_PRICES["codex"] = old_price
+        old_usd = estimate_cost_usd("codex", tokens)
+    finally:
+        pricing.ENGINE_PRICES["codex"] = current
+    return {
+        "codex_calls": calls,
+        "tokens": dict(tokens),
+        "ledger_estimated_usd": round(ledger_usd, 4),
+        "old_usd": round(old_usd or 0.0, 4),
+        "new_usd": round(new_usd or 0.0, 4),
+        "delta_pct": round((new_usd - old_usd) / old_usd * 100, 1) if old_usd else None,
+        "price_model": current.model,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("database", type=Path)
@@ -138,6 +181,11 @@ def main() -> int:
         from app.observability.cost import source_fee_summary  # noqa: PLC0415
     except ImportError:
         source_fee_summary = None
+    try:
+        import app.observability.pricing  # noqa: F401, PLC0415
+        has_pricing = True
+    except ImportError:
+        has_pricing = False
     report = {}
     for research_id in research_ids:
         raw = raw_source_calls(connection, research_id)
@@ -152,6 +200,8 @@ def main() -> int:
             entry["judge2_reader"] = summary
             entry["judge2_match"] = {k: v for k, v in raw.items() if v > 0} == \
                 {k: v for k, v in reader.items() if v > 0}
+        if has_pricing:
+            entry["codex_reprice"] = verdict_codex_reprice(connection, research_id)
         report[research_id] = entry
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
