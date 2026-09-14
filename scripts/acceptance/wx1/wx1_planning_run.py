@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, ".")
 
-QUERY = "国内大家对豆包的看法"
+QUERY = sys.argv[3] if len(sys.argv) > 3 else "国内大家对豆包的看法（对比 DeepSeek、Kimi、文心一言、通义千问）"
 SCALE = "standard"
 HARD_CAP_SECONDS = 30 * 60
 
@@ -96,7 +96,9 @@ import copy  # noqa: E402
 from app.plan.allocation import (  # noqa: E402
     SOURCE_NATURE, SUMMARY_GOAL_CUES, goal_affinity, nature_score,
 )
-from app.plan.normalize import _asks_backfill, _repair_acceptance, empty_goal_removal  # noqa: E402
+import subprocess  # noqa: E402
+
+from app.plan.normalize import _repair_acceptance, empty_goal_removal  # noqa: E402
 
 LEAD = "豆包"
 USER_OPINION = ("xhs", "douyin", "weibo")
@@ -185,13 +187,37 @@ async def main() -> int:
         synthesis_detail[goal_id] = (
             f"章 {len(goal.agents)} 撰写章 {[a.agent_id for a in writers]} 链头 {[a.agent_id for a in heads]}"
             f" 无输入链头 {dry_heads} 上游 goal 输入 {upstream_inputs} depends={goal.depends_on}")
-    stale_backfill = [
-        (goal.goal_id, index, str(item)[:80])
-        for goal in plan.goals
-        if not any(g == goal.goal_id for g, _, _ in cards)
-        for index, item in enumerate(goal.acceptance)
-        if _asks_backfill(str(item))
-    ]
+    # ⑦ 独立尺子（坑 23′：不 import 被测判定函数），子进程跑，读它的 JSON。
+    stale_proc = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("wx1_stale_acceptance.py")), str(OUT)],
+        capture_output=True, text=True)
+    stale = json.loads(stale_proc.stdout or "{}")
+    stale_hits = [(h["goal"], h["index"], h["text"][:60]) for h in stale.get("hits", [])]
+
+    # 竞品：名单与「竞争格局 goal」词表都自己写，不借生产词表。
+    competitors = ("DeepSeek", "Kimi", "文心一言", "通义千问")
+    known = " ".join([*subjects, *(str(c.get("canonical") or "") for c in entities),
+                      *(str((c.get("names") or {}).get(k) or "") for c in entities for k in ("zh", "en"))])
+    missing_competitors = [name for name in competitors if name.lower() not in known.lower()]
+    competitor_cards = {g for g, _s, e in cards if any(n.lower() in e.lower() for n in competitors)}
+    ancestors: dict[str, set[str]] = {}
+    goal_deps = {goal.goal_id: list(goal.depends_on) for goal in plan.goals}
+    for goal_id in goal_deps:
+        seen, stack = set(), list(goal_deps[goal_id])
+        while stack:
+            item = stack.pop()
+            if item not in seen:
+                seen.add(item)
+                stack.extend(goal_deps.get(item, []))
+        ancestors[goal_id] = seen
+    rivalry_cues = ("竞争", "竞品", "对比", "格局", "对标")
+    rivalry_goals = [goal.goal_id for goal in plan.goals if any(c in goal.title for c in rivalry_cues)]
+    rivalry_detail = {
+        g: {"自带竞品卡": g in competitor_cards, "上游竞品卡 goal": sorted(ancestors[g] & competitor_cards)}
+        for g in rivalry_goals
+    }
+    rivalry_ok = bool(rivalry_goals) and all(
+        d["自带竞品卡"] or d["上游竞品卡 goal"] for d in rivalry_detail.values())
 
     checks = [
         ("〇 主角是豆包且至少一个 goal 标题点名豆包",
@@ -208,8 +234,13 @@ async def main() -> int:
         ("⑤ D-062 不退化：最终计划再过验收条闸摘出 0 条", not residual, f"{residual[:3]}"),
         ("⑥ D-067：综合 goal 保留、撰写章在、链头都有输入（骨架无综合 goal 则本条无靶子记红）",
          bool(synthesis_skel) and synthesis_ok, f"综合={synthesis_skel} {synthesis_detail}"),
-        ("⑦ D-067：无自带卡的 goal 上没有「补采产物」验收条（生产 _asks_backfill）",
-         not stale_backfill, f"{stale_backfill[:3]}"),
+        ("⑦ D-068：空心 goal 无「要本 goal 采集产物」验收条（独立尺子 wx1_stale_acceptance.py）",
+         stale_proc.returncode == 0 and not stale_hits,
+         f"exit={stale_proc.returncode} 命中={stale_hits[:4]} stderr={stale_proc.stderr[-200:]}"),
+        ("⑧ subjects 含四家竞品（自写名单）", not missing_competitors,
+         f"subjects={subjects} 缺={missing_competitors}"),
+        ("⑨ 竞争格局 goal 有竞品采集卡或上游竞品产物（自写词表）", rivalry_ok,
+         f"竞争格局 goal={rivalry_goals} {rivalry_detail} 带竞品卡 goal={sorted(competitor_cards)}"),
     ]
     for label, ok, detail in checks:
         print(f"{'✓' if ok else '×'} {label}" + (f"    {detail}" if detail else ""))
