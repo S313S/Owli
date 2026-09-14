@@ -297,17 +297,75 @@ def subject_canonicals(plan: Mapping[str, Any]) -> list[str]:
     此时本来也没有单一主角）；⒝ 题面用的叫法实体卡没收录（题面写「字节的豆包」
     而卡里只有「豆包」仍能命中，因为是包含匹配；真失灵的是题面只用了某个
     卡外别名的情形）。**走兜底时竞品原声仍会进池**——这条限制是已知的，不是漏网。
+
+    **§D-069：题面里「对比 X」的 X 是对照，不是主角。** 用户把竞品写进题面
+    （「国内大家对豆包的看法（对比 DeepSeek、Kimi、文心一言、通义千问）」）后，
+    旧判法五家全算主角，分配表「恰好一个主角」不成立、整张退回轮转，原声闸也把
+    竞品叫法放了进来。现在先把比较标记**管辖的片段**遮掉，只在剩下的字里认主角
+    （遮法见 `_without_comparisons`）：
+      · 前缀标记「对比 / 对照 / 对标 / 相比 / 相较 / 比较 / 竞品 / vs」之后、到
+        分句符或右括号为止的实体是对照——「（对照：A）」「豆包 vs A」「相较于 A，豆包…」；
+      · 夹心「与 / 和 / 跟 / 同 … 相比 / 相较 / 比较 / 对比 / 对照 / 比」中间的实体
+        是对照——「与 A 相比，豆包…」「豆包和 A 比哪个好」。
+    **对称比较**（「豆包 vs DeepSeek」）只认标记**前**那家：题面写在前面的是用户
+    关心的那家（调度倾向、本包拍定）。没有比较标记的并列（「豆包和 DeepSeek 谁更好」）
+    仍两家都算主角——那句话里用户没有说谁是对照。
+    同一实体只要在遮罩外还被点到一次就仍是主角（「豆包（对比 Kimi 与豆包 Pro）」）。
+    **遮掉对照后一个主角都不剩**（「对比 A 和 B」）⇒ 返回空表、走上面的兜底，不另发明规则。
+    ⚠️ 「比较」也是副词（「大家比较喜欢 Kimi 吗」会把 Kimi 当对照）：此时若题面再没
+    别的实体就走兜底，与改前行为一样宽；这是保留「比较」这个标记的已知代价。
     """
 
     from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
 
-    topic = " ".join(str(plan.get(key) or "") for key in ("research_question", "title"))
-    if not topic.strip():
+    fields = [str(plan.get(key) or "") for key in ("research_question", "title")]
+    if not any(field.strip() for field in fields):
         return []
+    # 逐字段遮：前缀标记管到分句符为止，拼起来再遮会让它越过字段边界吞掉 title 里的主角。
+    topic = " ".join(_without_comparisons(field) for field in fields)
     return sorted(
         canonical for canonical, names in _entity_aliases(plan).items()
         if any(mentions(topic, name) for name in names if len(str(name).strip()) >= 2)
     )
+
+
+#: 比较标记管辖到这些字为止：分句符与右括号（「（对比 A、B）豆包…」里的豆包不被吞）。
+_COMPARISON_STOP = "，,。；;！？!?\n）)】]」』"
+_COMPARISON_PREFIX = re.compile(
+    r"对比|对照|对标|相比|相较|比较|竞品|(?<![0-9A-Za-z])(?:vs|versus)\.?(?![0-9A-Za-z])",
+    re.IGNORECASE,
+)
+#: 夹心中段可以再含「和/与」——「与 DeepSeek 和 Kimi 相比」两家都得遮；代价是从分句里
+#: **最左**的开头字起算，「豆包和字节跳动的产品与 Kimi 相比」会把字节跳动一起遮掉（主角豆包
+#: 在开头字之前，不受影响）。中段不跨分句符与左括号。
+_COMPARISON_CIRCUMFIX = re.compile(
+    r"(?:与|和|跟|同)([^" + re.escape(_COMPARISON_STOP + "（(【[「『") + r"]*?)"
+    r"(相比|相较|比较|对比|对照|比(?!例|率|重|分|如))"
+)
+
+
+def _without_comparisons(text: str) -> str:
+    """把题面里比较标记管辖的片段换成**等长空格**，剩下的字才用来认主角。§D-069。
+
+    换空格而不是删掉：拉丁名的词边界判定（`mentions`）要看左右邻字，空格是非字母数字，
+    不会把「A vs B」拼成「AB」凭空造出命中；等长只为调试时两串能对齐看。
+    夹心先判：它的尾标记（「相比」「比较」…）已被夹心占用，不再当前缀往后吞——否则
+    「与 A 相比豆包怎么样」会连豆包一起遮掉。
+    """
+
+    masked = list(text)
+    closers: set[int] = set()
+    for match in _COMPARISON_CIRCUMFIX.finditer(text):
+        masked[match.start(1):match.end(1)] = " " * (match.end(1) - match.start(1))
+        closers.add(match.start(2))
+    for match in _COMPARISON_PREFIX.finditer(text):
+        if match.start() in closers:
+            continue
+        end = match.end()
+        while end < len(text) and text[end] not in _COMPARISON_STOP:
+            end += 1
+        masked[match.end():end] = " " * (end - match.end())
+    return "".join(masked)
 
 
 def quote_gate_names(plan: Mapping[str, Any]) -> list[str]:
