@@ -173,9 +173,17 @@ def _repair_rule_31_reverse(
     多起草的卡一条规则都不违反，静默通过、真去采数。微博这类读池薄源命中口径宽，
     采回来的一多半是别家旧批次的语料，却被当成这个实体的证据入库。
 
-    口径（用户 09-12 经调度代拍）：
-    - **删卡按全局 `(source_id, entity)` 匹配**，不按 goal 内比对——规则 31 明写
-      允许挪 goal，按 goal 比会把合法挪过去的卡误删。
+    口径（用户 09-12 经调度代拍；§ALLOC-3 用户 09-14 拍甲收紧第一条）：
+    - **删卡按全局 `(source_id, entity)` 匹配**：不在表里 ⇒ 删（表外卡）。
+    - **同一对建在两个 goal、其中一个正是表里那个 goal、且它不在另一个的上游** ⇒ 删另一个
+      goal 那张，留表里那个 goal 的卡。表里那个 goal 在上游时不动，交规则 21「下游改引用上游
+      产物」；表里那个 goal 没建时也不动（允许挪 goal 的原口径照旧）。
+      为什么是这条而不是一律按 goal 删：standard 主角卡按性质分到非首个 goal 之后
+      （ALLOC-3），先起草的 goal 自加的清单外卡正好撞上后面 goal 的表内对，全局匹配
+      把它当合法卡留下，规则 21 再「保先出现者」让表里那个 goal 删掉自己的卡——
+      小跑 r-alloc3-0914-a 微博/公众号·豆包就这样全落回「产品基础」goal-1。一律按 goal 删
+      （表里那个 goal 没建也删、交规则 31 打回）实测打红 19 条整链用例：挪了 goal 的卡被删、
+      重生那个 goal 时上游清单还列着这张卡叫它「禁止重复」，三轮收不敛就整份计划作废。
     - **容量按每 goal 的采集卡数**，⛔ 不去收紧 `max_chapters_per_goal`：章数闸
       连非采集章一起数，收紧它会误伤报告章。实测 fast 那一格 4 章（3 采集 + 1 撰写）
       章数闸 4≤4 刚好过，采集位 3>2 却没人守——病不在章数上。
@@ -186,17 +194,48 @@ def _repair_rule_31_reverse(
 
     if not collection_plan:
         return []
-    table = {
-        (str(slot.get("source_id", "")), str(slot.get("entity", "")).strip())
-        for slots in collection_plan.values() for slot in slots
+    # (source_id, entity) → 表里归哪个 goal。分配表保证一对全计划只出现一次；万一重复取先出现的。
+    owners: dict[tuple[str, str], str] = {}
+    for goal_id, slots in collection_plan.items():
+        for slot in slots:
+            owners.setdefault(
+                (str(slot.get("source_id", "")), str(slot.get("entity", "")).strip()),
+                str(goal_id),
+            )
+    present = {
+        (goal.goal_id, _slot_key(agent)) for goal in plan.goals for agent in goal.agents
+        if _is_collector(agent)
     }
+    ancestors = _goal_ancestors(plan)
     notes: list[str] = []
     dropped: set[str] = set()
     for goal in plan.goals:
-        notes.extend(_gate_goal(goal, table, capacity, dropped))
+        notes.extend(_gate_goal(goal, owners, capacity, dropped, present, ancestors))
     if dropped:
         notes.extend(_drop_orphans(plan, dropped))
     return notes
+
+
+def _goal_ancestors(plan: Plan) -> dict[str, set[str]]:
+    """每个 goal 的全部上游（按 goal.depends_on 传递闭包）。"""
+
+    direct = {goal.goal_id: set(goal.depends_on) for goal in plan.goals}
+    result: dict[str, set[str]] = {}
+
+    def walk(goal_id: str, seen: frozenset[str]) -> set[str]:
+        if goal_id in result:
+            return result[goal_id]
+        found: set[str] = set()
+        for dep in direct.get(goal_id, set()):
+            if dep in seen:
+                continue
+            found |= {dep} | walk(dep, seen | {dep})
+        result[goal_id] = found
+        return found
+
+    for goal_id in direct:
+        walk(goal_id, frozenset({goal_id}))
+    return result
 
 
 def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
@@ -246,9 +285,10 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     return notes
 
 
-def _gate_goal(goal: Goal, table: set[tuple[str, str]], capacity: int | None,
-               dropped: set[str]) -> list[str]:
-    """一个 goal 的三道口：表外删、重复去、超容量截。非采集卡一律原样留着。
+def _gate_goal(goal: Goal, owners: Mapping[tuple[str, str], str], capacity: int | None,
+               dropped: set[str], present: set[tuple[str, tuple[str, str]]],
+               ancestors: Mapping[str, set[str]]) -> list[str]:
+    """一个 goal 的四道口：表外删、归错 goal 删、重复去、超容量截。非采集卡一律原样留着。
 
     被删卡的 agent_id 记进 `dropped`，交给 `_drop_orphans` 做连带收口。
     """
@@ -271,10 +311,22 @@ def _gate_goal(goal: Goal, table: set[tuple[str, str]], capacity: int | None,
             # 「分配的采集对未落实」，计划连生都生不出来。
             kept.append(agent)
             continue
-        if key not in table:
+        if key not in owners:
             notes.append(
                 f"[修正31] {where} 采集卡「{source}·{entity}」不在分配表里，已删除"
                 "（分配表是闸不是建议；表外源采回来的多是别家批次的语料）"
+            )
+            dropped.add(agent.agent_id)
+            continue
+        owner = owners[key]
+        if (
+            owner != goal.goal_id
+            and (owner, key) in present
+            and owner not in ancestors.get(goal.goal_id, set())
+        ):
+            notes.append(
+                f"[修正31] {where} 采集卡「{source}·{entity}」分配表归 {owner}、"
+                f"{owner} 也建了且不在本 goal 上游，本 goal 这张已删除（留表里那个 goal 的卡）"
             )
             dropped.add(agent.agent_id)
             continue
