@@ -1,0 +1,16 @@
+{
+  "canonical": "文心一言",
+  "names": {
+    "zh": "文心一言",
+    "en": "ERNIE Bot",
+    "aliases": [
+      "文心",
+      "ERNIE",
+      "百度文心",
+      "一言"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "百度推出的生成式对话大模型产品，基于文心（ERNIE）大模型，对标 ChatGPT。"
+}

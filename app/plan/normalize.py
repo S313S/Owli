@@ -12,7 +12,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
-from app.plan.model import Agent, Goal, Plan
+from app.plan.model import Agent, Goal, Plan, rated_collector_id
 
 
 def normalize_plan(
@@ -249,8 +249,14 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     判「孤儿」不看 kind 看依赖：`depends_on` 非空、且**每一个**上游都已被删，
     就是真的没有输入了。报告章依赖的是全部评级章，删掉其中一个还剩别的，
     不会被这一条误伤。级联到不动为止（卡 → 评级章 → 再往下）。
+
+    **例外（§D-067）**：综合 goal 自带的采集卡全是表外卡时，上面这条会把它的
+    审计 / 交叉 / 撰写章一路连删、goal 被 D-065 移出，研究丢了跨 goal 综合层
+    （WX-1 小跑 r-wx1-0914-1239 的 goal-4）。这些章本来就该吃上游 goal 的产物，
+    断的只是「本 goal 自带卡」那条腿——见 `_synthesis_rescue`。
     """
 
+    rescued = _synthesis_rescue(plan, dropped)
     notes: list[str] = []
     changed = True
     while changed:
@@ -259,7 +265,7 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
             kept: list[Agent] = []
             for agent in goal.agents:
                 deps = list(agent.depends_on)
-                if deps and all(dep in dropped for dep in deps):
+                if deps and all(dep in dropped for dep in deps) and agent.agent_id not in rescued:
                     dropped.add(agent.agent_id)
                     notes.append(
                         f"[修正31] {goal.goal_id}/{agent.agent_id} 的上游采集卡已删、"
@@ -273,7 +279,11 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     # 事件刷屏，而这一步本身是上面那几条删除的必然后果，不是独立决定。
     rewired: list[str] = []
     for goal in plan.goals:
+        if goal.goal_id in rescued.values():
+            notes.append(_rewire_to_upstream_goals(plan, goal, set(rescued), dropped))
         for agent in goal.agents:
+            if agent.agent_id in rescued:
+                continue
             remaining = [dep for dep in agent.depends_on if dep not in dropped]
             if remaining != list(agent.depends_on):
                 agent.depends_on = remaining
@@ -283,6 +293,120 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
             f"[修正31] 以下章的 depends_on 摘掉了已删卡：{'、'.join(rewired)}"
         )
     return notes
+
+
+def _synthesis_rescue(plan: Plan, dropped: set[str]) -> dict[str, str]:
+    """§D-067：哪些章不该跟着删卡连删——返回 {agent_id: goal_id}。
+
+    判据是 goal 级的（先把级联在 id 上模拟到不动，不改计划）：
+    - goal 有上游 goal（`goal.depends_on` 非空）——没有上游就没有可改接的输入，维持删除 + D-065 移出；
+    - 本 goal 的「综合章」（非采集卡、非只评一张卡的评级章）**全部**会被连删。
+      只断了一部分（别的卡还在、链还通）不救，与旧行为逐字相同。
+
+    评级章照删：它的产物契约就是那一张卡的库行（`rated_collector_id`），卡没了它无物可评。
+    """
+
+    doomed = set(dropped)
+    changed = True
+    while changed:
+        changed = False
+        for goal in plan.goals:
+            for agent in goal.agents:
+                deps = list(agent.depends_on)
+                if agent.agent_id not in doomed and deps and all(dep in doomed for dep in deps):
+                    doomed.add(agent.agent_id)
+                    changed = True
+    rescued: dict[str, str] = {}
+    for goal in plan.goals:
+        if not goal.depends_on:
+            continue
+        collectors = set(dropped) | {agent.agent_id for agent in goal.agents if _is_collector(agent)}
+        deliverable = str((goal.deliverable or {}).get("path", ""))
+        synthesis = [
+            agent for agent in goal.agents
+            if not _is_collector(agent)
+            and not rated_collector_id(
+                output=agent.output, depends_on=agent.depends_on,
+                deliverable_path=deliverable, collector_ids=collectors,
+            )
+        ]
+        if synthesis and all(agent.agent_id in doomed for agent in synthesis):
+            rescued.update({agent.agent_id: goal.goal_id for agent in synthesis})
+    return rescued
+
+
+def _rewire_to_upstream_goals(plan: Plan, goal: Goal, rescued: set[str], dropped: set[str]) -> str:
+    """§D-067：被救下的综合章改接上游 goal 产物，返回一条 [修正31] 留痕。
+
+    输入口径**沿用 `generate._build_plan` 给 goal 首章的那一套**（不另写）：上游 goal
+    的交付物（按 `goal.depends_on` 顺序）+ 传递上游 goal 里的采集章产物。删卡之前这份输入
+    挂在本 goal 首章——正是那张表外卡——卡一删输入跟着没了。这里从删卡后的计划重算，
+    被删的上游卡自然不在里面，不会引出悬空路径。
+    - 链头（依赖全被删的章）：`depends_on` 清空，inputs 接上面整份；
+    - 交付物章（产物 = goal.deliverable.path，即报告撰写章）：inputs 补上游 goal 交付物——
+      综合报告要直接看得见各上游 goal 的结论，不只看本 goal 的一致性检查；
+    - 其余救下的章只摘掉指向已删 id 的依赖（它们接的是链头，链头已有输入）。
+    章规格已生成时（`chapter.opening.inputs`）同步补路径；生成期首轮 normalize 时还没有章规格，
+    章规格按 `agent.inputs` 派生（`chapters._declared_inputs`）。
+    """
+
+    by_goal = {item.goal_id: item for item in plan.goals}
+    deliverables = [
+        {"from_goal": dep, "artifact": str(by_goal[dep].deliverable.get("path", ""))}
+        for dep in goal.depends_on
+        if dep in by_goal and str((by_goal[dep].deliverable or {}).get("path", ""))
+    ]
+    ancestors = _goal_ancestors(plan).get(goal.goal_id, set())
+    collected = [
+        {"from_goal": item.goal_id, "artifact": str(agent.output.get("path", ""))}
+        for item in plan.goals if item.goal_id in ancestors
+        for agent in item.agents
+        if agent.capability.get("sources") and str(agent.output.get("path", ""))
+    ]
+    deliverable_path = str((goal.deliverable or {}).get("path", ""))
+    heads: list[str] = []
+    fed: list[str] = []
+    for agent in goal.agents:
+        if agent.agent_id not in rescued:
+            continue
+        deps = list(agent.depends_on)
+        remaining = [dep for dep in deps if dep not in dropped]
+        agent.depends_on = remaining
+        if deps and not remaining:
+            _merge_inputs(agent, deliverables + collected)
+            heads.append(agent.agent_id)
+        elif str(agent.output.get("path", "")) == deliverable_path:
+            _merge_inputs(agent, deliverables)
+            fed.append(agent.agent_id)
+    kept = [agent.agent_id for agent in goal.agents if agent.agent_id in rescued]
+    parts = [f"链头 {'、'.join(heads)} 的 depends_on 清空，inputs 接上游交付物 {len(deliverables)} 份"
+             f" + 上游采集产物 {len(collected)} 份"] if heads else []
+    if fed:
+        parts.append(f"交付物章 {'、'.join(fed)} 的 inputs 补上游交付物")
+    return (
+        f"[修正31] {goal.goal_id}「{goal.title}」自带的采集卡已删，但它依赖上游 goal"
+        f"（{'、'.join(goal.depends_on)}）：综合章 {'、'.join(kept)} 不删、改接上游 goal 产物"
+        f"（{'；'.join(parts) or '无需改接'}）"
+    )
+
+
+def _merge_inputs(agent: Agent, extra: list[dict[str, str]]) -> None:
+    known = {
+        (str(item.get("from_goal", "")), str(item.get("artifact", "")))
+        for item in agent.inputs if isinstance(item, dict)
+    }
+    added: list[str] = []
+    for item in extra:
+        key = (item["from_goal"], item["artifact"])
+        if key not in known:
+            agent.inputs.append(dict(item))
+            known.add(key)
+            added.append(item["artifact"])
+    opening = (agent.chapter or {}).get("opening")
+    inputs = opening.get("inputs") if isinstance(opening, dict) else None
+    if isinstance(inputs, list) and added:
+        paths = {str(item.get("path", "")) for item in inputs if isinstance(item, dict)}
+        inputs.extend({"path": path} for path in added if path not in paths)
 
 
 def _gate_goal(goal: Goal, owners: Mapping[tuple[str, str], str], capacity: int | None,

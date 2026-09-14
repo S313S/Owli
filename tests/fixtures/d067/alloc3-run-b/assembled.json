@@ -1,0 +1,333 @@
+{
+  "goals": [
+    {
+      "title": "豆包产品定位与官方叙事基线",
+      "objective": "采集豆包在国内市场的产品定义、功能矩阵、面向人群、官方宣传口径与关键版本节点，建立后续舆论分析的对象基线。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "doubao_product_baseline.json",
+        "description": "豆包产品定位与官方叙事基线报告，汇总产品定义、功能矩阵、面向人群、官方宣传口径与关键版本节点，作为后续舆论分析的对象基线。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为 doubao_product_baseline.json 且顶层为 object 形态的节化文档信封",
+        "报告至少含「产品定义」「功能矩阵」「面向人群」「官方宣传口径」「关键版本节点」五个小节，每节引用不少于 2 条采集条目 permalink",
+        "所有采集 agent 的 output 顶层为数组，且每条含 permalink 与 fetched_at 字段",
+        "Reddit、X、HN、Product Hunt 四个必采源均各产出独立采集文件，且任务文本仅使用「豆包、Doubao、豆包AI、字节豆包」四种叫法",
+        "HN 采集查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000",
+        "同一 (source_id, entity) 组合在本 goal 内不重复出现",
+        "数据不足时以结构化缺口口径在报告的「缺口」节声明，而非虚构数据",
+        "交叉验证章节对官方口径与第三方叙述的一致性/分歧逐条给出判定"
+      ],
+      "agents": [
+        {
+          "name": "Reddit 数据抓取·豆包",
+          "task": "在 Reddit 检索关于「豆包、Doubao、豆包AI、字节豆包」的讨论帖，聚焦产品定义、功能矩阵、面向人群、官方宣传口径与关键版本节点相关证据，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "X 数据抓取·豆包",
+          "task": "在 X 平台检索关于「豆包、Doubao、豆包AI、字节豆包」的推文，重点收集产品定位陈述、功能介绍、面向人群与版本发布公告，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "HN 数据抓取·豆包",
+          "task": "在 Hacker News Algolia 接口使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 查询「豆包、Doubao、豆包AI、字节豆包」相关故事与评论，聚焦产品定位与版本节点，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Product Hunt 数据抓取·豆包",
+          "task": "在 Product Hunt 检索「豆包、Doubao、豆包AI、字节豆包」的产品页与发布记录，抓取官方描述、功能标签、面向人群与版本发布节点，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·豆包",
+          "task": "通过网页搜索检索「豆包、Doubao、豆包AI、字节豆包」的官方站点、产品发布页、白皮书与主流媒体报道，采集产品定义、功能矩阵、面向人群、官方宣传口径与关键版本节点，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·豆包",
+          "task": "在微信公众号生态检索「豆包、Doubao、豆包AI、字节豆包」相关的官方与媒体文章，收集官方口径、功能更新与版本节点等中文一手叙述，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·豆包",
+          "task": "在微博检索「豆包、Doubao、豆包AI、字节豆包」的官方账号动态与相关话题，重点收集官方宣传口径、面向人群定位与版本节点公告，输出条目含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "对上述各采集数组进行去重、字段归一、按主题（产品定义、功能矩阵、面向人群、官方宣传口径、关键版本节点）打标，保留 permalink 与 fetched_at，输出结构化清洗后数据集信封。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "以清洗后数据为输入，将官方源（官网、公众号、微博官方号、Product Hunt 页面）与第三方源（Reddit、X、HN、媒体报道）逐条比对，判定产品定位、功能矩阵、面向人群、版本节点等要素的一致性与分歧，产出节化验证结论。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于清洗与交叉验证结果，撰写豆包产品定位与官方叙事基线报告，包含产品定义、功能矩阵、面向人群、官方宣传口径、关键版本节点、缺口与不确定性等章节，每条论断挂载 permalink 引用，输出为节化文档信封。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "国内媒体与行业侧对豆包的评价",
+      "objective": "采集国内主流科技媒体、行业分析机构、财经媒体与知名评测人对豆包的报道、评测与观点，梳理专业侧的正负面判断与关键论据。",
+      "depends_on": [
+        "goal-1"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "media-industry-review.json",
+        "description": "面向国内主流科技媒体、行业分析机构、财经媒体与知名评测人的豆包报道与评测的结构化汇编，含专业侧正负面判断、关键论据与源级引用",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 等于「media-industry-review.json」，deliverable.shape 为 object",
+        "必采四源「小红书数据抓取·豆包」「抖音数据抓取·豆包」「微博数据抓取·豆包」「微信公众号数据抓取·豆包」均产出独立 array 型采集文件",
+        "所有采集 agent 的输出 JSON 顶层均为数组，且每条记录包含 permalink 与 fetched_at 两个字段",
+        "所有采集 agent 的任务文本只使用「豆包」「Doubao」「豆包AI」「字节豆包」四种叫法，不出现其他实体的专名",
+        "本 goal 内新增采集章的 (source_id, entity) 组合与上游 goal-1 的 reddit/x/hacker_news/product_hunt·豆包 不重复",
+        "「数据清洗」章的输入至少覆盖本 goal 全部采集章产物，输出为规范化 array 记录集",
+        "「交叉验证」章对至少两个及以上不同来源的豆包评价论据进行一致性比对，输出 object 型信封结构",
+        "「报告撰写」章输出 object 型信封文档，含专业侧正面判断、负面判断、关键论据、缺口口径四个可识别小节",
+        "数据不足时报告以结构化缺口口径披露缺失来源与影响范围，不写死上游无法保证的最小条数"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·豆包",
+          "task": "在小红书站内检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，采集科技测评类、行业观察类、财经解读类笔记与其评论摘要，记录标题、作者、发布时间、正文要点、点赞收藏评论量、permalink、fetched_at，仅保留与豆包这款产品直接相关的内容。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "抖音数据抓取·豆包",
+          "task": "在抖音站内检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，采集科技媒体号、行业分析号、财经解读号与知名评测人发布的评测视频与观点短视频，抓取标题、账号、发布时间、文案要点、点赞评论转发数、permalink、fetched_at，剔除与豆包产品无关的同名内容。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·豆包",
+          "task": "在微博站内检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，采集科技媒体、行业机构、财经媒体与认证评测博主的原创微博与长文，记录博主、发布时间、正文摘要、转赞评数、话题标签、permalink、fetched_at，仅保留指向豆包这款产品的内容。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·豆包",
+          "task": "面向微信公众号平台检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，采集科技媒体、行业分析机构、财经媒体与评测人公众号发布的评测长文与产业评论，抓取标题、公众号、发布时间、正文要点、阅读点赞在看数、permalink、fetched_at，仅保留主题为豆包这款产品的文章。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·豆包",
+          "task": "通过网页搜索检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，采集国内科技媒体门户、行业分析机构站点与财经媒体网站上关于豆包的报道、评测与研究稿，记录标题、站点、作者、发布时间、正文要点、permalink、fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "汇总本 goal 各采集章产物以及上游 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 中与国内媒体与行业侧评价相关的记录，进行去重、字段对齐、时间与来源标准化，产出规范化条目集合，每条保留 permalink、fetched_at、来源标识与主体「豆包」标签。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "针对清洗后的豆包评价条目，按话题（模型能力、产品体验、商业化、生态、风险）在至少两种不同来源之间比对论据一致性与冲突点，标注共识观点、争议观点与孤证观点，输出结构化信封。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "综合清洗与交叉验证结果，撰写国内媒体与行业侧对豆包的评价报告，包含专业侧正面判断、负面判断、关键论据、缺口口径四个小节，每一论断需引用具体来源 permalink，缺失来源以结构化缺口口径披露，最终输出 object 型信封文档。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "国内普通用户在社交与内容平台的口碑",
+      "objective": "采集微博、知乎、小红书、抖音、B 站、贴吧等国内平台上关于豆包的用户讨论、体验分享与吐槽，识别高频关键词、典型场景与情绪倾向。",
+      "depends_on": [
+        "goal-1"
+      ],
+      "deliverable": {
+        "format": "markdown",
+        "path": "domestic-social-reputation.md",
+        "description": "基于上游 goal-2 已采集的微博、小红书、抖音、微信公众号与网页搜索数据，产出「豆包」在国内普通用户中的口碑综述，覆盖高频关键词、典型使用场景与情绪倾向，并对目标中提及但注册表未提供源的知乎、B 站、贴吧以结构化缺口口径披露",
+        "shape": "object"
+      },
+      "acceptance": [
+        "产物文件名为 domestic-social-reputation.md 且顶层为节化文档信封 object",
+        "报告至少覆盖微博、小红书、抖音、微信公众号、网页搜索五个国内源的口碑证据",
+        "报告对「豆包」列出不少于 10 条高频关键词并逐条标注出处平台",
+        "报告归纳至少 5 类典型使用场景并附代表性用户原文引用",
+        "报告给出情绪倾向分布（正面／中性／负面）并附计数或占比",
+        "报告所有引用条目均可回溯到上游 goal-2 采集 JSON 中的 permalink 字段",
+        "对目标中提及但注册表未提供源的知乎、B 站、贴吧以结构化缺口章节声明未采集原因",
+        "报告中所有专名与引用名称使用中文引号「」包裹",
+        "报告文本不含未转义的英文双引号"
+      ],
+      "agents": [
+        {
+          "name": "数据清洗",
+          "task": "读取上游 goals/goal-2/data-collection-5.json（小红书）、goals/goal-2/data-collection-6.json（抖音）、goals/goal-2/data-collection-7.json（微博）、goals/goal-2/data-collection-8.json（微信公众号）、goals/goal-2/data-collection-9.json（网页搜索）五份采集数据，仅保留围绕「豆包」「Doubao」「豆包AI」「字节豆包」的条目，按 permalink 去重、剔除广告与纯营销文案、规范化 fetched_at 与时间戳字段、统一平台标记，输出清洗后条目数组",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "标签",
+          "task": "在清洗后的条目上为「豆包」抽取三类标签：一是高频关键词（例如免费、语音、儿童、写作、答疑等），二是典型使用场景（例如学习辅助、情感陪伴、办公写作、语音对话、家庭儿童使用），三是情绪倾向（正面／中性／负面），逐条附加平台来源、permalink 与原文摘录，输出打标条目数组",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "对打标结果按平台（微博、小红书、抖音、微信公众号、网页搜索）分组，对「豆包」的高频关键词与典型场景做跨平台一致性核验，识别仅单一平台出现的孤证与多平台互证的强信号，并对目标中提及但注册表未提供源的知乎、B 站、贴吧以结构化缺口口径说明未采集原因与影响，输出节化交叉验证文档",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "综合数据清洗、标签与交叉验证的产物，撰写《国内普通用户在社交与内容平台的口碑》报告，围绕「豆包」输出：一、高频关键词表（附出处平台与出现次数），二、典型使用场景清单（附代表性原文引用与 permalink），三、情绪倾向分布（正面／中性／负面计数或占比），四、跨平台强信号与孤证对照，五、未覆盖平台（知乎、B 站、贴吧）的结构化缺口说明，所有专名使用中文引号「」，输出节化文档信封",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "豆包在应用市场与使用数据侧的用户反馈",
+      "objective": "采集国内主流应用商店（华为、小米、OPPO、vivo、苹果 App Store 中国区、应用宝）中豆包的评分分布、代表性评论与版本演进反馈，辅以可公开获取的下载与活跃度数据。",
+      "depends_on": [
+        "goal-1"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-4-app-market-feedback.json",
+        "description": "面向豆包在华为、小米、OPPO、vivo、苹果 App Store 中国区、应用宝六大应用市场的评分分布、代表性评论、版本演进反馈以及可公开获取的下载与活跃度数据的节化文档；全部证据回溯至 goal-1 与 goal-2 已入库的九个采集产物，未覆盖之处以结构化缺口条目呈现。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable 文件位于 goal-4-app-market-feedback.json，顶层为 object 且包含 markets、ratings_distribution、representative_reviews、version_evolution、download_activity、gaps、cross_source_checks 七个键。",
+        "markets 覆盖并逐一命名「华为」「小米」「OPPO」「vivo」「苹果 App Store 中国区」「应用宝」六个市场，任一市场缺数据必须在 gaps 中出现同名条目并注明缺口口径。",
+        "ratings_distribution、representative_reviews、version_evolution、download_activity 中的每条记录均含 source_id、permalink、fetched_at、market、evidence_excerpt，且 permalink 与 fetched_at 逐字取自上游九个 output.path 之一。",
+        "所有引用产物路径仅限 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-2/data-collection-6.json、goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json、goals/goal-2/data-collection-9.json 这九个文件，未出现任何新增 source_id 与实体组合。",
+        "cross_source_checks 至少列出三条跨源一致性判定，每条含 claim、supporting_sources、conflicting_sources、verdict 四个字段。",
+        "报告中所有实体叫法仅使用「豆包」「Doubao」「豆包AI」「字节豆包」四种，且未出现未转义英文双引号，引用一律使用中文引号「」。",
+        "gaps 采用结构化缺口口径，字段含 market、missing_metric、reason、fallback_strategy，不出现任何未经上游支撑的下载量或评分数字。"
+      ],
+      "agents": [
+        {
+          "name": "数据清洗",
+          "task": "读取上游九个产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-2/data-collection-6.json、goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json、goals/goal-2/data-collection-9.json，筛选出与「豆包」「Doubao」「豆包AI」「字节豆包」在华为、小米、OPPO、vivo、苹果 App Store 中国区、应用宝这六个应用市场相关的条目，识别维度包括应用商店评分、星级分布、评论文本、下载量、DAU/MAU、版本号或更新日志、崩溃与卡顿反馈；对每条命中记录标注 source_id、permalink、fetched_at、market、metric_type（rating_distribution / representative_review / version_evolution / download_activity）、evidence_excerpt，去重后输出为清洗后的数组，字符串中禁止未转义英文双引号，人名与产品名一律用中文引号「」包裹。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "基于数据清洗产出的数组，对六个市场下的评分区间、下载量级、版本迭代节奏、崩溃反馈四类关键论断执行跨源比对；每条论断汇总支持源与冲突源的 permalink 列表，并给出 verdict（confirmed / partial / conflicted / insufficient）；对无法从九个上游产物取得证据的市场或指标，登记到结构化缺口列表，字段含 market、missing_metric、reason、fallback_strategy；结果按 claims 与 gaps 两节组织为 object。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "以数据清洗与交叉验证的产物为唯一证据源，撰写 goal-4-app-market-feedback.json；顶层 object 的键固定为 markets、ratings_distribution、representative_reviews、version_evolution、download_activity、gaps、cross_source_checks；markets 逐一列出六大市场并附总体印象与证据锚点；ratings_distribution、representative_reviews、version_evolution、download_activity 内每条记录须含 source_id、permalink、fetched_at、market、evidence_excerpt；gaps 承接交叉验证的缺口条目；cross_source_checks 承接交叉验证的 claims 节；实体叫法仅限「豆包」「Doubao」「豆包AI」「字节豆包」，引用一律使用中文引号「」，禁止出现未转义英文双引号或 Markdown 围栏。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "国内对豆包看法的综合归纳与舆论图谱",
+      "objective": "整合行业评价、用户社交讨论与应用市场反馈，按能力表现、使用体验、内容安全、商业化与竞品对比等维度归纳国内舆论的共识、分歧与代表性声音，形成对「国内大家看法」的可复核结论。",
+      "depends_on": [
+        "goal-2",
+        "goal-3",
+        "goal-4"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-5-report.json",
+        "description": "整合 goal-2 社交与公众号采集、goal-3 与 goal-4 的评估产物，按能力表现、使用体验、内容安全、商业化与竞品对比等维度归纳国内对「豆包」看法的共识、分歧与代表性声音，形成可复核的节化舆论图谱报告",
+        "shape": "object"
+      },
+      "acceptance": [
+        "报告顶层为 JSON object，且包含「能力表现」「使用体验」「内容安全」「商业化」「竞品对比」「共识」「分歧」「代表性声音」「缺口与降级说明」等章节键",
+        "每条结论均标注来源 source_id、上游 output.path 与至少一条 permalink，未满足则在「缺口与降级说明」中给出结构化缺口口径",
+        "所有引用名称使用中文引号「」，JSON 字符串内无未转义英文双引号",
+        "仅消费 goals/goal-1、goals/goal-2 已列出的九个上游 output.path 以及 goal-3、goal-4 的产物，未新增与上游重复的 (source_id, entity) 采集",
+        "代表性声音章节对每个 source_id 至少给出一条含 permalink 与 fetched_at 的原文引用，缺失时按结构化缺口口径记录",
+        "竞品对比章节仅围绕研究实体「豆包」展开叙述，不将其他产品作为独立采集主体",
+        "交叉验证章节列出至少三组跨源一致或冲突的观点，并注明支持与反对的 source_id 列表",
+        "一致性检查章节记录字段规范化、去重、时间窗对齐结果，异常项以列表形式列出并附处置动作"
+      ],
+      "agents": [
+        {
+          "name": "数据清洗",
+          "task": "读取 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-2/data-collection-6.json、goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json、goals/goal-2/data-collection-9.json，对「豆包」相关条目按叫法闭集「豆包、Doubao、豆包AI、字节豆包」进行匹配过滤，统一 permalink、fetched_at、source_id、text、author 字段，剔除与实体无关内容并输出规范化记录数组",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "基于数据清洗产物与 goal-3、goal-4 的评估产物，对能力表现、使用体验、内容安全、商业化、竞品对比五个维度的关键论点进行跨源比对，标注支持来源 source_id 列表、冲突来源 source_id 列表与代表 permalink，输出维度化交叉验证结论信封",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "一致性检查",
+          "task": "对清洗后的记录与交叉验证结论执行字段完整性、时间窗对齐、去重、叫法归一化与来源可追溯性检查，列出异常项、处置动作及是否触发结构化缺口口径的判定结果",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "综合数据清洗、交叉验证与一致性检查产物，撰写国内对「豆包」看法的综合归纳与舆论图谱报告，覆盖能力表现、使用体验、内容安全、商业化、竞品对比、共识、分歧、代表性声音与缺口与降级说明章节，所有结论标注 source_id、上游 output.path 与 permalink，引用名称使用中文引号「」",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

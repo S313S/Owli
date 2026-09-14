@@ -1,0 +1,49 @@
+{
+  "goal-1": [
+    {
+      "entity": "豆包",
+      "source_id": "reddit",
+      "collector_name": "Reddit 数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "x",
+      "collector_name": "X 数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "hacker_news",
+      "collector_name": "HN 数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "product_hunt",
+      "collector_name": "Product Hunt 数据抓取"
+    }
+  ],
+  "goal-2": [
+    {
+      "entity": "豆包",
+      "source_id": "xhs",
+      "collector_name": "小红书数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "douyin",
+      "collector_name": "抖音数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "weibo",
+      "collector_name": "微博数据抓取"
+    },
+    {
+      "entity": "豆包",
+      "source_id": "wechat_mp",
+      "collector_name": "微信公众号数据抓取"
+    }
+  ],
+  "goal-3": [],
+  "goal-4": [],
+  "goal-5": []
+}
