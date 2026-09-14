@@ -136,12 +136,15 @@ def test_绿_goal4保留_综合章改接上游goal产物_表外微博卡照删()
     assert lint(plan, collection_plan=_allocation())["errors"] == []
 
 
-def test_D062验收条闸摘条数不增() -> None:
+def test_D062验收条闸_别的goal摘条逐字不变_goal4只多摘两条过时条() -> None:
+    """货 1 时这条锁「摘条数不增」；货 2（用户拍甲）起 goal-4 点名已删补采卡的两条要摘，其余逐字不变。"""
     plan = _build()
     notes = normalize_plan(plan, collection_plan=_allocation())
     before = [n for n in GOLDEN[f"{WX1}/standard"]["notes"] if n.startswith("[修正4]")]
-    assert [n for n in notes if n.startswith("[修正4]")] == before
-    assert not [n for n in notes if n.startswith("[修正4] goal-4")]
+    assert [n for n in notes if n.startswith("[修正4]") and not n.startswith("[修正4] goal-4")] == before
+    assert [n.split(" 已摘")[0] for n in notes if n.startswith("[修正4] goal-4")] == [
+        "[修正4] goal-4.acceptance[1]", "[修正4] goal-4.acceptance[2]",
+    ]
 
 
 def test_无上游goal的构造_与改前代码逐字相同_仍删仍移出() -> None:
@@ -195,3 +198,55 @@ def test_幂等_再跑一遍不再删也不再改接() -> None:
     assert [n for n in normalize_plan(plan, collection_plan=_allocation()) if n.startswith("[修正31]")] == []
     assert _sha(plan) == snapshot
 
+
+
+# ---- 货 2：综合 goal 验收条点名已删卡的产物 ----
+
+STALE = [1, 2]  # 「补采的「微博数据抓取·通义千问」「微博数据抓取·文心一言」两章 JSON…」「…加本 goal 2 项补采共 28 项」
+
+
+def test_货2造红_草稿里goal4有两条要已删补采卡产物的验收条() -> None:
+    acceptance = _assembled()["goals"][3]["acceptance"]
+    assert "「微博数据抓取·通义千问」「微博数据抓取·文心一言」两章 JSON" in acceptance[1]
+    assert "本 goal 2 项补采共 28 项" in acceptance[2]
+
+
+def test_货2绿_两条过时验收条被摘并留痕_其余验收条一字不动() -> None:
+    original = _assembled()["goals"][3]["acceptance"]
+    plan = _build()
+    notes = normalize_plan(plan, collection_plan=_allocation())
+    goal_4 = _goal(plan, "goal-4")
+    assert goal_4.acceptance == [text for index, text in enumerate(original) if index not in STALE]
+    named = next(n for n in notes if n.startswith("[修正4] goal-4.acceptance[1] 已摘："))
+    assert "「微博数据抓取·通义千问」「微博数据抓取·文心一言」已被删卡闸删除" in named
+    assert named.endswith(f"——原文「{original[1]}」")
+    backfill = next(n for n in notes if n.startswith("[修正4] goal-4.acceptance[2] 已摘："))
+    assert "补采产物" in backfill and backfill.endswith(f"——原文「{original[2]}」")
+    assert lint(plan, collection_plan=_allocation())["errors"] == []
+
+
+def _with_goal_4_acceptance(extra: list[str]) -> Plan:
+    assembled = _assembled()
+    assembled["goals"][3]["acceptance"] = assembled["goals"][3]["acceptance"] + extra
+    return _build(assembled=assembled)
+
+
+def test_货2豁免_缺口语境与否定语境的补采_活着的卡名_不摘() -> None:
+    extra = [
+        "对单源结论在缺口说明节注明所需补采的来源与实体",
+        "证据台账不引用任何补采产物，只引用上游 goal 产物",
+        "交叉验证章逐条引用「小红书数据抓取·DeepSeek」的采集结果",
+    ]
+    plan = _with_goal_4_acceptance(extra)
+    normalize_plan(plan, collection_plan=_allocation())
+    assert _goal(plan, "goal-4").acceptance[-3:] == extra
+
+
+def test_货2不看还有卡的goal_点名已删卡照旧不动() -> None:
+    """goal-1 删了三张卡但还剩表内卡：点名已删卡「网页搜索数据抓取·豆包」的验收条不归第四类管。"""
+    assembled = _assembled()
+    clause = "「网页搜索数据抓取·豆包」产物顶层为数组"
+    assembled["goals"][0]["acceptance"] = assembled["goals"][0]["acceptance"] + [clause]
+    plan = _build(assembled=assembled)
+    normalize_plan(plan, collection_plan=_allocation())
+    assert _goal(plan, "goal-1").acceptance[-1] == clause
