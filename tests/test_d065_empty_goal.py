@@ -283,3 +283,101 @@ def test_空_goal_修正事件带结构化记录_别的修正不带():
 
     assert captured[0].raw["empty_goal_removed"] == {"goal_id": "goal-4", "title": "口碑"}
     assert "empty_goal_removed" not in captured[1].raw
+
+
+# ── 报告附注：缺席 goal ────────────────────────────────────────────────
+
+
+def _planning_event(store, research_id: str, raw: dict[str, Any]) -> None:
+    """与 api/main.publish_plan_event 落库形态一致：type=normalized_event、raw 原样。"""
+    store.append_event(
+        research_id,
+        event_type="normalized_event",
+        payload={
+            "type": "normalized_event",
+            "raw": raw,
+            "data": {"goal_id": "planning", "agent_id": "plan-progress",
+                     "item_kind": "thinking", "text": "机械修正", "is_error": False},
+        },
+        created_at="2026-09-14T00:00:00+00:00",
+    )
+
+
+def test_附注列出规划期移出的_goal_与执行期放行的空_goal(tmp_path, monkeypatch):
+    from tests.test_m3h_finalize import _finalize, _plan, _write
+
+    plan = _plan(report_format="markdown")
+    plan.goals[1].agents = []  # B 路：计划里还留着的 0 章 goal
+    artifact = tmp_path / "runs" / "r-ledger" / "goals" / "goal-3" / "report.md"
+    _write(artifact, "# 结论\n\n- 正文。\n\n# 信息源\n\n- 无。")
+
+    def prepare(store):
+        _planning_event(store, "r-ledger", {"repair": "别的修正"})
+        _planning_event(store, "r-ledger", {
+            "repair": "[修正31] goal-4「社媒与用户口碑」一章不剩，已移出计划",
+            "empty_goal_removed": {"goal_id": "goal-4", "title": "社媒与用户口碑"},
+        })
+        _planning_event(store, "r-other", {
+            "repair": "x", "empty_goal_removed": {"goal_id": "goal-9", "title": "别家"},
+        })
+
+    _finalize(tmp_path, plan, monkeypatch, prepare=prepare)
+
+    text = artifact.read_text(encoding="utf-8")
+    assert "- 缺席 goal：goal-4「社媒与用户口碑」——分配表没有给它排采集卡" in text
+    assert "- 缺席 goal：goal-2「阶段 2 证据产物」——计划里一章不剩" in text
+    assert "goal-9" not in text
+
+
+def test_json_报告附注带缺席_goal_键_没有缺席时为空列表(tmp_path, monkeypatch):
+    from tests.test_m3h_finalize import _finalize, _plan, _write
+
+    path = "goals/goal-3/final.json"
+    plan = _plan(report_format="json", path=path)
+    artifact = tmp_path / "runs" / "r-ledger" / path
+    _write(artifact, json.dumps({"title": "t"}, ensure_ascii=False))
+
+    _finalize(tmp_path, plan, monkeypatch)
+
+    assert json.loads(artifact.read_text(encoding="utf-8"))["收尾注释"]["缺席 goal"] == []
+
+
+def test_重启恢复运行态时_0_章_goal_算完成(tmp_path):
+    import copy as _copy
+    import sqlite3
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.orchestrator.runtime import RuntimeCoordinator
+    from app.store.dao import Store
+
+    database = tmp_path / "owli.db"
+    schema = ROOT / "app" / "store" / "schema.sql"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(schema.read_text(encoding="utf-8"))
+    source = make_plan_dict()
+    source["research_id"] = "r-d065"
+    source["status"] = "approved"
+    source["approved_at"] = "2026-09-14T00:00:00+00:00"
+    source["goals"][1]["agents"] = []
+    source["baseline"]["goals"] = _copy.deepcopy(source["goals"])
+    store = Store(database)
+    store.create_report(
+        id="r-d065", title=source["title"], research_question=source["research_question"],
+        created_at=source["created_at"], status="running", plan_snapshot=source,
+        extra={"scale": "fast"},
+    )
+
+    async def publish(research_id, payload):
+        return None
+
+    coordinator = RuntimeCoordinator(
+        store=store, event_buffer=SimpleNamespace(publish=publish),
+        researches={}, cards={}, runs_root=tmp_path / "runs", auto_confirm=False,
+        adapter_factory=lambda: None,
+        routing_utc_clock=lambda: datetime(2026, 9, 14, tzinfo=timezone.utc),
+    )
+
+    assert asyncio.run(coordinator.rehydrate_running_researches()) == ["r-d065"]
+    progress = coordinator.researches["r-d065"]["progress"]
+    assert progress["done"] == 1 and progress["total"] == 3

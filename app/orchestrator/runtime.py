@@ -2812,8 +2812,48 @@ class RuntimeCoordinator:
                 goal_id for goal_id, status in scheduler.goal_statuses.items()
                 if status in {"failed", "skipped"}
             ],
+            "缺席 goal": self._absent_goals(plan),
             "缺失清单": self._missing_entries(plan.research_id, plan),
         }
+
+    def _absent_goals(self, plan: Plan) -> list[dict[str, str]]:
+        """§D-065：一章不剩的 goal 写进报告附注，缺席要可见。
+
+        两条来路：规划期被 normalize 移出计划的（计划里已经没有它，只能从规划事件的
+        `empty_goal_removed` 取）；计划里仍留着 0 章 goal 的（编辑接口删空、旧计划），
+        scheduler 执行期直接放行。0 章 goal 在章账本里没有行，缺失清单列不出它。
+        """
+
+        absent: dict[str, dict[str, str]] = {}
+        connect = getattr(self.store, "_connect", None)
+        rows: list[Any] = []
+        if connect is not None:
+            with connect() as connection:
+                rows = connection.execute(
+                    "SELECT payload FROM events WHERE research_id = ? "
+                    "AND type = 'normalized_event' AND payload LIKE '%empty_goal_removed%' "
+                    "ORDER BY sequence",
+                    (plan.research_id,),
+                ).fetchall()
+        for (payload,) in rows:
+            try:
+                removal = (json.loads(payload).get("raw") or {}).get("empty_goal_removed")
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if isinstance(removal, dict) and removal.get("goal_id"):
+                absent.setdefault(str(removal["goal_id"]), {
+                    "goal_id": str(removal["goal_id"]),
+                    "标题": str(removal.get("title", "")),
+                    "原因": "分配表没有给它排采集卡，章全被删光，规划时已移出计划",
+                })
+        for goal in plan.goals:
+            if not goal.agents:
+                absent.setdefault(goal.goal_id, {
+                    "goal_id": goal.goal_id,
+                    "标题": goal.title,
+                    "原因": "计划里一章不剩，执行时未跑、直接放行",
+                })
+        return list(absent.values())
 
     def _summary_body(self, plan: Plan) -> str:
         """计划没有报告章时的收尾正文：按账本汇总已完成章，而不是硬写「未生成」。"""
@@ -2856,6 +2896,10 @@ class RuntimeCoordinator:
         block = ["", "## 决策天平注释", f"- 本报告按已确认的调研口径生成。{references}"]
         if notes["未完成 goal"]:
             block.append(f"- 未完成 goal：{', '.join(notes['未完成 goal'])}。")
+        for item in notes["缺席 goal"]:
+            block.append(
+                f"- 缺席 goal：{item['goal_id']}「{item['标题']}」——{item['原因']}。"
+            )
         for item in notes["决策天平"]:
             answer = json.dumps(item["答案"], ensure_ascii=False)
             block.append(f"[^{item['q_id']}]: 问题：{item['问题']}；答案：{answer}")
