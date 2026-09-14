@@ -595,6 +595,17 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     # 「评论 · 」前缀，评论正文只在 content_excerpt——池里不带，写手就只能按父帖标题
     # 归题（09-14 实测：S28「智能体数据迁到猫箱」被写成付费化注脚），原声也一句引不出。
     quote_prefix_by_mark = {int(r["citation_no"]): quote_prefix(r) for r in cited}
+    # §RPT-3 货 3：信息源清单的折叠行要说「其中对照实体 M 条」。实体按**章**认
+    # （证据 agent_name → 计划 agent.entity，与 `chapter_rows` 同一个判法），不按 goal 认：
+    # 本研究 goal-2（DeepSeek 对照）底下就有一章「微博·豆包」。叫法不在研究主体名单里 = 对照；
+    # 章上没登记实体（审计、清洗章）判不了，记 None，不硬猜。
+    subject_names = set(quote_gate_names(plan))
+    entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
+    contrast_by_mark = {}
+    for r in cited:
+        entity = entity_by_agent.get(str(r.get("agent_name") or ""), "")
+        contrast_by_mark[int(r["citation_no"])] = (
+            None if not entity else entity not in subject_names)
     return {
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
@@ -630,7 +641,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      # 建议段门禁要按角标核：这条源背后的主张里最强的那个交叉验证结论。
                      "crossref": crossref_by_mark.get(int(s["citation_no"])),
                      "title_independent": independent_by_mark.get(int(s["citation_no"]), True),
-                     "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"]))}
+                     "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"])),
+                     "contrast": contrast_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

@@ -12,7 +12,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Iterable, Mapping, Sequence
 
 from app.observability.cost import UsageMeteringAdapter
 from app.adapters import validation
@@ -117,14 +117,21 @@ def clear_stale_parts(runs_root: Path, research_id: str, template: str) -> list[
 SOURCES_HEADING = "## 信息源清单"
 MISSING_HEADING = "## 哪些没采到"
 BASIS_HEADING = "## 各表口径"
+CONFIDENCE_HEADING = "## 把握度读数（主张的交叉验证与被引证据等级）"
 LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
 QUOTES_HEADING = "## 代表原声（逐字摘录，按互动量排序）"
 PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING,
-                             QUOTES_HEADING, SOURCES_HEADING)
+                             QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING)
 
 
-def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
+def sources_table(sources: Sequence[Mapping[str, Any]],
+                  cited: Iterable[int] | None = None) -> str:
     """信息源清单：由代码生成，不让写手誊抄。
+
+    §RPT-3 货 3：`cited` 是正文实际出现过的角标号，给了就**只列这些**，池里没引的
+    折成一行「引用池另有 N 条本稿未引用（其中对照实体 M 条）」。09-14 评审实测清单
+    80 条、正文实引 12 条，其余多是对照实体的评论，读者翻清单以为报告靠它们撑着。
+    不给 `cited` 行为不变（老调用方照列整个池）。
 
     09-05 实测：三格里两格死在「附录」，报错都是
     `API Error: The socket connection was closed unexpectedly`——本机代理掐长响应。
@@ -133,17 +140,27 @@ def sources_table(sources: Sequence[Mapping[str, Any]]) -> str:
     """
     grade_note = {"A": "可独立支撑结论", "B": "较可靠，宜与他源同现",
                   "C": "只作旁证", "D": "线索级"}
-    lines = [SOURCES_HEADING, "",
-             "（本节由程序按证据库直接生成，未经改写。**角标号沿用证据库里的编号**："
-             "这一轮采到但正文没有引用的证据不出现在这里，所以号码是跳着的，"
-             "不是漏了几条——本报告实际引用的就是下面列出的这些。）", "",
+    used = None if cited is None else {int(n) for n in cited}
+    listed = [item for item in sources
+              if used is None or int(str(item["mark"])[1:]) in used]
+    note = ("（本节由程序按证据库直接生成，未经改写。**只列正文实际引用过的证据**，"
+            "角标号沿用引用池里的编号，所以号码是跳着的，不是漏了几条。）"
+            if used is not None else
+            "（本节由程序按证据库直接生成，未经改写。**角标号沿用证据库里的编号**，"
+            "列的是本报告的整个引用池，所以号码是跳着的，不是漏了几条。）")
+    lines = [SOURCES_HEADING, "", note, "",
              "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
-    for item in sources:
+    for item in listed:
         grade = str(item.get("grade") or "?")
         title = str(item.get("title") or "").replace("|", "｜").strip() or "（无标题）"
         url = str(item.get("url") or "")
         lines.append(f"| {item['mark']} | {grade} | {grade_note.get(grade, '未评级')} "
                      f"| {title} | {_fetched_at_cell(item.get('fetched_at'))} | {url} |")
+    unused = [item for item in sources if item not in listed]
+    if used is not None and unused:
+        contrast = sum(1 for item in unused if item.get("contrast") is True)
+        tail = f"（其中对照实体 {contrast} 条）" if contrast else ""
+        lines += ["", f"引用池另有 {len(unused)} 条本稿未引用{tail}，不在上表。"]
     return "\n".join(lines) + "\n"
 
 
@@ -235,7 +252,9 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
     `chapters` 键），按 (goal_id, 章号) 对上 missing 行：
     - 「缺的是哪一段」写「渠道（实体）」，如「微信公众号（文心一言）」，不再拿目标原话截句——
       缺的单位是单源子章，三行同目标会长得一模一样；
-    - `timeout` 且这一章有入库条数 ⇒ 「采到 N 条，但整理步骤超时，未纳入本章分析」。
+    - `timeout` 且这一章有入库条数 ⇒ 「采到 N 条，已入库并参与评级与统计；这一段的总结超时
+      没写成，正文未能引用它们」（§RPT-3 货 5：旧文案「未纳入本章分析」失实——那些行照常
+      评级、照常进平台分布等统计表，真正缺的只是角标）。
       §D-039 之后 timeout 的语义是「超时判 missing、已落库产物不作废」，写「没采到」是假话。
     不给 `chapters`（老调用方、老产物）行为逐字不变。
     """
@@ -264,7 +283,9 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
             where = plain_words(_chapter_label(entry, section or None, goal_titles))
             yielded = int(entry.get("yielded") or 0)
             if reason == "timeout" and yielded > 0:
-                why = f"采到 {yielded} 条，但整理步骤超时，未纳入本章分析"
+                # ⛔ 不写「采集章」：内部词，尺子①禁（程序生成的文本照样被抓）。
+                why = (f"采到 {yielded} 条，已入库并参与评级与统计；"
+                       "这一段的总结超时没写成，正文未能引用它们")
             else:
                 why = _MISSING_REASON.get(reason, "原因未记录")
         else:
@@ -276,6 +297,82 @@ def missing_table(missing: Sequence[Mapping[str, Any]],
             why = _MISSING_REASON.get(reason, "原因未记录")
         lines.append(f"| {where or f'第 {index} 段'} | {why} |")
     return "\n".join(lines) + "\n"
+
+
+#: 交叉验证结论 → 人话。与 `build_prompt` 里给写手的那张同一套说法，⛔ 不出现 SINGLE/PASS
+#: （尺子⑦禁开篇节写内部口径词；附录里也没理由让客户读英文枚举）。
+_CROSSREF_WORDS = {"SINGLE": "单源", "WEAK": "偏弱", "PASS": "多源互证", "CONFLICT": "多源冲突"}
+_CROSSREF_ORDER = ("SINGLE", "WEAK", "PASS", "CONFLICT")
+
+
+def _crossref_counts(tables: Mapping[str, Any]) -> tuple[int, list[tuple[str, int]]]:
+    table = (tables or {}).get("crossref_mix")
+    if not isinstance(table, Mapping):
+        return 0, []
+    counts = {str(r.get("交叉验证结论")): int(r.get("主张数") or 0)
+              for r in table.get("rows") or [] if isinstance(r, Mapping)}
+    order = [*_CROSSREF_ORDER, *sorted(k for k in counts if k not in _CROSSREF_ORDER)]
+    return int(table.get("n") or 0), [(k, counts[k]) for k in order if counts.get(k)]
+
+
+def confidence_line(tables: Mapping[str, Any]) -> str:
+    """§RPT-3 货 4：执行摘要把握度那句之后的一行数字，程序从 crossref_mix 取、不经模型。
+
+    评审实测：摘要写「绝大多数结论只有一个来源撑着」，那个数（255/310）读者全文找不到。
+    """
+    total, pairs = _crossref_counts(tables)
+    if not total or not pairs:
+        return ""
+    parts = " / ".join(f"{_CROSSREF_WORDS.get(k, '未登记')} {n}" for k, n in pairs)
+    return f"（程序按交叉验证结论计数）主张 {total} 条：{parts}。"
+
+
+def confidence_tables(tables: Mapping[str, Any]) -> str:
+    """§RPT-3 货 4：交叉验证分布 + 被引证据等级分布两张表，照 `lexicon_reference_table` 的形态挂附录。"""
+    total, pairs = _crossref_counts(tables)
+    grade = (tables or {}).get("grade_mix")
+    grade_rows = [r for r in (grade.get("rows") or []) if isinstance(r, Mapping)] \
+        if isinstance(grade, Mapping) else []
+    if not pairs and not grade_rows:
+        return ""
+    lines = [CONFIDENCE_HEADING, "",
+             "（本节由程序按主张登记与证据评级直接计数，未经改写。执行摘要里「把握度」"
+             "那句的依据就是这两张表。）"]
+    if pairs:
+        meaning = {"SINGLE": "只有一个来源撑着", "WEAK": "有多个来源但证据偏弱",
+                   "PASS": "多个独立来源互相印证", "CONFLICT": "多个来源说法互相冲突"}
+        lines += ["", "| 交叉验证结论 | 主张数 | 占比 | 含义 |", "|---|---|---|---|"]
+        for key, count in pairs:
+            share = f"{round(count * 100 / total, 1):g}%" if total else "—"
+            lines.append(f"| {_CROSSREF_WORDS.get(key, '未登记')} | {count} | {share} "
+                         f"| {meaning.get(key, '未登记')} |")
+        lines += ["", f"主张共 {total} 条。"]
+    if grade_rows:
+        label = {"?": "未评级"}
+        lines += ["", "| 等级 | 被引条数 | 全库条数 | 含义 |", "|---|---|---|---|"]
+        for row in grade_rows:
+            key = str(row.get("等级"))
+            lines.append(f"| {label.get(key, key)} | {_cell(row.get('被引条数'))} "
+                         f"| {_cell(row.get('全库条数'))} | {_cell(row.get('含义'))} |")
+        lines += ["", f"被引证据 {grade.get('n')} 条｜口径：{plain_words(str(grade.get('basis') or ''))}"]
+    return "\n".join(lines) + "\n"
+
+
+#: 执行摘要位的节名（三模板）。与验收尺子 `check_polished.OPENING_SECTIONS` 同一组。
+OPENING_SECTIONS = ("执行摘要", "总体倾向")
+
+
+def _inject_after_confidence(body: str, line: str) -> str:
+    """把 `line` 插在把握度引用块之后；稿里没有那句就接在节末。"""
+    lines = body.split("\n")
+    hit = next((i for i, text in enumerate(lines)
+                if text.lstrip().startswith(">") and "把握度" in text), None)
+    if hit is None:
+        return body.rstrip() + "\n\n" + line
+    end = hit
+    while end + 1 < len(lines) and lines[end + 1].lstrip().startswith(">"):
+        end += 1
+    return "\n".join([*lines[:end + 1], "", line, *lines[end + 1:]])
 
 
 def basis_table(tables: Mapping[str, Any]) -> str:
@@ -385,8 +482,13 @@ def quotes_reference_table(tables: Mapping[str, Any]) -> str:
 
 def assemble(parts: Sequence[tuple[str, Path]],
              sources: Sequence[Mapping[str, Any]] = (),
-             appendix_blocks: Sequence[str] = ()) -> str:
-    """把各节拼成成稿：一级标题由代码写，写手只交正文。"""
+             appendix_blocks: Sequence[str] = (),
+             tables: Mapping[str, Any] | None = None) -> str:
+    """把各节拼成成稿：一级标题由代码写，写手只交正文。
+
+    §RPT-3：给了 `tables` 就在执行摘要把握度那句后面注入主张计数行（货 4）；
+    信息源清单只列写手各节里实际出现过的角标（货 3）。
+    """
     chunks = []
     for name, path in parts:
         body = path.read_text(encoding="utf-8").strip()
@@ -396,7 +498,11 @@ def assemble(parts: Sequence[tuple[str, Path]],
         first, _, rest = body.partition("\n")
         if first.strip() in (f"# {name}", f"## {name}", name):
             body = rest.lstrip("\n")
+        if tables and name in OPENING_SECTIONS and confidence_line(tables):
+            body = _inject_after_confidence(body, confidence_line(tables))
         chunks.append(f"# {name}\n\n{body}")
+    # 实引角标只数写手写的正文，在挂程序块之前数——原声附录表也带角标，数进去就不是「正文实引」了。
+    cited = {int(n) for n in _MARK.findall("\n".join(chunks))}
     # §POOL-1 丁′：缺失清单与各表口径也由程序生成，与信息源清单一样挂在末节。
     # 它们本来就是「把现成字段照列一遍」，让模型誊抄既费引擎又会抄错。
     # 09-05 那次附录连死两格，修法正是把信息源清单下放给程序；这是同一条路再走一步。
@@ -405,7 +511,7 @@ def assemble(parts: Sequence[tuple[str, Path]],
             chunks[-1] = chunks[-1].rstrip() + "\n\n" + block
     if sources:
         # 清单挂在最后一节（三个模板的末节都是附录）末尾。
-        chunks[-1] = chunks[-1].rstrip() + "\n\n" + sources_table(sources)
+        chunks[-1] = chunks[-1].rstrip() + "\n\n" + sources_table(sources, cited)
     return "\n\n".join(chunks) + "\n"
 _MARK = re.compile(r"\[S(\d{2,})\]")
 
@@ -436,12 +542,14 @@ def _work_view(data: Mapping[str, Any], report_text: str) -> str:
 
     view = parse_report(report_text)
     conclusions = "\n".join(f"- {line}" for line in view.get("conclusions") or [])
-    missing = "\n".join(
-        f"- {item.get('chapter_id') or ''}：{item.get('reason') or ''} {item.get('text') or ''}".strip()
-        for item in view.get("missing") or [])
+    # §RPT-3 货 5：给写手看**程序改好的人话表**，不给机器行（`ch-1：timeout`）。
+    # 机器行里读不出「这些条目已入库、参与了评级和统计，只是没角标」，写手于是把
+    # 「小红书被引不足一成」写成语料问题（09-14 实测）。这张表就是附录里挂的那张。
+    missing = missing_table(view.get("missing") or [], data.get("objectives") or [],
+                            chapters=data.get("chapters") or []) if view.get("missing") else ""
     body = "\n\n".join(str(s.get("markdown") or "") for s in view.get("sections") or [])
     return (f"### 工作稿标题\n{data.get('title')}\n\n### 工作稿的结论行（原样）\n{conclusions}\n\n"
-            f"### 工作稿的缺失清单（要在附录里改成人话）\n{missing or '（无）'}\n\n"
+            f"### 哪些没采到（程序已写成人话，原样挂附录，你不必誊抄）\n{missing or '（无）'}\n\n"
             f"### 工作稿正文全文\n{body}")
 
 
@@ -1152,7 +1260,10 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
                 f"{'、'.join(merged_offpool)}——合并取错片了。"])
     from app.report.render import parse_report
 
-    markdown = assemble(parts, data.get("sources") or [], appendix_blocks=(
+    markdown = assemble(parts, data.get("sources") or [], tables=data.get("tables") or {},
+                        appendix_blocks=(
+        # §RPT-3 货 4：把握度的两张分布表由程序挂附录，摘要那句的依据读者看得见。
+        confidence_tables(data.get("tables") or {}),
         missing_table(parse_report(report_text).get("missing") or [],
                       data.get("objectives") or [],
                       chapters=data.get("chapters") or []),

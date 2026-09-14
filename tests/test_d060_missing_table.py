@@ -82,8 +82,10 @@ def test_new_wording_says_collected_but_timed_out():
     chapters = chapter_rows(PLAN, _rows())
     md = missing_table(MISSING, OBJECTIVES, chapters=chapters)
     lines = _lines(md)
-    assert lines[2] == "| Reddit（豆包） | 采到 111 条，但整理步骤超时，未纳入本章分析 |"
-    assert lines[0] == "| 小红书（豆包） | 采到 296 条，但整理步骤超时，未纳入本章分析 |"
+    # §RPT-3 货 5 改了文案：「未纳入本章分析」失实——这些行照常评级、进统计表，缺的只是角标。
+    tail = "已入库并参与评级与统计；这一段的总结超时没写成，正文未能引用它们"
+    assert lines[2] == f"| Reddit（豆包） | 采到 111 条，{tail} |"
+    assert lines[0] == f"| 小红书（豆包） | 采到 296 条，{tail} |"
 
 
 def test_yield_is_counted_by_agent_not_by_the_mislabelled_goal():
