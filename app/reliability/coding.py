@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -52,6 +53,11 @@ CODING_BATCH_MAX = 40
 #: **「为消灭超时做的分片反而在末片把超时造回来」**——所以这里两个顶一起封。
 CODING_BATCH_ITEMS = 5
 CODING_BATCH_BYTES = 2_000
+#: §RPT-3 货 1：主链路（收尾期 / 出稿前置）同时在飞几批。
+#: 沙盒实测一批 4 条 207 s、标价折算 $0.46（大头是每次 2 万 token 的缓存创建，
+#: 与批大小无关）。r-50600e09f7dd 引得了的 68 行切 20 批，串行 ≈ 70 min，
+#: 4 路 ≈ 20 min。钱不因并发变多，只省墙钟；脚本入口默认仍是 1（行为不变）。
+CODING_CONCURRENCY = 4
 QUOTE_MAX = 40
 #: 句末标点：quote 结尾落在这里才算把话说完。中英文各摆一套——底料里
 #: reddit 与抖音口播稿都有，只认中文标点会把英文整批判红。
@@ -226,6 +232,28 @@ def coding_targets(
             continue
         selected.append(dict(item))
     return selected
+
+
+def quotable_targets(
+    rows: Iterable[Mapping[str, Any]], *, force: bool = False,
+) -> list[dict[str, Any]]:
+    """§RPT-3 货 1：正式稿**引得了**的该编码行——进了引用池（有角标）且等级在 A/B。
+
+    主链路只编这一批：原声表只收「有角标 + A/B 级」的行（`coding_tables` 的
+    `marks` 与 `_quotable_grade` 两道），池外或 C 级的行编了也上不了正式稿的引用块。
+    r-50600e09f7dd 实测：全部 UGC 560 行切 128 批 ≈ $58 / 7.4 h，这一批 68 行 20 批 ≈ $9。
+    要全量（聚合表想数更多条）照旧走脚本 `--code-only`。
+
+    等级集合从 `run.QUOTE_GRADES` 取，⛔ 不在这里另写一份（`_quotable_grade` 同理）。
+    """
+
+    from app.report.polish.run import QUOTE_GRADES      # 延迟 import：避免成环
+
+    return [
+        item for item in coding_targets(rows, force=force)
+        if item.get("citation_no") is not None
+        and str(item.get("grade") or "") in QUOTE_GRADES
+    ]
 
 
 def coding_batch_sizes(
@@ -584,13 +612,21 @@ async def code_report(
     force: bool = False,
     engine_preference: str = "claude",
     on_event: Any = None,
+    scope: str = "all",
+    concurrency: int = 1,
 ) -> CodingResult:
-    """对一份报告的 UGC 逐条编码；失败的批保持原样，不写半截标签。"""
+    """对一份报告的 UGC 逐条编码；失败的批保持原样，不写半截标签。
+
+    `scope="quotable"`（§RPT-3 货 1）只编正式稿引得了的行（`quotable_targets`）；
+    `concurrency` 是同时在飞的批数，1 = 与原来逐批串行同序。
+    """
 
     from app.reliability.backfill import _batch_output_path, _safe_component
 
     if not 1 <= batch_size <= CODING_BATCH_MAX:
         raise ValueError(f"编码 batch_size 必须在 1–{CODING_BATCH_MAX} 之间")
+    if scope not in {"all", "quotable"}:
+        raise ValueError(f"编码 scope 只能是 all 或 quotable：{scope}")
     _safe_component(report_id, "report_id")
     report = store.get_report(report_id)
     if report is None:
@@ -598,11 +634,17 @@ async def code_report(
     # §CODE-2 货 3：把被评实体的叫法带进提示词，让模型挑句子时就避开「夸别人的话」。
     entity_names = _plan_entity_names(report)
     rows = store.list_evidence(report_id)
-    already = sum(1 for item in rows if is_coded(item))
-    targets = coding_targets(rows, force=force)
+    if scope == "quotable":
+        # 分母跟着口径走：只数引得了的那批里已编码的，覆盖率才不虚高。
+        already = sum(1 for item in quotable_targets(rows, force=True) if is_coded(item))
+        targets = quotable_targets(rows, force=force)
+    else:
+        already = sum(1 for item in rows if is_coded(item))
+        targets = coding_targets(rows, force=force)
     total = len(targets) + (0 if force else already)
     coded = failed = 0
     root = Path(runs_root)
+    jobs: list[tuple[str, int, list[dict[str, Any]]]] = []
     for goal_id in sorted({str(item.get("goal_id") or "goal-1") for item in targets}):
         pending = [
             item for item in targets
@@ -616,8 +658,14 @@ async def code_report(
             pending, max_items=min(batch_size, CODING_BATCH_ITEMS),
         )
         for number, size in enumerate(sizes, 1):
-            batch = pending[start:start + size]
+            jobs.append((goal_id, number, pending[start:start + size]))
             start += size
+
+    gate = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def run_job(goal_id: str, number: int, batch: list[dict[str, Any]]) -> None:
+        nonlocal coded, failed
+        async with gate:
             labels = await _code_batch(
                 batch, adapter=adapter,
                 output_path=_batch_output_path(
@@ -627,33 +675,82 @@ async def code_report(
                 engine_preference=engine_preference,
                 entity_names=entity_names,
             )
-            if labels is None:
-                failed += len(batch)
-                continue
-            store.upsert_evidence_batch([
-                _coding_payload(item, label) for item, label in zip(batch, labels)
-            ])
-            coded += len(batch)
-            if on_event is not None:
-                event = on_event({
-                    "type": "ugc_coding_progress",
-                    "data": {
-                        "report_id": report_id, "goal_id": goal_id,
-                        "batch_number": number, "batch_rows": len(batch),
-                        "coded_total": coded, "failed_total": failed,
-                    },
-                })
-                if hasattr(event, "__await__"):
-                    await event
+        if labels is None:
+            failed += len(batch)
+            return
+        store.upsert_evidence_batch([
+            _coding_payload(item, label) for item, label in zip(batch, labels)
+        ])
+        coded += len(batch)
+        if on_event is not None:
+            event = on_event({
+                "type": "ugc_coding_progress",
+                "data": {
+                    "report_id": report_id, "goal_id": goal_id,
+                    "batch_number": number, "batch_rows": len(batch),
+                    "coded_total": coded, "failed_total": failed,
+                },
+            })
+            if hasattr(event, "__await__"):
+                await event
+
+    # TaskGroup：一批抛异常（或整段被取消）就连带取消其余在飞的批，
+    # 与原来串行循环「异常即停」同一语义；已落库的批原样留着。
+    try:
+        async with asyncio.TaskGroup() as group:
+            for job in jobs:
+                group.create_task(run_job(*job))
+    except BaseExceptionGroup as grouped:
+        # 调用方（脚本打印 type、收尾期按类型发事件）原来看到的是裸异常，别换成组。
+        raise grouped.exceptions[0] from None
     return CodingResult(
         report_id=report_id, targets=total, coded=coded,
         failed=failed, already=(0 if force else already),
     )
 
 
+#: 主链路编码的账外记账路径名（`reports.extra.llm_usage_offledger` 的键）。
+CODING_USAGE_PATH = "ugc_coding"
+
+
+def pending_quotable(store: Any, report_id: str) -> int:
+    """引得了、还没编码的行数。0 = 主链路编码无事可做（含「本来就没有可引的评论」）。"""
+
+    return len(quotable_targets(store.list_evidence(report_id)))
+
+
+async def code_quotable(
+    store: Any,
+    report_id: str,
+    *,
+    adapter: Any,
+    runs_root: str | Path,
+    on_event: Any = None,
+    engine_preference: str = "claude",
+    concurrency: int = CODING_CONCURRENCY,
+) -> CodingResult:
+    """§RPT-3 货 1：主链路的编码入口——收尾期回填之后、出稿前置，两处共用这一个。
+
+    沿用脚本 `--code-only` 的 `code_report`，只多三件事：口径收成「引得了」、
+    批并发、套 `UsageMeteringAdapter` 记账外费用（OBS-7 挂账「编码未接账外记账」）。
+    """
+
+    from app.observability.cost import UsageMeteringAdapter
+
+    return await code_report(
+        store, report_id,
+        adapter=UsageMeteringAdapter(adapter, store=store, research_id=report_id,
+                                     path_name=CODING_USAGE_PATH),
+        runs_root=runs_root, engine_preference=engine_preference,
+        on_event=on_event, scope="quotable", concurrency=concurrency,
+    )
+
+
 __all__ = [
-    "ATTITUDES", "AUDIENCES", "CODING_VERSION", "CodingResult", "SCENARIOS",
-    "TOPICS", "TOPIC_NONE", "code_report", "coded_rows", "coding_errors",
+    "ATTITUDES", "AUDIENCES", "CODING_CONCURRENCY", "CODING_USAGE_PATH",
+    "CODING_VERSION", "CodingResult", "SCENARIOS",
+    "TOPICS", "TOPIC_NONE", "code_quotable", "code_report", "coded_rows", "coding_errors",
+    "pending_quotable", "quotable_targets",
     "CODING_BATCH_BYTES", "CODING_BATCH_ITEMS", "coding_batch_sizes",
     "ENGAGEMENT_NOTES", "coding_tables", "coding_targets", "engagement_tier",
     "is_coded", "quote_is_complete", "ratio_phrase_offenders",

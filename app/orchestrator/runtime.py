@@ -3039,6 +3039,60 @@ class RuntimeCoordinator:
                 self._backfill_runs.pop(research_id, None)
         await self._publish_backfill_done(research_id, result)
 
+    async def _code_quotes_on_finalize(self, research_id: str) -> None:
+        """§RPT-3 货 1：评级回填之后给「正式稿引得了」的评论编码。
+
+        编码以前只有脚本 `--code-only` 一个入口，没人手动跑的研究原声链路整段断：
+        `quotes` 表进 omitted_tables，正式稿写「本轮没有可引的原声」（09-14 评审实测）。
+        放在回填之后，是因为口径要用回填补齐的等级与此前登记的角标。
+        与回填同一套规矩：登记进 `_backfill_runs` 让 `/stop` 掐得到；抛错只发事件，
+        研究照常收尾；`OWLI_SKIP_UGC_CODING=1` 跳过。出稿入口另有一道前置兜底。
+        """
+        from app.reliability.coding import code_quotable, pending_quotable
+
+        if os.getenv("OWLI_SKIP_UGC_CODING") == "1":
+            return
+        scheduler = self.scheduler_for(research_id)
+        if scheduler is not None and getattr(scheduler, "status", None) == "stopped":
+            return
+        adapter = self._adapters.get(research_id)
+        pending = pending_quotable(self.store, research_id)
+        if adapter is None or not pending:
+            return
+        await self.events.publish(research_id, {
+            "type": "ugc_coding_started",
+            "data": {"research_id": research_id, "pending": pending, "stage": "finalize"},
+        })
+        run = asyncio.ensure_future(code_quotable(
+            self.store, research_id, adapter=adapter, runs_root=self.runs_root,
+            on_event=lambda payload: self.events.publish(research_id, payload),
+        ))
+        self._backfill_runs[research_id] = run
+        try:
+            result = await run
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                raise
+            return
+        except Exception as exc:  # noqa: BLE001 —— 收尾不得因编码失败判 failed
+            logger.warning("收尾原声编码失败，研究照常收尾：%s", exc)
+            await self.events.publish(research_id, {
+                "type": "ugc_coding_failed",
+                "data": {"research_id": research_id, "stage": "finalize",
+                         "error_type": type(exc).__name__, "message": str(exc)[:500]},
+            })
+            return
+        finally:
+            if self._backfill_runs.get(research_id) is run:
+                self._backfill_runs.pop(research_id, None)
+        await self.events.publish(research_id, {
+            "type": "ugc_coding_done",
+            "data": {"research_id": research_id, "stage": "finalize",
+                     "targets": result.targets, "coded": result.coded,
+                     "failed": result.failed, "already": result.already},
+        })
+
     async def _publish_backfill_done(self, research_id: str, result: Any) -> None:
         """回填结果发事件；rated_by 分布与交叉维非空行数直接从库里数。"""
         rows = self.store.list_evidence(research_id)
@@ -3187,6 +3241,8 @@ class RuntimeCoordinator:
                 claims_error = f"断言登记失败：{type(exc).__name__}: {exc}"
         # §X-1 货 1：断言登记之后、finish_report 之前无条件跑评级回填。
         await self._backfill_ratings_on_finalize(research_id)
+        # §RPT-3 货 1：回填补齐等级之后，给正式稿引得了的评论编码（原声链路进主链路）。
+        await self._code_quotes_on_finalize(research_id)
         failures = [
             {"validator": item.name, "message": item.message, "offenders": item.offenders}
             for item in validation_report.results

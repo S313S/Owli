@@ -109,6 +109,48 @@ def register_delivery_routes(
         except Exception:  # noqa: BLE001 — SSE 推送失败不该让后台任务炸掉
             logger.warning("正式稿进度事件推送失败：%s", research_id, exc_info=True)
 
+    async def _ensure_quotes_coded(research_id: str, template: str,
+                                   record_failure: Callable[[str], None]) -> bool:
+        """§RPT-3 货 1 出稿前置：引得了的评论没编码就先编，编不上一条就拒绝出稿。
+
+        收尾期已经会编（`runtime._code_quotes_on_finalize`），这里兜的是老研究、
+        收尾期编码失败或被跳过的研究。⛔ 不许静默出一份「没有原声」的稿：
+        09-14 评审那份稿就是没人跑编码、写手按兜底话术写了「本轮没有可引的原声」。
+        返回 True = 可以接着出稿。
+        """
+        from app.reliability import coding
+
+        pending = coding.pending_quotable(store, research_id)
+        if not pending:
+            return True
+        await _emit(research_id, {"type": "progress", "data": {
+            "stage": "polish", "template": template, "status": "running",
+            "summary": f"出稿前先给 {pending} 条引得了的评论编码（摘原声）"}})
+        failure: str | None = None
+        try:
+            from app.adapters.routing import RoutedAdapter
+
+            result = await coding.code_quotable(
+                store, research_id, adapter=RoutedAdapter(), runs_root=runs_root,
+                on_event=lambda payload: _emit(research_id, payload))
+        except Exception as exc:  # noqa: BLE001 — 编码失败要拒绝出稿，不是冲掉后台任务
+            logger.exception("出稿前原声编码失败：%s", research_id)
+            failure = f"出稿前原声编码失败（{type(exc).__name__}: {exc}），未出稿"
+        else:
+            if result.coded + result.already == 0:
+                failure = (f"出稿前原声编码一条都没编上（{result.failed} 条失败），"
+                           "拒绝出一份没有原声的稿；可稍后重试整理")
+            await _emit(research_id, {"type": "ugc_coding_done", "data": {
+                "research_id": research_id, "stage": "polish",
+                "targets": result.targets, "coded": result.coded,
+                "failed": result.failed, "already": result.already}})
+        if failure is None:
+            return True
+        record_failure(failure)
+        await _emit(research_id, {"type": "export_failed", "data": {
+            "kind": "polished", "template": template, "error": failure}})
+        return False
+
     async def _polish_in_background(research_id: str, template: str, text: str) -> None:
         """后台整理一次正式稿。失败只发 export_failed + 落一条无 url 的登记，研究状态一个字不改。"""
         from app.export.registry import record_export
@@ -121,6 +163,8 @@ def register_delivery_routes(
                           path=str(artifact_paths(runs_root, research_id, template)[0]),
                           url=None, desc=f"正式稿整理失败（模板 {template}）：{reason}")
 
+        if not await _ensure_quotes_coded(research_id, template, record_failure):
+            return
         await _emit(research_id, {"type": "progress", "data": {
             "stage": "polish", "template": template, "status": "running",
             "summary": f"正在整理正式稿（{template}）"}})
