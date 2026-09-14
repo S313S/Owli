@@ -1,4 +1,4 @@
-"""§WX-1 判据 2：standard 档真跑一次**规划期**——口碑 goal 有国内社媒豆包卡、媒体 goal 有公众号·豆包，D-061/D-062 两闸不退化。
+"""§WX-1 判据 2：standard 档真跑一次**规划期**——口碑 goal 有国内社媒豆包卡、媒体 goal 有公众号·豆包，D-061/D-062 两闸不退化，D-067 综合 goal 不被掏空。
 
 rebase 到 712a004（含 ALLOC-3 性质投递、D-065 空 goal 移出）后复验：「哪个 goal 是口碑类/媒体类」
 不另写分类，调生产 `allocation.nature_score` 与 ALLOC-3 同一把尺子；0 章 goal 与 D-065 移出留痕
@@ -96,7 +96,7 @@ import copy  # noqa: E402
 from app.plan.allocation import (  # noqa: E402
     SOURCE_NATURE, SUMMARY_GOAL_CUES, goal_affinity, nature_score,
 )
-from app.plan.normalize import _repair_acceptance, empty_goal_removal  # noqa: E402
+from app.plan.normalize import _asks_backfill, _repair_acceptance, empty_goal_removal  # noqa: E402
 
 LEAD = "豆包"
 USER_OPINION = ("xhs", "douyin", "weibo")
@@ -161,6 +161,38 @@ async def main() -> int:
         set(holders(s)) & set(top_goals(s)) for s in INDUSTRY_VIEW)
     removed_ids = {hit["goal_id"] for hit in removed}
 
+    # §D-067 复验：综合 goal = 骨架标题含生产 SUMMARY_GOAL_CUES 的 goal（与 ALLOC-3 同一词表）。
+    synthesis_skel = [g for g, sc in by_goal.items()
+                      if any(cue in sc["title"] for cue in SUMMARY_GOAL_CUES)]
+    plan_goals = {goal.goal_id: goal for goal in plan.goals}
+    synthesis_detail: dict[str, str] = {}
+    synthesis_ok = True
+    for goal_id in synthesis_skel:
+        goal = plan_goals.get(goal_id)
+        if goal is None:
+            synthesis_ok = False
+            synthesis_detail[goal_id] = "已移出"
+            continue
+        deliverable = str((goal.deliverable or {}).get("path", ""))
+        writers = [a for a in goal.agents if str((a.output or {}).get("path", "")) == deliverable]
+        heads = [a for a in goal.agents if not a.depends_on]
+        dry_heads = [a.agent_id for a in heads if not a.inputs]
+        upstream_inputs = sum(
+            1 for a in goal.agents for item in (a.inputs or [])
+            if isinstance(item, dict) and item.get("from_goal") in set(goal.depends_on))
+        ok = bool(goal.agents) and bool(writers) and not dry_heads
+        synthesis_ok = synthesis_ok and ok
+        synthesis_detail[goal_id] = (
+            f"章 {len(goal.agents)} 撰写章 {[a.agent_id for a in writers]} 链头 {[a.agent_id for a in heads]}"
+            f" 无输入链头 {dry_heads} 上游 goal 输入 {upstream_inputs} depends={goal.depends_on}")
+    stale_backfill = [
+        (goal.goal_id, index, str(item)[:80])
+        for goal in plan.goals
+        if not any(g == goal.goal_id for g, _, _ in cards)
+        for index, item in enumerate(goal.acceptance)
+        if _asks_backfill(str(item))
+    ]
+
     checks = [
         ("〇 主角是豆包且至少一个 goal 标题点名豆包",
          any(v.get(LEAD, 0) == 2 for v in affinity.values()), f"affinity={affinity}"),
@@ -174,6 +206,10 @@ async def main() -> int:
          triples_plan == triples_alloc,
          f"表外={sorted(set(triples_plan) - set(triples_alloc))} 缺={sorted(set(triples_alloc) - set(triples_plan))}"),
         ("⑤ D-062 不退化：最终计划再过验收条闸摘出 0 条", not residual, f"{residual[:3]}"),
+        ("⑥ D-067：综合 goal 保留、撰写章在、链头都有输入（骨架无综合 goal 则本条无靶子记红）",
+         bool(synthesis_skel) and synthesis_ok, f"综合={synthesis_skel} {synthesis_detail}"),
+        ("⑦ D-067：无自带卡的 goal 上没有「补采产物」验收条（生产 _asks_backfill）",
+         not stale_backfill, f"{stale_backfill[:3]}"),
     ]
     for label, ok, detail in checks:
         print(f"{'✓' if ok else '×'} {label}" + (f"    {detail}" if detail else ""))
