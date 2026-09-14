@@ -1,0 +1,1272 @@
+{
+  "wx1-0914/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "字节跳动",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "字节跳动",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "文心一言",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "通义千问",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        }
+      ],
+      "goal-4": []
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·字节跳动",
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "xhs·DeepSeek",
+        "xhs·Kimi",
+        "xhs·文心一言",
+        "xhs·通义千问"
+      ],
+      "goal-3": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包",
+        "wechat_mp·豆包"
+      ],
+      "goal-4": []
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "wx1-0914b/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "字节跳动"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "字节跳动",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        }
+      ],
+      "goal-4": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        }
+      ],
+      "goal-5": [],
+      "goal-6": []
+    },
+    "allocation_short": {
+      "goal-1": [
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "xhs·字节跳动"
+      ],
+      "goal-3": [
+        "wechat_mp·豆包"
+      ],
+      "goal-4": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包"
+      ],
+      "goal-5": [],
+      "goal-6": []
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "wx1-0914c/standard": {
+    "protagonists": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "豆包",
+      "通义千问"
+    ],
+    "quote_gate_names": [
+      "DeepSeek",
+      "DeepSeek-R1",
+      "DeepSeek-V3",
+      "Doubao",
+      "ERNIE Bot",
+      "Kimi",
+      "Kimi Chat",
+      "Kimi智能助手",
+      "MoonshotAI Kimi",
+      "Qwen",
+      "Tongyi Qianwen",
+      "kimi",
+      "字节豆包",
+      "文心一言",
+      "文心大模型",
+      "月之暗面Kimi",
+      "深度求索",
+      "百度文心",
+      "豆包",
+      "豆包AI",
+      "通义千问"
+    ],
+    "protagonist_first": null,
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "Kimi",
+          "source_id": "web_search",
+          "collector_name": "网页搜索数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        }
+      ],
+      "goal-4": [
+        {
+          "entity": "文心一言",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-5": [
+        {
+          "entity": "通义千问",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "reddit·豆包"
+      ],
+      "goal-2": [
+        "weibo·DeepSeek",
+        "x·豆包"
+      ],
+      "goal-3": [
+        "web_search·Kimi",
+        "hacker_news·豆包"
+      ],
+      "goal-4": [
+        "douyin·文心一言",
+        "product_hunt·豆包"
+      ],
+      "goal-5": [
+        "wechat_mp·通义千问"
+      ]
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "r-50600e09f7dd/plan": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI"
+    ]
+  },
+  "alloc3-run-b/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      []
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        }
+      ],
+      "goal-4": [],
+      "goal-5": []
+    },
+    "allocation_short": {
+      "goal-1": [
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "wechat_mp·豆包"
+      ],
+      "goal-3": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包"
+      ],
+      "goal-4": [],
+      "goal-5": []
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "alloc2/fast": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin"
+      ],
+      [
+        "Kimi",
+        "DeepSeek"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "douyin·豆包"
+      ],
+      "goal-2": [
+        "xhs·Kimi",
+        "weibo·豆包"
+      ],
+      "goal-3": [
+        "xhs·DeepSeek",
+        "reddit·豆包"
+      ]
+    },
+    "skipped": [
+      {
+        "entity": "豆包",
+        "source_id": "x",
+        "reason": "capacity"
+      },
+      {
+        "entity": "豆包",
+        "source_id": "hacker_news",
+        "reason": "capacity"
+      }
+    ],
+    "baseline": [
+      {
+        "goal_id": "goal-2",
+        "entity": "豆包",
+        "source_id": "weibo",
+        "reason": "protagonist_baseline"
+      },
+      {
+        "goal_id": "goal-3",
+        "entity": "豆包",
+        "source_id": "reddit",
+        "reason": "protagonist_baseline"
+      }
+    ]
+  },
+  "alloc2/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "Kimi",
+        "DeepSeek"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包",
+        "wechat_mp·豆包",
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "xhs·Kimi"
+      ],
+      "goal-3": [
+        "xhs·DeepSeek"
+      ]
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "d062fu/fast": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin"
+      ],
+      [
+        "DeepSeek",
+        "Kimi"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "douyin·豆包"
+      ],
+      "goal-2": [
+        "xhs·DeepSeek",
+        "weibo·豆包"
+      ],
+      "goal-3": [
+        "xhs·Kimi",
+        "reddit·豆包"
+      ]
+    },
+    "skipped": [
+      {
+        "entity": "豆包",
+        "source_id": "x",
+        "reason": "capacity"
+      },
+      {
+        "entity": "豆包",
+        "source_id": "hacker_news",
+        "reason": "capacity"
+      }
+    ],
+    "baseline": [
+      {
+        "goal_id": "goal-2",
+        "entity": "豆包",
+        "source_id": "weibo",
+        "reason": "protagonist_baseline"
+      },
+      {
+        "goal_id": "goal-3",
+        "entity": "豆包",
+        "source_id": "reddit",
+        "reason": "protagonist_baseline"
+      }
+    ]
+  },
+  "d062fu/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "doubao",
+      "字节豆包",
+      "豆包",
+      "豆包AI"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "DeepSeek",
+        "Kimi"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包",
+        "wechat_mp·豆包",
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "xhs·DeepSeek"
+      ],
+      "goal-3": [
+        "xhs·Kimi"
+      ]
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "alloc3/fast": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin"
+      ],
+      [
+        "字节跳动",
+        "DeepSeek",
+        "Kimi"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "字节跳动",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-4": [
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        }
+      ],
+      "goal-5": [],
+      "goal-6": [
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包",
+        "douyin·豆包"
+      ],
+      "goal-2": [
+        "xhs·字节跳动"
+      ],
+      "goal-3": [
+        "xhs·DeepSeek",
+        "xhs·Kimi"
+      ],
+      "goal-4": [
+        "weibo·豆包",
+        "reddit·豆包"
+      ],
+      "goal-5": [],
+      "goal-6": [
+        "x·豆包",
+        "hacker_news·豆包"
+      ]
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "alloc3/standard": {
+    "protagonists": [
+      "豆包"
+    ],
+    "quote_gate_names": [
+      "Doubao",
+      "豆包",
+      "豆包AI",
+      "豆包大模型"
+    ],
+    "protagonist_first": [
+      "豆包",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "字节跳动",
+        "DeepSeek",
+        "Kimi"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "字节跳动",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "DeepSeek",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "Kimi",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-4": [
+        {
+          "entity": "豆包",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        }
+      ],
+      "goal-5": [
+        {
+          "entity": "豆包",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        }
+      ],
+      "goal-6": []
+    },
+    "allocation_short": {
+      "goal-1": [
+        "reddit·豆包",
+        "x·豆包",
+        "hacker_news·豆包",
+        "product_hunt·豆包"
+      ],
+      "goal-2": [
+        "xhs·字节跳动"
+      ],
+      "goal-3": [
+        "xhs·DeepSeek",
+        "xhs·Kimi"
+      ],
+      "goal-4": [
+        "xhs·豆包",
+        "douyin·豆包",
+        "weibo·豆包"
+      ],
+      "goal-5": [
+        "wechat_mp·豆包"
+      ],
+      "goal-6": []
+    },
+    "skipped": [],
+    "baseline": []
+  },
+  "d062fu-run-a/fast": {
+    "protagonists": [
+      "豆包语音输入法"
+    ],
+    "quote_gate_names": [
+      "Doubao Voice Input",
+      "爱说输入法",
+      "豆包爱说",
+      "豆包爱说输入法",
+      "豆包语音输入法",
+      "豆包输入法"
+    ],
+    "protagonist_first": [
+      "豆包语音输入法",
+      [
+        "xhs",
+        "weibo",
+        "douyin"
+      ],
+      [
+        "讯飞输入法",
+        "搜狗输入法"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "讯飞输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "搜狗输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": [
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        }
+      ]
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包语音输入法",
+        "douyin·豆包语音输入法"
+      ],
+      "goal-2": [
+        "xhs·讯飞输入法",
+        "xhs·搜狗输入法"
+      ],
+      "goal-3": [
+        "weibo·豆包语音输入法",
+        "reddit·豆包语音输入法"
+      ]
+    },
+    "skipped": [
+      {
+        "entity": "豆包语音输入法",
+        "source_id": "x",
+        "reason": "capacity"
+      },
+      {
+        "entity": "豆包语音输入法",
+        "source_id": "hacker_news",
+        "reason": "capacity"
+      }
+    ],
+    "baseline": []
+  },
+  "d062fu-run-a/standard": {
+    "protagonists": [
+      "豆包语音输入法"
+    ],
+    "quote_gate_names": [
+      "Doubao Voice Input",
+      "爱说输入法",
+      "豆包爱说",
+      "豆包爱说输入法",
+      "豆包语音输入法",
+      "豆包输入法"
+    ],
+    "protagonist_first": [
+      "豆包语音输入法",
+      [
+        "xhs",
+        "weibo",
+        "douyin",
+        "wechat_mp"
+      ],
+      [
+        "讯飞输入法",
+        "搜狗输入法"
+      ]
+    ],
+    "allocation": {
+      "goal-1": [
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "douyin",
+          "collector_name": "抖音数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "weibo",
+          "collector_name": "微博数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "wechat_mp",
+          "collector_name": "微信公众号数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "reddit",
+          "collector_name": "Reddit 数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "x",
+          "collector_name": "X 数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "hacker_news",
+          "collector_name": "HN 数据抓取"
+        },
+        {
+          "entity": "豆包语音输入法",
+          "source_id": "product_hunt",
+          "collector_name": "Product Hunt 数据抓取"
+        }
+      ],
+      "goal-2": [
+        {
+          "entity": "讯飞输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        },
+        {
+          "entity": "搜狗输入法",
+          "source_id": "xhs",
+          "collector_name": "小红书数据抓取"
+        }
+      ],
+      "goal-3": []
+    },
+    "allocation_short": {
+      "goal-1": [
+        "xhs·豆包语音输入法",
+        "douyin·豆包语音输入法",
+        "weibo·豆包语音输入法",
+        "wechat_mp·豆包语音输入法",
+        "reddit·豆包语音输入法",
+        "x·豆包语音输入法",
+        "hacker_news·豆包语音输入法",
+        "product_hunt·豆包语音输入法"
+      ],
+      "goal-2": [
+        "xhs·讯飞输入法",
+        "xhs·搜狗输入法"
+      ],
+      "goal-3": []
+    },
+    "skipped": [],
+    "baseline": []
+  }
+}

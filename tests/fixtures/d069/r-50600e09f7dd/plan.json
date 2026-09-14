@@ -1,0 +1,64 @@
+{
+  "research_id": "r-50600e09f7dd",
+  "title": "国内大家对豆包的看法",
+  "research_question": "国内大家对豆包的看法",
+  "market_profile": "cn_product",
+  "subjects": [
+    "豆包",
+    "DeepSeek",
+    "Kimi"
+  ],
+  "subjects_justification": "主体为字节跳动旗下 AI 助手「豆包」，同时纳入国内用户最常拿来对比的两款同赛道产品 DeepSeek 与 Kimi，用作理解「大家看法」的对照坐标，均为可逐个采集的具体产品专名。",
+  "entities": [
+    {
+      "id": "豆包",
+      "canonical": "豆包",
+      "names": {
+        "zh": "豆包",
+        "en": "Doubao",
+        "aliases": [
+          "Doubao",
+          "豆包AI",
+          "字节豆包"
+        ]
+      },
+      "official_handles": {},
+      "same_product": true,
+      "note": "字节跳动旗下的AI聊天助手App，基于豆包大模型，提供问答、写作、翻译、生图等功能。"
+    },
+    {
+      "id": "DeepSeek",
+      "canonical": "DeepSeek",
+      "names": {
+        "zh": "深度求索",
+        "en": "DeepSeek",
+        "aliases": [
+          "深度求索",
+          "DeepSeek-R1",
+          "DeepSeek-V3"
+        ]
+      },
+      "official_handles": {},
+      "same_product": true,
+      "note": "DeepSeek（深度求索）是中国杭州深度求索公司推出的开源大语言模型及AI对话产品，代表模型包括 DeepSeek-V3、DeepSeek-R1 等，与调研需求原文中的『豆包』并非同一产品。"
+    },
+    {
+      "id": "Kimi",
+      "canonical": "Kimi",
+      "names": {
+        "zh": "Kimi智能助手",
+        "en": "Kimi",
+        "aliases": [
+          "kimi",
+          "Kimi Chat",
+          "月之暗面",
+          "Moonshot"
+        ]
+      },
+      "official_handles": {},
+      "same_product": true,
+      "note": "Kimi 是北京月之暗面科技（Moonshot AI）开发的生成式 AI 聊天助手，主打超长上下文与文档/URL 解析，与研究需求中的『豆包』（字节跳动旗下）为不同公司的独立产品。"
+    }
+  ],
+  "scale": "fast"
+}
