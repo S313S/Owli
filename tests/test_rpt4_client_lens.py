@@ -367,3 +367,14 @@ def test_货5_信息源清单标题归一成评论点帖子标题_有独立标�
     assert source_title({"title": "x" * 80}).endswith("…")
     table = sources_table([{"mark": "S01", "grade": "A", "title": "「评论 · 帖」", "url": "u"}])
     assert "| 评论 · 帖 |" in table and "「" not in table
+
+
+def test_逐字闸不把全角弯引号落成半角当改字_改了字照样打回() -> None:
+    from app.report.polish.run import altered_quotes
+    from app.reliability.coding import _squeeze
+
+    corpus = _squeeze("在我看来“是否下载猫箱”是一场典型的囚徒博弈，我个人认为仍然会有很多人去下载的")
+    ok = '> 在我看来"是否下载猫箱"是一场典型的囚徒博弈，我个人认为仍然会有很多人去下载的\n> —— 小红书 · 等级 B [S28]\n'
+    assert altered_quotes(ok, corpus) == []
+    bad = ok.replace("囚徒博弈", "囚徒困境")
+    assert altered_quotes(bad, corpus), "改了字照样打回"

@@ -886,6 +886,16 @@ def quote_corpus(data: Mapping[str, Any], report_text: str) -> str:
     return _squeeze("\n".join(chunks))
 
 
+#: §RPT-4：引号类字符在逐字比对里一律视作同一个。写手的工具链会把全角弯引号“”落成半角 `"`，
+#: 字一个没改——09-15 沙盒实测 S28「在我看来“是否下载猫箱”是一场典型的囚徒博弈」被这道闸
+#: 连退两次、整稿判失败（09-14 RPT-3 那轮同一句也被退过一次）。只折引号，别的标点照旧逐字比。
+_QUOTE_MARKS = str.maketrans({c: '"' for c in '“”„‟＂「」『』〝〞'} | {c: "'" for c in "‘’‚‛＇"})
+
+
+def _fold_quote_marks(text: str) -> str:
+    return str(text).translate(_QUOTE_MARKS)
+
+
 def altered_quotes(markdown: str, corpus: str) -> list[str]:
     """子串闸：`>` 引语行里对不上原文的那些。
 
@@ -895,11 +905,12 @@ def altered_quotes(markdown: str, corpus: str) -> list[str]:
     from app.reliability.coding import _squeeze          # ⛔ 只 import，不改那个文件
 
     problems = []
+    folded_corpus = _fold_quote_marks(corpus)
     for line_no, texts, _ in quote_blocks(markdown):
         for text in texts:
             for piece in _ELLIPSIS.split(text):
-                squeezed = _squeeze(piece)
-                if len(squeezed) >= QUOTE_MIN_CHARS and squeezed not in corpus:
+                squeezed = _fold_quote_marks(_squeeze(piece))
+                if len(squeezed) >= QUOTE_MIN_CHARS and squeezed not in folded_corpus:
                     problems.append(
                         f"第 {line_no} 行起的原声与原文对不上：「{piece.strip()[:40]}」。"
                         "原声必须逐字照抄，一个字都不许改（错别字也照抄，那是发帖人写的）。")
