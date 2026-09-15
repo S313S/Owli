@@ -1803,7 +1803,16 @@ class RuntimeCoordinator:
         会写出被库拒的不一致行；`rated_by` 与三个闭集标签则按键补空。
         不拿 `rated_by` 判新旧——`--rescore-only` 的补评保留原 `agent:*` 标记
         （backfill.py `_rating_provenance`），标记根本认不出谁新谁旧。
-        第四个返回值是 kept 行数，filled = len(payloads) - kept。
+
+        §RATE-5：**平台基线分不算「有分」。** 帖子入库就带一份按平台查表的基线
+        （`rated_by=baseline:<platform>@v1`，降级态带 `:degraded`），它不是谁评过
+        的结论，只是占位。按「五维非空」判，基线行全被当成有分 → 评级章的真评分
+        整块丢弃（r-20271e8a5028：240 行帖子评过、一行没落，正式稿闸门拦下）。
+        所以基线行与五维全空的行同路：产物整块覆盖（五维 + rating_notes 连同 `None`
+        一起换，基线的备注不能留着配产物的分），三个闭集标签与 `rated_by` 也换成产物的。
+        `rated_by` 在这里只用来认「基线」这一种占位，不拿它判 agent 之间谁新谁旧。
+        第四个返回值是 kept 行数；替换了基线的行数由调用方按
+        `_baseline_rated(existing 行)` 数，filled = len(payloads) - kept - 替换数。
         """
         try:
             items = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -1832,11 +1841,15 @@ class RuntimeCoordinator:
                 unmatched.append(permalink or "(缺 permalink)")
                 continue
             payload = dict(stored)
-            scored = any(
+            baseline = self._baseline_rated(stored)
+            scored = not baseline and any(
                 stored.get(column) is not None
                 for column in self._RATING_SCORE_COLUMNS
             )
-            if not scored:
+            if baseline:
+                for column in self._RATING_COLUMNS:
+                    payload[column] = raw.get(column)
+            elif not scored:
                 # 五维 + rating_notes 是**一整块**：`dao._prepare_evidence` 要求
                 # 备注里的五个数字与五维列逐格一致（`?` 记法对应 NULL），按列
                 # 补空会写出「分是产物的、备注还是库里的」这种不一致行，直接被
@@ -1859,6 +1872,12 @@ class RuntimeCoordinator:
             payloads.append(payload)
             kept += 1 if scored else 0
         return payloads, unmatched, invalid, kept
+
+    @staticmethod
+    def _baseline_rated(stored: Mapping[str, Any]) -> bool:
+        """这一行的分是不是入库时的平台基线占位（§RATE-5），而非评出来的分。"""
+
+        return str(stored.get("rated_by") or "").startswith("baseline:")
 
     @classmethod
     def _rating_scores_ok(cls, raw: Mapping[str, Any]) -> bool:
@@ -2119,7 +2138,13 @@ class RuntimeCoordinator:
         payloads, unmatched, invalid, kept = self._rating_payloads(
             path, existing=existing, agent_id=agent.agent_id,
         )
-        filled = len(payloads) - kept
+        replaced = sum(
+            1 for payload in payloads
+            if self._baseline_rated(
+                existing.get(str(payload["permalink"])) or {}
+            )
+        )
+        filled = len(payloads) - kept - replaced
         failed = ""
         if payloads:
             try:
@@ -2129,7 +2154,7 @@ class RuntimeCoordinator:
                 # 不把调它的那条收尾路径一起带走。
                 failed = f"{type(error).__name__}: {error}"
                 payloads = []
-                kept = filled = 0
+                kept = filled = replaced = 0
         await self.events.publish(plan.research_id, {
             "type": "rating_chapter_persisted",
             "data": {
@@ -2141,6 +2166,8 @@ class RuntimeCoordinator:
                 # filled = 五维全空、由旧产物整份贴回的行。让「谁的分赢」
                 # 不是静默发生的：补评之后再跑，kept 应等于有分行数。
                 "kept": kept, "filled": filled,
+                # §RATE-5：库里原是平台基线占位分、被评级章真评分整块替换的行。
+                "replaced_baseline": replaced,
             },
         })
 

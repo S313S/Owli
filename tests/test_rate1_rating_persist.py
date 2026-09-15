@@ -109,6 +109,8 @@ def test_评级章产物按permalink贴回_行数不变且五维落库(tmp_path:
         "invalid_samples": [], "failed": "",
         # D-049：这三行库里五维全 NULL，走的是「旧产物回贴」那一路
         "kept": 0, "filled": 3,
+        # §RATE-5：新增读数，这三行库里原本五维全空、不是基线占位
+        "replaced_baseline": 0,
     }]
 
 
