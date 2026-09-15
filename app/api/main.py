@@ -345,6 +345,39 @@ def create_app(
                 })
         return sections
 
+    def unwritten_summary(research_id: str) -> dict[str, Any] | None:
+        """§RPT-4 货 1：研究「已完成」但有段落没写成时，给报告页挂黄条用的几个数。
+
+        09-14 评审实测：标题旁绿色「已完成」，要翻到附录「哪些没采到」才知道三段小红书
+        总结全部超时没写成（842 条、全部语料 75%）。⛔ 标签本身不改（有用例锁、
+        工作板与历史页共用），只多给一个字段，前端据此在标题下挂黄条。
+
+        `yielded` 是这些没写成的段**已入库**的条数，与附录缺失清单同一把尺子
+        （`tables.chapter_rows` 按 agent_name 数）——那张表写「采到 N 条，已入库…」，
+        黄条的 N 必须与它对得上。没缺段（或研究没完成）返回 None。
+        """
+        report = store.get_report(research_id)
+        if report is None or str(report.get("status")) != "completed":
+            return None
+        missing = [row for row in store.list_chapters(research_id)
+                   if str(row.get("status")) in {"missing", "deferred"}]
+        if not missing:
+            return None
+        from app.report.polish.tables import chapter_rows
+
+        plan = report.get("plan_snapshot") or {}
+        if isinstance(plan, str):
+            plan = json.loads(plan or "{}")
+        by_chapter = {(c["goal_id"], c["chapter_id"]): c
+                      for c in chapter_rows(plan, store.list_evidence(research_id))}
+        # 同一章的几节（`ch-6/sec-1`、`ch-6/sec-2`）落在同一个 agent 上，按章去重再加，
+        # 否则同一批入库条数会被数两遍。
+        parents = {(str(row["goal_id"]), str(row["chapter_id"]).partition("/")[0])
+                   for row in missing}
+        yielded = sum(int((by_chapter.get(key) or {}).get("yielded") or 0) for key in parents)
+        timeouts = sum(1 for row in missing if str(row.get("reason") or "") == "timeout")
+        return {"sections": len(missing), "timeouts": timeouts, "yielded": yielded}
+
     def historical_snapshot(research_id: str) -> dict[str, Any] | None:
         """从 Store 事实重建历史只读 DTO，不创建任何运行态对象。"""
         report = store.get_report(research_id)
@@ -476,6 +509,7 @@ def create_app(
             "goals": goals,
             "chapters": chapters,
             "missing": missing,
+            "unwritten": unwritten_summary(research_id),
             "cards": [],
             "events": [],
             "run_panel_sections": run_panel_sections(research_id, live=False),
@@ -909,6 +943,9 @@ def create_app(
             data = {
                 **(state or {}),
                 "run_panel_sections": run_panel_sections(research_id, live=live),
+                # §RPT-4 货 1：刚跑完、还挂在内存里的研究也要挂黄条，不只历史快照。
+                # 运行中不挂这个键——运行中的快照形状逐字不变。
+                **({} if live else {"unwritten": unwritten_summary(research_id)}),
             }
             return {"ok": True, "data": data, "error": None}
         state = historical_snapshot(research_id)

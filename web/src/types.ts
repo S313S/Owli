@@ -200,6 +200,8 @@ export type ResearchSnapshot = {
   run_panel_sections?: RunPanelSection[]
   chapters?: ChapterProgress[]
   missing?: HistoricalMissing[]
+  /** §RPT-4 货 1：已完成但有段落没写成时的读数；没缺段为 null。 */
+  unwritten?: { sections: number; timeouts: number; yielded: number } | null
   cards: ActionCard[]
   events: NormalizedEvent[]
   /** 键是 agent_id；没有 agent 归属的心跳落 `goal/chapter`。 */
