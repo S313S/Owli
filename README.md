@@ -40,7 +40,7 @@
 
 > 完整演示：**[2 分 53 秒 · 从提问到出报告](https://github.com/user-attachments/assets/e105a011-c6f5-4115-a6f5-b1cd6b8267fb)**<!-- 换成 user-attachments 链接 -->
 > 更长的无剪辑全流程录屏见 [一镜到底无人托管Agents舆情监督工具](https://weixin.qq.com/sph/A1FeZR2wL)。
-> 文字版实录：[公众号文章](https://mp.weixin.qq.com/s/kGCSCmHF8XHaEYS1t4O2nw)<!-- 换成 mp.weixin.qq.com 那篇的链接 -->
+> 图文版实录：[公众号文章](https://mp.weixin.qq.com/s/kGCSCmHF8XHaEYS1t4O2nw)<!-- 换成 mp.weixin.qq.com 那篇的链接 -->
 
 ### 为什么做这个
 
