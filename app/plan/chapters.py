@@ -11,8 +11,8 @@ from typing import Any, Mapping
 
 from app.config import ChapterEngineConfig
 from app.plan.model import (
-    Agent, Plan, RATING_BATCH_ROWS, rated_collector_id, rating_batch_path,
-    rating_rows_path,
+    AGENT_KIND_PREFIXES, Agent, Plan, RATING_BATCH_ROWS, rated_collector_id,
+    rating_batch_path, rating_rows_path,
 )
 
 
@@ -84,6 +84,76 @@ def _input_paths(value: Any) -> list[str]:
     return paths
 
 
+# §D-070：非采集职能 → 唯一对应的章类型。只收历史读数里「这个职能从来只落在这一种章类型」的；
+# 一致性检查（audit / cross_validation 两种都出现过）、规划、仲裁不在表内——它们被标成
+# collection 时没有唯一目标，退回章内语义重试让模型改。浏览器自动化不算确定的非采集职能
+# （MediaCrawler 这类本来就是在采集），两个方向都不校正。
+_KIND_CHAPTER_TYPES = {
+    "report_writing": "report",
+    "summary": "summary",
+    "tagging": "tagging",
+    "cross_validation": "cross_validation",
+    "reliability_audit": "audit",
+    "data_cleaning": "data_cleaning",
+    "excel_generation": "excel_generation",
+    "code_execution": "code_execution",
+}
+_NON_COLLECTION_KINDS = frozenset(
+    {*_KIND_CHAPTER_TYPES, "consistency_check", "goal_planning", "plan_arbitration"}
+)
+
+
+def _declared_kind(agent: Any) -> str:
+    """只认系统派的 agent_id 前缀（`generate._classify` 按职能闭集起的 id），不退回 profile 猜。"""
+
+    agent_id = str(getattr(agent, "agent_id", "") or "")
+    for prefix, kind in AGENT_KIND_PREFIXES.items():
+        if agent_id == prefix or agent_id.startswith(f"{prefix}-"):
+            return kind
+    return ""
+
+
+def _reconcile_chapter_type(
+    chapter_type: str, agent: Any,
+) -> tuple[str, dict[str, str] | None]:
+    """§D-070：章类型与 agent 结构化职能**确定矛盾**时机械改回，返回 (章类型, 校正记录)。
+
+    章类型是模型逐章填的，会被任务文字带偏（r-82ac9ebbd0f0：「报告撰写」agent 的任务写着
+    「……口碑与用户评价采集」节化文档，被标成 collection）。章类型错了不止规则 22 认错全卷
+    采集章、交叉验证章永远补不齐 inputs；引擎选型、执行期采集分支、复用占位也都按它走。
+    所以在章规格落地的这一处按职能校正，下游一律看到对的章类型。
+
+    只处理两种确定矛盾，职能只读结构化字段、不看中文名：
+    - 采集职能（`capability.profile == "web-collector"`，与 `_collection_inventory`、
+      `normalize._is_collector` 同口径）被标成非 collection → 改回 collection；
+    - 确定非采集职能（agent_id 前缀，见 `_KIND_CHAPTER_TYPES` / `_NON_COLLECTION_KINDS`）
+      被标成 collection → 有唯一目标的改回它，没有的抛 ValueError 走章内语义重试。
+
+    不校正：非 collection 章类型之间的互换（report/summary、comparison/cross_validation、
+    撰写 agent 标 comparison 等）；职能认不出（自定义 agent_id、profile 兜底）；浏览器自动化。
+    """
+
+    profile = str((getattr(agent, "capability", None) or {}).get("profile", ""))
+    if profile == "web-collector":
+        if chapter_type == "collection":
+            return chapter_type, None
+        return "collection", {
+            "from": chapter_type, "to": "collection", "by": "profile=web-collector",
+        }
+    if chapter_type != "collection":
+        return chapter_type, None
+    kind = _declared_kind(agent)
+    if kind not in _NON_COLLECTION_KINDS:
+        return chapter_type, None
+    target = _KIND_CHAPTER_TYPES.get(kind)
+    if target is None:
+        raise ValueError(
+            f"chapter_type 不能是 collection：本章 agent 职能为 {kind}，不做采集；"
+            "请从其余章类型中按本章实际工作选择"
+        )
+    return target, {"from": "collection", "to": target, "by": f"agent_kind={kind}"}
+
+
 def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("章节 JSON 顶层必须是 object")
@@ -93,6 +163,7 @@ def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
     chapter_type = str(value.get("chapter_type", ""))
     if chapter_type not in CHAPTER_TYPES:
         raise ValueError(f"chapter_type 不在闭集：{chapter_type!r}")
+    chapter_type, correction = _reconcile_chapter_type(chapter_type, agent)
     opening = value.get("opening")
     closing = value.get("closing")
     if not isinstance(opening, Mapping) or not isinstance(closing, Mapping):
@@ -143,6 +214,10 @@ def validate_chapter_value(value: Any, agent: Agent) -> dict[str, Any]:
     notes = closing.get("notes")
     if not isinstance(notes, Mapping):
         raise ValueError("章节 closing.notes 必须是 object")
+    notes = dict(notes)
+    if correction is not None:
+        # 可查读数：落进计划快照与 goals/<goal>/ch-N.md，原始模型输出仍在 plan-segments。
+        notes["chapter_type_correction"] = correction
     return {
         "chapter_type": chapter_type,
         "opening": {
