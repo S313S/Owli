@@ -1,0 +1,102 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "doubao_product_profile.json",
+    "description": "豆包产品与官方定位画像报告，覆盖产品形态、功能矩阵、版本迭代、面向用户群与官方口径，作为后续舆论分析的事实基线。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "报告顶层为 object，至少含产品形态、功能矩阵、版本迭代、面向用户群、官方口径、缺口口径六个节点。",
+    "每一节所有陈述均可追溯到至少一条采集产物中的 permalink 与 fetched_at。",
+    "必采清单 Reddit、X、Hacker News、Product Hunt 四条采集 agent 均在 agents 中出现且各输出顶层为数组的采集产物。",
+    "所有采集产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段。",
+    "任何维度若源侧样本不足，均以结构化缺口口径注明缺口原因与后续补采建议，不得留空。",
+    "全文只出现 豆包 与 字节跳动 两个研究实体，任何闭集外实体名均触发不通过。"
+  ],
+  "agents": [
+    {
+      "name": "Reddit 数据抓取·豆包",
+      "task": "在 Reddit 搜索并抓取涉及「豆包」「Doubao」「豆包AI」「豆包大模型」的帖子与评论，重点覆盖产品形态、功能矩阵、版本迭代与用户群自述。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·豆包",
+      "task": "在 X 抓取涉及「豆包」「Doubao」「豆包AI」「豆包大模型」的官方账号推文与讨论，重点收集官方发布口径、功能公告与版本节点。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·豆包",
+      "task": "在 Hacker News 以固定参数 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 检索「豆包」「Doubao」「豆包AI」「豆包大模型」，抓取相关讨论帖及评论。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Product Hunt 数据抓取·豆包",
+      "task": "在 Product Hunt 检索「豆包」「Doubao」「豆包AI」「豆包大模型」，抓取产品页、发布记录、maker 描述、tagline 与社区评论。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·豆包",
+      "task": "通过网页搜索抓取「豆包」「Doubao」「豆包AI」「豆包大模型」的官方站点、产品说明页、版本更新日志与官方新闻稿链接。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号抓取涉及「豆包」「Doubao」「豆包AI」「豆包大模型」的官方与关联账号推文，聚焦官方口径与功能发布。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博抓取「豆包」「Doubao」「豆包AI」「豆包大模型」相关的官方账号发帖、话题页与置顶公告。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·字节跳动",
+      "task": "通过网页搜索抓取「字节跳动」「ByteDance」的官方定位、组织架构披露、新闻稿与投资者沟通材料。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "合并上述采集产物，去重并规范 permalink 与 fetched_at，按产品形态、功能矩阵、版本迭代、面向用户群、官方口径五个维度打标，输出结构化条目数组。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对清洗后的条目做多源交叉验证，标注每条事实的支撑源数量、冲突记录与官方/非官方分层，输出维度到证据的映射信封。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "核对报告字段与官方口径的一致性，检查实体命名是否严格限于 豆包 与 字节跳动 的闭集叫法，生成缺口清单与不一致清单。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗、交叉验证与一致性检查结果撰写豆包产品与官方定位画像报告，输出 object 信封含产品形态、功能矩阵、版本迭代、面向用户群、官方口径与缺口口径六节。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合各源清洗与交叉验证结果，撰写 DeepSeek 国内口碑与评价的节化报告，包含使用体验、技术印象、差异化认知、典型场景与后续对比豆包的证据线索，关键结论逐条附 permalink 引用与来源标注。",
+    "acceptance": [
+      "报告按节化结构组织，涵盖使用体验、技术印象、差异化认知、典型场景与对比豆包的证据线索五个主题",
+      "每条关键结论均附 permalink 引用与来源标注，便于回溯核验",
+      "结论综合引用上游清洗与交叉验证结果，未出现无来源支撑的主观断言",
+      "输出文件写入 goals/goal-2/deepseek-reputation-report.json，且 JSON 结构可解析"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/deepseek-reputation-report.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "positioning": "记录 DeepSeek 在国内用户认知中的定位（如开源、推理强、性价比高等标签）及其口碑基调",
+      "pricing": "汇总关于 DeepSeek API 价格、免费额度、订阅方式等的公开评价与用户体感",
+      "feature_differences": "梳理 DeepSeek 在推理能力、上下文长度、代码/数学表现等方面区别于其他国内大模型的特性",
+      "social_proof": "收录社区口碑、KOL 评价、评测榜单及典型案例作为社会证据，逐条附 permalink",
+      "strengths_weaknesses": "分列 DeepSeek 的相对优势（性能、开源生态、成本）与短板（多模态、产品化、稳定性等），并标注证据来源，为后续与豆包对比留出证据线索"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取 8 个必采源与网页搜索的采集产物，按统一 schema（source_id、entity、permalink、fetched_at、author、posted_at、text、metrics、tags）归一化字段、去除重复条目、剔除与豆包无关噪声，输出统一证据池 object 含 records 数组与统计摘要。",
+    "acceptance": [
+      "输出文件写入 goals/goal-1/data-cleaning.md，且包含统一证据池 object",
+      "证据池 object 必须包含 records 数组，每条记录含 source_id/entity/permalink/fetched_at/author/posted_at/text/metrics/tags 全部字段",
+      "records 中 entity 字段统一为『豆包』，剔除与豆包无关噪声条目",
+      "基于 permalink 与 text 指纹去重，重复条目仅保留一条并在统计摘要中记录去重数量",
+      "统计摘要包含 total_in/total_out/dedup_removed/off_topic_removed/by_source 分布",
+      "字段缺失时按 schema 规范填 null，不得省略字段或引入未声明字段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "schema": [
+        "source_id",
+        "entity",
+        "permalink",
+        "fetched_at",
+        "author",
+        "posted_at",
+        "text",
+        "metrics",
+        "tags"
+      ],
+      "dedup_strategy": "permalink 精确匹配 + text 归一化指纹（去空白/大小写/标点）双重判定",
+      "noise_filter": "剔除未提及豆包或仅泛谈大模型/AI 而无豆包实体关联的条目",
+      "upstream_sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json"
+      ],
+      "summary_fields": [
+        "total_in",
+        "total_out",
+        "dedup_removed",
+        "off_topic_removed",
+        "by_source"
+      ],
+      "entity_normalization": "统一实体名为『豆包』，别名（Doubao/豆包APP/豆包助手）归并"
+    }
+  }
+}

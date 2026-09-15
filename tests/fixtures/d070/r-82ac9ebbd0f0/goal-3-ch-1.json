@@ -1,0 +1,52 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集国内用户围绕「Kimi 智能助手」「Kimi」「Kimi Chat」「月之暗面」「Moonshot」的笔记、评论与使用体验分享，覆盖长文本阅读、论文/合同解析、学习办公、联网搜索等场景的正负面反馈；每条记录写入 permalink 与 fetched_at，顶层输出为数组。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，直接写入 goals/goal-3/data-collection-17.json",
+      "每条记录必须包含 permalink 字段，指向小红书原始笔记或评论页面的可访问链接",
+      "每条记录必须包含 fetched_at 字段，采用 ISO 8601 时间格式记录抓取时刻",
+      "检索关键词需覆盖「Kimi 智能助手」「Kimi」「Kimi Chat」「月之暗面」「Moonshot」全部别名",
+      "内容需覆盖长文本阅读、论文/合同解析、学习办公、联网搜索等使用场景，并包含正面与负面反馈",
+      "仅采集国内小红书用户产生的中文笔记与评论，剔除营销号与纯广告贴"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-17.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "entity_aliases": [
+        "Kimi 智能助手",
+        "Kimi",
+        "Kimi Chat",
+        "月之暗面",
+        "Moonshot"
+      ],
+      "scenario_coverage": [
+        "长文本阅读",
+        "论文解析",
+        "合同解析",
+        "学习办公",
+        "联网搜索"
+      ],
+      "sentiment_coverage": [
+        "正面反馈",
+        "负面反馈"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "顶层为数组",
+      "language": "zh-CN",
+      "collected_on": "2026-09-15"
+    }
+  }
+}

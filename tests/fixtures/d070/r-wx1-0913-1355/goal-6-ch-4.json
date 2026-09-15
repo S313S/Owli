@@ -1,0 +1,55 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "整合数据清洗、一致性检查、交叉验证章的产物，撰写《国内对豆包看法的综合研判》信封式报告，章节含 objective、依据路径清单、正面认知、争议焦点、与竞品相对形象、字节跳动影响链路、结构化缺口口径七节，全文引用一律使用中文引号「」并附 permalink 与 fetched_at",
+    "acceptance": [
+      "报告严格包含 objective、依据路径清单、正面认知、争议焦点、与竞品相对形象、字节跳动影响链路、结构化缺口口径七节，缺一不可",
+      "全文所有引用统一使用中文直角引号「」，并逐条附带 permalink 与 fetched_at 字段",
+      "依据路径清单需覆盖 data-cleaning-6、consistency-check-3、cross-validation-6 三项上游产物路径原文",
+      "与竞品相对形象节需引用 DeepSeek、Kimi 相关采集与对比结论，字节跳动影响链路节需引用 goal-2 采集证据",
+      "结构化缺口口径节需明确列出未覆盖的维度、样本偏差与后续补采建议",
+      "最终 JSON 落盘至 goals/goal-6/final-report.json，且顶层字段与七节结构一一对应"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/final-report.json"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动",
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": 7,
+    "notes": {
+      "report_style": "envelope",
+      "sections": [
+        "objective",
+        "evidence_paths",
+        "positive_perception",
+        "controversies",
+        "competitor_relative_image",
+        "bytedance_influence_chain",
+        "structural_gap_statement"
+      ],
+      "quote_style": "中文直角引号「」",
+      "citation_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "upstream_sources": [
+        "goals/goal-6/data-cleaning-6.md",
+        "goals/goal-6/consistency-check-3.md",
+        "goals/goal-6/cross-validation-6.json"
+      ],
+      "primary_entity": "豆包",
+      "comparative_entities": [
+        "DeepSeek",
+        "Kimi"
+      ],
+      "parent_entity": "字节跳动"
+    }
+  }
+}

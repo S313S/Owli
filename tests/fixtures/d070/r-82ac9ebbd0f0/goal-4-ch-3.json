@@ -1,0 +1,65 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "汇总本 goal 九个采集产物，按叫法闭集校验条目归属「文心一言」，执行去重、去广告、去机翻噪声，产出统一 schema 的清洗语料，标注情感倾向、主题标签与场景类别，保留 permalink 与 fetched_at 溯源字段。",
+    "acceptance": [
+      "条目按叫法闭集校验，全部归属「文心一言」，非目标实体条目剔除并记录数量",
+      "完成去重、去广告、去机翻噪声三类清洗，输出统一 schema 的清洗语料文件",
+      "每条语料补齐情感倾向、主题标签与场景类别三项标注字段",
+      "permalink 与 fetched_at 溯源字段完整保留，可回溯至上游采集产物"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-cleaning-4.md"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity_alias_closed_set": [
+        "文心一言",
+        "ERNIE Bot",
+        "文心",
+        "百度文心"
+      ],
+      "cleaning_rules": [
+        "dedupe_by_permalink_and_normalized_text",
+        "strip_ads_and_promotional_boilerplate",
+        "filter_machine_translation_noise"
+      ],
+      "unified_schema_fields": [
+        "id",
+        "source",
+        "permalink",
+        "fetched_at",
+        "text",
+        "sentiment",
+        "topic_tags",
+        "scene_category"
+      ],
+      "annotation_dimensions": {
+        "sentiment": [
+          "positive",
+          "neutral",
+          "negative"
+        ],
+        "topic_tags": "open_set_controlled_vocabulary",
+        "scene_category": [
+          "办公写作",
+          "编程开发",
+          "学习教育",
+          "生活咨询",
+          "创意娱乐",
+          "其他"
+        ]
+      },
+      "provenance_fields_preserved": [
+        "permalink",
+        "fetched_at"
+      ]
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取本 goal 的四份采集产物以及上游 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 与 goals/goal-2/data-collection-6.json",
+    "acceptance": [
+      "产出 goals/goal-3/data-cleaning-3.md，覆盖本 goal 四份采集与上游五份采集的清洗结果",
+      "对每条字段标注来源 output.path 与可信度，缺失或冲突需显式记录",
+      "输出结构化清洗表，字段命名统一、单位规范、去除重复与噪声"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "豆包",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "upstream_sources": [
+        "goals/goal-3/data-collection-10.json",
+        "goals/goal-3/data-collection-11.json",
+        "goals/goal-3/reliability-audit-10.json",
+        "goals/goal-3/reliability-audit-11.json",
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-2/data-collection-6.json"
+      ],
+      "cleaning_rules": [
+        "字段命名统一为 snake_case",
+        "价格统一为人民币/月并注明币种与周期",
+        "去除广告与营销话术，仅保留可核验事实",
+        "冲突条目保留全部来源并标注 conflict=true"
+      ],
+      "conflict_policy": "多源冲突时以 reliability-audit 评分最高者为主，其余存入 alternatives 字段",
+      "missing_policy": "字段缺失记为 null 并在 notes 中说明原因",
+      "derived_from": "plan+collection_manifest"
+    }
+  }
+}

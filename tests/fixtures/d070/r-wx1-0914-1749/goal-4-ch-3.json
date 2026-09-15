@@ -1,0 +1,49 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 采集与「豆包」「Doubao」「豆包AI」「字节豆包」相关的产品页、Maker 讨论、Hunter 评论与投票数据，重点抓取国际视角对豆包定位、功能、与国产同类竞品差异化的评论；输出数组，每条含 permalink、fetched_at、标题、正文、upvotes、评论数、发布日期。",
+    "acceptance": [
+      "输出为 JSON 数组，每条记录包含 permalink、fetched_at、标题、正文、upvotes、评论数、发布日期字段",
+      "覆盖「豆包」「Doubao」「豆包AI」「字节豆包」四个关键词的检索结果",
+      "包含产品页、Maker 讨论、Hunter 评论与投票数据四类内容",
+      "重点收录国际视角对豆包定位、功能及与国产同类竞品差异化的评论",
+      "结果写入 goals/goal-4/data-collection-15.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-15.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Product Hunt",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "content_types": [
+        "产品页",
+        "Maker 讨论",
+        "Hunter 评论",
+        "投票数据"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "标题",
+        "正文",
+        "upvotes",
+        "评论数",
+        "发布日期"
+      ],
+      "focus": "国际视角下豆包的定位、功能、与国产同类竞品差异化的评论",
+      "fetched_at_timezone": "UTC"
+    }
+  }
+}

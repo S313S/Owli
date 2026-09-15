@@ -1,0 +1,47 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "整合数据清洗、标签、交叉验证、一致性检查与摘要产物，撰写《国内媒体与行业观察者对「豆包」的评论采集报告》，按五维度分节呈现观点、来源索引、可信度结论，并在末节汇总数据缺口与后续采集建议",
+    "acceptance": [
+      "报告按五维度（定位、定价、功能差异、社会证明、优劣势）分节呈现国内媒体与行业观察者的评论观点",
+      "每条观点均标注来源索引，可回溯至上游采集章的 output.path 与原始条目",
+      "交叉验证与一致性检查结论以可信度分级（高/中/低）明确标记",
+      "末节汇总数据缺口清单与后续采集建议，覆盖缺失来源、时间窗口与观察维度",
+      "输出为合法 JSON，写入 goals/goal-5/media-commentary-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/media-commentary-report.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "sections": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses",
+        "gaps_and_next_steps"
+      ],
+      "upstream_sources": [
+        "goals/goal-5/summary.md",
+        "goals/goal-5/consistency-check-2.md",
+        "goals/goal-5/cross-validation-5.json",
+        "goals/goal-5/tagging-2.md",
+        "goals/goal-5/data-cleaning-5.md"
+      ],
+      "credibility_scale": [
+        "高",
+        "中",
+        "低"
+      ],
+      "final_section": "数据缺口与后续采集建议",
+      "format": "json"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微信公众号采集与「豆包」相关的深度文章、测评、行业解读与开发者视角内容；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的功能评价、使用案例、争议话题与商业化观察；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+    "acceptance": [
+      "顶层输出为 JSON 数组",
+      "每条记录至少包含 permalink 与 fetched_at 字段",
+      "只采集来自微信公众号的内容",
+      "内容与「豆包」实体高度相关，覆盖深度文章、测评、行业解读与开发者视角",
+      "只使用实体叫法闭集内的名称：豆包 / Doubao / 豆包AI / 豆包大模型",
+      "输出文件写入 goals/goal-3/data-collection-24.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-24.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微信公众号",
+      "entity_name_whitelist": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "content_scope": [
+        "深度文章",
+        "测评",
+        "行业解读",
+        "开发者视角"
+      ],
+      "topic_dimensions": [
+        "功能评价",
+        "使用案例",
+        "争议话题",
+        "商业化观察"
+      ],
+      "required_fields_per_item": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_shape": "array"
+    }
+  }
+}

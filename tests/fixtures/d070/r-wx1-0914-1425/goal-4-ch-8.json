@@ -1,0 +1,50 @@
+{
+  "chapter_type": "tagging",
+  "opening": {
+    "inputs": [],
+    "task": "对清洗后的样本逐条打上情感极性（正/中/负）、话题类别（写作、代码、陪伴、教育、语音、吐槽等）与用户人设（学生、职场、开发者、家长等）三层标签，保留原 permalink 便于追溯。",
+    "acceptance": [
+      "每条样本均包含情感极性、话题类别与用户人设三层标签",
+      "标签取值符合预定义闭集且允许多话题类别并列",
+      "保留原 permalink 字段用于回溯原始来源",
+      "输出写入 goals/goal-4/tagging.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/tagging.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "label_layers": [
+        "sentiment",
+        "topic",
+        "persona"
+      ],
+      "sentiment_values": [
+        "正",
+        "中",
+        "负"
+      ],
+      "topic_values": [
+        "写作",
+        "代码",
+        "陪伴",
+        "教育",
+        "语音",
+        "吐槽"
+      ],
+      "persona_values": [
+        "学生",
+        "职场",
+        "开发者",
+        "家长"
+      ],
+      "traceability": "保留原 permalink 字段",
+      "upstream": "goals/goal-4/data-cleaning-4.md"
+    }
+  }
+}

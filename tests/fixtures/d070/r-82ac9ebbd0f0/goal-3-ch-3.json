@@ -1,0 +1,45 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并去重前述各采集产物，统一字段（平台、作者、发布时间、正文、permalink、fetched_at、语言、情感倾向标签），剔除广告与明显不相关噪音，输出可供交叉验证与报告撰写复用的清洗结果与源计数分布。",
+    "acceptance": [
+      "合并前述采集产物并按 permalink 去重",
+      "字段统一为：平台、作者、发布时间、正文、permalink、fetched_at、语言、情感倾向标签",
+      "剔除广告与明显不相关噪音，保留清洗前后计数对比",
+      "输出可供后续交叉验证与报告撰写复用的清洗结果与源计数分布",
+      "结果写入 goals/goal-3/data-cleaning-3.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "unified_fields": [
+        "平台",
+        "作者",
+        "发布时间",
+        "正文",
+        "permalink",
+        "fetched_at",
+        "语言",
+        "情感倾向标签"
+      ],
+      "dedup_key": "permalink",
+      "noise_filters": [
+        "广告",
+        "明显不相关内容"
+      ],
+      "downstream_usage": [
+        "cross_validation",
+        "report"
+      ],
+      "source_count_distribution": "按平台与来源采集章聚合的计数分布"
+    }
+  }
+}

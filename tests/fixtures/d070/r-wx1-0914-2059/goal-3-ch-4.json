@@ -1,0 +1,54 @@
+{
+  "chapter_type": "tagging",
+  "opening": {
+    "inputs": [],
+    "task": "对清洗语料按长文本能力（长上下文、论文阅读、长文写作）、使用场景（学术、办公、生活、编程）、舆情倾向（正面、负面、中性、故障与吐槽）三大维度做聚合与频次统计，输出 object，含各维度分布、代表性引用与来源分布",
+    "acceptance": [
+      "输出为合法 JSON object，包含长文本能力、使用场景、舆情倾向三大维度的分布与频次",
+      "每个维度下的子类别（长上下文/论文阅读/长文写作；学术/办公/生活/编程；正面/负面/中性/故障与吐槽）均有明确计数",
+      "每个子类别提供至少一条代表性引用及其来源标识",
+      "输出包含来源分布字段，可回溯到上游清洗与采集章节的记录"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/tagging.md"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "long_text_capability",
+        "use_scenario",
+        "sentiment"
+      ],
+      "long_text_capability_subtypes": [
+        "长上下文",
+        "论文阅读",
+        "长文写作"
+      ],
+      "use_scenario_subtypes": [
+        "学术",
+        "办公",
+        "生活",
+        "编程"
+      ],
+      "sentiment_subtypes": [
+        "正面",
+        "负面",
+        "中性",
+        "故障与吐槽"
+      ],
+      "aggregation_output_fields": [
+        "distribution",
+        "representative_quotes",
+        "source_distribution"
+      ],
+      "upstream_cleaning": "goals/goal-3/data-cleaning-3.md",
+      "upstream_audit": "goals/goal-3/reliability-audit-14.json",
+      "upstream_collection": "goals/goal-3/data-collection-14.json"
+    }
+  }
+}

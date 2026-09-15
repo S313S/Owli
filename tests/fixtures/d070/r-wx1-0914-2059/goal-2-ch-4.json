@@ -1,0 +1,50 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      }
+    ],
+    "task": "对清洗后的 DeepSeek 证据按正面、负面、中性与技术印象四类聚合，比对不同来源在使用体验、性能表现、性价比与差异化认知上的口径一致性，标注冲突点、共识点与证据来源分布。",
+    "acceptance": [
+      "证据按正面 / 负面 / 中性 / 技术印象四类完整聚合，无遗漏或重复归类",
+      "在使用体验、性能表现、性价比与差异化认知四个维度上分别给出跨来源口径一致性判定",
+      "冲突点、共识点均逐条列出并附来源引用",
+      "证据来源分布以可核验的计数或占比形式呈现",
+      "输出文件写入 goals/goal-2/cross-validation-2.json 且为合法 JSON"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation-2.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sentiment_buckets": [
+        "positive",
+        "negative",
+        "neutral",
+        "technical_impression"
+      ],
+      "comparison_dimensions": [
+        "usage_experience",
+        "performance",
+        "cost_effectiveness",
+        "differentiation_awareness"
+      ],
+      "consistency_labels": [
+        "consensus",
+        "conflict",
+        "partial_overlap"
+      ],
+      "must_mark_conflicts": true,
+      "must_mark_consensus": true,
+      "must_report_source_distribution": true,
+      "source_traceability_required": true
+    }
+  }
+}

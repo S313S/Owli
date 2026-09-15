@@ -1,0 +1,47 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取上述八个采集数组，做去重、时间标准化、字段补齐与实体标注，并按实体（豆包 / 字节跳动）分桶；输出清洗后节化对象，含 by_entity、by_source、gap 字段。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-cleaning.md",
+      "对采集数组完成去重、时间标准化、字段补齐与实体标注",
+      "按实体（豆包 / 字节跳动）分桶，包含 by_entity、by_source、gap 三个字段",
+      "覆盖上游全部采集章（data-collection 至 data-collection-5）"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "buckets": [
+        "豆包",
+        "字节跳动"
+      ],
+      "output_fields": [
+        "by_entity",
+        "by_source",
+        "gap"
+      ],
+      "operations": [
+        "去重",
+        "时间标准化",
+        "字段补齐",
+        "实体标注"
+      ],
+      "upstream_collections": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json"
+      ]
+    }
+  }
+}

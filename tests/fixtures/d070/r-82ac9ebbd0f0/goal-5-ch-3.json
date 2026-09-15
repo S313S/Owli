@@ -1,0 +1,46 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "汇总本 goal 全部采集 agent 的输出，去重合并、标准化字段、剔除无关噪声，按来源标注情感倾向与主题标签（能力、开源、商用、生态、价格、缺陷），产出结构化的清洗后数据集。",
+    "acceptance": [
+      "输出文件位于 goals/goal-5/data-cleaning-5.md，可被下游章节引用。",
+      "去重合并后的记录字段统一，包含来源、原文摘录、情感倾向与主题标签。",
+      "情感倾向枚举明确（正面/中性/负面），并给出判定依据。",
+      "主题标签只能取自能力、开源、商用、生态、价格、缺陷六类之一或其组合。",
+      "剔除与通义千问无关的噪声内容，并保留剔除原因的抽样说明。"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-cleaning-5.md"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "goal-5 全部采集 agent 输出的清洗与合并",
+      "source_agents": [
+        "data-collection-34"
+      ],
+      "sentiment_enum": [
+        "正面",
+        "中性",
+        "负面"
+      ],
+      "topic_tags": [
+        "能力",
+        "开源",
+        "商用",
+        "生态",
+        "价格",
+        "缺陷"
+      ],
+      "deduplication": "基于原文片段哈希与语义相似度去重",
+      "normalization": "统一字段为 source/quote/sentiment/tags/timestamp",
+      "noise_filter": "剔除与通义千问无关或缺少可核验来源的条目",
+      "downstream": "供后续对比、交叉校验与报告章节直接消费"
+    }
+  }
+}

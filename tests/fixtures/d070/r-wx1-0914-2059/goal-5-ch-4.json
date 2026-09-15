@@ -1,0 +1,78 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-24.json"
+      }
+    ],
+    "task": "校验各采集章 permalink/fetched_at 完备性、task 文本别名闭集合规、(source_id, entity) 组合与上游及必采清单的不重复性，产出检查结论与问题清单。",
+    "acceptance": [
+      "所有采集章的 permalink 与 fetched_at 字段均非空且格式合法",
+      "task 文本中的实体别名均落在闭集合规范围内",
+      "(source_id, entity) 组合在全卷范围内唯一，无与上游或必采清单重复",
+      "输出检查结论与问题清单，明确列出通过项与异常项"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/consistency-check-2.md"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "check_scope": [
+        "permalink_completeness",
+        "fetched_at_completeness",
+        "task_alias_closed_set",
+        "source_entity_uniqueness"
+      ],
+      "input_chapter_count": 12,
+      "cross_reference": {
+        "upstream_plan_sources": [
+          "data-cleaning-5",
+          "reliability-audit-24",
+          "data-collection-24"
+        ],
+        "required_collection_list": "全卷采集章清单"
+      },
+      "deliverable_sections": [
+        "检查结论",
+        "问题清单"
+      ]
+    }
+  }
+}

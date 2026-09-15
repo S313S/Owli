@@ -1,0 +1,106 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "doubao_reputation_baseline.json",
+    "description": "豆包在国内外主流社媒、问答社区、评测与媒体报道中的用户口碑证据基线，含分源原始条目索引、清洗与交叉验证结论、舆情倾向与优缺点归纳的节化文档信封。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「doubao_reputation_baseline.json」，顶层为 object，包含至少「sources_index、cleaned_snapshot、cross_validation、consistency_check、reputation_report」五个节。",
+    "必采清单 8 条（小红书数据抓取·豆包、抖音数据抓取·豆包、微博数据抓取·豆包、微信公众号数据抓取·豆包、Reddit 数据抓取·豆包、X 数据抓取·豆包、HN 数据抓取·豆包、Product Hunt 数据抓取·豆包）全部执行且各自产出为顶层数组。",
+    "每个采集 agent 的输出数组中，每条记录必须包含「permalink」与「fetched_at」两个字段，缺失条目必须剔除并在缺口口径中登记。",
+    "所有采集任务的检索词只使用豆包实体叫法闭集「豆包、Doubao、字节豆包、豆包AI、豆包大模型」，不得出现 DeepSeek、Kimi、文心一言、通义千问 的任何叫法。",
+    "HN 数据抓取·豆包 使用固定检索约束 created_at_i>执行时点UTC epoch 减 7776000、points>50、hitsPerPage=1000。",
+    "数据清洗节按（source_id, permalink）去重，并标注语种、发布日期、作者可识别度与噪声等级。",
+    "交叉验证节针对同一主张（优点／缺点／场景／舆情倾向）跨至少两个源核对，未跨源支持的主张须标记为「单源待证」。",
+    "一致性检查节确认所有引用条目均可回溯到采集数组中的 permalink，且实体叫法未越界。",
+    "报告撰写节输出豆包口碑摘要，含优点、缺点、典型使用场景、舆情倾向分布与结构化缺口口径。",
+    "数据不足时使用结构化缺口口径（source_id、缺口原因、影响范围），不得写死具体最小条数承诺。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·豆包",
+      "task": "在小红书采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的笔记、评论与话题内容，聚焦用户看法、优缺点评价、使用场景反馈；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动量、话题标签与情感线索。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·豆包",
+      "task": "在抖音采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的短视频、图文与评论区反馈，重点抓取用户口碑、优缺点吐槽和使用场景演示；顶层输出数组，每条含 permalink、fetched_at、作者、文案、评论摘要、点赞与转发量。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」有关的博文、话题与转评，聚焦舆情倾向与优缺点讨论；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动指标与话题标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的深度评测、行业观察与用户体验文章；顶层输出数组，每条含 permalink、fetched_at、公众号名、标题、发布日期、正文摘要与结论要点。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·豆包",
+      "task": "在 Reddit 采集与「豆包／Doubao」相关的帖子与评论，重点收集海外及在华外籍用户对豆包的看法与使用反馈；顶层输出数组，每条含 permalink、fetched_at、subreddit、作者、标题、正文与得分。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·豆包",
+      "task": "在 X 采集与「豆包／Doubao」相关的推文、引用与线程，聚焦口碑倾向、功能评价与使用场景；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动量与语言标注。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·豆包",
+      "task": "在 Hacker News 采集与「豆包／Doubao」相关的 story 与讨论，检索约束固定为 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000；顶层输出数组，每条含 permalink、fetched_at、标题、作者、points、num_comments 与讨论要点。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Product Hunt 数据抓取·豆包",
+      "task": "在 Product Hunt 采集与「豆包／Doubao」相关的产品页、点评与讨论，抓取用户投票、评论与优缺点标签；顶层输出数组，每条含 permalink、fetched_at、产品名、发布日期、upvote 数、评论摘要与主题标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "整合上述 8 个采集数组，按（source_id, permalink）去重，标注语种、发布日期、作者可识别度、噪声等级与情感线索，剔除广告与非用户观点内容，输出节化清洗快照并登记结构化缺口口径。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对豆包的优点、缺点、典型使用场景与舆情倾向逐条汇总，跨源核对同一主张的一致性与冲突点，未获两源以上支持的主张标记为「单源待证」，输出跨源验证结论。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "校验报告中引用的每条证据是否可回溯到采集数组的 permalink，检查实体叫法是否越界至 DeepSeek、Kimi、文心一言、通义千问，输出一致性检查记录与需要回补的条目清单。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗快照、交叉验证与一致性检查结果，撰写豆包国内用户口碑评价基线报告，含优点、缺点、典型使用场景、舆情倾向分布、分源证据引用与结构化缺口口径，输出节化文档信封。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

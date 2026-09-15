@@ -1,0 +1,41 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗与交叉验证结果撰写节化报告，覆盖通义千问在国内的口碑总貌、能力表现（多模态、推理、编程、长文本）、开源生态反馈、商用与 API 反馈、代表性正负面观点与缺口说明，形成对比参照素材。",
+    "acceptance": [
+      "报告覆盖通义千问口碑总貌、能力表现（多模态/推理/编程/长文本）、开源生态、商用与 API 反馈、正负面观点及缺口说明六大板块",
+      "关键结论均引用清洗与交叉验证结果中的证据编号或来源，禁止无据表述",
+      "正负面观点均给出代表性引述并注明来源与倾向标签",
+      "缺口说明明确列出证据不足或存在冲突的议题，供后续对比章参照",
+      "输出为结构化 JSON，写入 goals/goal-5/goal-5-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/goal-5-report.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "口碑总貌",
+        "能力表现（多模态、推理、编程、长文本）",
+        "开源生态反馈",
+        "商用与 API 反馈",
+        "代表性正负面观点",
+        "缺口说明"
+      ],
+      "evidence_sources": [
+        "goals/goal-5/data-cleaning-5.md",
+        "goals/goal-5/cross-validation-5.json",
+        "goals/goal-5/reliability-audit-35.json",
+        "goals/goal-5/data-collection-34.json"
+      ],
+      "purpose": "为跨品牌对比章提供通义千问侧的节化参照素材",
+      "format": "structured_json_report"
+    }
+  }
+}

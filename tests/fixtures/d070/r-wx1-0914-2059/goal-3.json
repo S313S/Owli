@@ -1,0 +1,78 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "kimi-reputation-report.json",
+    "description": "国内用户对 Kimi 的口碑与评价综合报告，覆盖长文本能力口碑、使用场景反馈与舆情标签，形成 Kimi 侧证据文档",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 指向的文件存在且为合法 JSON object",
+    "所有采集 agent 的 output 顶层为数组，且每条记录包含 permalink 与 fetched_at 字段",
+    "必采清单项 xhs×Kimi 由「小红书数据抓取·Kimi」产出并落盘",
+    "采集章的 source_id 均取自 applicable_sources：xhs、weibo、wechat_mp、douyin、web_search",
+    "采集 agent 任务文本仅使用 Kimi 的允许叫法：Kimi智能助手、Kimi、Kimi Chat、kimi、月之暗面Kimi、Kimi.ai，不出现其他实体名",
+    "(source_id, entity) 组合在本 goal 内唯一，且不与上游 goal-1、goal-2 的已采组合重复",
+    "数据清洗 output 顶层为数组，字段标准化后可被标签与报告撰写下游消费",
+    "标签 output 为 object，至少覆盖长文本能力、使用场景、舆情标签三类聚合",
+    "报告撰写 output 为 object，包含结论、证据引用锚点与数据缺口说明",
+    "数据不足时以结构化缺口口径记录，不写死上游无法保证的最小条数"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·Kimi",
+      "task": "在小红书检索并采集国内用户关于「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的笔记、评论与话题聚合，覆盖长文本阅读、论文速读、职场办公与学习场景反馈，输出数组，每条含 permalink、fetched_at 及原文正文与互动指标",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·Kimi",
+      "task": "在微博检索并采集提及「Kimi」「Kimi智能助手」「kimi」「月之暗面Kimi」的热门微博、转评赞与话题词，重点抓取长文本能力口碑、故障与热点舆情，输出数组，每条含 permalink、fetched_at 与作者、正文、互动数",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·Kimi",
+      "task": "在微信公众号采集评测与解读「Kimi」「Kimi智能助手」「Kimi Chat」「Kimi.ai」的中长文与读者留言，聚焦国内用户使用体验与场景案例，输出数组，每条含 permalink、fetched_at、公众号名、标题与正文摘录",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·Kimi",
+      "task": "在抖音采集介绍、教程或吐槽「Kimi」「Kimi智能助手」「月之暗面Kimi」的短视频、评论区与话题标签，覆盖国内大众用户直观反馈，输出数组，每条含 permalink、fetched_at、作者、文案与互动数",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "通过网页搜索采集中文媒体报道、知乎问答、论坛帖与评测站对「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的口碑内容与讨论，输出数组，每条含 permalink、fetched_at、站点、标题与正文摘录",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "合并五路采集的原始记录，按 permalink 去重，标准化平台、发布时间、作者、正文、互动指标、情感倾向候选与场景标签候选等字段，剔除广告与无关噪声，输出清洗后的数组供下游标签与报告消费",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "标签",
+      "task": "对清洗语料按长文本能力（长上下文、论文阅读、长文写作）、使用场景（学术、办公、生活、编程）、舆情倾向（正面、负面、中性、故障与吐槽）三大维度做聚合与频次统计，输出 object，含各维度分布、代表性引用与来源分布",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "整合清洗结果与标签聚合，撰写节化文档信封形的国内用户对 Kimi 口碑与评价报告，含长文本能力口碑、使用场景反馈、舆情标签总结、证据引用与数据缺口说明，输出 object",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

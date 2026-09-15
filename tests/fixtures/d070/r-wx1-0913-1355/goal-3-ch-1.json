@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」「deepseek」的用户笔记、话题与评论，聚焦产品定位、代表能力、口碑标签与国内用户基础四类线索；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/data-collection-13.json，且顶层为 JSON 数组",
+      "每条记录必须包含 permalink 与 fetched_at 字段，permalink 指向小红书原始笔记/话题/评论页面",
+      "采集内容覆盖「DeepSeek」「深度求索」「DeepSeek-R1」「deepseek」四个关键词，且涉及产品定位、代表能力、口碑标签与国内用户基础四类线索",
+      "记录来源限定为小红书平台的用户笔记、话题或评论，字段命名保持一致"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-13.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "keywords": [
+        "DeepSeek",
+        "深度求索",
+        "DeepSeek-R1",
+        "deepseek"
+      ],
+      "content_types": [
+        "用户笔记",
+        "话题",
+        "评论"
+      ],
+      "focus_dimensions": [
+        "产品定位",
+        "代表能力",
+        "口碑标签",
+        "国内用户基础"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "output_format": "JSON 数组"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关笔记与评论，抓取标题、正文、点赞收藏评论数、话题标签、作者昵称、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+    "acceptance": [
+      "输出为顶层 JSON 数组",
+      "每条记录包含 permalink 字段且为小红书站内可访问链接",
+      "每条记录包含 fetched_at 字段（ISO8601 时间戳）",
+      "字段涵盖标题、正文、点赞数、收藏数、评论数、话题标签、作者昵称、发布时间",
+      "检索关键词覆盖「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」四组",
+      "结果按 permalink 去重",
+      "输出路径为 goals/goal-2/data-collection-10.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-10.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "xiaohongshu",
+      "search_keywords": [
+        "DeepSeek",
+        "深度求索",
+        "DeepSeek-R1",
+        "DeepSeek-V3"
+      ],
+      "content_types": [
+        "note",
+        "comment"
+      ],
+      "required_fields": [
+        "title",
+        "content",
+        "likes",
+        "collects",
+        "comments",
+        "hashtags",
+        "author_nickname",
+        "published_at",
+        "permalink",
+        "fetched_at"
+      ],
+      "dedup_key": "permalink",
+      "output_shape": "top_level_array"
+    }
+  }
+}

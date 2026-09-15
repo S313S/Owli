@@ -1,0 +1,109 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_reputation_baseline.json"
+      },
+      {
+        "path": "goals/goal-2/deepseek-reputation-report.json"
+      },
+      {
+        "path": "goals/goal-3/kimi-reputation-report.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-24.json"
+      }
+    ],
+    "task": "读取 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-c",
+    "acceptance": [
+      "输出文件 goals/goal-6/data-cleaning-6.md 存在且可读",
+      "已对齐并清洗全部 17 个输入源的字段与实体命名",
+      "缺失值、重复值与异常值均有处理说明与结果记录",
+      "清洗后数据结构统一，可供后续对比/汇总章直接引用"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/data-cleaning-6.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "input_count": 17,
+      "source_breakdown": {
+        "reports": 5,
+        "collections": 12
+      },
+      "entity_mapping": {
+        "豆包": [
+          "goals/goal-1"
+        ],
+        "DeepSeek": [
+          "goals/goal-2"
+        ],
+        "Kimi": [
+          "goals/goal-3"
+        ],
+        "文心一言": [
+          "goals/goal-4"
+        ],
+        "通义千问": [
+          "goals/goal-5"
+        ]
+      },
+      "cleaning_rules": [
+        "字段命名统一为 snake_case",
+        "空值统一为 null",
+        "重复记录按来源+时间戳去重",
+        "价格与评分字段做类型归一化"
+      ],
+      "output_format": "markdown"
+    }
+  }
+}

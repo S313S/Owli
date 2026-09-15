@@ -1,0 +1,45 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书围绕字节跳动、ByteDance 检索大模型战略动作、组织架构调整、算力储备与流量倾斜相关笔记，采集条目输出为 JSON 数组，每条含 permalink 与 fetched_at 字段，数据不足时按结构化缺口口径记录。",
+    "acceptance": [
+      "输出为 JSON 数组，每条至少包含 permalink 与 fetched_at 字段",
+      "检索关键词覆盖字节跳动、ByteDance 及大模型战略动作、组织架构调整、算力储备、流量倾斜等维度",
+      "所有 permalink 指向小红书站内可访问笔记",
+      "fetched_at 使用 ISO 8601 时间格式",
+      "数据不足或检索无结果时按结构化缺口口径显式记录，不得留空或伪造"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-9.json"
+    },
+    "entities": [
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "search_keywords": [
+        "字节跳动",
+        "ByteDance",
+        "字节跳动 大模型",
+        "字节跳动 组织架构",
+        "字节跳动 算力",
+        "字节跳动 流量倾斜"
+      ],
+      "dimensions": [
+        "大模型战略动作",
+        "组织架构调整",
+        "算力储备",
+        "流量倾斜"
+      ],
+      "record_schema": [
+        "permalink",
+        "fetched_at"
+      ],
+      "gap_policy": "数据不足时按结构化缺口口径显式记录缺失原因与检索条件"
+    }
+  }
+}

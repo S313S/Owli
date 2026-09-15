@@ -1,0 +1,84 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/goal1_doubao_bytedance_factbase.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "在小红书站内检索并采集与「豆包」相关的用户笔记、评论、话题与合集；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的正负面反馈、典型使用场景（写作、学习、情感陪伴、办公、创作等）与情绪分布；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少包含 permalink 与 fetched_at 字段，字符串值内的名称一律使用中文引号「」。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录至少包含 permalink 与 fetched_at 字段",
+      "字符串值内涉及实体名称一律使用中文引号「」包裹，且只使用「豆包」「Doubao」「豆包AI」「豆包大模型」闭集内的叫法",
+      "采集内容覆盖笔记、评论、话题与合集四类载体，且覆盖写作、学习、情感陪伴、办公、创作等典型使用场景",
+      "同时包含正面与负面反馈样本，附带情绪倾向标注以便后续情绪分布统计",
+      "所有 permalink 均为小红书站内可访问链接，fetched_at 使用 ISO 8601 时间格式"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-21.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "carriers": [
+        "笔记",
+        "评论",
+        "话题",
+        "合集"
+      ],
+      "name_aliases": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "scenario_coverage": [
+        "写作",
+        "学习",
+        "情感陪伴",
+        "办公",
+        "创作"
+      ],
+      "sentiment_coverage": [
+        "正面",
+        "负面",
+        "中性"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "quote_style": "中文引号「」",
+      "top_level_shape": "array"
+    }
+  }
+}

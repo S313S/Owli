@@ -1,0 +1,42 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集国内用户关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的笔记、评论与使用体验分享，聚焦口碑评价、模型能力印象、场景化用法与差异化认知；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录均包含非空的 permalink 与 fetched_at 字段",
+      "采集内容聚焦 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）相关的口碑评价、模型能力印象、场景化用法与差异化认知",
+      "数据来源限定于小红书平台的笔记与评论",
+      "输出写入 goals/goal-2/data-collection-9.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-9.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "keywords": [
+        "DeepSeek",
+        "深度求索",
+        "DeepSeek-V3",
+        "DeepSeek-R1"
+      ],
+      "focus": [
+        "口碑评价",
+        "模型能力印象",
+        "场景化用法",
+        "差异化认知"
+      ],
+      "record_required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "top-level JSON array"
+    }
+  }
+}

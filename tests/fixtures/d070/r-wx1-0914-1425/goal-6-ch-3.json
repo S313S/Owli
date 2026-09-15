@@ -1,0 +1,62 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-2/bytedance-doubao-strategy.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      }
+    ],
+    "task": "基于交叉验证与一致性检查产物撰写《国内对「豆包」看法的综合结论》报告，依次组织公司背景（聚焦「字节跳动」）、媒体评论、用户口碑、竞争位置四章，并在总体结论章给出共识、争议、缺口三类总结及主要分歧点清单；所有引用名称统一使用中文「」，事实性陈述回填 permalink 或上游 output.path，数据不足处以结构化缺口口径说明",
+    "acceptance": [
+      "章节顺序严格为：公司背景（聚焦「字节跳动」）、媒体评论、用户口碑、竞争位置、总体结论五章",
+      "所有品牌与公司引用名称统一使用中文「」括注，例如「豆包」「字节跳动」",
+      "每条事实性陈述必须回填对应的 permalink 或上游 output.path（如 goals/goal-2/bytedance-doubao-strategy.json、goals/goal-5/goal-5-report.json、goals/goal-6/cross-validation-6.json、goals/goal-6/consistency-check-3.md）",
+      "数据不足或来源缺失处必须以结构化缺口口径说明，禁止臆测补齐",
+      "竞争位置章覆盖 positioning、pricing、feature_differences、social_proof、strengths_weaknesses 五个维度",
+      "总体结论章分别给出共识、争议、缺口三类总结，并列出主要分歧点清单",
+      "报告最终写入 goals/goal-6/goal-6-report.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/goal-6-report.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "chapter_outline": [
+        "公司背景（聚焦「字节跳动」）",
+        "媒体评论",
+        "用户口碑",
+        "竞争位置",
+        "总体结论"
+      ],
+      "upstream_sources": {
+        "consistency_check": "goals/goal-6/consistency-check-3.md",
+        "cross_validation": "goals/goal-6/cross-validation-6.json",
+        "company_background": "goals/goal-2/bytedance-doubao-strategy.json",
+        "aggregated_report": "goals/goal-5/goal-5-report.json"
+      },
+      "positioning": "在竞争位置章描述「豆包」在国内 AI 助手赛道的市场定位，包括面向的用户群体、场景切入点与「字节跳动」生态协同关系，事实回填上游 output.path",
+      "pricing": "汇总「豆包」及主要竞品的定价、免费额度、订阅套餐与商业化策略，缺口处使用结构化缺口口径说明",
+      "feature_differences": "对比「豆包」与竞品在多模态、语音、插件生态、上下文长度、Agent 能力等维度的差异，逐条附 permalink 或上游 output.path",
+      "social_proof": "整合媒体评论与用户口碑作为社会证据，区分正面、中性、负面样本并回填来源链接",
+      "strengths_weaknesses": "在总体结论章之前先在竞争位置章总结「豆包」的核心优势与主要短板，同时标注证据强弱",
+      "conclusion_buckets": [
+        "共识",
+        "争议",
+        "缺口"
+      ],
+      "disagreement_list": "总体结论章末尾附主要分歧点清单，每条注明分歧双方与来源",
+      "citation_policy": "事实性陈述回填 permalink 或上游 output.path，禁止无源断言",
+      "gap_policy": "数据不足处采用结构化缺口口径（缺口描述 / 影响范围 / 建议补采来源）说明",
+      "naming_convention": "所有品牌、公司、产品引用统一使用中文「」括注"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集国内用户对「文心一言」（含叫法：文心一言、ERNIE Bot、文心大模型、Yiyan）的使用体验、优缺点吐槽、生态定位讨论与场景笔记；顶层输出数组，每条含 permalink、fetched_at，保留标题、正文、点赞、评论、发布时间、作者昵称等原始字段；仅使用文心一言的叫法闭集作为检索词。",
+    "acceptance": [
+      "顶层为 JSON 数组，每条笔记均包含 permalink 与 fetched_at 字段",
+      "保留标题、正文、点赞、评论、发布时间、作者昵称等原始字段",
+      "检索词仅使用叫法闭集：文心一言、ERNIE Bot、文心大模型、Yiyan",
+      "内容聚焦国内用户的使用体验、优缺点吐槽、生态定位讨论与场景笔记",
+      "输出写入 goals/goal-4/data-collection-19.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-19.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "query_terms": [
+        "文心一言",
+        "ERNIE Bot",
+        "文心大模型",
+        "Yiyan"
+      ],
+      "content_focus": [
+        "使用体验",
+        "优缺点吐槽",
+        "生态定位讨论",
+        "场景笔记"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "标题",
+        "正文",
+        "点赞",
+        "评论",
+        "发布时间",
+        "作者昵称"
+      ],
+      "top_level_structure": "array",
+      "region_scope": "国内用户"
+    }
+  }
+}

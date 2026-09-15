@@ -1,0 +1,69 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "以 inputs 方式消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/go",
+    "acceptance": [
+      "opening.inputs 每条路径均来源于全卷采集章清单的 output.path 原文，不得自造路径",
+      "对豆包与字节跳动相关字段进行跨来源一致性核验，输出冲突项与置信度",
+      "closing.output.path 必须为 goals/goal-6/cross-validation-6.json",
+      "closing.notes 必须是 JSON object，记录核验维度与冲突处置策略"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/cross-validation-6.json"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": 9,
+    "notes": {
+      "validation_scope": "对 9 份采集章中涉及豆包/字节跳动的关键字段进行交叉一致性核验",
+      "dimensions": [
+        "产品定位",
+        "定价与商业化",
+        "功能特性",
+        "用户规模与社交证明",
+        "战略动向"
+      ],
+      "conflict_policy": "冲突项以最新采集时间与权威来源优先，标注 confidence 与 source_count",
+      "coverage": {
+        "goal-1": 4,
+        "goal-2": 1,
+        "goal-3": 1,
+        "goal-4": 3
+      },
+      "derived_from": "plan"
+    }
+  }
+}

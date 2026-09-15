@@ -1,0 +1,55 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 下五个采集产物做去重、脏数据剔除、字段规范化与情感/主题预标注（优点、缺点、生态定位、典型场景），保留 permalink 与 fetched_at 溯源，输出统一结构的清洗结果信封。",
+    "acceptance": [
+      "去除完全重复与近似重复条目（依据 permalink 或正文指纹）",
+      "剔除广告、乱码、与主题无关的脏数据",
+      "字段规范化：统一时间、作者、平台、正文与 permalink 字段命名",
+      "为每条记录添加情感极性（正面/中性/负面）与主题标签（优点/缺点/生态定位/典型场景）",
+      "保留 permalink 与 fetched_at 以便溯源",
+      "输出统一 schema 的清洗结果信封到指定路径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-cleaning-4.md"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity": "文心一言",
+      "goal_id": "goal-4",
+      "dedup_keys": [
+        "permalink",
+        "content_fingerprint"
+      ],
+      "normalized_fields": [
+        "source_platform",
+        "author",
+        "published_at",
+        "fetched_at",
+        "permalink",
+        "content"
+      ],
+      "sentiment_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "topic_labels": [
+        "优点",
+        "缺点",
+        "生态定位",
+        "典型场景"
+      ],
+      "traceability": [
+        "permalink",
+        "fetched_at"
+      ]
+    }
+  }
+}

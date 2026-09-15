@@ -1,0 +1,4651 @@
+{
+  "r-82ac9ebbd0f0": {
+    "generate_error": "",
+    "missing_segments": [],
+    "engine_calls": 36,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "fe7ce33512732e58",
+        "closing_sha_without_correction": "31a6a418777eebd4",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "3ef2b362d69681ce",
+        "closing_sha_without_correction": "08cc22bc96aef194",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-3.json",
+        "opening_sha": "3c91bc021a9fb4c2",
+        "closing_sha_without_correction": "6b614c6288ad52bf",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-3.json",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-4.json",
+        "opening_sha": "c57e757013582266",
+        "closing_sha_without_correction": "4f78dfe1913c5b52",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-4.json",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-5.json",
+        "opening_sha": "9cec56c031a876dc",
+        "closing_sha_without_correction": "d35ba9de0d15c8fa",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-5.json",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-collection-6",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-6.json",
+        "opening_sha": "adf52db2e1c066bd",
+        "closing_sha_without_correction": "4f69d0ddcf123a5e",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "reliability-audit-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-6.json",
+        "opening_sha": "da57682056d181c8",
+        "closing_sha_without_correction": "493b945d9428ecde",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "data-collection-7",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-7.json",
+        "opening_sha": "8bc28cbfb0749fd2",
+        "closing_sha_without_correction": "e576d27c4450abc8",
+        "correction": null
+      },
+      "goal-1/ch-14": {
+        "agent_id": "reliability-audit-7",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-7.json",
+        "opening_sha": "1b8446c02baa8a22",
+        "closing_sha_without_correction": "798ddbbe5f761bd4",
+        "correction": null
+      },
+      "goal-1/ch-15": {
+        "agent_id": "data-collection-8",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-8.json",
+        "opening_sha": "74159adfcfdc05e4",
+        "closing_sha_without_correction": "5df4f6605e5ed475",
+        "correction": null
+      },
+      "goal-1/ch-16": {
+        "agent_id": "reliability-audit-8",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-8.json",
+        "opening_sha": "f050d588d89b9696",
+        "closing_sha_without_correction": "f9e356c479118920",
+        "correction": null
+      },
+      "goal-1/ch-17": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "5fda0c68d457e4e1",
+        "closing_sha_without_correction": "ef07c1dcfcee5ed1",
+        "correction": null
+      },
+      "goal-1/ch-18": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/consistency-check.md",
+        "opening_sha": "c415f237ffe1ec30",
+        "closing_sha_without_correction": "a5cb2d4f766c22ac",
+        "correction": null
+      },
+      "goal-1/ch-19": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "5de7f2c6e51b33a7",
+        "closing_sha_without_correction": "849b66227ffe558c",
+        "correction": null
+      },
+      "goal-1/ch-20": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/doubao_reputation_profile.json",
+        "opening_sha": "108b2ff092c5dcd0",
+        "closing_sha_without_correction": "20107f66cbd782fa",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-10",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-10.json",
+        "opening_sha": "bbfc8010408b7137",
+        "closing_sha_without_correction": "6660291e6186faa2",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-10",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-10.json",
+        "opening_sha": "dd0474daf0ed51c9",
+        "closing_sha_without_correction": "5aac282ca1f5fbba",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-cleaning-2",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-cleaning-2.md",
+        "opening_sha": "5876a295fafc70ac",
+        "closing_sha_without_correction": "c41d7340789e03d7",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "cross-validation-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/cross-validation-2.json",
+        "opening_sha": "b1bdcfd76d2fb80c",
+        "closing_sha_without_correction": "fc9b3fe6a6dde83c",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "report-writing-2",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/goal-2-deepseek-reputation.json",
+        "opening_sha": "4166ce1b5cfece4e",
+        "closing_sha_without_correction": "613b03c41ee9e73b",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-17",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-17.json",
+        "opening_sha": "7e93717c843c7e47",
+        "closing_sha_without_correction": "0c6b4100bf3d4a38",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-17",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-17.json",
+        "opening_sha": "830514006701c115",
+        "closing_sha_without_correction": "4e18d915c882dc68",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "a3ae622ef7b15e21",
+        "closing_sha_without_correction": "afc53ad008dc7424",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/cross-validation-3.json",
+        "opening_sha": "51815743351b16e1",
+        "closing_sha_without_correction": "886db599a9c67eed",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/goal-3-kimi-reputation.json",
+        "opening_sha": "6872044f5515a522",
+        "closing_sha_without_correction": "ef723456f020d44f",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-25",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-25.json",
+        "opening_sha": "405c2f31c8a5d2c8",
+        "closing_sha_without_correction": "3c136b8dfc1d3b6c",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-26",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-26.json",
+        "opening_sha": "fe27eff948727f30",
+        "closing_sha_without_correction": "9f100bfc50f546f2",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-cleaning-4",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-cleaning-4.md",
+        "opening_sha": "7b1c8089eeaca87b",
+        "closing_sha_without_correction": "8dabe35451953d74",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-4/consistency-check-2.md",
+        "opening_sha": "8ee8b498c887a2b9",
+        "closing_sha_without_correction": "6d258ce889380f2e",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-4.json",
+        "opening_sha": "dc798c1d4b110869",
+        "closing_sha_without_correction": "e421881f5cd8abbf",
+        "correction": null
+      },
+      "goal-4/ch-6": {
+        "agent_id": "reliability-audit-25",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-25.json",
+        "opening_sha": "dc4ca04a518b888f",
+        "closing_sha_without_correction": "1fcc2136c75de9d9",
+        "correction": null
+      },
+      "goal-4/ch-7": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-4/goal-4-report.json",
+        "opening_sha": "78a5be92cd883f70",
+        "closing_sha_without_correction": "372928b3860fb5f2",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-collection-34",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-collection-34.json",
+        "opening_sha": "43275ce121761eb3",
+        "closing_sha_without_correction": "db59c40e6175589a",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "reliability-audit-35",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-5/reliability-audit-35.json",
+        "opening_sha": "948831b919a96461",
+        "closing_sha_without_correction": "101ddbaf57bc95c0",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "data-cleaning-5",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-cleaning-5.md",
+        "opening_sha": "b1fde56e1913b61c",
+        "closing_sha_without_correction": "a75929ccaca76d72",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "cross-validation-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-5/cross-validation-5.json",
+        "opening_sha": "526807d0fcfd733f",
+        "closing_sha_without_correction": "9e30640d31fed321",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "report-writing-5",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-5/goal-5-report.json",
+        "opening_sha": "d76ad69a51621582",
+        "closing_sha_without_correction": "05dd4e222e300834",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "data-cleaning-6",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-6/data-cleaning-6.md",
+        "opening_sha": "4fd2c968ce2b3440",
+        "closing_sha_without_correction": "5c31765844dbd808",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "tagging",
+        "profile": "report-writer",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "output_path": "goals/goal-6/tagging.md",
+        "opening_sha": "6070fb6a10903bdf",
+        "closing_sha_without_correction": "0857fa0c4d693058",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "cross-validation-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-6/cross-validation-6.json",
+        "opening_sha": "41494f7c70e82257",
+        "closing_sha_without_correction": "3ce5f54231d179d6",
+        "correction": null
+      },
+      "goal-6/ch-4": {
+        "agent_id": "consistency-check-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-6/consistency-check-3.md",
+        "opening_sha": "7ebb18a1344fcf23",
+        "closing_sha_without_correction": "3293b7febe36145e",
+        "correction": null
+      },
+      "goal-6/ch-5": {
+        "agent_id": "reliability-audit-44",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-6/reliability-audit-44.json",
+        "opening_sha": "cbe589378e92e07e",
+        "closing_sha_without_correction": "259b514dd16c8ff9",
+        "correction": null
+      },
+      "goal-6/ch-6": {
+        "agent_id": "report-writing-6",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-6/goal-6-report.json",
+        "opening_sha": "e304cf299a08ab7e",
+        "closing_sha_without_correction": "a6569e9bbffe09a6",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "785d72e4f5b00128",
+    "lint_errors": [
+      "[规则22] goal-1/ch-19 (cross-validation) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-2/ch-4 (cross-validation-2) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-3/ch-4 (cross-validation-3) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-4/ch-4 (consistency-check-2) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-4/ch-5 (cross-validation-4) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-5/ch-4 (cross-validation-5) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-6/ch-3 (cross-validation-6) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-6/ch-4 (consistency-check-3) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs"
+    ],
+    "rule22": [
+      "[规则22] goal-1/ch-19 (cross-validation) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-2/ch-4 (cross-validation-2) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-3/ch-4 (cross-validation-3) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-4/ch-4 (consistency-check-2) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-4/ch-5 (cross-validation-4) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-5/ch-4 (cross-validation-5) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-6/ch-3 (cross-validation-6) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs",
+      "[规则22] goal-6/ch-4 (consistency-check-3) inputs 未覆盖全卷采集章：goal-3/ch-5 output.path=goals/goal-3/goal-3-kimi-reputation.json。请把以上 output.path 逐条加入 chapter.opening.inputs"
+    ]
+  },
+  "r-wx1-0913-1355": {
+    "generate_error": "PlanSegmentError: 规划段 goal-4-ch-1 连续 3 次失败：夹具缺段 goal-4-ch-1",
+    "missing_segments": [
+      "goal-4-ch-1",
+      "goal-4-ch-1",
+      "goal-4-ch-1",
+      "goal-4-ch-2",
+      "goal-4-ch-2",
+      "goal-4-ch-2",
+      "goal-4-ch-3",
+      "goal-4-ch-3",
+      "goal-4-ch-3",
+      "goal-4-ch-4",
+      "goal-4-ch-4",
+      "goal-4-ch-4"
+    ],
+    "engine_calls": 32,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "c2387371e616d229",
+        "closing_sha_without_correction": "d2c87af1b6541b20",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "fde41bd524f235fe",
+        "closing_sha_without_correction": "be18b0dd9827d8d2",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-3.json",
+        "opening_sha": "4d1ec40a696f228d",
+        "closing_sha_without_correction": "f8cddf408ae5094e",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-3.json",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-4.json",
+        "opening_sha": "5fd9cbd8b5b8b262",
+        "closing_sha_without_correction": "f5c2eca535ba92b9",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-4.json",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-5.json",
+        "opening_sha": "494018f8c6b3102c",
+        "closing_sha_without_correction": "f559459c8dc15edd",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-5.json",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-collection-6",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-6.json",
+        "opening_sha": "1fd316fda04126fc",
+        "closing_sha_without_correction": "dff545ea38273f47",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "reliability-audit-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-6.json",
+        "opening_sha": "da57682056d181c8",
+        "closing_sha_without_correction": "493b945d9428ecde",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "data-collection-7",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-7.json",
+        "opening_sha": "ab154e0a0e272ffc",
+        "closing_sha_without_correction": "bd9f46ea17447531",
+        "correction": null
+      },
+      "goal-1/ch-14": {
+        "agent_id": "reliability-audit-7",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-7.json",
+        "opening_sha": "1b8446c02baa8a22",
+        "closing_sha_without_correction": "798ddbbe5f761bd4",
+        "correction": null
+      },
+      "goal-1/ch-15": {
+        "agent_id": "data-collection-8",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-8.json",
+        "opening_sha": "16cd0e246ed94e6c",
+        "closing_sha_without_correction": "e62858a0f8631fe6",
+        "correction": null
+      },
+      "goal-1/ch-16": {
+        "agent_id": "reliability-audit-8",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-8.json",
+        "opening_sha": "f050d588d89b9696",
+        "closing_sha_without_correction": "f9e356c479118920",
+        "correction": null
+      },
+      "goal-1/ch-17": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "7bff887cd306d2d6",
+        "closing_sha_without_correction": "e8549bd45991c398",
+        "correction": null
+      },
+      "goal-1/ch-18": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "28f42111e39d0edc",
+        "closing_sha_without_correction": "56584775c8cb9b1f",
+        "correction": null
+      },
+      "goal-1/ch-19": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/doubao_product_profile.json",
+        "opening_sha": "d08ab98928664179",
+        "closing_sha_without_correction": "fb7e7c9e42cb541a",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "goal-planning",
+        "profile": "readonly-analyst",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/goal-planning.md",
+        "opening_sha": "8884e84476fdba53",
+        "closing_sha_without_correction": "b96aca2e0aa887a2",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "data-collection-9",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-9.json",
+        "opening_sha": "6daaf66b540f0e97",
+        "closing_sha_without_correction": "38ed4323aa4d88ae",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "reliability-audit-9",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-9.json",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-13",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-13.json",
+        "opening_sha": "ddb9949b541a4dfd",
+        "closing_sha_without_correction": "089d6f8013ade57b",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-13",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-13.json",
+        "opening_sha": "aa8a6671994d307b",
+        "closing_sha_without_correction": "01ddb262f4719638",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-14",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-14.json",
+        "opening_sha": "856138857ddfa1fc",
+        "closing_sha_without_correction": "19952a863fc3175d",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-14",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-14.json",
+        "opening_sha": "66eabc50d93859de",
+        "closing_sha_without_correction": "846b4d05cb9f3d4b",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-collection-23",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-23.json",
+        "opening_sha": "ebb72d08fb1aa329",
+        "closing_sha_without_correction": "343c5e8a9b5873d6",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "reliability-audit-23",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-23.json",
+        "opening_sha": "2d139610ff545e5b",
+        "closing_sha_without_correction": "3a9e8e20ddaac924",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "ca6e1ae0d6ec0273",
+        "closing_sha_without_correction": "38a6e754bfc8b00d",
+        "correction": null
+      },
+      "goal-3/ch-8": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/consistency-check.md",
+        "opening_sha": "3832e010a4fd6090",
+        "closing_sha_without_correction": "714cf9f6a45f4b82",
+        "correction": null
+      },
+      "goal-3/ch-9": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/cross-validation-3.json",
+        "opening_sha": "3d8ddbf543c177d8",
+        "closing_sha_without_correction": "43e53807ee172d3a",
+        "correction": null
+      },
+      "goal-3/ch-10": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "comparison",
+        "engine": "claude",
+        "output_path": "goals/goal-3/competitor-benchmark.json",
+        "opening_sha": "406a3ffc09e3287b",
+        "closing_sha_without_correction": "5c58f5099ce37234",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-cleaning-4",
+        "profile": "sandboxed-runner",
+        "chapter_type": null,
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-cleaning-4.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "tagging",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/tagging.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-4.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/report.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-cleaning-5",
+        "profile": "sandboxed-runner",
+        "chapter_type": null,
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-cleaning-5.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "tagging-2",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-5/tagging-2.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "cross-validation-5",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-5/cross-validation-5.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-5/consistency-check-2.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "summary",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-5/summary.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-5/ch-6": {
+        "agent_id": "report-writing-5",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-5/media-commentary-report.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "data-cleaning-6",
+        "profile": "sandboxed-runner",
+        "chapter_type": null,
+        "engine": "codex",
+        "output_path": "goals/goal-6/data-cleaning-6.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "consistency-check-3",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-6/consistency-check-3.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "cross-validation-6",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-6/cross-validation-6.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-6/ch-4": {
+        "agent_id": "report-writing-6",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-6/final-report.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "c12853b610085e8d",
+    "lint_errors": [],
+    "rule22": []
+  },
+  "r-wx1-0914-1239": {
+    "generate_error": "PlanSegmentError: 规划段 goal-4-ch-1 连续 3 次失败：夹具缺段 goal-4-ch-1",
+    "missing_segments": [
+      "goal-4-ch-1",
+      "goal-4-ch-1",
+      "goal-4-ch-1",
+      "goal-4-ch-2",
+      "goal-4-ch-2",
+      "goal-4-ch-2",
+      "goal-4-ch-3",
+      "goal-4-ch-3",
+      "goal-4-ch-3",
+      "goal-4-ch-4",
+      "goal-4-ch-4",
+      "goal-4-ch-4"
+    ],
+    "engine_calls": 37,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "480f93a25ef264d3",
+        "closing_sha_without_correction": "30d2e83c1ea77a73",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "fc78aefd325a3de4",
+        "closing_sha_without_correction": "7dda07f9dcbb2f03",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-3.json",
+        "opening_sha": "d9fc28c68a07e730",
+        "closing_sha_without_correction": "41fe7c7d4c64deb3",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-3.json",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-4.json",
+        "opening_sha": "9ecddb3a3fe3a384",
+        "closing_sha_without_correction": "ec3677cda6a55c3a",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-4.json",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-5.json",
+        "opening_sha": "431fbc6960394a15",
+        "closing_sha_without_correction": "98fcb3d254099a04",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-5.json",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "216c638afc2769ac",
+        "closing_sha_without_correction": "b5117d12cc4eb6de",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "523258705b4a756d",
+        "closing_sha_without_correction": "38fcf63867e64304",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/goal1_doubao_bytedance_factbase.json",
+        "opening_sha": "ac787c2aa838aa85",
+        "closing_sha_without_correction": "67de190f9fcc3cf8",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-9.json",
+        "opening_sha": "bf5b206fa432ddcb",
+        "closing_sha_without_correction": "042665874f706d5b",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-10",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-10.json",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "f9731dfb861c94bd",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-collection-10",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-10.json",
+        "opening_sha": "b136601f0754c3b0",
+        "closing_sha_without_correction": "f8e147b2dadbf652",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "reliability-audit-11",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-11.json",
+        "opening_sha": "dd0474daf0ed51c9",
+        "closing_sha_without_correction": "05c7e628e5823015",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "data-collection-11",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-11.json",
+        "opening_sha": "0eadd5dfdc22fcd4",
+        "closing_sha_without_correction": "728dd1f4f9f34652",
+        "correction": null
+      },
+      "goal-2/ch-6": {
+        "agent_id": "reliability-audit-12",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-12.json",
+        "opening_sha": "2f259b97adb2617f",
+        "closing_sha_without_correction": "76ba36d5eb2c28c0",
+        "correction": null
+      },
+      "goal-2/ch-7": {
+        "agent_id": "data-collection-12",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-12.json",
+        "opening_sha": "3d96cad07ecf41e7",
+        "closing_sha_without_correction": "acdb7419a07e27f3",
+        "correction": null
+      },
+      "goal-2/ch-8": {
+        "agent_id": "reliability-audit-13",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-13.json",
+        "opening_sha": "428fb7545c52a492",
+        "closing_sha_without_correction": "79d1d19d7095be91",
+        "correction": null
+      },
+      "goal-2/ch-9": {
+        "agent_id": "data-cleaning-2",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-cleaning-2.md",
+        "opening_sha": "e40e80803157da83",
+        "closing_sha_without_correction": "983e0416e3a739cb",
+        "correction": null
+      },
+      "goal-2/ch-10": {
+        "agent_id": "reliability-audit-9",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-9.json",
+        "opening_sha": "3ef1ba639ae4ca4c",
+        "closing_sha_without_correction": "dbd7ab3d0319d7fc",
+        "correction": null
+      },
+      "goal-2/ch-11": {
+        "agent_id": "cross-validation-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/cross-validation-2.json",
+        "opening_sha": "fc94e77696c5a266",
+        "closing_sha_without_correction": "b33a51f0935b3d2e",
+        "correction": null
+      },
+      "goal-2/ch-12": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/consistency-check.md",
+        "opening_sha": "b3acb50a763ad241",
+        "closing_sha_without_correction": "cb2ff25083df3983",
+        "correction": null
+      },
+      "goal-2/ch-13": {
+        "agent_id": "report-writing-2",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/goal-2-competitor-dossier.json",
+        "opening_sha": "2065e0455d868bba",
+        "closing_sha_without_correction": "4fa2414aff4b5869",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-21",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-21.json",
+        "opening_sha": "09a137faf288be61",
+        "closing_sha_without_correction": "a37436c1f2a7d0e0",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-22",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-22.json",
+        "opening_sha": "720e7d91c7cb1d32",
+        "closing_sha_without_correction": "0fd304516fea497c",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-22",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-22.json",
+        "opening_sha": "6b3a29b2515727fb",
+        "closing_sha_without_correction": "72508e2f099eb351",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-23",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-23.json",
+        "opening_sha": "492886939eb7b7d4",
+        "closing_sha_without_correction": "2e2261b948581538",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-collection-23",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-23.json",
+        "opening_sha": "3510d3b0de3c9ffc",
+        "closing_sha_without_correction": "e43cae9e01e47e92",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "reliability-audit-24",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-24.json",
+        "opening_sha": "2d139610ff545e5b",
+        "closing_sha_without_correction": "413e75204a60711f",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "data-collection-24",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-24.json",
+        "opening_sha": "950e1f9ae35641ca",
+        "closing_sha_without_correction": "12e78fd430216991",
+        "correction": null
+      },
+      "goal-3/ch-8": {
+        "agent_id": "reliability-audit-25",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-25.json",
+        "opening_sha": "044b1080887bc9af",
+        "closing_sha_without_correction": "dd7a11cb08a3b9cf",
+        "correction": null
+      },
+      "goal-3/ch-9": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "a84f19ffb7b71ff9",
+        "closing_sha_without_correction": "ea56dbecf6eaef6f",
+        "correction": null
+      },
+      "goal-3/ch-10": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/consistency-check-2.md",
+        "opening_sha": "9cad59fc41239c01",
+        "closing_sha_without_correction": "a63a3166099942a2",
+        "correction": null
+      },
+      "goal-3/ch-11": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/cross-validation-3.json",
+        "opening_sha": "5aa169487a99fd36",
+        "closing_sha_without_correction": "da60d36a4a3a9108",
+        "correction": null
+      },
+      "goal-3/ch-12": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-3/domestic-doubao-reviews.json",
+        "opening_sha": "6da0106042ac0798",
+        "closing_sha_without_correction": "16a29e031d5a0c9a",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "reliability-audit-28",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-28.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-4.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "consistency-check-3",
+        "profile": "readonly-analyst",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/consistency-check-3.md",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": null,
+        "engine": "claude",
+        "output_path": "goals/goal-4/goal-4.json",
+        "opening_sha": "74234e98afe7498f",
+        "closing_sha_without_correction": "1d97c473be678b8b",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "c2b5bae3513997cc",
+    "lint_errors": [],
+    "rule22": []
+  },
+  "r-wx1-0914-1425": {
+    "generate_error": "",
+    "missing_segments": [],
+    "engine_calls": 30,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "5a238abea7e76946",
+        "closing_sha_without_correction": "93a0391bf5bc1aad",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "b974c6354a05d43b",
+        "closing_sha_without_correction": "12d2db65e80258b5",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-3.json",
+        "opening_sha": "4908d1122ec5352c",
+        "closing_sha_without_correction": "90fd2aebcc1fc387",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-3.json",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-4.json",
+        "opening_sha": "b311e86b9f56fdb5",
+        "closing_sha_without_correction": "185a0a152c932b61",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-4.json",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "4b5d29debc9d2138",
+        "closing_sha_without_correction": "3adff5c1588b116c",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "f28a04e298412dc8",
+        "closing_sha_without_correction": "1e01c359b847ae81",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/consistency-check.md",
+        "opening_sha": "993b7216012fb836",
+        "closing_sha_without_correction": "da9be9af2f3e193e",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/doubao_product_profile.json",
+        "opening_sha": "68bfe5568178a3e3",
+        "closing_sha_without_correction": "38cf596bae0dcc85",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-9.json",
+        "opening_sha": "80b7c5bedd043465",
+        "closing_sha_without_correction": "c44855ea37c690c9",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-9",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-9.json",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-cleaning-2",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-cleaning-2.md",
+        "opening_sha": "f4bb2b5939818965",
+        "closing_sha_without_correction": "306cd39b5e838806",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "cross-validation-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/cross-validation-2.json",
+        "opening_sha": "45db1d7ec3165ac0",
+        "closing_sha_without_correction": "53d63cfa6e4091cb",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "report-writing-2",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/bytedance-doubao-strategy.json",
+        "opening_sha": "c99c7ec95bf0023e",
+        "closing_sha_without_correction": "6c1f22d3faca8537",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-13",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-13.json",
+        "opening_sha": "63821851540cad3d",
+        "closing_sha_without_correction": "fda1ca72483be569",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-13",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-13.json",
+        "opening_sha": "aa8a6671994d307b",
+        "closing_sha_without_correction": "01ddb262f4719638",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "ad989eab9aad8664",
+        "closing_sha_without_correction": "31c5bba6d64989ab",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/cross-validation-3.json",
+        "opening_sha": "50da3da1ae26ead7",
+        "closing_sha_without_correction": "111ba01a1f67dc23",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/consistency-check-2.md",
+        "opening_sha": "c1207b40e0224383",
+        "closing_sha_without_correction": "8258032356b304a7",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-3/media-review-report.json",
+        "opening_sha": "035b66e9498f614e",
+        "closing_sha_without_correction": "e8d0e81bee4c0fe1",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-16",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-16.json",
+        "opening_sha": "dfb470d190e7a38d",
+        "closing_sha_without_correction": "755e465b385cb1c3",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-16",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-16.json",
+        "opening_sha": "fbaf4a717953d7c1",
+        "closing_sha_without_correction": "4443358c2d94625b",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-collection-17",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-17.json",
+        "opening_sha": "2bf3eb3f7f7178e9",
+        "closing_sha_without_correction": "3ade9cbbfea25d16",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "reliability-audit-17",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-17.json",
+        "opening_sha": "0d74cfa5a7dc72f3",
+        "closing_sha_without_correction": "76310d11699cbde1",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "data-collection-18",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-18.json",
+        "opening_sha": "d18abb87307a051d",
+        "closing_sha_without_correction": "17c856a813949c8d",
+        "correction": null
+      },
+      "goal-4/ch-6": {
+        "agent_id": "reliability-audit-18",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-18.json",
+        "opening_sha": "9446cf6dc772ec1b",
+        "closing_sha_without_correction": "409345530c1f32f0",
+        "correction": null
+      },
+      "goal-4/ch-7": {
+        "agent_id": "data-cleaning-4",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-cleaning-4.md",
+        "opening_sha": "ae65b7200bcfcf0c",
+        "closing_sha_without_correction": "e8d9553645001d7d",
+        "correction": null
+      },
+      "goal-4/ch-8": {
+        "agent_id": "tagging",
+        "profile": "report-writer",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "output_path": "goals/goal-4/tagging.md",
+        "opening_sha": "2108cd56c60be795",
+        "closing_sha_without_correction": "d5e6b7fc4cd987d5",
+        "correction": null
+      },
+      "goal-4/ch-9": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-4.json",
+        "opening_sha": "d83f541986e83301",
+        "closing_sha_without_correction": "c2a64e4e9d5c599c",
+        "correction": null
+      },
+      "goal-4/ch-10": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-4/goal-4-report.json",
+        "opening_sha": "0e05ab90b6c66a3b",
+        "closing_sha_without_correction": "d2e4105c4312b6bd",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-cleaning-5",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-cleaning-5.md",
+        "opening_sha": "c039d6da88185ce0",
+        "closing_sha_without_correction": "b5614ab20e006c4c",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "cross-validation-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-5/cross-validation-5.json",
+        "opening_sha": "056bc424cd5fc871",
+        "closing_sha_without_correction": "a2de958913625132",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "report-writing-5",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-5/goal-5-report.json",
+        "opening_sha": "e9d1ac0c678e4819",
+        "closing_sha_without_correction": "b63053fc755edc26",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "cross-validation-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-6/cross-validation-6.json",
+        "opening_sha": "ee400133fb1f4d13",
+        "closing_sha_without_correction": "46b004a485c850f5",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "consistency-check-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-6/consistency-check-3.md",
+        "opening_sha": "346cd9974538d6e7",
+        "closing_sha_without_correction": "3189aa7037c26a00",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "report-writing-6",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-6/goal-6-report.md",
+        "opening_sha": "90a851e6883f0303",
+        "closing_sha_without_correction": "2c701f9bda2ffded",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "06242946343288c9",
+    "lint_errors": [],
+    "rule22": []
+  },
+  "r-wx1-0914-1749": {
+    "generate_error": "",
+    "missing_segments": [],
+    "engine_calls": 25,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "a694cc4cbc285647",
+        "closing_sha_without_correction": "5df32b1b95cecbe0",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "c8f879ce553ff1f4",
+        "closing_sha_without_correction": "aaed40837d67c07a",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "953837e32f934e11",
+        "closing_sha_without_correction": "89b7df58d2b0a048",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "bef716bb0cc6ce94",
+        "closing_sha_without_correction": "64450dea1bcb321e",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/goal1_doubao_product_profile.json",
+        "opening_sha": "735662a0015fa962",
+        "closing_sha_without_correction": "b413930092e009d9",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-5",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-5.json",
+        "opening_sha": "149a70bfb2e240e8",
+        "closing_sha_without_correction": "cadc78efc691ba5e",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-5.json",
+        "opening_sha": "1a4ed8387eaa8be8",
+        "closing_sha_without_correction": "3f6a68a5e1d80959",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-collection-6",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-6.json",
+        "opening_sha": "8259497ceeaefd40",
+        "closing_sha_without_correction": "f850feedf8bb3132",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "reliability-audit-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-6.json",
+        "opening_sha": "8ba6cb94cfc38488",
+        "closing_sha_without_correction": "ff785e992a5ce3b4",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "data-cleaning-2",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-cleaning-2.md",
+        "opening_sha": "80c1a2ca72a93553",
+        "closing_sha_without_correction": "494220aaecfddd1a",
+        "correction": null
+      },
+      "goal-2/ch-6": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/consistency-check.md",
+        "opening_sha": "d93b0663df54742c",
+        "closing_sha_without_correction": "1050dface50c993e",
+        "correction": null
+      },
+      "goal-2/ch-7": {
+        "agent_id": "cross-validation-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/cross-validation-2.json",
+        "opening_sha": "064782cb807a54aa",
+        "closing_sha_without_correction": "529334bc875efca8",
+        "correction": null
+      },
+      "goal-2/ch-8": {
+        "agent_id": "report-writing-2",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/goal-2-report.json",
+        "opening_sha": "153b29f371c11c74",
+        "closing_sha_without_correction": "9e64f80d1924be5f",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-10",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-10.json",
+        "opening_sha": "a3bc6ec88f3af346",
+        "closing_sha_without_correction": "ec6e22a85e5cc5f8",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-10",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-10.json",
+        "opening_sha": "7e95493505caa6d5",
+        "closing_sha_without_correction": "6463d28609ce6f5f",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-11",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-11.json",
+        "opening_sha": "e5bb925f438fc3c2",
+        "closing_sha_without_correction": "0d3087b33475ec72",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-11",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-11.json",
+        "opening_sha": "e202ebc095a235bc",
+        "closing_sha_without_correction": "bb4bd78e6b0ecb69",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "aa920c2f14f1d9e6",
+        "closing_sha_without_correction": "1a405461fa654a49",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-3/cross-validation-3.json",
+        "opening_sha": "1ec90484fa345618",
+        "closing_sha_without_correction": "113c832ef4e6a467",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-3/report.json",
+        "opening_sha": "e861a99567df8ee9",
+        "closing_sha_without_correction": "bfddf4af27138829",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-14",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-14.json",
+        "opening_sha": "bb98bc7044f78272",
+        "closing_sha_without_correction": "36536019e7b9861d",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-14",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-14.json",
+        "opening_sha": "3a40fd2946a22144",
+        "closing_sha_without_correction": "c1a12574b4f8b842",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-collection-15",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-15.json",
+        "opening_sha": "419aefde2cf25e33",
+        "closing_sha_without_correction": "bed9b2d226c09c13",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "reliability-audit-15",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-15.json",
+        "opening_sha": "2342f000eb7eeb3c",
+        "closing_sha_without_correction": "a636a1b47a37dd5f",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "data-cleaning-4",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-cleaning-4.md",
+        "opening_sha": "8c13367633ad9f2d",
+        "closing_sha_without_correction": "fca2d0382d72387c",
+        "correction": null
+      },
+      "goal-4/ch-6": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-4.json",
+        "opening_sha": "ee3f8605450747b1",
+        "closing_sha_without_correction": "e3caf3dd6a469da8",
+        "correction": null
+      },
+      "goal-4/ch-7": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-4/goal-4-report.json",
+        "opening_sha": "c4e018723bed2269",
+        "closing_sha_without_correction": "341dc2e53a5b2236",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-collection-20",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-collection-20.json",
+        "opening_sha": "56b0fbc70bf7e938",
+        "closing_sha_without_correction": "9d12ed5d1defef1e",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "reliability-audit-20",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-5/reliability-audit-20.json",
+        "opening_sha": "df15c9e8d93e828c",
+        "closing_sha_without_correction": "18644567d8948ef6",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "cross-validation-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-5/cross-validation-5.json",
+        "opening_sha": "dd1794e00b0ff0f0",
+        "closing_sha_without_correction": "4892814d8d6d79d8",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-5/consistency-check-2.md",
+        "opening_sha": "386ea1c5541c0248",
+        "closing_sha_without_correction": "8b5f1a3214695b79",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "report-writing-5",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-5/final-report.json",
+        "opening_sha": "1d01df924d4ff8ad",
+        "closing_sha_without_correction": "097a9a7a2df9b5fb",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "bd31cf3322fd9b20",
+    "lint_errors": [],
+    "rule22": []
+  },
+  "r-wx1-0914-2059": {
+    "generate_error": "",
+    "missing_segments": [],
+    "engine_calls": 33,
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection.json",
+        "opening_sha": "1fea6ff4886ab9bd",
+        "closing_sha_without_correction": "dbccce0e62ba37ae",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit.json",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-2.json",
+        "opening_sha": "f5bbb9244fd80c10",
+        "closing_sha_without_correction": "818d09a9cc82c534",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-2.json",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-3.json",
+        "opening_sha": "db5e895bbbb8f918",
+        "closing_sha_without_correction": "51906fd07ef85712",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-3.json",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-4.json",
+        "opening_sha": "b80e0273b47634cd",
+        "closing_sha_without_correction": "66561a7b1704bc2c",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-4.json",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-5.json",
+        "opening_sha": "64db629f0bfd00d1",
+        "closing_sha_without_correction": "abec11b8ca7a2fec",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-5.json",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-collection-6",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-6.json",
+        "opening_sha": "aa0f8a083ec646df",
+        "closing_sha_without_correction": "3a33975f31e4c030",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "reliability-audit-6",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-6.json",
+        "opening_sha": "da57682056d181c8",
+        "closing_sha_without_correction": "493b945d9428ecde",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "data-collection-7",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-7.json",
+        "opening_sha": "3338a2739d925a9e",
+        "closing_sha_without_correction": "bd9f46ea17447531",
+        "correction": null
+      },
+      "goal-1/ch-14": {
+        "agent_id": "reliability-audit-7",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-7.json",
+        "opening_sha": "1b8446c02baa8a22",
+        "closing_sha_without_correction": "798ddbbe5f761bd4",
+        "correction": null
+      },
+      "goal-1/ch-15": {
+        "agent_id": "data-collection-8",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-collection-8.json",
+        "opening_sha": "cc1041e69da06907",
+        "closing_sha_without_correction": "956936134e2d642f",
+        "correction": null
+      },
+      "goal-1/ch-16": {
+        "agent_id": "reliability-audit-8",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-1/reliability-audit-8.json",
+        "opening_sha": "f050d588d89b9696",
+        "closing_sha_without_correction": "f9e356c479118920",
+        "correction": null
+      },
+      "goal-1/ch-17": {
+        "agent_id": "data-cleaning",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-1/data-cleaning.md",
+        "opening_sha": "4fe689e93166c497",
+        "closing_sha_without_correction": "189d0f0303ef8905",
+        "correction": null
+      },
+      "goal-1/ch-18": {
+        "agent_id": "cross-validation",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/cross-validation.json",
+        "opening_sha": "51b3b06891df9389",
+        "closing_sha_without_correction": "62e3c1b98ef3aea5",
+        "correction": null
+      },
+      "goal-1/ch-19": {
+        "agent_id": "consistency-check",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-1/consistency-check.md",
+        "opening_sha": "476ec546c6e4618a",
+        "closing_sha_without_correction": "7c65055eb51ed306",
+        "correction": null
+      },
+      "goal-1/ch-20": {
+        "agent_id": "report-writing",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-1/doubao_reputation_baseline.json",
+        "opening_sha": "2cb5bc4f8450b2b0",
+        "closing_sha_without_correction": "5c152090eaf16f97",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-collection-9.json",
+        "opening_sha": "c4df602dd2d69847",
+        "closing_sha_without_correction": "c96fe245a5da196a",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-9",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-2/reliability-audit-9.json",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-cleaning-2",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-2/data-cleaning-2.md",
+        "opening_sha": "dea91829e1a3f209",
+        "closing_sha_without_correction": "82fb7f4e464294e3",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "cross-validation-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-2/cross-validation-2.json",
+        "opening_sha": "5d5c2c3010b93b0c",
+        "closing_sha_without_correction": "e2535a821a33e2bf",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "report-writing-2",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-2/deepseek-reputation-report.json",
+        "opening_sha": "b9c979f72356f55d",
+        "closing_sha_without_correction": "a34276fb680b42a8",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-14",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-collection-14.json",
+        "opening_sha": "bb75443bf6bdc6fd",
+        "closing_sha_without_correction": "11abf2d40da014bb",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-14",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-3/reliability-audit-14.json",
+        "opening_sha": "66eabc50d93859de",
+        "closing_sha_without_correction": "846b4d05cb9f3d4b",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-cleaning-3",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-3/data-cleaning-3.md",
+        "opening_sha": "18e09c84d3fc1694",
+        "closing_sha_without_correction": "9362cfd6615b3dfb",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "tagging",
+        "profile": "report-writer",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "output_path": "goals/goal-3/tagging.md",
+        "opening_sha": "28b432ea2294ccc5",
+        "closing_sha_without_correction": "c4b23a4321a60702",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "report-writing-3",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-3/kimi-reputation-report.json",
+        "opening_sha": "9caa2efd303b29b4",
+        "closing_sha_without_correction": "cfc2aec0ce106678",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-19",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-collection-19.json",
+        "opening_sha": "662b316aa90c57d9",
+        "closing_sha_without_correction": "9af71243d5c1ff41",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-19",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-4/reliability-audit-19.json",
+        "opening_sha": "861ed777ded48c4c",
+        "closing_sha_without_correction": "5fbedee0a55a7232",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-cleaning-4",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-4/data-cleaning-4.md",
+        "opening_sha": "e5e3c5441f5dd2e4",
+        "closing_sha_without_correction": "6941a92b8b9f1d35",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "cross-validation-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-4/cross-validation-3.json",
+        "opening_sha": "20c7d62767c7768c",
+        "closing_sha_without_correction": "0936a6d52022a722",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "report-writing-4",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-4/goal-4-report.json",
+        "opening_sha": "96ad2d37fb20c7d7",
+        "closing_sha_without_correction": "7bddd6e0ed503916",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-collection-24",
+        "profile": "web-collector",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-collection-24.json",
+        "opening_sha": "970213503d02e961",
+        "closing_sha_without_correction": "e6667890df90ce93",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "reliability-audit-24",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-5/reliability-audit-24.json",
+        "opening_sha": "83dcd652da02c812",
+        "closing_sha_without_correction": "67cf0f119ef73986",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "data-cleaning-5",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-5/data-cleaning-5.md",
+        "opening_sha": "92735cd945683ee4",
+        "closing_sha_without_correction": "9c5eab0cb0cd8474",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-5/consistency-check-2.md",
+        "opening_sha": "868ff4492a78c2a8",
+        "closing_sha_without_correction": "4ba4b58333fe6059",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "cross-validation-4",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-5/cross-validation-4.json",
+        "opening_sha": "cec81938dbdab116",
+        "closing_sha_without_correction": "13731e3680a176bc",
+        "correction": null
+      },
+      "goal-5/ch-6": {
+        "agent_id": "report-writing-5",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-5/goal-5-report.json",
+        "opening_sha": "966970991e206ffd",
+        "closing_sha_without_correction": "99a3df59c599f56d",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "data-cleaning-6",
+        "profile": "sandboxed-runner",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "output_path": "goals/goal-6/data-cleaning-6.md",
+        "opening_sha": "6ef1050c7e4c80c6",
+        "closing_sha_without_correction": "dc7f6e126534df95",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "cross-validation-5",
+        "profile": "readonly-analyst",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "output_path": "goals/goal-6/cross-validation-5.json",
+        "opening_sha": "163ca958a61135e0",
+        "closing_sha_without_correction": "d97a3d78898ddeb8",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "consistency-check-3",
+        "profile": "readonly-analyst",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "output_path": "goals/goal-6/consistency-check-3.md",
+        "opening_sha": "5b6065e1a00a95c7",
+        "closing_sha_without_correction": "1934145b9a121d3d",
+        "correction": null
+      },
+      "goal-6/ch-4": {
+        "agent_id": "report-writing-6",
+        "profile": "report-writer",
+        "chapter_type": "report",
+        "engine": "claude",
+        "output_path": "goals/goal-6/final-report.json",
+        "opening_sha": "2c67f5de9dbc3856",
+        "closing_sha_without_correction": "475b92cb4db0c2da",
+        "correction": null
+      }
+    },
+    "normalize_notes_sha": "fc214505dc640684",
+    "lint_errors": [],
+    "rule22": []
+  },
+  "r-wx1-0913-1355/saved-plan": {
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "c2387371e616d229",
+        "closing_sha_without_correction": "d2c87af1b6541b20",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "fde41bd524f235fe",
+        "closing_sha_without_correction": "be18b0dd9827d8d2",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "4d1ec40a696f228d",
+        "closing_sha_without_correction": "f8cddf408ae5094e",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "5fd9cbd8b5b8b262",
+        "closing_sha_without_correction": "f5c2eca535ba92b9",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "494018f8c6b3102c",
+        "closing_sha_without_correction": "f559459c8dc15edd",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-collection-6",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "1fd316fda04126fc",
+        "closing_sha_without_correction": "dff545ea38273f47",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "reliability-audit-6",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "da57682056d181c8",
+        "closing_sha_without_correction": "493b945d9428ecde",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "data-collection-7",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "ab154e0a0e272ffc",
+        "closing_sha_without_correction": "bd9f46ea17447531",
+        "correction": null
+      },
+      "goal-1/ch-14": {
+        "agent_id": "reliability-audit-7",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "1b8446c02baa8a22",
+        "closing_sha_without_correction": "798ddbbe5f761bd4",
+        "correction": null
+      },
+      "goal-1/ch-15": {
+        "agent_id": "data-collection-8",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "16cd0e246ed94e6c",
+        "closing_sha_without_correction": "e62858a0f8631fe6",
+        "correction": null
+      },
+      "goal-1/ch-16": {
+        "agent_id": "reliability-audit-8",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "f050d588d89b9696",
+        "closing_sha_without_correction": "f9e356c479118920",
+        "correction": null
+      },
+      "goal-1/ch-17": {
+        "agent_id": "data-cleaning",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "7bff887cd306d2d6",
+        "closing_sha_without_correction": "e8549bd45991c398",
+        "correction": null
+      },
+      "goal-1/ch-18": {
+        "agent_id": "cross-validation",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "28f42111e39d0edc",
+        "closing_sha_without_correction": "56584775c8cb9b1f",
+        "correction": null
+      },
+      "goal-1/ch-19": {
+        "agent_id": "report-writing",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "d08ab98928664179",
+        "closing_sha_without_correction": "fb7e7c9e42cb541a",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "goal-planning",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "8884e84476fdba53",
+        "closing_sha_without_correction": "b96aca2e0aa887a2",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "data-collection-9",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "6daaf66b540f0e97",
+        "closing_sha_without_correction": "38ed4323aa4d88ae",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "reliability-audit-9",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-13",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "ddb9949b541a4dfd",
+        "closing_sha_without_correction": "089d6f8013ade57b",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-13",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "aa8a6671994d307b",
+        "closing_sha_without_correction": "01ddb262f4719638",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-14",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "856138857ddfa1fc",
+        "closing_sha_without_correction": "19952a863fc3175d",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-14",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "66eabc50d93859de",
+        "closing_sha_without_correction": "846b4d05cb9f3d4b",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-collection-23",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "ebb72d08fb1aa329",
+        "closing_sha_without_correction": "343c5e8a9b5873d6",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "reliability-audit-23",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "2d139610ff545e5b",
+        "closing_sha_without_correction": "3a9e8e20ddaac924",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "data-cleaning-3",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "ca6e1ae0d6ec0273",
+        "closing_sha_without_correction": "38a6e754bfc8b00d",
+        "correction": null
+      },
+      "goal-3/ch-8": {
+        "agent_id": "consistency-check",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "3832e010a4fd6090",
+        "closing_sha_without_correction": "714cf9f6a45f4b82",
+        "correction": null
+      },
+      "goal-3/ch-9": {
+        "agent_id": "cross-validation-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "3d8ddbf543c177d8",
+        "closing_sha_without_correction": "43e53807ee172d3a",
+        "correction": null
+      },
+      "goal-3/ch-10": {
+        "agent_id": "report-writing-3",
+        "saved_type": "comparison",
+        "saved_engine": "claude",
+        "chapter_type": "comparison",
+        "engine": "claude",
+        "opening_sha": "406a3ffc09e3287b",
+        "closing_sha_without_correction": "5c58f5099ce37234",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-cleaning-5",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "000f3bf26f822ab4",
+        "closing_sha_without_correction": "ad83962323b4628b",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "tagging-2",
+        "saved_type": "tagging",
+        "saved_engine": "claude",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "opening_sha": "48be969c546fecf2",
+        "closing_sha_without_correction": "557a420d8b5b6e5c",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "cross-validation-5",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "f0fdf7633c7794a7",
+        "closing_sha_without_correction": "3cf2e35b807d2515",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "5aaecf6c927a05c4",
+        "closing_sha_without_correction": "b399241be3e54296",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "summary",
+        "saved_type": "summary",
+        "saved_engine": "claude",
+        "chapter_type": "summary",
+        "engine": "claude",
+        "opening_sha": "5e5ffb98def4a5bb",
+        "closing_sha_without_correction": "4a09f5ab9a776ef1",
+        "correction": null
+      },
+      "goal-5/ch-6": {
+        "agent_id": "report-writing-5",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "8b343d4526335cb7",
+        "closing_sha_without_correction": "82e5ac3b2f431f72",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "data-cleaning-6",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "70c22971f2d90f1e",
+        "closing_sha_without_correction": "487953b4a5e19a89",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "consistency-check-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "71533d40f0bf5c03",
+        "closing_sha_without_correction": "095a1165d35101d0",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "cross-validation-6",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "bc6498ae1aa9b5d9",
+        "closing_sha_without_correction": "ee8b77f24b53bcf0",
+        "correction": null
+      },
+      "goal-6/ch-4": {
+        "agent_id": "report-writing-6",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "9c3a42d3e6bd06f9",
+        "closing_sha_without_correction": "83346f7c9a17f640",
+        "correction": null
+      }
+    },
+    "lint_errors": []
+  },
+  "r-wx1-0914-1239/saved-plan": {
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "480f93a25ef264d3",
+        "closing_sha_without_correction": "30d2e83c1ea77a73",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "fc78aefd325a3de4",
+        "closing_sha_without_correction": "7dda07f9dcbb2f03",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "d9fc28c68a07e730",
+        "closing_sha_without_correction": "41fe7c7d4c64deb3",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "9ecddb3a3fe3a384",
+        "closing_sha_without_correction": "ec3677cda6a55c3a",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "431fbc6960394a15",
+        "closing_sha_without_correction": "98fcb3d254099a04",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-cleaning",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "216c638afc2769ac",
+        "closing_sha_without_correction": "b5117d12cc4eb6de",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "cross-validation",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "523258705b4a756d",
+        "closing_sha_without_correction": "38fcf63867e64304",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "report-writing",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "ac787c2aa838aa85",
+        "closing_sha_without_correction": "67de190f9fcc3cf8",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "bf5b206fa432ddcb",
+        "closing_sha_without_correction": "042665874f706d5b",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-10",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "f9731dfb861c94bd",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-collection-10",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "b136601f0754c3b0",
+        "closing_sha_without_correction": "f8e147b2dadbf652",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "reliability-audit-11",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "dd0474daf0ed51c9",
+        "closing_sha_without_correction": "05c7e628e5823015",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "data-collection-11",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "0eadd5dfdc22fcd4",
+        "closing_sha_without_correction": "728dd1f4f9f34652",
+        "correction": null
+      },
+      "goal-2/ch-6": {
+        "agent_id": "reliability-audit-12",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "2f259b97adb2617f",
+        "closing_sha_without_correction": "76ba36d5eb2c28c0",
+        "correction": null
+      },
+      "goal-2/ch-7": {
+        "agent_id": "data-collection-12",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "3d96cad07ecf41e7",
+        "closing_sha_without_correction": "acdb7419a07e27f3",
+        "correction": null
+      },
+      "goal-2/ch-8": {
+        "agent_id": "reliability-audit-13",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "428fb7545c52a492",
+        "closing_sha_without_correction": "79d1d19d7095be91",
+        "correction": null
+      },
+      "goal-2/ch-9": {
+        "agent_id": "data-cleaning-2",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "e40e80803157da83",
+        "closing_sha_without_correction": "983e0416e3a739cb",
+        "correction": null
+      },
+      "goal-2/ch-10": {
+        "agent_id": "reliability-audit-9",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "3ef1ba639ae4ca4c",
+        "closing_sha_without_correction": "dbd7ab3d0319d7fc",
+        "correction": null
+      },
+      "goal-2/ch-11": {
+        "agent_id": "cross-validation-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "fc94e77696c5a266",
+        "closing_sha_without_correction": "b33a51f0935b3d2e",
+        "correction": null
+      },
+      "goal-2/ch-12": {
+        "agent_id": "consistency-check",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "b3acb50a763ad241",
+        "closing_sha_without_correction": "cb2ff25083df3983",
+        "correction": null
+      },
+      "goal-2/ch-13": {
+        "agent_id": "report-writing-2",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "2065e0455d868bba",
+        "closing_sha_without_correction": "4fa2414aff4b5869",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-21",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "09a137faf288be61",
+        "closing_sha_without_correction": "a37436c1f2a7d0e0",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-22",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "720e7d91c7cb1d32",
+        "closing_sha_without_correction": "0fd304516fea497c",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-22",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "6b3a29b2515727fb",
+        "closing_sha_without_correction": "72508e2f099eb351",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-23",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "492886939eb7b7d4",
+        "closing_sha_without_correction": "2e2261b948581538",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-collection-23",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "3510d3b0de3c9ffc",
+        "closing_sha_without_correction": "e43cae9e01e47e92",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "reliability-audit-24",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "2d139610ff545e5b",
+        "closing_sha_without_correction": "413e75204a60711f",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "data-collection-24",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "950e1f9ae35641ca",
+        "closing_sha_without_correction": "12e78fd430216991",
+        "correction": null
+      },
+      "goal-3/ch-8": {
+        "agent_id": "reliability-audit-25",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "044b1080887bc9af",
+        "closing_sha_without_correction": "dd7a11cb08a3b9cf",
+        "correction": null
+      },
+      "goal-3/ch-9": {
+        "agent_id": "data-cleaning-3",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "a84f19ffb7b71ff9",
+        "closing_sha_without_correction": "ea56dbecf6eaef6f",
+        "correction": null
+      },
+      "goal-3/ch-10": {
+        "agent_id": "consistency-check-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "9cad59fc41239c01",
+        "closing_sha_without_correction": "a63a3166099942a2",
+        "correction": null
+      },
+      "goal-3/ch-11": {
+        "agent_id": "cross-validation-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "5aa169487a99fd36",
+        "closing_sha_without_correction": "da60d36a4a3a9108",
+        "correction": null
+      },
+      "goal-3/ch-12": {
+        "agent_id": "report-writing-3",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "6da0106042ac0798",
+        "closing_sha_without_correction": "16a29e031d5a0c9a",
+        "correction": null
+      }
+    },
+    "lint_errors": []
+  },
+  "r-wx1-0914-1425/saved-plan": {
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "5a238abea7e76946",
+        "closing_sha_without_correction": "93a0391bf5bc1aad",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "b974c6354a05d43b",
+        "closing_sha_without_correction": "12d2db65e80258b5",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "4908d1122ec5352c",
+        "closing_sha_without_correction": "90fd2aebcc1fc387",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "b311e86b9f56fdb5",
+        "closing_sha_without_correction": "185a0a152c932b61",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-cleaning",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "4b5d29debc9d2138",
+        "closing_sha_without_correction": "3adff5c1588b116c",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "cross-validation",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "f28a04e298412dc8",
+        "closing_sha_without_correction": "1e01c359b847ae81",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "consistency-check",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "993b7216012fb836",
+        "closing_sha_without_correction": "da9be9af2f3e193e",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "report-writing",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "68bfe5568178a3e3",
+        "closing_sha_without_correction": "38cf596bae0dcc85",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "80b7c5bedd043465",
+        "closing_sha_without_correction": "c44855ea37c690c9",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-9",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-cleaning-2",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "f4bb2b5939818965",
+        "closing_sha_without_correction": "306cd39b5e838806",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "cross-validation-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "45db1d7ec3165ac0",
+        "closing_sha_without_correction": "53d63cfa6e4091cb",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "report-writing-2",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "c99c7ec95bf0023e",
+        "closing_sha_without_correction": "6c1f22d3faca8537",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-13",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "63821851540cad3d",
+        "closing_sha_without_correction": "fda1ca72483be569",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-13",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "aa8a6671994d307b",
+        "closing_sha_without_correction": "01ddb262f4719638",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-cleaning-3",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "ad989eab9aad8664",
+        "closing_sha_without_correction": "31c5bba6d64989ab",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "cross-validation-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "50da3da1ae26ead7",
+        "closing_sha_without_correction": "111ba01a1f67dc23",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "consistency-check-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "c1207b40e0224383",
+        "closing_sha_without_correction": "8258032356b304a7",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "report-writing-3",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "035b66e9498f614e",
+        "closing_sha_without_correction": "e8d0e81bee4c0fe1",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-16",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "dfb470d190e7a38d",
+        "closing_sha_without_correction": "755e465b385cb1c3",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-16",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "fbaf4a717953d7c1",
+        "closing_sha_without_correction": "4443358c2d94625b",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-collection-17",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "2bf3eb3f7f7178e9",
+        "closing_sha_without_correction": "3ade9cbbfea25d16",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "reliability-audit-17",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "0d74cfa5a7dc72f3",
+        "closing_sha_without_correction": "76310d11699cbde1",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "data-collection-18",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "d18abb87307a051d",
+        "closing_sha_without_correction": "17c856a813949c8d",
+        "correction": null
+      },
+      "goal-4/ch-6": {
+        "agent_id": "reliability-audit-18",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "9446cf6dc772ec1b",
+        "closing_sha_without_correction": "409345530c1f32f0",
+        "correction": null
+      },
+      "goal-4/ch-7": {
+        "agent_id": "data-cleaning-4",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "ae65b7200bcfcf0c",
+        "closing_sha_without_correction": "e8d9553645001d7d",
+        "correction": null
+      },
+      "goal-4/ch-8": {
+        "agent_id": "tagging",
+        "saved_type": "tagging",
+        "saved_engine": "claude",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "opening_sha": "2108cd56c60be795",
+        "closing_sha_without_correction": "d5e6b7fc4cd987d5",
+        "correction": null
+      },
+      "goal-4/ch-9": {
+        "agent_id": "cross-validation-4",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "d83f541986e83301",
+        "closing_sha_without_correction": "c2a64e4e9d5c599c",
+        "correction": null
+      },
+      "goal-4/ch-10": {
+        "agent_id": "report-writing-4",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "0e05ab90b6c66a3b",
+        "closing_sha_without_correction": "d2e4105c4312b6bd",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-cleaning-5",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "c039d6da88185ce0",
+        "closing_sha_without_correction": "b5614ab20e006c4c",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "cross-validation-5",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "056bc424cd5fc871",
+        "closing_sha_without_correction": "a2de958913625132",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "report-writing-5",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "e9d1ac0c678e4819",
+        "closing_sha_without_correction": "b63053fc755edc26",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "cross-validation-6",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "ee400133fb1f4d13",
+        "closing_sha_without_correction": "46b004a485c850f5",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "consistency-check-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "346cd9974538d6e7",
+        "closing_sha_without_correction": "3189aa7037c26a00",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "report-writing-6",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "90a851e6883f0303",
+        "closing_sha_without_correction": "2c701f9bda2ffded",
+        "correction": null
+      }
+    },
+    "lint_errors": []
+  },
+  "r-wx1-0914-1749/saved-plan": {
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "a694cc4cbc285647",
+        "closing_sha_without_correction": "5df32b1b95cecbe0",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "c8f879ce553ff1f4",
+        "closing_sha_without_correction": "aaed40837d67c07a",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-cleaning",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "953837e32f934e11",
+        "closing_sha_without_correction": "89b7df58d2b0a048",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "cross-validation",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "bef716bb0cc6ce94",
+        "closing_sha_without_correction": "64450dea1bcb321e",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "report-writing",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "735662a0015fa962",
+        "closing_sha_without_correction": "b413930092e009d9",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-5",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "149a70bfb2e240e8",
+        "closing_sha_without_correction": "cadc78efc691ba5e",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-5",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "1a4ed8387eaa8be8",
+        "closing_sha_without_correction": "3f6a68a5e1d80959",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-collection-6",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "8259497ceeaefd40",
+        "closing_sha_without_correction": "f850feedf8bb3132",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "reliability-audit-6",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "8ba6cb94cfc38488",
+        "closing_sha_without_correction": "ff785e992a5ce3b4",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "data-cleaning-2",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "80c1a2ca72a93553",
+        "closing_sha_without_correction": "494220aaecfddd1a",
+        "correction": null
+      },
+      "goal-2/ch-6": {
+        "agent_id": "consistency-check",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "d93b0663df54742c",
+        "closing_sha_without_correction": "1050dface50c993e",
+        "correction": null
+      },
+      "goal-2/ch-7": {
+        "agent_id": "cross-validation-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "064782cb807a54aa",
+        "closing_sha_without_correction": "529334bc875efca8",
+        "correction": null
+      },
+      "goal-2/ch-8": {
+        "agent_id": "report-writing-2",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "153b29f371c11c74",
+        "closing_sha_without_correction": "9e64f80d1924be5f",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-10",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "a3bc6ec88f3af346",
+        "closing_sha_without_correction": "ec6e22a85e5cc5f8",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-10",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "7e95493505caa6d5",
+        "closing_sha_without_correction": "6463d28609ce6f5f",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-collection-11",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "e5bb925f438fc3c2",
+        "closing_sha_without_correction": "0d3087b33475ec72",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "reliability-audit-11",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e202ebc095a235bc",
+        "closing_sha_without_correction": "bb4bd78e6b0ecb69",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "data-cleaning-3",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "aa920c2f14f1d9e6",
+        "closing_sha_without_correction": "1a405461fa654a49",
+        "correction": null
+      },
+      "goal-3/ch-6": {
+        "agent_id": "cross-validation-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "1ec90484fa345618",
+        "closing_sha_without_correction": "113c832ef4e6a467",
+        "correction": null
+      },
+      "goal-3/ch-7": {
+        "agent_id": "report-writing-3",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "e861a99567df8ee9",
+        "closing_sha_without_correction": "bfddf4af27138829",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-14",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "bb98bc7044f78272",
+        "closing_sha_without_correction": "36536019e7b9861d",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-14",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "3a40fd2946a22144",
+        "closing_sha_without_correction": "c1a12574b4f8b842",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-collection-15",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "419aefde2cf25e33",
+        "closing_sha_without_correction": "bed9b2d226c09c13",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "reliability-audit-15",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "2342f000eb7eeb3c",
+        "closing_sha_without_correction": "a636a1b47a37dd5f",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "data-cleaning-4",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "8c13367633ad9f2d",
+        "closing_sha_without_correction": "fca2d0382d72387c",
+        "correction": null
+      },
+      "goal-4/ch-6": {
+        "agent_id": "cross-validation-4",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "ee3f8605450747b1",
+        "closing_sha_without_correction": "e3caf3dd6a469da8",
+        "correction": null
+      },
+      "goal-4/ch-7": {
+        "agent_id": "report-writing-4",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "c4e018723bed2269",
+        "closing_sha_without_correction": "341dc2e53a5b2236",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-collection-20",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "56b0fbc70bf7e938",
+        "closing_sha_without_correction": "9d12ed5d1defef1e",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "reliability-audit-20",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "df15c9e8d93e828c",
+        "closing_sha_without_correction": "18644567d8948ef6",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "cross-validation-5",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "dd1794e00b0ff0f0",
+        "closing_sha_without_correction": "4892814d8d6d79d8",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "386ea1c5541c0248",
+        "closing_sha_without_correction": "8b5f1a3214695b79",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "report-writing-5",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "1d01df924d4ff8ad",
+        "closing_sha_without_correction": "097a9a7a2df9b5fb",
+        "correction": null
+      }
+    },
+    "lint_errors": []
+  },
+  "r-wx1-0914-2059/saved-plan": {
+    "chapters": {
+      "goal-1/ch-1": {
+        "agent_id": "data-collection",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "1fea6ff4886ab9bd",
+        "closing_sha_without_correction": "dbccce0e62ba37ae",
+        "correction": null
+      },
+      "goal-1/ch-2": {
+        "agent_id": "reliability-audit",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5d165b2e306a0a5b",
+        "closing_sha_without_correction": "146232f5fb6d95db",
+        "correction": null
+      },
+      "goal-1/ch-3": {
+        "agent_id": "data-collection-2",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "f5bbb9244fd80c10",
+        "closing_sha_without_correction": "818d09a9cc82c534",
+        "correction": null
+      },
+      "goal-1/ch-4": {
+        "agent_id": "reliability-audit-2",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "e1616e9a6f929a82",
+        "closing_sha_without_correction": "087c43aa5f8cfb37",
+        "correction": null
+      },
+      "goal-1/ch-5": {
+        "agent_id": "data-collection-3",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "db5e895bbbb8f918",
+        "closing_sha_without_correction": "51906fd07ef85712",
+        "correction": null
+      },
+      "goal-1/ch-6": {
+        "agent_id": "reliability-audit-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "606eba2a91fc79b1",
+        "closing_sha_without_correction": "649c24d134392c04",
+        "correction": null
+      },
+      "goal-1/ch-7": {
+        "agent_id": "data-collection-4",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "b80e0273b47634cd",
+        "closing_sha_without_correction": "66561a7b1704bc2c",
+        "correction": null
+      },
+      "goal-1/ch-8": {
+        "agent_id": "reliability-audit-4",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "d66442dceaf037d3",
+        "closing_sha_without_correction": "6ff959371ce8ff35",
+        "correction": null
+      },
+      "goal-1/ch-9": {
+        "agent_id": "data-collection-5",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "64db629f0bfd00d1",
+        "closing_sha_without_correction": "abec11b8ca7a2fec",
+        "correction": null
+      },
+      "goal-1/ch-10": {
+        "agent_id": "reliability-audit-5",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "b92f4b8117ef3d84",
+        "closing_sha_without_correction": "616502a9b2130ca4",
+        "correction": null
+      },
+      "goal-1/ch-11": {
+        "agent_id": "data-collection-6",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "aa0f8a083ec646df",
+        "closing_sha_without_correction": "3a33975f31e4c030",
+        "correction": null
+      },
+      "goal-1/ch-12": {
+        "agent_id": "reliability-audit-6",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "da57682056d181c8",
+        "closing_sha_without_correction": "493b945d9428ecde",
+        "correction": null
+      },
+      "goal-1/ch-13": {
+        "agent_id": "data-collection-7",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "3338a2739d925a9e",
+        "closing_sha_without_correction": "bd9f46ea17447531",
+        "correction": null
+      },
+      "goal-1/ch-14": {
+        "agent_id": "reliability-audit-7",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "1b8446c02baa8a22",
+        "closing_sha_without_correction": "798ddbbe5f761bd4",
+        "correction": null
+      },
+      "goal-1/ch-15": {
+        "agent_id": "data-collection-8",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "cc1041e69da06907",
+        "closing_sha_without_correction": "956936134e2d642f",
+        "correction": null
+      },
+      "goal-1/ch-16": {
+        "agent_id": "reliability-audit-8",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "f050d588d89b9696",
+        "closing_sha_without_correction": "f9e356c479118920",
+        "correction": null
+      },
+      "goal-1/ch-17": {
+        "agent_id": "data-cleaning",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "4fe689e93166c497",
+        "closing_sha_without_correction": "189d0f0303ef8905",
+        "correction": null
+      },
+      "goal-1/ch-18": {
+        "agent_id": "cross-validation",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "51b3b06891df9389",
+        "closing_sha_without_correction": "62e3c1b98ef3aea5",
+        "correction": null
+      },
+      "goal-1/ch-19": {
+        "agent_id": "consistency-check",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "476ec546c6e4618a",
+        "closing_sha_without_correction": "7c65055eb51ed306",
+        "correction": null
+      },
+      "goal-1/ch-20": {
+        "agent_id": "report-writing",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "2cb5bc4f8450b2b0",
+        "closing_sha_without_correction": "5c152090eaf16f97",
+        "correction": null
+      },
+      "goal-2/ch-1": {
+        "agent_id": "data-collection-9",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "c4df602dd2d69847",
+        "closing_sha_without_correction": "c96fe245a5da196a",
+        "correction": null
+      },
+      "goal-2/ch-2": {
+        "agent_id": "reliability-audit-9",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "31e6a6703701d443",
+        "closing_sha_without_correction": "4647855854d242ba",
+        "correction": null
+      },
+      "goal-2/ch-3": {
+        "agent_id": "data-cleaning-2",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "dea91829e1a3f209",
+        "closing_sha_without_correction": "82fb7f4e464294e3",
+        "correction": null
+      },
+      "goal-2/ch-4": {
+        "agent_id": "cross-validation-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "5d5c2c3010b93b0c",
+        "closing_sha_without_correction": "e2535a821a33e2bf",
+        "correction": null
+      },
+      "goal-2/ch-5": {
+        "agent_id": "report-writing-2",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "b9c979f72356f55d",
+        "closing_sha_without_correction": "a34276fb680b42a8",
+        "correction": null
+      },
+      "goal-3/ch-1": {
+        "agent_id": "data-collection-14",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "bb75443bf6bdc6fd",
+        "closing_sha_without_correction": "11abf2d40da014bb",
+        "correction": null
+      },
+      "goal-3/ch-2": {
+        "agent_id": "reliability-audit-14",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "66eabc50d93859de",
+        "closing_sha_without_correction": "846b4d05cb9f3d4b",
+        "correction": null
+      },
+      "goal-3/ch-3": {
+        "agent_id": "data-cleaning-3",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "18e09c84d3fc1694",
+        "closing_sha_without_correction": "9362cfd6615b3dfb",
+        "correction": null
+      },
+      "goal-3/ch-4": {
+        "agent_id": "tagging",
+        "saved_type": "tagging",
+        "saved_engine": "claude",
+        "chapter_type": "tagging",
+        "engine": "claude",
+        "opening_sha": "28b432ea2294ccc5",
+        "closing_sha_without_correction": "c4b23a4321a60702",
+        "correction": null
+      },
+      "goal-3/ch-5": {
+        "agent_id": "report-writing-3",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "9caa2efd303b29b4",
+        "closing_sha_without_correction": "cfc2aec0ce106678",
+        "correction": null
+      },
+      "goal-4/ch-1": {
+        "agent_id": "data-collection-19",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "662b316aa90c57d9",
+        "closing_sha_without_correction": "9af71243d5c1ff41",
+        "correction": null
+      },
+      "goal-4/ch-2": {
+        "agent_id": "reliability-audit-19",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "861ed777ded48c4c",
+        "closing_sha_without_correction": "5fbedee0a55a7232",
+        "correction": null
+      },
+      "goal-4/ch-3": {
+        "agent_id": "data-cleaning-4",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "e5e3c5441f5dd2e4",
+        "closing_sha_without_correction": "6941a92b8b9f1d35",
+        "correction": null
+      },
+      "goal-4/ch-4": {
+        "agent_id": "cross-validation-3",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "20c7d62767c7768c",
+        "closing_sha_without_correction": "0936a6d52022a722",
+        "correction": null
+      },
+      "goal-4/ch-5": {
+        "agent_id": "report-writing-4",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "96ad2d37fb20c7d7",
+        "closing_sha_without_correction": "7bddd6e0ed503916",
+        "correction": null
+      },
+      "goal-5/ch-1": {
+        "agent_id": "data-collection-24",
+        "saved_type": "collection",
+        "saved_engine": "codex",
+        "chapter_type": "collection",
+        "engine": "codex",
+        "opening_sha": "970213503d02e961",
+        "closing_sha_without_correction": "e6667890df90ce93",
+        "correction": null
+      },
+      "goal-5/ch-2": {
+        "agent_id": "reliability-audit-24",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "83dcd652da02c812",
+        "closing_sha_without_correction": "67cf0f119ef73986",
+        "correction": null
+      },
+      "goal-5/ch-3": {
+        "agent_id": "data-cleaning-5",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "92735cd945683ee4",
+        "closing_sha_without_correction": "9c5eab0cb0cd8474",
+        "correction": null
+      },
+      "goal-5/ch-4": {
+        "agent_id": "consistency-check-2",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "868ff4492a78c2a8",
+        "closing_sha_without_correction": "4ba4b58333fe6059",
+        "correction": null
+      },
+      "goal-5/ch-5": {
+        "agent_id": "cross-validation-4",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "cec81938dbdab116",
+        "closing_sha_without_correction": "13731e3680a176bc",
+        "correction": null
+      },
+      "goal-5/ch-6": {
+        "agent_id": "report-writing-5",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "966970991e206ffd",
+        "closing_sha_without_correction": "99a3df59c599f56d",
+        "correction": null
+      },
+      "goal-6/ch-1": {
+        "agent_id": "data-cleaning-6",
+        "saved_type": "data_cleaning",
+        "saved_engine": "codex",
+        "chapter_type": "data_cleaning",
+        "engine": "codex",
+        "opening_sha": "6ef1050c7e4c80c6",
+        "closing_sha_without_correction": "dc7f6e126534df95",
+        "correction": null
+      },
+      "goal-6/ch-2": {
+        "agent_id": "cross-validation-5",
+        "saved_type": "cross_validation",
+        "saved_engine": "claude",
+        "chapter_type": "cross_validation",
+        "engine": "claude",
+        "opening_sha": "163ca958a61135e0",
+        "closing_sha_without_correction": "d97a3d78898ddeb8",
+        "correction": null
+      },
+      "goal-6/ch-3": {
+        "agent_id": "consistency-check-3",
+        "saved_type": "audit",
+        "saved_engine": "claude",
+        "chapter_type": "audit",
+        "engine": "claude",
+        "opening_sha": "5b6065e1a00a95c7",
+        "closing_sha_without_correction": "1934145b9a121d3d",
+        "correction": null
+      },
+      "goal-6/ch-4": {
+        "agent_id": "report-writing-6",
+        "saved_type": "report",
+        "saved_engine": "claude",
+        "chapter_type": "report",
+        "engine": "claude",
+        "opening_sha": "2c67f5de9dbc3856",
+        "closing_sha_without_correction": "475b92cb4db0c2da",
+        "correction": null
+      }
+    },
+    "lint_errors": []
+  }
+}

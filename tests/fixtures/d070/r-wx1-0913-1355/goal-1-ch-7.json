@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微信公众号采集与「豆包」「豆包AI」「豆包大模型」「Doubao」相关的深度稿件、行业分析、评测长文与商业化路径梳理，输出顶层为数组的 JSON，每条含 permalink、fetched_at、account_name、article_title、article_summary、read_count_bucket、like_count、publish_time 字段，作为能力矩阵与商业化路径的",
+    "acceptance": [
+      "输出为顶层数组的 JSON 文件，路径为 goals/goal-1/data-collection-4.json",
+      "每条记录包含 permalink、fetched_at、account_name、article_title、article_summary、read_count_bucket、like_count、publish_time 全部字段",
+      "采集内容与「豆包」「豆包AI」「豆包大模型」「Doubao」深度稿件、行业分析、评测长文或商业化路径相关",
+      "permalink 指向微信公众号原文且可访问，fetched_at 与 publish_time 采用规范时间格式",
+      "同一 permalink 不重复出现，article_summary 不为空且能反映稿件核心内容"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微信公众号",
+      "content_focus": [
+        "深度稿件",
+        "行业分析",
+        "评测长文",
+        "商业化路径梳理"
+      ],
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "豆包大模型",
+        "Doubao"
+      ],
+      "downstream_usage": "作为能力矩阵与商业化路径分析的原料",
+      "field_schema": [
+        "permalink",
+        "fetched_at",
+        "account_name",
+        "article_title",
+        "article_summary",
+        "read_count_bucket",
+        "like_count",
+        "publish_time"
+      ],
+      "dedup_key": "permalink"
+    }
+  }
+}

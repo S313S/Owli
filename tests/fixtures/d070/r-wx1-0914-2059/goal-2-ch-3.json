@@ -1,0 +1,36 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 各采集章的原始记录进行去重、噪声剔除、字段规范化与来源标注，保留 permalink、fetched_at、source_id、正文、作者、互动指标等关键字段，输出统一结构。",
+    "acceptance": [
+      "原始记录完成去重，重复 permalink 仅保留一条",
+      "噪声与广告类内容剔除，保留主题相关记录",
+      "字段规范化后保留 permalink、fetched_at、source_id、正文、作者、互动指标等关键字段",
+      "每条记录均带有来源标注，可追溯到对应采集章",
+      "输出为统一结构，写入 goals/goal-2/data-cleaning-2.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_key": "permalink",
+      "normalized_fields": [
+        "permalink",
+        "fetched_at",
+        "source_id",
+        "content",
+        "author",
+        "interaction_metrics"
+      ],
+      "source_tagging": "each_record_tagged_with_collection_chapter",
+      "noise_removal": "advertisements_and_off_topic_removed"
+    }
+  }
+}

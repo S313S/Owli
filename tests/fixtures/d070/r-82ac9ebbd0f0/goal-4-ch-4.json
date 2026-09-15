@@ -1,0 +1,95 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "针对清洗语料中的关键主张——中文表达、行业接入、多模态能力、幻觉与稳定性、价格与配额、生态与插件——执行跨源一致性检查，输出主张—证据—一致度矩阵。",
+    "acceptance": [
+      "六个关键主张维度均已覆盖，无遗漏",
+      "每条主张至少交叉引用两个采集来源并标注来源路径",
+      "输出主张—证据—一致度矩阵，一致度分级（高/中/低/冲突）明确",
+      "对冲突或低一致度条目给出解释与后续处置建议",
+      "结果落盘至 goals/goal-4/consistency-check-2.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/consistency-check-2.md"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": 6,
+    "notes": {
+      "claim_dimensions": [
+        "中文表达",
+        "行业接入",
+        "多模态能力",
+        "幻觉与稳定性",
+        "价格与配额",
+        "生态与插件"
+      ],
+      "matrix_columns": [
+        "claim",
+        "evidence_sources",
+        "consistency_level",
+        "conflicts",
+        "remarks"
+      ],
+      "consistency_levels": [
+        "高",
+        "中",
+        "低",
+        "冲突"
+      ],
+      "cross_source_min_refs": 2,
+      "primary_entity": "文心一言",
+      "reference_entities": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "通义千问"
+      ],
+      "output_format": "markdown"
+    }
+  }
+}

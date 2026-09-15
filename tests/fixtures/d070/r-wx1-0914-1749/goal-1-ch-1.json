@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内检索关键词「豆包」「Doubao」「豆包AI」「字节豆包」，抓取官方账号笔记、功能宣传贴、版本更新贴与用户体验分享，覆盖产品定位、核心功能、迭代节奏与官方口径线索；输出 JSON 数组，每条含 permalink 与 fetched_at。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条记录同时包含 permalink 与 fetched_at 字段",
+      "检索覆盖「豆包」「Doubao」「豆包AI」「字节豆包」四个关键词",
+      "抓取内容覆盖官方账号笔记、功能宣传贴、版本更新贴与用户体验分享四类",
+      "结果落盘到 goals/goal-1/data-collection.json",
+      "记录能够体现产品定位、核心功能、迭代节奏与官方口径线索"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "content_types": [
+        "官方账号笔记",
+        "功能宣传贴",
+        "版本更新贴",
+        "用户体验分享"
+      ],
+      "coverage_dimensions": [
+        "产品定位",
+        "核心功能",
+        "迭代节奏",
+        "官方口径线索"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at"
+      ]
+    }
+  }
+}

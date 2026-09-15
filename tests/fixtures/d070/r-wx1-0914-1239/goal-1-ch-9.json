@@ -1,0 +1,44 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 检索 「Doubao」「豆包」「豆包AI」「豆包大模型」 相关产品页与评论，采集上榜信息、标签、投票与讨论；输出 JSON 数组，每条含 permalink、fetched_at、product_name、tagline、launched_at、votes_count、comments_count、maker、topics。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条记录包含 permalink、fetched_at、product_name、tagline、launched_at、votes_count、comments_count、maker、topics 全部字段",
+      "覆盖 「Doubao」「豆包」「豆包AI」「豆包大模型」 四个检索关键词命中的产品页与评论",
+      "permalink 指向 Product Hunt 有效产品页，fetched_at 使用 ISO 8601 时间戳",
+      "votes_count 与 comments_count 为整数，topics 为字符串数组",
+      "结果写入 goals/goal-1/data-collection-5.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-5.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Product Hunt",
+      "keywords": [
+        "Doubao",
+        "豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "fields": [
+        "permalink",
+        "fetched_at",
+        "product_name",
+        "tagline",
+        "launched_at",
+        "votes_count",
+        "comments_count",
+        "maker",
+        "topics"
+      ],
+      "format": "JSON array"
+    }
+  }
+}

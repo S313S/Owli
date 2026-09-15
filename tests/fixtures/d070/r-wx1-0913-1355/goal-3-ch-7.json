@@ -1,0 +1,42 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 内九条采集产物按实体、来源与维度归一化字段，剔除重复 permalink、标注语言与情感极性，形成「DeepSeek」与「Kimi」两实体的清洗中间层。",
+    "acceptance": [
+      "字段结构在 DeepSeek 与 Kimi 两实体间保持一致，覆盖来源、维度、permalink、language、sentiment 等归一化列",
+      "基于 permalink 的去重完成，重复记录被剔除且保留可追溯的来源标记",
+      "language 与 sentiment 标注对每条记录完整填充，缺失需以显式空值或规则标记说明",
+      "输出写入 goals/goal-3/data-cleaning-3.md 并明确列出 DeepSeek 与 Kimi 两实体的清洗结果"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "normalization_fields": [
+        "entity",
+        "source",
+        "dimension",
+        "permalink",
+        "language",
+        "sentiment"
+      ],
+      "dedup_key": "permalink",
+      "language_tagging": "基于文本自动识别 zh/en 等语言标签",
+      "sentiment_polarity": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "coverage": "覆盖本 goal 内九条采集产物",
+      "output_layer": "cleaning_intermediate"
+    }
+  }
+}

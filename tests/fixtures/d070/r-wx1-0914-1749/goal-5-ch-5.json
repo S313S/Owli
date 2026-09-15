@@ -1,0 +1,40 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于交叉验证与一致性检查产物撰写《国内对豆包看法的综合研判》最终报告，按相对位置、主要褒贬维度、典型使用人群、未来预期四节组织，并附总体结论与证据回溯清单；所有引用名称统一使用中文引号「」；以节化文档信封形式的对象输出",
+    "acceptance": [
+      "报告以对象形式组织，包含相对位置、主要褒贬维度、典型使用人群、未来预期四节",
+      "附总体结论与证据回溯清单",
+      "所有引用的产品或来源名称统一使用中文引号「」包裹",
+      "结论与观点均可回溯至交叉验证与一致性检查产物",
+      "输出写入 goals/goal-5/final-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/final-report.json"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "相对位置",
+        "主要褒贬维度",
+        "典型使用人群",
+        "未来预期"
+      ],
+      "appendices": [
+        "总体结论",
+        "证据回溯清单"
+      ],
+      "quotation_style": "中文引号「」",
+      "envelope": "sectioned_document_object",
+      "upstream_reference": [
+        "goals/goal-5/consistency-check-2.md",
+        "goals/goal-5/cross-validation-5.json",
+        "goals/goal-5/reliability-audit-20.json"
+      ]
+    }
+  }
+}

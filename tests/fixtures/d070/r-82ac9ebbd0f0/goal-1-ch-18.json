@@ -1,0 +1,42 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "校验清洗后证据池：确认每条采集任务 task 文本仅使用豆包允许叫法，检查 (source_id, entity) 无重复、permalink 与 fetched_at 字段完备度、时间戳合法性，输出一致性检查报告 object，含通过项、告警项与阻断项。",
+    "acceptance": [
+      "所有采集任务 task 文本仅出现豆包允许叫法，无禁用别名",
+      "(source_id, entity) 组合在证据池内全局唯一，无重复记录",
+      "permalink 与 fetched_at 字段完备度达到 100%，缺失项在报告中标记为阻断项",
+      "所有 fetched_at 时间戳格式合法且不晚于当前日期 2026-09-15",
+      "一致性检查报告为 object 结构，明确区分 passed / warnings / blockers 三类"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/consistency-check.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "report_shape": {
+        "passed": "通过项列表，记录满足规则的检查维度",
+        "warnings": "告警项列表，记录非阻断但需关注的问题",
+        "blockers": "阻断项列表，记录必须修复的严重问题"
+      },
+      "check_dimensions": [
+        "task_text_naming_compliance",
+        "source_id_entity_uniqueness",
+        "permalink_completeness",
+        "fetched_at_completeness",
+        "timestamp_validity"
+      ],
+      "allowed_names": [
+        "豆包"
+      ],
+      "reference_date": "2026-09-15",
+      "downstream_usage": "供后续报告章与竞品对比章引用一致性结论"
+    }
+  }
+}

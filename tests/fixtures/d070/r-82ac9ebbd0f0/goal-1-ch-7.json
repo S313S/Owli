@@ -1,0 +1,49 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微信公众号采集关于豆包（含 Doubao、豆包AI、字节豆包）的深度文章、评测、教程与行业分析，聚焦功能对比、体验记录、使用心得与代表性观点；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "顶层为 JSON 数组，每条记录至少包含 permalink 与 fetched_at 字段",
+      "内容聚焦豆包（含 Doubao、豆包AI、字节豆包）相关的深度文章、评测、教程与行业分析",
+      "采集渠道为微信公众号，覆盖功能对比、体验记录、使用心得与代表性观点",
+      "permalink 为有效可访问链接，fetched_at 为 ISO8601 时间戳",
+      "输出写入 goals/goal-1/data-collection-4.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微信公众号",
+      "entity_aliases": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "content_focus": [
+        "深度文章",
+        "评测",
+        "教程",
+        "行业分析"
+      ],
+      "coverage_dimensions": [
+        "功能对比",
+        "体验记录",
+        "使用心得",
+        "代表性观点"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_structure": "array"
+    }
+  }
+}

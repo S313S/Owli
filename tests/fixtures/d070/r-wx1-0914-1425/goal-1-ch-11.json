@@ -1,0 +1,75 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "核对报告字段与官方口径的一致性，检查实体命名是否严格限于 豆包 与 字节跳动 的闭集叫法，生成缺口清单与不一致清单。",
+    "acceptance": [
+      "所有采集章字段均已与官方口径逐条核对",
+      "实体命名严格限定在 豆包 与 字节跳动 闭集，未出现别名或变体",
+      "缺口清单（missing fields）已明确列出并可追溯到具体来源",
+      "不一致清单（inconsistencies）已明确列出并附差异描述",
+      "输出文件 goals/goal-1/consistency-check.md 生成完毕且结构完整"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/consistency-check.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "跨全卷 9 个采集章的字段一致性核对",
+      "entity_whitelist": [
+        "豆包",
+        "字节跳动"
+      ],
+      "checks": [
+        "字段命名与官方口径一致性",
+        "实体命名闭集合规性",
+        "跨采集章字段值一致性"
+      ],
+      "deliverables": {
+        "gap_list": "缺口清单：官方口径存在但报告缺失的字段",
+        "inconsistency_list": "不一致清单：字段值与官方口径或跨章之间不一致的条目"
+      },
+      "official_source_reference": "以官方口径（官网/官方公告/招股书或官方新闻稿）为准",
+      "cross_goal_coverage": [
+        "goal-1",
+        "goal-2",
+        "goal-3",
+        "goal-4"
+      ]
+    }
+  }
+}

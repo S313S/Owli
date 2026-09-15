@@ -1,0 +1,24 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News 采集与「豆包／Doubao」相关的 story 与讨论，检索约束固定为 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000；顶层输出数组，每条含 permalink、fetched_at、标题、作者、points、num_comments 与讨论要点。",
+    "acceptance": [
+      "顶层输出为 JSON 数组",
+      "每条记录包含 permalink、fetched_at、标题、作者、points、num_comments 与讨论要点字段",
+      "检索使用 created_at_i > (执行时点 UTC epoch - 7776000)、points > 50、hitsPerPage = 1000 三项约束",
+      "仅采集与「豆包／Doubao」相关的 story 与讨论",
+      "输出写入 goals/goal-1/data-collection-7.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-7.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {}
+  }
+}

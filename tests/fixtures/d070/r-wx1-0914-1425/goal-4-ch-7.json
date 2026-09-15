@@ -1,0 +1,51 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并小红书、抖音、微博三源采集数组，剔除广告号、机器灌水与重复内容，规范化正文与互动字段，按平台分组保留 permalink 与 fetched_at 供下游使用。",
+    "acceptance": [
+      "三源采集数组已合并为统一结构，字段命名一致且类型规范",
+      "广告号、机器灌水账号与重复内容（按正文与 permalink 去重）被剔除并记录剔除原因与数量",
+      "正文完成去 emoji/去噪、空白规整；互动字段（点赞、评论、收藏、转发）统一为整数",
+      "结果按小红书、抖音、微博三平台分组输出，每条记录保留 permalink 与 fetched_at",
+      "输出写入 goals/goal-4/data-cleaning-4.md 且包含清洗统计与规则说明"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-cleaning-4.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sources": [
+        "小红书",
+        "抖音",
+        "微博"
+      ],
+      "dedup_keys": [
+        "permalink",
+        "normalized_text_hash"
+      ],
+      "removed_categories": [
+        "广告号",
+        "机器灌水",
+        "重复内容"
+      ],
+      "normalized_fields": [
+        "text",
+        "likes",
+        "comments",
+        "collects",
+        "shares"
+      ],
+      "preserved_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "grouping": "by_platform"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 搜索并抓取涉及「豆包」「Doubao」「豆包AI」「豆包大模型」的帖子与评论，重点覆盖产品形态、功能矩阵、版本迭代与用户群自述。",
+    "acceptance": [
+      "覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」四个关键词的 Reddit 搜索结果",
+      "抓取内容包含帖子标题、正文与评论区讨论",
+      "重点信息覆盖产品形态、功能矩阵、版本迭代与用户群自述四个维度",
+      "输出文件写入 goals/goal-1/data-collection.json 且结构化可解析"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Reddit",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "focus_dimensions": [
+        "产品形态",
+        "功能矩阵",
+        "版本迭代",
+        "用户群自述"
+      ],
+      "content_types": [
+        "posts",
+        "comments"
+      ]
+    }
+  }
+}

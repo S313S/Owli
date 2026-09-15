@@ -1,0 +1,140 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-4/report.json"
+      },
+      {
+        "path": "goals/goal-5/media-commentary-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-18.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-20.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-21.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-24.json"
+      }
+    ],
+    "task": "读取 goal-1、goal-2、goal-3、goal-4、goal-5 的采集与分析产物，抽取涉及「豆包」「字节跳动」「DeepSeek」「Kimi」的观点条目，按 source_id、entity、topic、sentiment、evidence_excerpt、permalink、fetched_at 字段归一化，剔除缺少 permalink 或重复的记录，产出统一的观点条目集合供下游节化",
+    "acceptance": [
+      "每条观点条目必须包含 source_id、entity、topic、sentiment、evidence_excerpt、permalink、fetched_at 七个字段且均非空",
+      "entity 取值必须归一化为「豆包」「字节跳动」「DeepSeek」「Kimi」四者之一，其他实体一律剔除",
+      "缺少 permalink 或 permalink 为空/无效的记录必须剔除并在 notes 中登记剔除数量",
+      "按 (entity, permalink, evidence_excerpt) 组合去重，重复记录仅保留 fetched_at 最新的一条",
+      "输出统一观点条目集合并写入 goals/goal-6/data-cleaning-6.md，包含分实体计数与来源分布"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/data-cleaning-6.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动",
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "normalization_fields": [
+        "source_id",
+        "entity",
+        "topic",
+        "sentiment",
+        "evidence_excerpt",
+        "permalink",
+        "fetched_at"
+      ],
+      "drop_rules": [
+        "missing_permalink",
+        "duplicate_by_entity_permalink_excerpt",
+        "entity_out_of_scope"
+      ],
+      "dedup_key": [
+        "entity",
+        "permalink",
+        "evidence_excerpt"
+      ],
+      "dedup_tiebreaker": "keep_latest_fetched_at",
+      "sentiment_scale": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "source_coverage": {
+        "goal-1": "豆包 采集 1-8",
+        "goal-2": "字节跳动 采集 9-12",
+        "goal-3": "DeepSeek/Kimi 采集 13-23",
+        "goal-4": "report.json + data-collection-24.json",
+        "goal-5": "media-commentary-report.json"
+      },
+      "downstream": "goal-6 后续节化与聚合章节"
+    }
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "competitor-benchmark.json",
+    "description": "对「DeepSeek」与「Kimi」两款国内对标竞品的产品定位、代表能力、口碑标签与国内用户基础进行采集与横向对齐，形成「豆包」看法的相对参照系报告",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable 顶层为 object，并包含针对「DeepSeek」与「Kimi」两个实体的独立小节",
+    "每个实体小节均覆盖产品定位、代表能力、口碑标签、国内用户基础四个维度",
+    "所有采集 agent 的输出 JSON 顶层为数组，每条记录含 permalink 与 fetched_at 字段",
+    "必采清单中「小红书数据抓取·DeepSeek」与「小红书数据抓取·Kimi」两条采集链均落地为独立采集文件",
+    "同一 (source_id, entity) 组合在本 goal 内不重复出现，也不与 goal-1、goal-2 已采集组合重复",
+    "所有采集章的 source_id 均取自 applicable_sources 集合「douyin、hacker_news、product_hunt、reddit、web_search、wechat_mp、weibo、x、xhs」",
+    "报告中出现的研究实体仅限「豆包」「字节跳动」「DeepSeek」「Kimi」四者，引用名称一律使用中文引号「」",
+    "各采集章任务文本中对本实体的称呼仅取该实体的叫法闭集，不混入其他实体的别名",
+    "数据不足时以结构化缺口口径在报告小节内明示，不写死上游无法保证的条数",
+    "交叉验证章需列出至少两条跨源一致或冲突的口碑标签证据链",
+    "报告撰写章需给出「DeepSeek」与「Kimi」相对「豆包」的横向坐标结论"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·DeepSeek",
+      "task": "在小红书采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」「deepseek」的用户笔记、话题与评论，聚焦产品定位、代表能力、口碑标签与国内用户基础四类线索；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "小红书数据抓取·Kimi",
+      "task": "在小红书采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「kimi」「月之暗面Kimi」「Kimi.ai」的用户笔记、话题与评论，聚焦产品定位、代表能力、口碑标签与国内用户基础四类线索；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·DeepSeek",
+      "task": "在微信公众号采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」「deepseek」的图文推送与评论，围绕产品定位、代表能力、口碑标签与国内用户基础四维展开；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·Kimi",
+      "task": "在微信公众号采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的图文推送与评论，围绕产品定位、代表能力、口碑标签与国内用户基础四维展开；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」「deepseek」的博文、话题热度与评论，覆盖产品定位、代表能力、口碑标签与国内用户基础；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·Kimi",
+      "task": "在微博采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的博文、话题热度与评论，覆盖产品定位、代表能力、口碑标签与国内用户基础；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·DeepSeek",
+      "task": "通过网页搜索采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」的新闻、评测、行业报道与官网文案，聚焦产品定位、代表能力、口碑标签与国内用户基础四维；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "通过网页搜索采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的新闻、评测、行业报道与官网文案，聚焦产品定位、代表能力、口碑标签与国内用户基础四维；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·DeepSeek",
+      "task": "在抖音采集涉及「DeepSeek」「深度求索」「DeepSeek-R1」的短视频、话题标签与热门评论，围绕产品定位、代表能力、口碑标签与国内用户基础四维沉淀视听维度证据；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·Kimi",
+      "task": "在抖音采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」的短视频、话题标签与热门评论，围绕产品定位、代表能力、口碑标签与国内用户基础四维沉淀视听维度证据；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "hn 数据抓取",
+      "task": "在 Hacker News 检索涉及「DeepSeek」「DeepSeek-R1」的英文讨论，查询固定使用 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000，用于校准「DeepSeek」海外技术圈口碑与国内讨论的落差；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 内九条采集产物按实体、来源与维度归一化字段，剔除重复 permalink、标注语言与情感极性，形成「DeepSeek」与「Kimi」两实体的清洗中间层。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "对「DeepSeek」与「Kimi」在产品定位陈述、代表能力描述、口碑标签与国内用户基础四维上做跨源一致性核验，标记同源不同语气与跨源冲突。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对「DeepSeek」与「Kimi」跨源出现的口碑标签、代表能力主张与国内用户基础数据进行交叉验证，输出证据链清单，区分一致证据与冲突证据。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "整合清洗、一致性与交叉验证结果，撰写「DeepSeek」与「Kimi」相对「豆包」的横向参照系报告，覆盖产品定位、代表能力、口碑标签与国内用户基础四维，数据缺口以结构化口径注明。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

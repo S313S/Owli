@@ -1,0 +1,52 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "汇总清洗、一致性检查与交叉验证结论，生成五个实体的画像小节与对照基线正文，覆盖产品定位、能力侧重、母公司背景、上线节奏、国内差异化卖点，形成节化文档信封形对象。",
+    "acceptance": [
+      "输出为单一 JSON object，符合信封形结构，包含五个实体各自的画像小节",
+      "每个实体画像至少覆盖产品定位、能力侧重、母公司背景、上线节奏、国内差异化卖点五个维度",
+      "对照基线正文以横向比较方式呈现，字段与画像小节维度对齐",
+      "所有结论必须可追溯到上游清洗、一致性检查与交叉验证章节的产物",
+      "输出文件写入 goals/goal-2/goal-2-report.json，格式合法可被 JSON 解析器读取"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/goal-2-report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "structure": "envelope",
+      "sections": [
+        "per_entity_profiles",
+        "comparison_baseline"
+      ],
+      "profile_dimensions": {
+        "positioning": "产品定位",
+        "capability_focus": "能力侧重",
+        "parent_company_background": "母公司背景",
+        "launch_timeline": "上线节奏",
+        "domestic_differentiation": "国内差异化卖点"
+      },
+      "upstream_sources": [
+        "goals/goal-2/data-cleaning-2.md",
+        "goals/goal-2/consistency-check.md",
+        "goals/goal-2/cross-validation-2.json",
+        "goals/goal-2/reliability-audit-5.json",
+        "goals/goal-2/reliability-audit-6.json",
+        "goals/goal-2/data-collection-5.json",
+        "goals/goal-2/data-collection-6.json"
+      ],
+      "traceability": "每个断言需可回溯至清洗/一致性/交叉验证结论",
+      "language": "zh-CN"
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-24.json"
+      },
+      {
+        "path": "goals/goal-6/data-cleaning-6.md"
+      }
+    ],
+    "task": "基于数据清洗产出的证据池，对五方在「产品定位」「能力优劣」「场景匹配」「价格与生态」「用户画像」五个维度上的高频评价逐条交叉比对：至少两源同向支持才可入结论，仅单源支持标注为弱证据，冲突条目并列展示；对每个实体保留至少一条 permalink 与 fetched_at；证据不足格以结构化缺口口径占位而非估算",
+    "acceptance": [
+      "五个维度（产品定位/能力优劣/场景匹配/价格与生态/用户画像）均逐条完成交叉比对",
+      "结论条目均由至少两个独立来源同向支持，单源仅标注为弱证据",
+      "冲突条目以并列方式展示，不做主观取舍",
+      "每个实体至少保留一条 permalink 与 fetched_at 字段",
+      "证据不足的单元格以结构化缺口占位（如 evidence_gap），不得估算或编造"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/cross-validation-5.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "dimensions": [
+        "产品定位",
+        "能力优劣",
+        "场景匹配",
+        "价格与生态",
+        "用户画像"
+      ],
+      "support_rule": "≥2 独立来源同向支持方可入结论",
+      "weak_evidence_rule": "仅单源支持须标注 weak_evidence=true",
+      "conflict_rule": "冲突条目并列展示，不做主观取舍",
+      "provenance_requirement": "每个实体至少保留一条 permalink 与 fetched_at",
+      "gap_policy": "证据不足格以 evidence_gap 结构化占位，禁止估算",
+      "upstream": {
+        "data_cleaning": "goals/goal-6/data-cleaning-6.md"
+      }
+    }
+  }
+}

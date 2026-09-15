@@ -1,0 +1,58 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-5/data-collection-24.json"
+      }
+    ],
+    "task": "跨小红书、微博、微信公众号、抖音、网页搜索五源比对「通义千问」「Qwen」「Tongyi Qianwen」的口碑主题（开源反馈、企业落地、C 端体验、价格与生态），标注一致证据、冲突证据与结构化缺口。",
+    "acceptance": [
+      "输出文件 goals/goal-5/cross-validation-4.json 存在且为合法 JSON",
+      "覆盖小红书、微博、微信公众号、抖音、网页搜索五个来源，且对「通义千问」「Qwen」「Tongyi Qianwen」三种称谓均有说明",
+      "按开源反馈、企业落地、C 端体验、价格与生态四个口碑主题分别给出一致证据、冲突证据与结构化缺口",
+      "每条证据附带来源标识与可回溯字段（如原文 URL、发布时间、作者/账号），并注明所引采集章路径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/cross-validation-4.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity_aliases": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen"
+      ],
+      "sources": [
+        "小红书",
+        "微博",
+        "微信公众号",
+        "抖音",
+        "网页搜索"
+      ],
+      "themes": [
+        "开源反馈",
+        "企业落地",
+        "C 端体验",
+        "价格与生态"
+      ],
+      "comparison_dimensions": {
+        "consistent_evidence": "跨源在同一主题上表述一致或互相印证的证据条目",
+        "conflicting_evidence": "跨源在同一主题上出现矛盾或口碑正负反转的证据条目",
+        "structural_gaps": "某一主题在特定来源上缺失、样本量不足或证据链断裂的情形"
+      },
+      "traceability": "每条证据需引用 goals/goal-5/data-collection-24.json 中的原始 record_id / URL / 发布时间 / 作者账号",
+      "upstream_context": {
+        "consistency_check": "goals/goal-5/consistency-check-2.md",
+        "data_cleaning": "goals/goal-5/data-cleaning-5.md",
+        "reliability_audit": "goals/goal-5/reliability-audit-24.json",
+        "data_collection": "goals/goal-5/data-collection-24.json"
+      }
+    }
+  }
+}

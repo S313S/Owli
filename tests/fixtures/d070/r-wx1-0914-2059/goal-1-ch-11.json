@@ -1,0 +1,45 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 采集与「豆包／Doubao」相关的推文、引用与线程，聚焦口碑倾向、功能评价与使用场景；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动量与语言标注。",
+    "acceptance": [
+      "顶层为数组结构，每条记录包含 permalink、fetched_at、作者、正文、互动量与语言标注字段",
+      "采集内容围绕「豆包／Doubao」相关的推文、引用与线程，聚焦口碑倾向、功能评价与使用场景",
+      "permalink 指向 X 平台真实可访问的推文地址，fetched_at 使用 ISO8601 时间戳",
+      "互动量字段覆盖点赞、转发、评论、浏览等可获取的指标，语言标注遵循 BCP47 规范",
+      "输出文件写入 goals/goal-1/data-collection-6.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-6.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "X",
+      "content_types": [
+        "推文",
+        "引用",
+        "线程"
+      ],
+      "focus": [
+        "口碑倾向",
+        "功能评价",
+        "使用场景"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "互动量",
+        "语言标注"
+      ],
+      "top_level_structure": "array"
+    }
+  }
+}

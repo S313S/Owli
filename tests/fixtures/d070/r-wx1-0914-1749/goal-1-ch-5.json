@@ -1,0 +1,45 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并小红书、Reddit、网页搜索、微信公众号四路采集产物，按「产品定位」「核心功能」「迭代节奏」「母公司背景」「用户规模」「官方宣传口径」六个维度抽取字段、去重、归一时间戳，并保留每条事实的 permalink 溯源列表；输出结构化对象。",
+    "acceptance": [
+      "输出文件 goals/goal-1/data-cleaning.md 存在且为结构化对象格式",
+      "六个维度（产品定位/核心功能/迭代节奏/母公司背景/用户规模/官方宣传口径）字段齐全",
+      "所有时间戳已归一为 ISO 8601 (UTC) 格式",
+      "同源事实完成去重，重复项按 permalink 合并",
+      "每条事实保留至少一个 permalink 溯源链接列表",
+      "四路来源（小红书/Reddit/网页搜索/微信公众号）均在合并结果中可追溯"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity": "豆包",
+      "dimensions": [
+        "产品定位",
+        "核心功能",
+        "迭代节奏",
+        "母公司背景",
+        "用户规模",
+        "官方宣传口径"
+      ],
+      "sources": [
+        "小红书",
+        "Reddit",
+        "网页搜索",
+        "微信公众号"
+      ],
+      "dedup_strategy": "按 permalink + 归一化事实文本聚合",
+      "timestamp_normalization": "ISO 8601 UTC",
+      "provenance": "每条事实保留 permalink 列表用于溯源",
+      "output_format": "structured_object"
+    }
+  }
+}

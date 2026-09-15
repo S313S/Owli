@@ -1,0 +1,70 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "report.json",
+    "description": "国内用户与媒体对「豆包」的评价与口碑节化文档，汇总使用体验、优点、缺点、吐槽与推荐场景，并对照「DeepSeek」「Kimi」「文心一言」「通义千问」四个对标产品的口碑证据。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "所有采集类 agent 的 output JSON 顶层均为数组，且每条记录同时包含 permalink 与 fetched_at 字段。",
+    "必采两项「网页搜索数据抓取·Kimi」与「HN 数据抓取·豆包」均按名产出对应文件且非空或以结构化缺口口径注明。",
+    "「HN 数据抓取·豆包」查询参数固定使用 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000。",
+    "每个采集 agent 的 task 文本只使用其所属实体的合法叫法闭集，不与其他实体叫法混写。",
+    "本 goal 所有采集章的 (source_id, entity) 组合不与上游 goal-1、goal-2 已采集组合以及必采清单重复。",
+    "报告章节覆盖 使用体验总览、优点、缺点、吐槽、推荐场景 五个必备小节。",
+    "报告含与「DeepSeek」「Kimi」「文心一言」「通义千问」的口碑对比章节，并对每一对标产品至少给出一条证据引用。",
+    "报告与所有清洗、验证产物中的名称引用一律使用中文引号「」，字符串值内不出现未转义的英文双引号。",
+    "数据不足或来源受限时，以结构化缺口口径在 gap_notes 中说明，不写死具体条数下限。"
+  ],
+  "agents": [
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "通过网页搜索检索国内媒体、评测站与内容社区关于「Kimi」「Kimi智能助手」「Kimi Chat」「kimi」「月之暗面Kimi」「MoonshotAI Kimi」的使用体验、优缺点、吐槽与推荐场景类文章与讨论，聚焦国内 cn_product 语境；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、title、snippet、source_site、published_at、language 字段，名称引用统一使用中文引号「」。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·豆包",
+      "task": "在 Hacker News Algolia 接口检索「豆包」「Doubao」「豆包AI」「字节豆包」相关帖子与评论，查询固定使用 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、objectID、title、url、points、num_comments、author、created_at、story_text 字段，名称引用统一使用中文引号「」。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博站内搜索「豆包」「Doubao」「豆包AI」「字节豆包」的用户使用体验、优点、缺点、吐槽与推荐场景讨论，覆盖普通用户与蓝 V 媒体账号；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、author、author_type、text、reposts、comments、likes、posted_at 字段，名称引用统一使用中文引号「」。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·豆包",
+      "task": "在抖音站内搜索「豆包」「Doubao」「豆包AI」「字节豆包」的评测短视频、口播吐槽与推荐场景演示，抓取视频与热门评论；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、author、caption、likes、comments、shares、collects、posted_at、top_comments 字段，名称引用统一使用中文引号「」。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "读取本 goal 的四份采集产物以及上游 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 与 goals/goal-2/data-collection-6.json 中与「豆包」相关的记录，并联动 goal-2 的对标产品记录，进行去重、剔除广告与无关内容，按实体（「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」）与标签（使用体验、优点、缺点、吐槽、推荐场景）打标，输出对象含 by_entity、by_sentiment、by_source、raw_index、dedup_notes 五个键。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对清洗后的每条口碑证据在多源之间比对，判定是否存在两个及以上独立来源相互印证，识别相互矛盾的说法与仅有单源支撑的说法，输出对象含 corroborated、single_source、conflicts、entity_coverage_matrix、gap_notes 五个键，名称引用统一使用中文引号「」。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "撰写「国内用户与媒体对豆包的评价与口碑」节化文档，正文包含 摘要、使用体验总览、优点、缺点、吐槽、推荐场景、与「DeepSeek」「Kimi」「文心一言」「通义千问」的口碑对比、方法与来源说明、缺口说明 九个小节；每条论断引用清洗与交叉验证产物中的证据 permalink，名称引用一律使用中文引号「」，字符串内避免出现未转义的英文双引号。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

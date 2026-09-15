@@ -1,0 +1,16 @@
+{
+  "canonical": "DeepSeek",
+  "names": {
+    "zh": "深度求索",
+    "en": "DeepSeek",
+    "aliases": [
+      "DS",
+      "深度求索",
+      "DeepSeek-R1",
+      "DeepSeek-V3"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "DeepSeek（深度求索）是中国杭州深度求索公司推出的开源大语言模型及AI助手产品，代表模型包括DeepSeek-V3、DeepSeek-R1等。"
+}

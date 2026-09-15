@@ -1,0 +1,35 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "撰写「文心一言国内用户口碑与评价」报告，分节呈现优点、缺点、生态定位认知、典型场景与结构化缺口口径，每条结论附带证据 permalink 与来源；使用中文引号「」引用实体与产品名，输出节化文档信封。",
+    "acceptance": [
+      "输出为节化文档信封，包含优点、缺点、生态定位认知、典型场景与结构化缺口五个小节",
+      "每条结论均附带证据 permalink 与来源标注",
+      "实体与产品名使用中文引号「」包裹",
+      "输出路径为 goals/goal-4/goal-4-report.json，且为合法 JSON object"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/goal-4-report.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "优点",
+        "缺点",
+        "生态定位认知",
+        "典型场景",
+        "结构化缺口"
+      ],
+      "citation_style": "permalink+source",
+      "quote_style": "中文引号「」",
+      "envelope": "sectioned_document",
+      "language": "zh-CN"
+    }
+  }
+}

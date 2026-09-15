@@ -1,0 +1,54 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      }
+    ],
+    "task": "校验四实体×四维度矩阵在术语、时间线与结论上的内部一致性，标记同实体多源结论矛盾之处并给出建议裁定。",
+    "acceptance": [
+      "覆盖 DeepSeek、Kimi、文心一言、通义千问 四个实体的全部四个维度",
+      "对每一处术语、时间线或结论上的矛盾均给出源引用并标记冲突类型",
+      "为每一处矛盾提出可执行的建议裁定或复核路径",
+      "输出结构化一致性报告至 goals/goal-2/consistency-check.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/consistency-check.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "matrix_shape": "4x4",
+      "dimensions_checked": [
+        "术语",
+        "时间线",
+        "结论",
+        "多源交叉"
+      ],
+      "conflict_types": [
+        "terminology",
+        "timeline",
+        "conclusion"
+      ],
+      "adjudication_policy": "对同实体多源冲突给出建议裁定，无法判定时标记为待人工复核",
+      "source_scope": "仅使用 goal-2 采集章的四份数据快照"
+    }
+  }
+}

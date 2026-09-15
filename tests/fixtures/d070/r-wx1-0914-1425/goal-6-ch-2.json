@@ -1,0 +1,81 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-6/cross-validation-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "对交叉验证产物执行一致性检查，识别国内不同人群（官方媒体、行业自媒体、开发者、C 端用户、海外观察者）对「豆包」评价的分歧点，归类为共识、争议、缺口三类，并核对引用是否覆盖上游全部 16 条采集产物；输出节化文档信封",
+    "acceptance": [
+      "输出文件位于 goals/goal-6/consistency-check-3.md，使用节化 Markdown 结构（含共识 / 争议 / 缺口三节）",
+      "对官方媒体、行业自媒体、开发者、C 端用户、海外观察者五类人群逐一给出评价立场归纳",
+      "分歧点必须成对引用至少两条上游采集或交叉验证证据，且注明来源 path",
+      "对上游 16 条采集产物逐条核对引用覆盖情况，缺口条目需在『缺口』章节明确列出 path 与缺失原因",
+      "closing.notes 为 JSON object，包含共识/争议/缺口计数与覆盖率字段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/consistency-check-3.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 3,
+    "notes": {
+      "chapter_role": "consistency_check",
+      "upstream_cross_validation": "goals/goal-6/cross-validation-6.json",
+      "audience_segments": [
+        "官方媒体",
+        "行业自媒体",
+        "开发者",
+        "C 端用户",
+        "海外观察者"
+      ],
+      "classification_buckets": [
+        "共识",
+        "争议",
+        "缺口"
+      ],
+      "coverage_target": {
+        "declared_upstream_collection_count": 16,
+        "visible_collection_paths_in_plan": 9,
+        "must_reconcile": true,
+        "reconcile_strategy": "在缺口章节列出未在计划树中显式暴露的 7 条采集产物 path 或说明其归并方式"
+      },
+      "citation_rules": {
+        "min_sources_per_divergence": 2,
+        "require_path_reference": true
+      },
+      "output_format": "sectioned_markdown_envelope"
+    }
+  }
+}

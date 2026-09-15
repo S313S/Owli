@@ -1,0 +1,43 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "校验清洗后各实体在产品定位、能力侧重、母公司背景、上线节奏、差异化卖点五个字段上的表述是否内部一致，对同实体多源分歧标注冲突或结构化缺口口径。",
+    "acceptance": [
+      "覆盖 goal-2 范围内 DeepSeek 与豆包两个实体在五个字段上的一致性核验",
+      "对同实体多源分歧逐条标注 conflict 或 structural_gap，并给出对应口径说明",
+      "审计结论以 Markdown 形式落盘至 goals/goal-2/consistency-check.md，含字段级明细与汇总"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/consistency-check.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "fields_checked": [
+        "产品定位",
+        "能力侧重",
+        "母公司背景",
+        "上线节奏",
+        "差异化卖点"
+      ],
+      "conflict_taxonomy": {
+        "conflict": "同实体多源在同一字段存在互斥或不可调和的表述",
+        "structural_gap": "同实体在同一字段缺失、口径不统一或粒度不对齐"
+      },
+      "scope": "仅覆盖 goal-2 清洗后产物内部一致性，不跨 goal 比对",
+      "upstream_reference": [
+        "goals/goal-2/data-cleaning-2.md",
+        "goals/goal-2/reliability-audit-5.json",
+        "goals/goal-2/reliability-audit-6.json"
+      ],
+      "reason_inputs_empty": "系统声明 inputs=[]，本章仅消费系统注入的清洗与可靠性审计产物，不再声明外部路径",
+      "output_format": "markdown_with_field_matrix"
+    }
+  }
+}

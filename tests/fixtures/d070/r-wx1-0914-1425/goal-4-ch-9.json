@@ -1,0 +1,55 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "比对小红书、抖音、微博三源在同类话题上的情感倾向与观点，对被多源印证的口碑要点、平台独有话题以及相互冲突的说法分别输出证据组与来源 permalink。",
+    "acceptance": [
+      "对每一同类话题给出小红书/抖音/微博三源的情感倾向标注与代表性观点摘录",
+      "多源印证的口碑要点、平台独有话题、相互冲突的说法分别成组呈现，且每组含至少两条独立来源 permalink",
+      "所有证据条目均可回溯至上游采集章的原始记录，permalink 与情感标签一一对应",
+      "输出文件写入 goals/goal-4/cross-validation-4.json 且结构可被下游报告章直接读取"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/cross-validation-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sources": [
+        "小红书",
+        "抖音",
+        "微博"
+      ],
+      "evidence_groups": [
+        "multi_source_confirmed",
+        "platform_unique",
+        "conflicting_claims"
+      ],
+      "sentiment_scheme": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "requires_permalink_per_evidence": true,
+      "upstream_collection_chapters": [
+        "goals/goal-4/data-collection-16.json",
+        "goals/goal-4/data-collection-17.json",
+        "goals/goal-4/data-collection-18.json"
+      ]
+    }
+  }
+}

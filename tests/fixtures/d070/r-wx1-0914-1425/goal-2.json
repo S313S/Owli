@@ -1,0 +1,69 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "bytedance-doubao-strategy.json",
+    "description": "字节跳动对豆包的战略与资源投入结构化报告，含组织架构、投入规模、商业化布局与对外表态四个小节，附引用与信息缺口说明。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "产物文件名为 bytedance-doubao-strategy.json，顶层为 JSON object，且至少包含组织架构、投入规模、商业化布局、对外表态四个小节键。",
+    "四份采集产物顶层均为 JSON 数组，每条记录含 permalink 与 fetched_at 字段。",
+    "采集章任务文本仅使用闭集叫法「字节跳动」或「ByteDance」，不出现其它实体叫法。",
+    "小红书数据抓取·字节跳动 作为本 goal 必采项已排入并产出独立数组文件。",
+    "报告章节在字节跳动相关论断处引用本 goal 的清洗结果，在豆包背景处引用 goal-1 的四份上游产物（goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json）中的至少两份。",
+    "交叉验证章输出对象包含一致点、冲突点与信息缺口三类字段，冲突条目附证据 permalink。",
+    "同一 (source_id, entity) 组合在本 goal 内不重复出现，且不与上游 goal-1 的 (reddit,豆包)、(x,豆包)、(hacker_news,豆包)、(product_hunt,豆包) 冲突。",
+    "任一采集章因平台限流或结果不足时，按结构化缺口口径记录缺失原因与已尝试查询词，不虚构条数。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·字节跳动",
+      "task": "在小红书采集关于「字节跳动」或「ByteDance」的公开笔记与评论，聚焦「字节跳动」大模型组织架构、投入规模、商业化布局与「ByteDance」官方对外表态；输出 JSON 数组，每条含 permalink 与 fetched_at，并附标题、正文摘录、作者、发布时间、互动数。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·字节跳动",
+      "task": "在微博采集关于「字节跳动」或「ByteDance」的公开博文，覆盖高管发言、财报口径、组织调整与豆包相关战略动态；输出 JSON 数组，每条含 permalink 与 fetched_at，并附正文、作者、发布时间、转评赞。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·字节跳动",
+      "task": "在微信公众号采集关于「字节跳动」或「ByteDance」的官方账号推文与主流媒体深度报道，重点覆盖大模型部门与豆包资源投入相关内容；输出 JSON 数组，每条含 permalink 与 fetched_at，并附标题、作者账号、发布时间、正文摘录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·字节跳动",
+      "task": "通过网页搜索采集关于「字节跳动」或「ByteDance」在大模型与豆包相关战略、组织架构、商业化布局、公开表态的权威报道与官方发言页；输出 JSON 数组，每条含 permalink 与 fetched_at，并附标题、站点、发布时间、摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 四份采集数组做去重、字段规整、时间归一化与主题打标（组织架构 / 投入规模 / 商业化布局 / 对外表态），输出统一结构的清洗结果对象，保留原始 permalink 引用。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "将本 goal 清洗结果与 goal-1 的四份豆包上游产物（goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json）对照，围绕「字节跳动」与「豆包」的战略叙述抽取一致点、冲突点与信息缺口，输出对象化验证结果并附证据 permalink。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "综合清洗结果与交叉验证结论，撰写覆盖组织架构、投入规模、商业化布局、对外表态四个小节的字节跳动对豆包战略与资源投入报告对象，附引用列表与缺口说明。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

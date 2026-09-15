@@ -1,0 +1,54 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博检索并采集与「豆包」相关的博文、评论、超话与热搜条目；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的正负面舆情、争议话题、KOL 观点与情绪分布；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+    "acceptance": [
+      "顶层输出为 JSON 数组",
+      "每条记录至少包含 permalink 与 fetched_at 字段",
+      "仅使用本实体叫法闭集：豆包 / Doubao / 豆包AI / 豆包大模型",
+      "覆盖博文、评论、超话与热搜四类内容",
+      "包含正负面舆情、争议话题、KOL 观点与情绪分布相关条目",
+      "输出写入 goals/goal-3/data-collection-23.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-23.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "微博",
+      "content_types": [
+        "博文",
+        "评论",
+        "超话",
+        "热搜"
+      ],
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "sentiment_coverage": [
+        "正面",
+        "负面",
+        "中性"
+      ],
+      "focus": [
+        "争议话题",
+        "KOL 观点",
+        "情绪分布"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_shape": "array"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合清洗结果与交叉验证结论，撰写「豆包产品画像与国内官方呈现」档案，按六维度组织正文，逐条引用采集产物 permalink，并在结尾列出缺口与建议补采的源；输出节化文档对象。",
+    "acceptance": [
+      "输出为节化文档对象（JSON），顶层至少包含 title/entity/dimensions/gaps/recommended_sources 等字段",
+      "正文按六维度组织：定位与目标用户、功能与能力、平台与入口、定价与商业化、生态与合作、官方呈现与合规",
+      "每条陈述必须逐条引用来自 data-collection 与 data-collection-2 的 permalink，且需与 cross-validation.json 结论一致",
+      "对清洗中被标注为存疑或未通过交叉验证的信息予以剔除或明确标注为待验证",
+      "结尾列出信息缺口与建议补采的源清单（含理由与优先级）",
+      "输出文件写入 goals/goal-1/goal1_doubao_product_profile.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/goal1_doubao_product_profile.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 1,
+    "notes": {
+      "document_type": "product_profile",
+      "target_entity": "豆包",
+      "structure": "sectioned_json_document",
+      "dimensions": [
+        "positioning_and_target_users",
+        "features_and_capabilities",
+        "platforms_and_entrypoints",
+        "pricing_and_monetization",
+        "ecosystem_and_partnerships",
+        "official_presentation_and_compliance"
+      ],
+      "citation_policy": "每条陈述必须携带 permalink 且来源于 data-collection.json 或 data-collection-2.json",
+      "consistency_check": "所有陈述需与 cross-validation.json 结论一致，冲突项需在 gaps 中登记",
+      "gaps_section_required": true,
+      "recommended_sources_required": true,
+      "scope": "仅涵盖国内官方及一手呈现，海外/第三方评测不纳入本档案"
+    }
+  }
+}

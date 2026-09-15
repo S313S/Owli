@@ -1,0 +1,73 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗与交叉验证结果，撰写《国内舆论对四款对标产品及其与豆包的横向比较》信封形节化报告，包含四实体分节、与豆包的能力/体验/价格/生态横向对比小节、证据引用（使用中文引号「」标注来源）、缺口披露与结论；输出 object，含 title、abstract、sections、evidence_index、gaps、references。",
+    "acceptance": [
+      "输出为单一 JSON object，且顶层字段恰好包含 title、abstract、sections、evidence_index、gaps、references 六项",
+      "sections 中包含四款对标产品（DeepSeek、Kimi、文心一言、通义千问）的独立分节，每节内含与豆包在能力/体验/价格/生态四个维度的横向对比小节",
+      "所有引用证据均使用中文引号「」标注来源，并在 evidence_index 中与 references 一一对应可回溯",
+      "gaps 字段显式披露数据缺口、样本偏差或无法证实之处，不得留空占位",
+      "结论部分基于交叉验证结果给出对豆包的相对定位判断，不得引入未在 references 中登记的新事实",
+      "输出文件写入 goals/goal-4/goal-4-report.json，且可被 JSON 解析器正确解析"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/goal-4-report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "report_object_fields": [
+        "title",
+        "abstract",
+        "sections",
+        "evidence_index",
+        "gaps",
+        "references"
+      ],
+      "comparison_dimensions": [
+        "能力",
+        "体验",
+        "价格",
+        "生态"
+      ],
+      "citation_style": "中文引号「」标注来源，并在 evidence_index 与 references 中登记",
+      "baseline_entity": "豆包",
+      "benchmark_entities": [
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "upstream_dependencies": {
+        "cross_validation": "goals/goal-4/cross-validation-4.json",
+        "data_cleaning": "goals/goal-4/data-cleaning-4.md",
+        "reliability_audits": [
+          "goals/goal-4/reliability-audit-14.json",
+          "goals/goal-4/reliability-audit-15.json"
+        ],
+        "collections": [
+          "goals/goal-1/data-collection.json",
+          "goals/goal-1/data-collection-2.json",
+          "goals/goal-2/data-collection-5.json",
+          "goals/goal-2/data-collection-6.json",
+          "goals/goal-3/data-collection-10.json",
+          "goals/goal-3/data-collection-11.json",
+          "goals/goal-4/data-collection-14.json",
+          "goals/goal-4/data-collection-15.json",
+          "goals/goal-5/data-collection-20.json"
+        ]
+      },
+      "gap_disclosure_required": true,
+      "no_new_facts_beyond_references": true
+    }
+  }
+}

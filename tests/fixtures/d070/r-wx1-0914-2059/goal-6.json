@@ -1,0 +1,54 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "final-report.json",
+    "description": "基于五方口碑证据横向对比「豆包」与「DeepSeek」「Kimi」「文心一言」「通义千问」，形成国内大家对豆包的整体看法、优势短板与差异化标签的综合结论报告",
+    "shape": "object"
+  },
+  "acceptance": [
+    "final-report.json 顶层为 object，至少包含五方对比矩阵、豆包画像、逐一竞品对照、差异化标签、国内整体看法、缺口清单六个节",
+    "五方对比矩阵行标签严格等于闭集五实体「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」，不引入闭集外任何实体",
+    "矩阵每格评价均回引至少一条上游或本章采集记录的 permalink 与 fetched_at，无法取证处以结构化缺口口径占位",
+    "本章新增网页搜索采集卡的产物被交叉验证章与报告撰写章 inputs 消费，且顶层为数组、每条含 permalink 与 fetched_at",
+    "上游 28 条采集产物（goals/goal-1/data-collection.json 至 goals/goal-5/data-collection-28.json）在交叉验证章被逐一读取并留下来源标记",
+    "JSON 字符串值内不得出现未转义的英文双引号，所有他方名称引用统一使用中文引号「」",
+    "结论段明确回答国内大家对豆包的整体口碑倾向、相对四款竞品的差异化标签与主要短板"
+  ],
+  "agents": [
+    {
+      "name": "网页搜索数据抓取·豆包",
+      "task": "以「豆包」「Doubao」「字节豆包」「豆包AI」「豆包大模型」为查询词，从网页搜索抓取国内评测、口碑与横向对比线索，仅围绕本实体本身检索，不得写入其他四个竞品的叫法；顶层为数组，每条含 permalink 与 fetched_at，字段包含标题、摘要、发布时间、来源域名、匹配到的本实体叫法",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "读取 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-collection-6.json、goals/goal-1/data-collection-7.json、goals/goal-1/data-collection-8.json、goals/goal-2/data-collection-9.json、goals/goal-2/data-collection-10.json、goals/goal-2/data-collection-11.json、goals/goal-2/data-collection-12.json、goals/goal-2/data-collection-13.json、goals/goal-3/data-collection-14.json、goals/goal-3/data-collection-15.json、goals/goal-3/data-collection-16.json、goals/goal-3/data-collection-17.json、goals/goal-3/data-collection-18.json、goals/goal-4/data-collection-19.json、goals/goal-4/data-collection-20.json、goals/goal-4/data-collection-21.json、goals/goal-4/data-collection-22.json、goals/goal-4/data-collection-23.json、goals/goal-5/data-collection-24.json、goals/goal-5/data-collection-25.json、goals/goal-5/data-collection-26.json、goals/goal-5/data-collection-27.json、goals/goal-5/data-collection-28.json 与本章新增的网页搜索·豆包采集产物，按闭集五实体归一叫法、清除疑似营销通稿与重复条目、标注情感极性与话题标签，输出统一的证据池信封",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "基于数据清洗产出的证据池，对五方在「产品定位」「能力优劣」「场景匹配」「价格与生态」「用户画像」五个维度上的高频评价逐条交叉比对：至少两源同向支持才可入结论，仅单源支持标注为弱证据，冲突条目并列展示；对每个实体保留至少一条 permalink 与 fetched_at；证据不足格以结构化缺口口径占位而非估算",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "核对交叉验证产物中的实体叫法是否落入闭集五实体的允许叫法集合、矩阵是否覆盖全部五个 canonical、引用 permalink 是否可回溯、结论是否回避了闭集外实体、缺口是否使用结构化占位、他方名称是否统一使用中文引号「」；对不一致条目回写修订清单",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "综合数据清洗、交叉验证与一致性检查产物撰写节化报告，输出信封结构 object，节包括：标题与执行摘要、五方对比矩阵、豆包画像、豆包对「DeepSeek」对照、豆包对「Kimi」对照、豆包对「文心一言」对照、豆包对「通义千问」对照、差异化标签、国内整体看法、缺口与后续研究方向；每条论断附来源 permalink 与 fetched_at，他方名称一律使用中文引号「」",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

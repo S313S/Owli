@@ -1,0 +1,58 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "校验清洗与交叉验证产物中实体叫法是否落在闭集「豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance」内，检查引号规范、permalink 与 fetched_at 完整性、上游产物引用是否到位，输出 object 信封含 issues、fixes、passed。",
+    "acceptance": [
+      "实体叫法均落在闭集「豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance」内",
+      "引号规范一致，permalink 与 fetched_at 字段完整无缺失",
+      "上游 cleaning 与 cross-validation 产物引用到位可追溯",
+      "输出为 object 信封，包含 issues、fixes、passed 三个字段",
+      "输出写入 goals/goal-3/consistency-check-2.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/consistency-check-2.md"
+    },
+    "entities": [
+      "豆包",
+      "Doubao",
+      "豆包AI",
+      "豆包大模型",
+      "字节跳动",
+      "ByteDance"
+    ],
+    "expected_count": null,
+    "notes": {
+      "envelope": "object",
+      "envelope_fields": [
+        "issues",
+        "fixes",
+        "passed"
+      ],
+      "entity_whitelist": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型",
+        "字节跳动",
+        "ByteDance"
+      ],
+      "checks": [
+        "entity_naming_in_whitelist",
+        "quote_style_normalized",
+        "permalink_present",
+        "fetched_at_present",
+        "upstream_reference_integrity"
+      ],
+      "upstream_refs": [
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/cross-validation-3.json",
+        "goals/goal-3/reliability-audit-13.json",
+        "goals/goal-3/data-collection-13.json"
+      ],
+      "pass_criteria": "issues 为空或均在 fixes 中修复，则 passed=true"
+    }
+  }
+}

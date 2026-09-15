@@ -1,0 +1,141 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-2-competitor-dossier.json",
+    "description": "「DeepSeek」「Kimi」「文心一言」「通义千问」四大国内竞品的产品特征、市场定位、用户口碑与中文媒体评价对比资料集，作为豆包对比分析的参照系",
+    "shape": "object"
+  },
+  "acceptance": [
+    "必采清单四条采集卡（小红书×DeepSeek、小红书×Kimi、小红书×文心一言、小红书×通义千问）全部落盘且顶层为数组",
+    "每条采集记录均含 permalink 与 fetched_at 字段，未出现未转义的英文双引号，引用名称一律用中文引号「」",
+    "各采集 agent 的 task 文本仅使用本实体允许叫法：DeepSeek 仅「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」；Kimi 仅「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」；文心一言 仅「文心一言」「ERNIE Bot」「百度文心」；通义千问 仅「通义千问」",
+    "本 goal 新增采集章的 (source_id, entity) 组合不与必采清单或上游 goal-1 产物重复",
+    "采集章 source_id 全部落在 applicable_sources={「douyin」「hacker_news」「product_hunt」「reddit」「web_search」「wechat_mp」「weibo」「x」「xhs」}",
+    "数据清洗产物按 DeepSeek、Kimi、文心一言、通义千问 四实体分区归并，字段涵盖产品特征、市场定位、用户口碑、中文媒体评价",
+    "可靠度审计按源与实体打分，并标注低置信证据与需要补采的缺口",
+    "交叉验证对 Kimi 仅在国内市场并列比对，不与同名外文产品跨市场交叉",
+    "一致性检查覆盖四实体×四维度矩阵，冲突条目附出处证据链",
+    "报告撰写产出节化文档信封（object），含四实体各自章节、横向对比小结与结构化缺口口径"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·DeepSeek",
+      "task": "在小红书检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关笔记与评论，采集产品特征、使用体验与口碑证据，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "小红书数据抓取·Kimi",
+      "task": "在小红书检索「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」相关笔记与评论，聚焦国内市场语境下的产品特征、长文本能力与口碑证据，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "小红书数据抓取·文心一言",
+      "task": "在小红书检索「文心一言」「ERNIE Bot」「百度文心」相关笔记与评论，采集产品特征、市场定位与用户口碑证据，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "小红书数据抓取·通义千问",
+      "task": "在小红书检索「通义千问」相关笔记与评论，采集产品特征、场景应用与用户口碑证据，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·DeepSeek",
+      "task": "通过网页搜索采集「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的官网、白皮书、发布通稿与中文媒体评价，覆盖产品特征与市场定位，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "通过网页搜索采集「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」在国内中文媒体的产品报道、发布会通稿与评测文章，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·文心一言",
+      "task": "通过网页搜索采集「文心一言」「ERNIE Bot」「百度文心」的官方介绍、迭代公告与中文媒体评价，覆盖产品特征与市场定位，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·通义千问",
+      "task": "通过网页搜索采集「通义千问」的官方介绍、模型发布通稿与中文媒体评测，覆盖产品特征与市场定位，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·DeepSeek",
+      "task": "在微信公众号采集「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关深度分析、行业解读与用户口碑文章，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·Kimi",
+      "task": "在微信公众号采集「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」相关深度分析、产品评测与商业化解读文章，限定国内语境，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·文心一言",
+      "task": "在微信公众号采集「文心一言」「ERNIE Bot」「百度文心」相关深度分析、企业应用案例与口碑文章，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·通义千问",
+      "task": "在微信公众号采集「通义千问」相关深度分析、开源生态与行业解读文章，输出数组顶层，每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "合并本 goal 全部采集产物，按「DeepSeek」「Kimi」「文心一言」「通义千问」四实体分区，抽取产品特征、市场定位、用户口碑、中文媒体评价四维度字段，保留 permalink 与 fetched_at 溯源，删除噪声与重复，缺口以结构化占位标注。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "可靠度审计",
+      "task": "对清洗后的四实体×多源资料按源权威度、发布主体、时效性、证据密度打分，标注低置信条目与需补采缺口，产出可靠度矩阵。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对四实体的产品特征、市场定位、用户口碑、中文媒体评价四维度跨源交叉核验，冲突条目列证据链；「Kimi」仅在国内市场并列比对，不与同名外文产品跨市场交叉。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "校验四实体×四维度矩阵在术语、时间线与结论上的内部一致性，标记同实体多源结论矛盾之处并给出建议裁定。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "输出节化文档信封（object），含「DeepSeek」「Kimi」「文心一言」「通义千问」四实体独立章节、横向对比小结、可靠度与交叉验证附录，以及结构化缺口清单，作为豆包对比分析的参照系。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

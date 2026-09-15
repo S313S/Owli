@@ -1,0 +1,60 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 采集与「豆包／Doubao」相关的帖子与评论，重点收集海外及在华外籍用户对豆包的看法与使用反馈；顶层输出数组，每条含 permalink、fetched_at、subreddit、作者、标题、正文与得分。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-collection-5.json，顶层为 JSON 数组",
+      "每条记录必须包含 permalink、fetched_at、subreddit、author、title、body、score 字段",
+      "采集内容需与「豆包／Doubao」直接相关，聚焦海外用户及在华外籍用户的观点与使用反馈",
+      "permalink 为 Reddit 原始链接，fetched_at 为 ISO 8601 时间戳",
+      "剔除与豆包无关或纯广告/机器人内容，保留可溯源的原始文本"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-5.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Reddit",
+      "focus": "海外及在华外籍用户对豆包的看法与使用反馈",
+      "language_scope": "以英文为主，兼收其他非中文语种",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "subreddit",
+        "author",
+        "title",
+        "body",
+        "score"
+      ],
+      "top_level_shape": "array",
+      "search_keywords": [
+        "Doubao",
+        "豆包",
+        "ByteDance Doubao",
+        "Doubao AI",
+        "Doubao chatbot"
+      ],
+      "subreddits_hint": [
+        "r/ChineseLanguage",
+        "r/ChatGPT",
+        "r/LocalLLaMA",
+        "r/artificial",
+        "r/China",
+        "r/shanghai",
+        "r/Beijing"
+      ],
+      "deduplication": "按 permalink 去重",
+      "exclusions": [
+        "与豆包无关的内容",
+        "广告与营销贴",
+        "机器人自动回复"
+      ]
+    }
+  }
+}

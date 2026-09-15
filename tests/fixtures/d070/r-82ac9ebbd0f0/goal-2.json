@@ -1,0 +1,92 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-2-deepseek-reputation.json",
+    "description": "DeepSeek 国内口碑与用户评价采集章节化产物，含多源原始素材、清洗归并结果与交叉验证后的评价报告，作为对比豆包的参照素材",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 对应文件存在且为合法 JSON object",
+    "必采清单项「小红书数据抓取·DeepSeek」已建立采集 agent，task 文本仅使用 DeepSeek 别名闭集（深度求索、DeepSeek、DeepSeek-R1、DeepSeek-V3）",
+    "所有采集 agent 的 (source_id, entity) 组合两两不重复，且 source_id 均在 applicable_sources 内",
+    "所有采集 agent 的 task 文本不出现豆包、Kimi、文心一言、通义千问的任一别名",
+    "每个采集 agent 的 output 为顶层数组，每条记录必须含 permalink 与 fetched_at 字段",
+    "Hacker News 采集章固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的查询参数",
+    "数据清洗 agent 产出 object 信封，含来源分布、语料条数、字段缺失与去重口径",
+    "交叉验证 agent 至少在三个来源之间比对一致口碑点与冲突讨论点，冲突条目留档",
+    "报告撰写 agent 产出章节化 object，覆盖模型能力、开源属性、场景表现、典型讨论四个维度",
+    "任一维度数据不足时以结构化缺口口径记录，不虚构条数或结论"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·DeepSeek",
+      "task": "在小红书站内检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关笔记与评论，抓取标题、正文、点赞收藏评论数、话题标签、作者昵称、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博站内检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关博文、话题与热评，抓取正文、转评赞、话题标签、作者、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·DeepSeek",
+      "task": "在微信公众号生态抓取以「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」为主题的推文，记录标题、公众号名称、阅读点赞在看、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·DeepSeek",
+      "task": "在抖音站内检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关短视频与评论区，抓取视频文案、播放点赞评论转发、账号、话题、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·DeepSeek",
+      "task": "通过网页搜索聚合国内媒体、评测站与技术博客中关于「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的报道、评测与讨论，抓取标题、站点、正文摘要、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·DeepSeek",
+      "task": "在 Hacker News Algolia 接口检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关帖与评论，固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的查询参数，抓取标题、作者、分数、评论数、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·DeepSeek",
+      "task": "在 Reddit 相关 subreddit 检索「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的主帖与高赞评论，抓取标题、正文、分数、评论数、subreddit、作者、发布时间与 permalink，输出顶层数组，每条含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对上述采集 agent 的原始数组进行去重、语言标注、情感初判与字段规范化，按来源与语义标签维度汇总语料条数、字段缺失与去重口径，输出 object 信封",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对清洗后的 DeepSeek 语料在小红书、微博、微信公众号、抖音、网页搜索、Hacker News、Reddit 之间做三源以上证据比对，标注一致口碑点与冲突讨论点，冲突条目留档，输出 object 信封",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗与交叉验证结果撰写 DeepSeek 国内口碑章节化报告，覆盖模型能力、开源属性、场景表现、典型讨论四个维度，数据不足处以结构化缺口口径标注，输出 object 信封",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

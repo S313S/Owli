@@ -1,0 +1,38 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "对清洗后的四实体×多源资料按源权威度、发布主体、时效性、证据密度打分，标注低置信条目与需补采缺口，产出可靠度矩阵。",
+    "acceptance": [
+      "产出文件位于 goals/goal-2/reliability-audit-9.json 且为合法 JSON",
+      "覆盖四个实体（DeepSeek、Kimi、文心一言、通义千问）的可靠度评分",
+      "每条来源均给出源权威度、发布主体、时效性、证据密度四个维度的评分",
+      "低置信条目被显式标注并给出理由",
+      "列出需补采的缺口清单与建议来源"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/reliability-audit-9.json"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scoring_dimensions": [
+        "source_authority",
+        "publisher",
+        "timeliness",
+        "evidence_density"
+      ],
+      "matrix_shape": "entity x source x dimension",
+      "low_confidence_flagging": "对综合评分低于阈值或单维度缺失的条目打 low_confidence 标签并附理由",
+      "gap_analysis": "输出需补采缺口清单，指明实体、缺失维度与建议来源类型",
+      "audit_scope": "基于上游清洗与采集结果（data-cleaning-2 与 data-collection-9/10/11/12）执行"
+    }
+  }
+}

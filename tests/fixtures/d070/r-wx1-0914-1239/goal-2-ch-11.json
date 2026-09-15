@@ -1,0 +1,45 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      }
+    ],
+    "task": "对四实体的产品特征、市场定位、用户口碑、中文媒体评价四维度跨源交叉核验，冲突条目列证据链；「Kimi」仅在国内市场并列比对，不与同名外文产品跨市场交叉。",
+    "acceptance": [
+      "四实体（DeepSeek、Kimi、文心一言、通义千问）均完成产品特征、市场定位、用户口碑、中文媒体评价四维度跨源比对",
+      "所有冲突条目均附证据链（来源URL、原文摘录、发布时间）",
+      "Kimi仅限国内市场比对，明确排除同名外文产品的跨市场交叉",
+      "输出为合法JSON，写入 goals/goal-2/cross-validation-2.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation-2.json"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "positioning": "逐实体记录市场定位跨源一致性与差异（含Kimi国内市场限定说明）",
+      "pricing": "对四实体定价/免费策略跨源核验，冲突处列证据链",
+      "feature_differences": "产品特征差异（模型能力、上下文长度、多模态、接口开放度等）分维度比对",
+      "social_proof": "用户口碑（应用商店评分、社区反馈、活跃度）跨源交叉",
+      "strengths_weaknesses": "综合优势与短板，冲突条目附来源URL、原文摘录、发布时间证据链"
+    }
+  }
+}

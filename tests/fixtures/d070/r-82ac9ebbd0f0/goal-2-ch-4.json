@@ -1,0 +1,79 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "对清洗后的 DeepSeek 语料在小红书、微博、微信公众号、抖音、网页搜索、Hacker News、Reddit 之间做三源以上证据比对，标注一致口碑点与冲突讨论点，冲突条目留档，输出 object 信封",
+    "acceptance": [
+      "每个被验证的口碑点必须有 ≥3 个不同平台来源支撑",
+      "一致点与冲突点分别列出且逐条给出证据引用",
+      "冲突条目留档并保留原始 evidence_id 与平台",
+      "输出为 object 信封写入 goals/goal-2/cross-validation-2.json",
+      "所有引用的证据均可追溯至上游采集/清洗产物"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation-2.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platforms_covered": [
+        "小红书",
+        "微博",
+        "微信公众号",
+        "抖音",
+        "网页搜索",
+        "Hacker News",
+        "Reddit"
+      ],
+      "min_sources_per_point": 3,
+      "consistent_points": "标注跨平台一致口碑点，附证据引用列表",
+      "conflict_points": "标注跨平台冲突讨论点，冲突条目留档",
+      "conflict_archive_required": true,
+      "envelope_type": "object"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-6-report.json",
+    "description": "面向 goal-6 的五方横向对比综述文档信封，围绕能力、体验、生态、口碑倾向与用户群差异五个维度组织横向对比，并凝练「豆包」相对「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化定位综述；所有结论均可回溯到 goal-1 至 goal-5 的 41 份 data-collection 采集产物。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "文档 sections 至少覆盖「能力」「体验」「生态」「口碑倾向」「用户群差异」五个横向对比维度章节",
+    "每个维度章节均分别给出「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」五方的对比要点，缺失方以结构化缺口口径显式标注",
+    "文档设有独立的「豆包差异化定位」综述章节，明确陈述其相对「DeepSeek」「Kimi」「文心一言」「通义千问」的差异点与共性点",
+    "所有引用条目均携带来源 source_id、permalink 与 fetched_at，且可精确回溯至 goals/goal-1 至 goals/goal-5 下的 data-collection*.json 记录",
+    "跨源同一横向结论至少有 2 个不同 source_id 的记录支撑，不足者以结构化缺口口径标注证据不足并列出已知 permalink",
+    "字符串中所有产品与平台名称一律使用中文引号「」包裹，JSON 字符串值内部不出现未转义的英文双引号",
+    "对 goal-1 至 goal-5 共 41 个上游采集产物均建立可核验的引用或未引用说明索引",
+    "可靠度审计结论对每条被引用记录给出高/中/低置信度分级及判定依据，并在报告章节中以脚注或字段形式体现"
+  ],
+  "agents": [
+    {
+      "name": "数据清洗",
+      "task": "以 inputs 方式消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-collection-6.json、goals/goal-1/data-collection-7.json、goals/goal-1/data-collection-8.json、goals/goal-1/data-collection-9.json、goals/goal-2/data-collection-10.json 至 goals/goal-2/data-collection-16.json、goals/goal-3/data-collection-17.json 至 goals/goal-3/data-collection-24.json、goals/goal-4/data-collection-25.json 至 goals/goal-4/data-collection-33.json、goals/goal-5/data-collection-34.json 至 goals/goal-5/data-collection-41.json 共 41 份采集产物，按实体（「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」）与 source_id 建立统一记录集，按 permalink 去重、保留 fetched_at，剔除广告体与纯转载噪声，输出结构化统一记录数组。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "标签",
+      "task": "在数据清洗产物基础上，为每条记录打上维度标签（能力、体验、生态、口碑倾向、用户群差异）、情感倾向（正面/中性/负面）与所涉实体标签（限定于「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」闭集），并输出带标签的记录数组，便于后续按维度切片检索。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "消费带标签记录，对每个维度抽取「豆包」相对「DeepSeek」「Kimi」「文心一言」「通义千问」的核心横向对比论断；每条论断须由至少 2 个不同 source_id 的记录佐证，若不足则登记为结构化证据缺口并列出候选 permalink，输出交叉验证结论文档信封。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "检查五个实体在不同源之间的叙述是否存在冲突或口径矛盾（例如同一能力项在「微博」与「小红书」评价相反、或「Hacker News」与「微信公众号」判断相反），标注冲突条目并给出可回溯 permalink 与 fetched_at 列表，输出一致性检查文档信封。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "可靠度审计",
+      "task": "对将被引用到横向对比结论的每一条记录评估来源可靠度，考虑平台类型、账号属性、时间新鲜度、是否为官方通稿或营销投放，给出高/中/低置信度分级及判定依据，输出可靠度审计文档信封。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "整合数据清洗、标签、交叉验证、一致性检查、可靠度审计五份产物，撰写《五款产品的横向对比与豆包定位综述》文档信封：按「能力」「体验」「生态」「口碑倾向」「用户群差异」五个维度呈现五方横向对比，并单设「豆包差异化定位」综述章节，凝练其相对「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化定位；所有引用一律使用中文引号「」并附 source_id、permalink 与 fetched_at，证据不足处以结构化缺口口径显式标注。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

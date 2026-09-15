@@ -1,0 +1,43 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "对交叉验证的结论草稿进行内部一致性审计，检查判断之间是否存在逻辑冲突、口径不统一或与产品画像相悖，核验主体命名是否严格落在闭集叫法之内，核验中文引号「」使用与英文双引号转义是否合规，输出需修订项与修订建议",
+    "acceptance": [
+      "逐条列出结论草稿中的判断，并标注是否存在相互冲突或口径不统一之处",
+      "核验主体命名是否严格落在闭集叫法（豆包/DeepSeek/Kimi/文心一言/通义千问）之内，非闭集叫法须列出并给出替换建议",
+      "核验中文引号「」的使用与英文双引号的转义合规性，列出不合规位置",
+      "对每一处需修订项给出具体修订建议，并说明修订后的表述如何与产品画像保持一致",
+      "输出文件写入 goals/goal-5/consistency-check-2.md，包含需修订项清单与修订建议两个部分"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/consistency-check-2.md"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "audit_scope": "cross-validation conclusion draft internal consistency",
+      "checks": [
+        "logical_conflict_between_judgments",
+        "caliber_uniformity",
+        "alignment_with_product_profile",
+        "entity_naming_within_closed_set",
+        "chinese_quote_and_double_quote_escape_compliance"
+      ],
+      "closed_set_entity_names": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "target_entity": "通义千问",
+      "deliverable_sections": [
+        "需修订项清单",
+        "修订建议"
+      ]
+    }
+  }
+}

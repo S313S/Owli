@@ -1,0 +1,186 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_reputation_profile.json"
+      },
+      {
+        "path": "goals/goal-2/goal-2-deepseek-reputation.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-18.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-20.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-21.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-24.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-26.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-27.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-28.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-29.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-30.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-31.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-32.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-33.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-35.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-36.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-37.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-38.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-39.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-40.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-41.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-42.json"
+      }
+    ],
+    "task": "以 inputs 方式消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/go",
+    "acceptance": [
+      "输出 Markdown 文件写入 goals/goal-6/data-cleaning-6.md",
+      "覆盖全部 46 个 inputs 输入源并按目标（goal-1~goal-5）分组归并",
+      "对五款竞品（豆包、DeepSeek、Kimi、文心一言、通义千问）的原始数据完成去重、字段规范化与缺失值标注",
+      "清洗后数据保留可追溯的来源路径与实体标签"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/data-cleaning-6.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "scope": "对 goal-1 至 goal-5 的 42 份 data-collection 采集章及 5 份 reputation/report 汇总产物统一执行数据清洗",
+      "cleaning_steps": [
+        "字段结构对齐",
+        "去重与合并",
+        "缺失值标注",
+        "来源路径回溯",
+        "实体归一化"
+      ],
+      "grouping_by_goal": {
+        "goal-1": "豆包",
+        "goal-2": "DeepSeek",
+        "goal-3": "Kimi",
+        "goal-4": "文心一言",
+        "goal-5": "通义千问"
+      },
+      "downstream_use": "为后续 comparison/cross_validation 章提供统一口径的洁净数据底座"
+    }
+  }
+}

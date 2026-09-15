@@ -1,0 +1,42 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博采集含「豆包」「豆包大模型」「Doubao」关键词的普通用户博文与热评，记录正文、发布时间、转赞评数、permalink 与 fetched_at；输出顶层数组。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，路径为 goals/goal-4/data-collection-18.json",
+      "每条记录包含正文、发布时间、转赞评数、permalink 与 fetched_at 字段",
+      "采集内容需命中「豆包」「豆包大模型」「Doubao」关键词之一",
+      "覆盖普通用户博文与热评两类样本"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-18.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "微博",
+      "keywords": [
+        "豆包",
+        "豆包大模型",
+        "Doubao"
+      ],
+      "content_types": [
+        "普通用户博文",
+        "热评"
+      ],
+      "fields": [
+        "正文",
+        "发布时间",
+        "转赞评数",
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "顶层数组"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集国内用户对「文心一言」「文心大模型」「ERNIE Bot」的使用笔记、教程、评价与吐槽，覆盖近 90 天热门与最新排序，输出数组，每条至少含 permalink、fetched_at、作者、正文、点赞收藏评论数、话题标签。",
+    "acceptance": [
+      "输出文件位于 goals/goal-4/data-collection-25.json，为合法 JSON 数组",
+      "每条记录必须包含 permalink、fetched_at、作者、正文、点赞数、收藏数、评论数、话题标签字段",
+      "采集覆盖「文心一言」「文心大模型」「ERNIE Bot」三个关键词",
+      "采集范围覆盖近 90 天，且同时包含热门排序与最新排序结果",
+      "fetched_at 为 ISO 8601 时间戳，permalink 为可访问的小红书笔记链接"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-25.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "文心一言",
+        "文心大模型",
+        "ERNIE Bot"
+      ],
+      "time_window_days": 90,
+      "sort_modes": [
+        "热门",
+        "最新"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "点赞数",
+        "收藏数",
+        "评论数",
+        "话题标签"
+      ],
+      "output_format": "JSON array"
+    }
+  }
+}

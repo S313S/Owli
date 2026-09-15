@@ -1,0 +1,47 @@
+{
+  "deliverable": {
+    "format": "markdown",
+    "path": "goal-6-report.md",
+    "description": "整合「字节跳动」公司背景、媒体评论、用户口碑与竞争位置四个维度，形成关于国内各类人群对「豆包」总体看法的结构化综合结论与主要分歧点报告",
+    "shape": "object"
+  },
+  "acceptance": [
+    "报告主体依次覆盖公司背景、媒体评论、用户口碑、竞争位置四个章节，且每章均给出小结",
+    "在总体结论部分明确区分共识、争议、缺口三类信息，每类不少于两条并标注证据来源",
+    "至少列出三条国内不同人群（媒体、开发者、普通用户、行业观察者）对「豆包」看法的主要分歧点，并注明对应源的 permalink 或上游产物路径",
+    "所有事实性陈述均可回溯至 goal-1 至 goal-5 的产物 output.path 或本 goal 采集数据的 permalink",
+    "报告与所有中间产物中引用的名称一律使用中文「」引号，JSON 字符串值内部不出现未转义的英文双引号",
+    "数据缺口部分以结构化缺口口径列出缺失的源与实体组合，不写死具体最小条数",
+    "本 goal 新增采集章的 (source_id, entity) 组合与上游及必采清单均不重复"
+  ],
+  "agents": [
+    {
+      "name": "hn 数据抓取·字节跳动",
+      "task": "抓取 Hacker News 上关于「字节跳动」与「ByteDance」的讨论，用于补充国际科技社区对「字节跳动」在 AI 与产品战略上的评价视角；查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000；输出顶层为数组，每条含 permalink、fetched_at 等字段",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "以 inputs 方式消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-2/data-collection-6.json、goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json、goals/goal-3/data-collection-9.json、goals/goal-3/data-collection-10.json、goals/goal-3/data-collection-11.json、goals/goal-4/data-collection-12.json、goals/goal-4/data-collection-13.json、goals/goal-4/data-collection-14.json、goals/goal-5/data-collection-15.json、goals/goal-5/data-collection-16.json 以及本 goal 的 HN 采集产物；按公司背景、媒体评论、用户口碑、竞争位置四维对「豆包」与「字节跳动」的关键论断做交叉比对，将每条论断标注为多源一致、跨源冲突或单源孤证，并保留证据 permalink",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "对交叉验证产物执行一致性检查，识别国内不同人群（官方媒体、行业自媒体、开发者、C 端用户、海外观察者）对「豆包」评价的分歧点，归类为共识、争议、缺口三类，并核对引用是否覆盖上游全部 16 条采集产物；输出节化文档信封",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于交叉验证与一致性检查产物撰写《国内对「豆包」看法的综合结论》报告，依次组织公司背景（聚焦「字节跳动」）、媒体评论、用户口碑、竞争位置四章，并在总体结论章给出共识、争议、缺口三类总结及主要分歧点清单；所有引用名称统一使用中文「」，事实性陈述回填 permalink 或上游 output.path，数据不足处以结构化缺口口径说明",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

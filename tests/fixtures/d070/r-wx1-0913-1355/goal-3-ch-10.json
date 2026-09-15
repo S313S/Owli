@@ -1,0 +1,121 @@
+{
+  "chapter_type": "comparison",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "整合清洗、一致性与交叉验证结果，撰写「DeepSeek」与「Kimi」相对「豆包」的横向参照系报告，覆盖产品定位、代表能力、口碑标签与国内用户基础四维，数据缺口以结构化口径注明。",
+    "acceptance": [
+      "报告分别刻画 DeepSeek 与 Kimi 相对豆包在产品定位、代表能力、口碑标签、国内用户基础四个维度的差异",
+      "所有关键结论均可追溯至采集、清洗、一致性或交叉验证章节的原文口径",
+      "数据缺口、口径分歧与低置信度字段以结构化方式标注，不得以自然语言遮盖",
+      "closing.notes 使用 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五个字段承载竞品对比要点"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/competitor-benchmark.json"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": 2,
+    "notes": {
+      "positioning": {
+        "DeepSeek": "以开源大模型与代码/推理能力为核心的技术型玩家，主打高性价比与研究友好路线",
+        "Kimi": "月之暗面旗下面向长文本理解与办公助手场景的通用对话助手",
+        "豆包_reference": "字节跳动旗下面向大众消费级 AIGC 与内容创作的多模态助手",
+        "gaps": []
+      },
+      "pricing": {
+        "DeepSeek": "API 与开源权重免费/低价路线，消费端 App 免费",
+        "Kimi": "消费端免费为主，长文本处理与高峰算力采用排队/付费扩容机制",
+        "豆包_reference": "消费端免费，企业侧通过火山引擎方舟平台按 token 计费",
+        "gaps": [
+          "需在最终报告中以最新公开报价复核，缺口以 data_gap 字段标记"
+        ]
+      },
+      "feature_differences": {
+        "DeepSeek_vs_豆包": [
+          "推理/代码能力领先，多模态与语音生态弱于豆包",
+          "开源权重可自部署，豆包为闭源"
+        ],
+        "Kimi_vs_豆包": [
+          "超长上下文与文档解析为差异点",
+          "多模态创作与短视频生态弱于豆包"
+        ],
+        "gaps": [
+          "部分能力指标缺少同口径基准，需在报告中以 benchmark_missing 标注"
+        ]
+      },
+      "social_proof": {
+        "DeepSeek": "开发者与研究社区口碑突出，代表标签：开源、高性价比、推理强",
+        "Kimi": "长文档/学术/办公场景口碑突出，代表标签：长上下文、文件问答",
+        "豆包_reference": "大众用户与创作者口碑突出，代表标签：多模态、易用、字节生态",
+        "gaps": [
+          "舆情样本量与来源分布差异需在报告中披露"
+        ]
+      },
+      "strengths_weaknesses": {
+        "DeepSeek": {
+          "strengths": [
+            "开源生态",
+            "推理/代码",
+            "低成本"
+          ],
+          "weaknesses": [
+            "消费端品牌声量与用户基数低于豆包",
+            "多模态与内容生态薄弱"
+          ]
+        },
+        "Kimi": {
+          "strengths": [
+            "长上下文",
+            "文档处理",
+            "办公助手体验"
+          ],
+          "weaknesses": [
+            "国内 MAU 与分发渠道相对豆包处于劣势",
+            "多模态与实时能力有限"
+          ]
+        },
+        "gaps": [
+          "国内用户基础（MAU/DAU）以最新可核实公开数据为准，未覆盖窗口以 data_gap 说明"
+        ]
+      }
+    }
+  }
+}

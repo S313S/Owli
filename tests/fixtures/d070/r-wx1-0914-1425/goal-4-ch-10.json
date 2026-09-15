@@ -1,0 +1,44 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合清洗结果、标签统计与交叉验证结论，撰写「豆包」国内社交舆论口碑节化报告，涵盖情感分布、话题聚类、代表性正负样本、平台差异对比以及数据缺口说明。",
+    "acceptance": [
+      "报告覆盖情感分布、话题聚类、代表性正负样本、平台差异对比、数据缺口五个板块",
+      "所有结论均可回溯至清洗、标签统计与交叉验证章节的证据",
+      "对交叉验证中标记为存疑或不足的数据点给出明确说明",
+      "输出为结构化 JSON，写入 goals/goal-4/goal-4-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/goal-4-report.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "国内社交舆论口碑节化报告",
+      "sections": [
+        "情感分布",
+        "话题聚类",
+        "代表性正负样本",
+        "平台差异对比",
+        "数据缺口说明"
+      ],
+      "upstream_dependencies": [
+        "data-collection-16",
+        "data-collection-17",
+        "data-collection-18",
+        "reliability-audit-16",
+        "reliability-audit-17",
+        "reliability-audit-18",
+        "data-cleaning-4",
+        "tagging",
+        "cross-validation-4"
+      ],
+      "traceability": "所有结论需引用清洗、标签统计与交叉验证章节的编号或字段"
+    }
+  }
+}

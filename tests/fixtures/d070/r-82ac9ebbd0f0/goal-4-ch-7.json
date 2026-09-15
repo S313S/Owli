@@ -1,0 +1,45 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合清洗、一致性检查、交叉验证与可靠度审计，撰写「文心一言的国内口碑与用户评价采集」节化报告，含概述、采集覆盖、口碑主题、优缺点、舆论走向、风险与缺口六节，引用名称一律使用中文引号「」。",
+    "acceptance": [
+      "报告严格包含概述、采集覆盖、口碑主题、优缺点、舆论走向、风险与缺口六节，缺一不可",
+      "所有产品与来源名称引用一律使用中文引号「」，不得混用英文引号或书名号",
+      "结论须综合上游清洗、一致性检查、交叉验证与可靠度审计结果，标注可靠度等级与关键缺口",
+      "输出保存至 goals/goal-4/goal-4-report.json，为合法 JSON 且六节字段齐备"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/goal-4-report.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "概述",
+        "采集覆盖",
+        "口碑主题",
+        "优缺点",
+        "舆论走向",
+        "风险与缺口"
+      ],
+      "quote_style": "中文引号「」",
+      "upstream_sources": {
+        "data_collection": "goals/goal-4/data-collection-25.json",
+        "data_cleaning": "goals/goal-4/data-cleaning-4.md",
+        "consistency_check": "goals/goal-4/consistency-check-2.md",
+        "cross_validation": "goals/goal-4/cross-validation-4.json",
+        "reliability_audit": [
+          "goals/goal-4/reliability-audit-25.json",
+          "goals/goal-4/reliability-audit-26.json"
+        ]
+      },
+      "report_scope": "「文心一言」的国内口碑与用户评价采集节化报告",
+      "format": "json"
+    }
+  }
+}

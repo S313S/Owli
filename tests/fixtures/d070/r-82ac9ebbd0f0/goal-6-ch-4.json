@@ -1,0 +1,90 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "检查五个实体在不同源之间的叙述是否存在冲突或口径矛盾（例如同一能力项在「微博」与「小红书」评价相反、或「Hacker News」与「微信公众号」判断相反），标注冲突条目并给出可回溯 permalink 与 fetched_at 列表，输出一致性检查文档信封。",
+    "acceptance": [
+      "每个实体至少覆盖两个来源平台的对比",
+      "冲突条目需明确标注平台与能力项",
+      "每条冲突附 permalink 与 fetched_at 时间戳",
+      "输出文档为一致性检查信封结构",
+      "冲突判定标准可追溯并可复核"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/consistency-check-3.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "scope": "cross-source narrative consistency",
+      "conflict_dimensions": [
+        "capability_evaluation",
+        "pricing_statement",
+        "feature_availability",
+        "user_sentiment"
+      ],
+      "platform_pairs": [
+        "微博 vs 小红书",
+        "Hacker News vs 微信公众号"
+      ],
+      "traceability": {
+        "fields_required": [
+          "permalink",
+          "fetched_at",
+          "platform",
+          "entity",
+          "capability_item"
+        ]
+      },
+      "output_envelope": "consistency-check markdown with structured conflict table"
+    }
+  }
+}

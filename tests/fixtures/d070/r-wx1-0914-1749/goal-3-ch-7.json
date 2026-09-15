@@ -1,0 +1,64 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "撰写「国内用户与媒体对豆包的评价与口碑」节化文档，正文包含 摘要、使用体验总览、优点、缺点、吐槽、推荐场景、与「DeepSeek」「Kimi」「文心一言」「通义千问」的口碑对比、方法与来源说明、缺口说明 九个小节；每条论断引用清洗与交叉验证产物中的证据 permalink，名称引用一律使用中文引号「」，字符串内避免出现未转义的英文双引号。",
+    "acceptance": [
+      "输出为合法 JSON object，落盘至 goals/goal-3/report.json",
+      "正文严格包含 摘要、使用体验总览、优点、缺点、吐槽、推荐场景、口碑对比、方法与来源说明、缺口说明 九个小节且顺序一致",
+      "每一条论断均引用清洗与交叉验证产物中的证据 permalink，无裸引用与孤立结论",
+      "名称引用一律使用中文引号「」，字符串内不出现未转义的英文双引号",
+      "口碑对比小节覆盖「DeepSeek」「Kimi」「文心一言」「通义千问」四个竞品",
+      "缺口说明明确列出证据不足、样本偏差与未覆盖场景"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 9,
+    "notes": {
+      "sections": [
+        "摘要",
+        "使用体验总览",
+        "优点",
+        "缺点",
+        "吐槽",
+        "推荐场景",
+        "口碑对比",
+        "方法与来源说明",
+        "缺口说明"
+      ],
+      "primary_entity": "豆包",
+      "compared_entities": [
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "evidence_sources": [
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/cross-validation-3.json",
+        "goals/goal-3/reliability-audit-10.json",
+        "goals/goal-3/reliability-audit-11.json",
+        "goals/goal-3/data-collection-10.json",
+        "goals/goal-3/data-collection-11.json"
+      ],
+      "citation_rule": "每条论断附证据 permalink，引用清洗与交叉验证产物",
+      "quotation_rule": "名称一律使用中文引号「」，字符串避免未转义的英文双引号",
+      "positioning": "以「豆包」为主体，围绕国内用户与媒体口碑展开综合评述",
+      "pricing": "如涉及价格与订阅口碑，仅引用清洗与交叉验证证据 permalink",
+      "feature_differences": "在口碑对比小节对齐「DeepSeek」「Kimi」「文心一言」「通义千问」在功能、体验、生态维度的差异化口碑",
+      "social_proof": "以国内用户社群反馈与主流媒体评测作为社会证据来源",
+      "strengths_weaknesses": "在优点/缺点/吐槽小节分别归纳「豆包」的正负面口碑并交叉印证",
+      "gap_disclosure": "缺口说明覆盖样本偏差、时间窗、地域偏差与未覆盖场景"
+    }
+  }
+}

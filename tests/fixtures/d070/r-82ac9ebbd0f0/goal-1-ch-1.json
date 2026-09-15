@@ -1,0 +1,54 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书系统采集关于豆包（含 Doubao、豆包AI、字节豆包）的笔记、评论、话题与合集，聚焦学生、职场、创作者等群体对豆包的使用体验、功能亮点、缺点吐槽与场景案例；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "输出文件 goals/goal-1/data-collection.json 存在且顶层为 JSON 数组",
+      "每条记录必须包含 permalink 与 fetched_at 字段",
+      "覆盖笔记、评论、话题与合集四类内容",
+      "内容聚焦豆包（含 Doubao、豆包AI、字节豆包）相关关键词",
+      "覆盖学生、职场、创作者等目标群体的使用体验、功能亮点、缺点吐槽与场景案例"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "entity_aliases": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "content_types": [
+        "笔记",
+        "评论",
+        "话题",
+        "合集"
+      ],
+      "target_audiences": [
+        "学生",
+        "职场",
+        "创作者"
+      ],
+      "focus_dimensions": [
+        "使用体验",
+        "功能亮点",
+        "缺点吐槽",
+        "场景案例"
+      ],
+      "record_required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_structure": "array"
+    }
+  }
+}

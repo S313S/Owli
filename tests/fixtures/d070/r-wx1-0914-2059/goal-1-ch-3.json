@@ -1,0 +1,53 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在抖音采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的短视频、图文与评论区反馈，重点抓取用户口碑、优缺点吐槽和使用场景演示；顶层输出数组，每条含 permalink、fetched_at、作者、文案、评论摘要、点赞与转发量。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录均含 permalink、fetched_at、作者、文案、评论摘要、点赞与转发量字段",
+      "内容需来自抖音平台，且与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」直接相关",
+      "覆盖短视频、图文与评论区反馈三类形态，突出用户口碑、优缺点吐槽和使用场景演示",
+      "fetched_at 使用 ISO 8601 时间戳，permalink 为可访问的抖音原始链接",
+      "评论摘要需真实提炼评论区核心观点，不得编造，点赞与转发量需为整数"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "抖音",
+      "content_types": [
+        "短视频",
+        "图文",
+        "评论区反馈"
+      ],
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "字节豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "focus": [
+        "用户口碑",
+        "优缺点吐槽",
+        "使用场景演示"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "文案",
+        "评论摘要",
+        "点赞量",
+        "转发量"
+      ],
+      "top_level_shape": "array"
+    }
+  }
+}

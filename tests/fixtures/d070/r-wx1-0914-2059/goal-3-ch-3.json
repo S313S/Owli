@@ -1,0 +1,43 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并五路采集的原始记录，按 permalink 去重，标准化平台、发布时间、作者、正文、互动指标、情感倾向候选与场景标签候选等字段，剔除广告与无关噪声，输出清洗后的数组供下游标签与报告消费",
+    "acceptance": [
+      "输出文件 goals/goal-3/data-cleaning-3.md 存在且可读",
+      "五路采集原始记录已完整合并且按 permalink 完成去重",
+      "平台、发布时间、作者、正文、互动指标、情感倾向候选与场景标签候选等字段完成标准化",
+      "广告与无关噪声记录已剔除并留有剔除原因记录",
+      "清洗后的数组结构统一可供下游标签与报告章节直接消费"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_key": "permalink",
+      "standardized_fields": [
+        "platform",
+        "published_at",
+        "author",
+        "content",
+        "engagement_metrics",
+        "sentiment_candidates",
+        "scene_tag_candidates"
+      ],
+      "noise_filter": [
+        "advertisement",
+        "irrelevant"
+      ],
+      "downstream": [
+        "tagging",
+        "report"
+      ]
+    }
+  }
+}

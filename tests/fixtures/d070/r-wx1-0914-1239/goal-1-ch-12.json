@@ -1,0 +1,55 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      }
+    ],
+    "task": "在同市场源内并列比对 「豆包」 与 「字节跳动」 关于产品版本、用户规模、商业化路径与官方表态的说法，识别一致点、冲突点与孤证；输出节化对象，含 consistent、conflicts、single_source、gap。",
+    "acceptance": [
+      "仅使用 goal-1 采集章的输出作为输入，不引入外部路径",
+      "输出对象包含 consistent、conflicts、single_source、gap 四个节",
+      "每一致点/冲突点/孤证均标注证据来源路径与实体归属（豆包 或 字节跳动）",
+      "对四个议题（产品版本、用户规模、商业化路径、官方表态）逐项覆盖，无遗漏项进入 gap"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "consistent",
+        "conflicts",
+        "single_source",
+        "gap"
+      ],
+      "dimensions": [
+        "产品版本",
+        "用户规模",
+        "商业化路径",
+        "官方表态"
+      ],
+      "scope": "同市场源内并列比对",
+      "source_scope": "goal-1 采集章输出"
+    }
+  }
+}

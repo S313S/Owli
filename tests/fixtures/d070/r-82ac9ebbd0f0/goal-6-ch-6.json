@@ -1,0 +1,67 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "整合数据清洗、标签、交叉验证、一致性检查、可靠度审计五份产物，撰写《五款产品的横向对比与豆包定位综述》文档信封：按「能力」「体验」「生态」「口碑倾向」「用户群差异」五个维度呈现五方横向对比，并单设「豆包差异化定位」综述章节，凝练其相对「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化定位；所有引用一律使用中文引号「」并附 source_id、permalink 与 fetched_a",
+    "acceptance": [
+      "文档信封输出到 goals/goal-6/goal-6-report.json，结构包含五维度横向对比章节与「豆包差异化定位」综述章节各一节",
+      "五维度对比覆盖「能力」「体验」「生态」「口碑倾向」「用户群差异」，每一维度均并列列出豆包、DeepSeek、Kimi、文心一言、通义千问五方观点",
+      "「豆包差异化定位」章节明确凝练豆包相对 DeepSeek、Kimi、文心一言、通义千问的差异化定位并给出对比结论",
+      "所有引用一律使用中文引号「」并附 source_id、permalink 与 fetched_at 字段，且引用来源可追溯至上游五份产物",
+      "整合数据清洗、标签、交叉验证、一致性检查、可靠度审计五份上游产物，冲突与低可靠度证据在文中显式标注"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/goal-6-report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "report_sections": [
+        "能力横向对比",
+        "体验横向对比",
+        "生态横向对比",
+        "口碑倾向横向对比",
+        "用户群差异横向对比",
+        "豆包差异化定位综述"
+      ],
+      "comparison_dimensions": [
+        "能力",
+        "体验",
+        "生态",
+        "口碑倾向",
+        "用户群差异"
+      ],
+      "focal_entity": "豆包",
+      "benchmark_entities": [
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "upstream_artifacts": [
+        "goals/goal-6/data-cleaning-6.md",
+        "goals/goal-6/tagging.md",
+        "goals/goal-6/cross-validation-6.json",
+        "goals/goal-6/consistency-check-3.md",
+        "goals/goal-6/reliability-audit-44.json"
+      ],
+      "citation_rules": {
+        "quote_style": "中文引号「」",
+        "required_fields": [
+          "source_id",
+          "permalink",
+          "fetched_at"
+        ]
+      },
+      "conflict_handling": "在文中显式标注冲突结论与低可靠度证据，并注明来源可靠度评级"
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_product_profile.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "在小红书采集近 90 天与「豆包」「豆包AI」「豆包大模型」相关的普通用户笔记、评论与话题聚合，记录原文、发帖时间、点赞收藏评论量、permalink 与 fetched_at；输出顶层数组。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且每条记录字段齐全",
+      "覆盖近 90 天（相对 2026-09-14）内的小红书笔记、评论与话题聚合",
+      "关键词至少覆盖「豆包」「豆包AI」「豆包大模型」三个查询词",
+      "每条记录包含原文、发帖时间、点赞数、收藏数、评论数、permalink 与 fetched_at",
+      "仅纳入普通用户内容，排除官方账号与广告投放稿"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-16.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "xiaohongshu",
+      "time_window_days": 90,
+      "reference_date": "2026-09-14",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "content_types": [
+        "note",
+        "comment",
+        "topic_aggregation"
+      ],
+      "audience_filter": "regular_users_only",
+      "record_fields": [
+        "raw_text",
+        "posted_at",
+        "likes",
+        "collects",
+        "comments",
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "top_level_array"
+    }
+  }
+}

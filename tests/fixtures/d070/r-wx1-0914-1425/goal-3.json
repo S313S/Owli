@@ -1,0 +1,69 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "media-review-report.json",
+    "description": "汇总国内科技媒体、行业分析机构与专业评测对「豆包」能力、体验与生态的公开评论，形成主流叙事与争议点的节化文档信封，含来源指纹、观点分组与证据链。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「media-review-report.json」且顶层为 object 信封结构，包含 sections、sources、gaps 三个键。",
+    "报告 sections 至少覆盖「能力评价」「体验评价」「生态与商业化评价」「争议与批评」四个小节，每节标注支撑证据条目的 permalink。",
+    "所有采集章产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段，缺失时以结构化缺口口径在 gaps 中登记。",
+    "必采组合「微信公众号·豆包」以 agent「微信公众号数据抓取·豆包」实现，且未与上游 (source_id, entity) 组合重复。",
+    "报告中的实体表述只使用闭集叫法：豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance，未出现闭集外的别名。",
+    "上游产物 goals/goal-2/data-collection-7.json 与 goals/goal-2/data-collection-8.json 被下游节化章节以 inputs 形式消费并在证据链中引用。",
+    "JSON 字符串值内部引用名称统一使用中文引号「」，未出现未转义的英文双引号。",
+    "交叉验证章输出 object 信封，标注每条主流叙事至少两条不同来源的支撑或冲突记录。"
+  ],
+  "agents": [
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号生态检索并抓取国内科技媒体与行业评论账号对「豆包」「Doubao」「豆包AI」「豆包大模型」的评测、深度分析与观点文章，输出顶层数组，每条含 permalink、fetched_at、标题、账号名、发布时间、摘要与原文关键片段，聚焦能力、体验、生态与争议维度。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·豆包",
+      "task": "通过网页搜索抓取国内科技门户、行业分析机构、专业评测站点对「豆包」「Doubao」「豆包AI」「豆包大模型」的公开评论与榜单文章，输出顶层数组，每条含 permalink、fetched_at、站点名、标题、发布时间、观点摘要与原文关键片段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博抓取科技媒体蓝V、行业分析师与评测博主对「豆包」「Doubao」「豆包AI」「豆包大模型」的评论、长文与话题讨论，输出顶层数组，每条含 permalink、fetched_at、账号名、发布时间、正文、转评赞数据与观点标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "读取本 goal 三个采集章产物以及上游 goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json，对文本去重、剔除广告与非评论内容、标准化时间与来源字段，按能力、体验、生态、争议四类打上初步观点标签，输出节化 object 信封含 records、dedup_stats、gaps。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "基于数据清洗产物，对国内媒体与行业评论中的主流叙事（如模型能力档位、C 端体验、生态铺设、商业化路径）与争议点进行跨来源相互印证与冲突识别，每条叙事登记至少两条来源 permalink，输出节化 object 信封含 narratives、conflicts、evidence_index。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "校验清洗与交叉验证产物中实体叫法是否落在闭集「豆包、Doubao、豆包AI、豆包大模型、字节跳动、ByteDance」内，检查引号规范、permalink 与 fetched_at 完整性、上游产物引用是否到位，输出 object 信封含 issues、fixes、passed。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "综合数据清洗、交叉验证与一致性检查结果，撰写「国内媒体与行业评论对豆包的评价」节化报告，按能力评价、体验评价、生态与商业化评价、争议与批评四节组织，每节引用证据 permalink，最终输出 object 信封含 sections、sources、gaps。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

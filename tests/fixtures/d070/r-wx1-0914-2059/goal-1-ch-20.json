@@ -1,0 +1,42 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗快照、交叉验证与一致性检查结果，撰写豆包国内用户口碑评价基线报告，含优点、缺点、典型使用场景、舆情倾向分布、分源证据引用与结构化缺口口径，输出节化文档信封。",
+    "acceptance": [
+      "报告以 JSON 信封形式输出至 goals/goal-1/doubao_reputation_baseline.json，顶层字段结构完整可解析",
+      "内容分节覆盖优点、缺点、典型使用场景、舆情倾向分布、分源证据引用与结构化缺口口径六大模块",
+      "所有结论均引用清洗快照、交叉验证与一致性检查的上游产物，并保留可回溯的来源标注",
+      "舆情倾向分布给出正/中/负三档口径与样本计数说明，缺口部分明确列出未覆盖维度与原因"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/doubao_reputation_baseline.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_role": "报告章：基于上游清洗/交叉验证/一致性检查产物汇总豆包国内用户口碑基线",
+      "sections": [
+        "strengths",
+        "weaknesses",
+        "typical_use_cases",
+        "sentiment_distribution",
+        "evidence_by_source",
+        "structured_gaps"
+      ],
+      "upstream_reference": {
+        "consistency_check": "goals/goal-1/consistency-check.md",
+        "cross_validation": "goals/goal-1/cross-validation.json",
+        "data_cleaning": "goals/goal-1/data-cleaning.md"
+      },
+      "sentiment_scheme": "positive/neutral/negative 三档，附样本计数与来源分布",
+      "citation_policy": "每条结论标注证据编号与来源采集章 output.path",
+      "gap_policy": "对未覆盖维度、样本不足或冲突未解项显式标注 gap 与原因",
+      "envelope_format": "JSON 节化文档信封，键名稳定，便于下游横向比较"
+    }
+  }
+}

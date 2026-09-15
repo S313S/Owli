@@ -1,0 +1,33 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "对将被引用到横向对比结论的每一条记录评估来源可靠度，考虑平台类型、账号属性、时间新鲜度、是否为官方通稿或营销投放，给出高/中/低置信度分级及判定依据，输出可靠度审计文档信封。",
+    "acceptance": [
+      "每条记录均给出高/中/低置信度分级",
+      "判定依据涵盖平台类型、账号属性、时间新鲜度以及是否为官方通稿或营销投放",
+      "输出文件位于 goals/goal-6/reliability-audit-44.json 且结构完整"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/reliability-audit-44.json"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "scoring_dimensions": [
+        "platform_type",
+        "account_attributes",
+        "time_freshness",
+        "official_or_marketing"
+      ],
+      "confidence_levels": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "audit_scope": "所有将被横向对比结论引用的记录"
+    }
+  }
+}

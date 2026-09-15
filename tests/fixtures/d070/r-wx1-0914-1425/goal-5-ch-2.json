@@ -1,0 +1,69 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "读取 goals/goal-5/data-cleaning.json，围绕豆包与国内主流 AI 助手（如「文心一言」「通义千问」「Kimi」「DeepSeek」等）的相对定位、优势短板、差异化认知，跨源比对一致与冲突表述，标注证据链与冲突点；输出节化 object 到 goals/goal-5/cross-validation.json，包含 consensus、conflicts、evidenc",
+    "acceptance": [
+      "输出为合法 JSON object，且严格写入 goals/goal-5/cross-validation-5.json",
+      "包含 consensus、conflicts、evidence_chain 三个核心节，每条主张至少绑定 1 条源引用（source path + 片段/字段）",
+      "覆盖豆包与文心一言、通义千问、Kimi、DeepSeek 至少 4 个对照对象的相对定位比对",
+      "对每一处冲突表述标注冲突类型（定位/定价/功能/口碑/优劣势）与来源差异原因",
+      "positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五个维度均有跨源比对结论",
+      "所有引用路径必须来自全卷采集章清单原文，不得自造路径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/cross-validation-5.json"
+    },
+    "entities": [
+      "豆包",
+      "文心一言",
+      "通义千问",
+      "Kimi",
+      "DeepSeek"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "positioning": "跨源比对豆包（字节跳动，面向 C 端泛娱乐+效率场景）与文心一言（百度，搜索+知识增强）、通义千问（阿里，云与企业生态）、Kimi（月之暗面，超长上下文文档助手）、DeepSeek（深度求索，开源与推理/编码）在市场定位上的一致与分歧，标注每条定位陈述的来源与冲突证据。",
+      "pricing": "汇总各源关于豆包及对照助手的免费额度、订阅价、API 计费单位（tokens/次）等表述，识别价格口径不一致（如是否含长上下文附加费、企业版是否公开）并列出冲突点与证据链。",
+      "feature_differences": "比对模态覆盖（文本/语音/图像/视频）、上下文长度、插件/智能体、多端接入、企业 API 等功能差异，标注跨源一致项与冲突项，并给出证据引用。",
+      "social_proof": "汇总 MAU/DAU、下载量、榜单排名、媒体口碑、开发者评价等社会证据，区分官方口径与第三方口径的冲突，注明时间戳与来源。",
+      "strengths_weaknesses": "跨源提炼豆包相对国内主流 AI 助手的核心优势（生态分发、多模态、内容运营）与短板（严肃知识、专业推理、开源生态），并标注对照助手对应长短板，形成冲突/共识两清单。",
+      "conflict_tagging_rule": "每条 conflict 需带 {claim, sources[], conflict_type, likely_cause, resolution_hint} 五元组；evidence_chain 每条需带 {claim_id, source_path, snippet_or_field, extracted_at}。",
+      "upstream_reference": {
+        "data_cleaning_planned_path": "goals/goal-5/data-cleaning-5.md",
+        "task_declared_path": "goals/goal-5/data-cleaning.json",
+        "handling": "以实际存在的清洗产物为准，若两者不一致，在 conflicts 中登记为上游路径口径冲突。"
+      }
+    }
+  }
+}

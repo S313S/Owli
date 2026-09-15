@@ -1,0 +1,70 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-20.json"
+      }
+    ],
+    "task": "对清洗后的每条口碑证据在多源之间比对，判定是否存在两个及以上独立来源相互印证，识别相互矛盾的说法与仅有单源支撑的说法，输出对象含 corroborated、single_source、conflicts、entity_coverage_matrix、gap_notes 五个键，名称引用统一使用中文引号「」。",
+    "acceptance": [
+      "输出 JSON 顶层恰好包含 corroborated、single_source、conflicts、entity_coverage_matrix、gap_notes 五个键",
+      "corroborated 项须包含两个及以上独立来源的 source_id 列表，且来源不得同源重复",
+      "conflicts 项须记录对立观点、涉及来源与冲突焦点摘要",
+      "single_source 项须明确标注仅有单源支撑的原因或缺口",
+      "entity_coverage_matrix 须覆盖全部涉及实体并给出每个证据维度的来源计数",
+      "所有实体与产品名称引用统一使用中文引号「」，不得使用英文引号或裸名"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/cross-validation-3.json"
+    },
+    "entities": [
+      "豆包",
+      "Kimi",
+      "DeepSeek",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "对全卷九个采集章的清洗后口碑证据进行跨源比对",
+      "method": "以证据点为单位聚合，比对来源独立性、发布时间与观点一致性",
+      "independence_rule": "同一媒体矩阵或同一作者不同平台的多次转载视为单源",
+      "quotation_style": "所有实体与产品名称统一使用中文引号「」",
+      "output_keys": [
+        "corroborated",
+        "single_source",
+        "conflicts",
+        "entity_coverage_matrix",
+        "gap_notes"
+      ],
+      "gap_handling": "对覆盖不足或证据不平衡的实体在 gap_notes 中给出补采建议"
+    }
+  }
+}

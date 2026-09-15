@@ -1,0 +1,66 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-20.json"
+      }
+    ],
+    "task": "汇总 goal-1 至 goal-4 的全部采集产物（goals/goal-1/data-collection.json、data-collection-2.json、data-collection-3.json、data-collection-4.json，goals/goal-2/data-collection-5.json 至 data-collection-9.json，goals/goa",
+    "acceptance": [
+      "逐条覆盖全卷采集章清单中的 output.path，无遗漏与自造路径",
+      "对同一实体在不同章节的字段进行交叉核对，标记冲突与一致项",
+      "输出写入 goals/goal-5/cross-validation-5.json 且为合法 JSON",
+      "所有引用来源均可回溯到具体的 data-collection 输出路径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/cross-validation-5.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "goal-1 至 goal-5 全部采集产物的交叉校验汇总",
+      "cross_checked_fields": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "conflict_policy": "同字段跨章不一致时并列记录并标注来源 path",
+      "source_count": 9
+    }
+  }
+}

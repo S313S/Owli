@@ -1,0 +1,53 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 采集关于豆包（含 Doubao、豆包AI、字节豆包）的推文、转推、引用与话题串，聚焦技术圈、AI 研究者与海外中文用户对豆包的功能观点、模型能力评价与代表性讨论；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-collection-6.json，顶层为 JSON 数组",
+      "每条记录必须包含 permalink 与 fetched_at 字段",
+      "内容覆盖豆包、Doubao、豆包AI、字节豆包等关键词的推文、转推、引用及话题串",
+      "聚焦技术圈、AI 研究者与海外中文用户对豆包功能观点、模型能力评价及代表性讨论",
+      "permalink 指向 X 平台真实可访问链接，fetched_at 为 ISO 8601 时间戳"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-6.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 40,
+    "notes": {
+      "platform": "X (Twitter)",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "audience_focus": [
+        "技术圈",
+        "AI 研究者",
+        "海外中文用户"
+      ],
+      "content_types": [
+        "推文",
+        "转推",
+        "引用",
+        "话题串"
+      ],
+      "discussion_themes": [
+        "功能观点",
+        "模型能力评价",
+        "代表性讨论"
+      ],
+      "record_schema": {
+        "permalink": "X 平台原始链接",
+        "fetched_at": "ISO 8601 抓取时间戳"
+      },
+      "top_level_structure": "array"
+    }
+  }
+}

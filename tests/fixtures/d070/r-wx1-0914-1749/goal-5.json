@@ -1,0 +1,46 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "final-report.json",
+    "description": "国内对豆包看法的综合研判报告，围绕相对位置、主要褒贬维度、典型使用人群、未来预期四个议题给出结论与证据回溯",
+    "shape": "object"
+  },
+  "acceptance": [
+    "报告涵盖「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」五个主体的对比结论且命名严格落在闭集叫法内",
+    "结论至少回答豆包的相对位置、主要褒贬维度、典型使用人群、未来预期四个议题各一节",
+    "每条关键判断均标注可回溯的证据来源，指向 goal-1 至 goal-4 已存在的产物路径或本 goal 新增采集的条目",
+    "本 goal 新增采集 JSON 顶层为数组，且每条对象至少含 permalink 与 fetched_at 字段",
+    "引用产品或作品名称一律使用中文引号「」，JSON 字符串值内不得出现未转义英文双引号",
+    "若某一议题证据不足，以结构化缺口口径记录缺口原因与影响范围，不得虚构上游未保证的最小条数"
+  ],
+  "agents": [
+    {
+      "name": "微信公众号数据抓取·通义千问",
+      "task": "在微信公众号平台围绕本实体的闭集叫法「通义千问」「Qwen」「Tongyi Qianwen」采集近三个月的中文长文、评测与行业观察，聚焦本实体在国内 AI 助手赛道的口碑定位、用户群画像、能力评价与未来预期表述；不得在任务文本或结果字段中混入其他实体的专名；如遇与上游 goals/goal-4/data-collection-19.json 相同的 permalink 需去重合并；顶层结构为数组，每条对象至少含 permalink 与 fetched_at",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "汇总 goal-1 至 goal-4 的全部采集产物（goals/goal-1/data-collection.json、data-collection-2.json、data-collection-3.json、data-collection-4.json，goals/goal-2/data-collection-5.json 至 data-collection-9.json，goals/goal-3/data-collection-10.json 至 data-collection-13.json，goals/goal-4/data-collection-14.json 至 data-collection-19.json）与本 goal 新增的「微信公众号数据抓取·通义千问」结果，对「豆包」在五款产品中的相对位置、褒贬维度、使用人群与未来预期的关键判断进行多源交叉核对，产出源覆盖矩阵，逐条标注一致证据、冲突证据与孤证，并给出可信度分级",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "对交叉验证的结论草稿进行内部一致性审计，检查判断之间是否存在逻辑冲突、口径不统一或与产品画像相悖，核验主体命名是否严格落在闭集叫法之内，核验中文引号「」使用与英文双引号转义是否合规，输出需修订项与修订建议",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于交叉验证与一致性检查产物撰写《国内对豆包看法的综合研判》最终报告，按相对位置、主要褒贬维度、典型使用人群、未来预期四节组织，并附总体结论与证据回溯清单；所有引用名称统一使用中文引号「」；以节化文档信封形式的对象输出",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

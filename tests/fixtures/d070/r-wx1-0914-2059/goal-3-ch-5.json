@@ -1,0 +1,41 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "整合清洗结果与标签聚合，撰写节化文档信封形的国内用户对 Kimi 口碑与评价报告，含长文本能力口碑、使用场景反馈、舆情标签总结、证据引用与数据缺口说明，输出 object",
+    "acceptance": [
+      "输出为 JSON object，采用节化文档信封形结构",
+      "覆盖长文本能力口碑、使用场景反馈、舆情标签总结四大主题",
+      "关键结论均附来源证据引用（可回溯到 data-collection-14 与 reliability-audit-14）",
+      "包含数据缺口/局限性说明章节",
+      "文件写入 goals/goal-3/kimi-reputation-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/kimi-reputation-report.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "format": "sectioned_document_envelope",
+      "sections": [
+        "long_context_reputation",
+        "use_case_feedback",
+        "sentiment_tag_summary",
+        "evidence_citations",
+        "data_gaps"
+      ],
+      "upstream_sources": [
+        "goals/goal-3/tagging.md",
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/reliability-audit-14.json",
+        "goals/goal-3/data-collection-14.json"
+      ],
+      "citation_required": true,
+      "language": "zh-CN"
+    }
+  }
+}

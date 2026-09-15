@@ -1,0 +1,55 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博采集关于豆包（含 Doubao、豆包AI、字节豆包）的博文、转评赞、话题与热搜条目，聚焦大众用户与 KOL 对豆包的使用观点、功能评价与舆论事件；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-collection-3.json 且顶层为 JSON 数组",
+      "每条记录必须包含 permalink 与 fetched_at 字段",
+      "内容围绕豆包（含 Doubao、豆包AI、字节豆包）关键词，覆盖博文、转评赞、话题与热搜条目",
+      "记录须体现大众用户与 KOL 的使用观点、功能评价或舆论事件",
+      "permalink 为可访问的微博原始链接，fetched_at 采用 ISO 8601 时间戳"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微博",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "content_types": [
+        "博文",
+        "转发",
+        "评论",
+        "点赞数",
+        "话题",
+        "热搜条目"
+      ],
+      "audience_focus": [
+        "大众用户",
+        "KOL"
+      ],
+      "aspects": [
+        "使用观点",
+        "功能评价",
+        "舆论事件"
+      ],
+      "record_required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_structure": "array",
+      "fetched_at_format": "ISO 8601"
+    }
+  }
+}

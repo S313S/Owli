@@ -1,0 +1,36 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "编写「Kimi 的国内口碑与用户评价采集」节化文档，包含正面评价、负面吐槽、长文本能力代表性观点、典型使用场景、媒体定性、以及可供与其它四款产品对比时复用的素材切片；引用名称统一使用「」，输出为节化文档信封 object。",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/goal-3-kimi-reputation.json，为节化文档信封 object",
+      "文档包含正面评价、负面吐槽、长文本能力代表性观点、典型使用场景、媒体定性等章节",
+      "提供可供与其它四款产品对比时复用的素材切片",
+      "所有产品与品牌引用名称统一使用「」包裹",
+      "仅围绕「Kimi」一个实体展开，不混入其它竞品的评价"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/goal-3-kimi-reputation.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "doc_type": "sectioned_document_envelope",
+      "sections": [
+        "正面评价",
+        "负面吐槽",
+        "长文本能力代表性观点",
+        "典型使用场景",
+        "媒体定性",
+        "对比复用素材切片"
+      ],
+      "quote_style": "「」",
+      "reusable_for_comparison": true
+    }
+  }
+}

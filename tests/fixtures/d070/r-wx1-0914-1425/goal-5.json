@@ -1,0 +1,57 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-5-report.json",
+    "description": "豆包在国内 AI 助手竞争格局中的定位分析节化报告（信封形 object），综合产品事实、媒体评价与用户口碑，输出豆包与国内主流 AI 助手在国内舆论中的相对定位、差异化认知与结构化缺口说明。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "产物文件位于 goals/goal-5/goal-5-report.json，顶层为 object，包含 meta、sections、citations、gaps 四个键",
+    "sections 至少覆盖「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四个小节，且每一小节都标注引用来源路径",
+    "citations 引用清单必须包含上游 14 条 output.path 与本 goal 新增 2 条采集 output.path，共计 16 条不重复条目",
+    "新增采集章的 (source_id, entity) 组合仅为「reddit·字节跳动」「x·字节跳动」，与上游 14 条 (source_id, entity) 组合无重复",
+    "采集章 source_id 全部来自 applicable_sources 闭集 douyin/hacker_news/product_hunt/reddit/web_search/wechat_mp/weibo/x/xhs",
+    "每份新增采集 JSON 顶层为数组，且每条记录含 permalink 与 fetched_at 字段",
+    "采集章任务文本涉及研究对象时仅使用本实体叫法闭集：字节跳动→字节跳动、ByteDance；不得混入豆包的叫法",
+    "报告与中间产物中所有引用名称一律使用中文引号「」，JSON 字符串值内部不出现未转义英文双引号",
+    "当某一维度的数据不足以支撑结论时，在 gaps 小节以结构化缺口口径记录（source_id、entity、缺口描述），不写死上游无法保证的实体最小条数",
+    "交叉验证与报告撰写章 output.shape 均为 object，与 deliverable.shape 保持一致的节化文档信封形"
+  ],
+  "agents": [
+    {
+      "name": "Reddit·字节跳动",
+      "task": "在 Reddit 抓取近 90 天内涉及「字节跳动」或「ByteDance」在 AI 助手竞争格局中的讨论帖与高赞评论，聚焦其与豆包关系及国内 AI 助手相对定位的表述；输出顶层数组，每条含 permalink、fetched_at、subreddit、title、text、score 等字段，保存为 goals/goal-5/data-collection-15.json。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X·字节跳动",
+      "task": "在 X 平台抓取近 90 天内涉及「字节跳动」或「ByteDance」与国内 AI 助手竞争格局讨论的推文及主回复，重点覆盖对豆包定位、市场份额与差异化的评价；输出顶层数组，每条含 permalink、fetched_at、author、text、metrics 等字段，保存为 goals/goal-5/data-collection-16.json。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "消费 inputs=[goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-2/data-collection-6.json、goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json、goals/goal-3/data-collection-9.json、goals/goal-3/data-collection-10.json、goals/goal-3/data-collection-11.json、goals/goal-4/data-collection-12.json、goals/goal-4/data-collection-13.json、goals/goal-4/data-collection-14.json、goals/goal-5/data-collection-15.json、goals/goal-5/data-collection-16.json]，按实体（「豆包」「字节跳动」）与来源分桶，做字段对齐、去重、语种标注、情感倾向粗标，输出节化 object 到 goals/goal-5/data-cleaning.json，包含 by_entity、by_source、dedup_stats、field_alignment 四个键。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "读取 goals/goal-5/data-cleaning.json，围绕豆包与国内主流 AI 助手（如「文心一言」「通义千问」「Kimi」「DeepSeek」等）的相对定位、优势短板、差异化认知，跨源比对一致与冲突表述，标注证据链与冲突点；输出节化 object 到 goals/goal-5/cross-validation.json，包含 consensus、conflicts、evidence_map、confidence 四个键，所有引用名称使用中文「」引号。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "读取 goals/goal-5/data-cleaning.json 与 goals/goal-5/cross-validation.json，撰写节化文档信封形报告到 goals/goal-5/goal-5-report.json，顶层 object 包含 meta、sections、citations、gaps；sections 至少含「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四小节；citations 必须列出全部 16 条上下游 output.path；数据不足处于 gaps 以 (source_id、entity、缺口描述) 结构记录；所有引用名称使用中文「」引号，字符串内不得出现未转义英文双引号。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

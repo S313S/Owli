@@ -1,0 +1,38 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 五个采集数组进行去重、去广告、正文清洗、时间字段归一，输出统一 schema 的证据集合，标注每条证据的 source_id、entity=「通义千问」、原始 permalink 与清洗后文本。",
+    "acceptance": [
+      "输出文件 goals/goal-5/data-cleaning-5.md 存在且证据集合遵循统一 schema",
+      "每条证据均包含 source_id、entity=「通义千问」、原始 permalink 与清洗后文本四个字段",
+      "完成基于 permalink 与正文指纹的去重，去除广告样式与模板文案",
+      "时间字段统一归一为 ISO 8601（UTC）格式",
+      "清洗后正文剥离 HTML/Markdown 噪声并保留可用语义"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-cleaning-5.md"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity": "通义千问",
+      "schema_fields": [
+        "source_id",
+        "entity",
+        "permalink",
+        "cleaned_text",
+        "published_at"
+      ],
+      "dedup_strategy": "permalink + 正文 SimHash 指纹双重去重",
+      "ad_filter": "去除广告标语、推广模板、联系方式与二维码占位",
+      "text_cleaning": "剥离 HTML/Markdown 噪声、统一空白与标点、保留语义段落",
+      "time_normalization": "所有时间字段统一为 ISO 8601 (UTC)",
+      "source_scope": "本 goal 采集章 data-collection-24 的五个采集数组"
+    }
+  }
+}

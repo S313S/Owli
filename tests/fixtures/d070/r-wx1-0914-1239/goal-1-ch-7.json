@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News Algolia 使用查询词 「Doubao」「豆包」，固定参数 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，采集 story 与 comment；输出 JSON 数组，每条含 permalink、fetched_at、objectID、created_at_i、points、num_comm",
+    "acceptance": [
+      "输出文件 goals/goal-1/data-collection-4.json 存在且为 JSON 数组",
+      "每条记录包含 permalink、fetched_at、objectID、created_at_i、points、num_comm 字段",
+      "查询词覆盖「Doubao」「豆包」两组关键词",
+      "固定参数 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 生效",
+      "同时采集 story 与 comment 两类命中"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Hacker News Algolia Search API",
+      "queries": [
+        "Doubao",
+        "豆包"
+      ],
+      "params": {
+        "created_at_i_gt": "执行时点UTC epoch-7776000",
+        "points_gt": 50,
+        "hitsPerPage": 1000
+      },
+      "hit_types": [
+        "story",
+        "comment"
+      ],
+      "fields": [
+        "permalink",
+        "fetched_at",
+        "objectID",
+        "created_at_i",
+        "points",
+        "num_comm"
+      ]
+    }
+  }
+}

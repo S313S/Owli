@@ -1,0 +1,46 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内检索「通义千问」「Qwen」「Tongyi Qianwen」相关笔记与评论，覆盖使用体验、开源版本反馈、办公与学习场景口碑；输出顶层数组，每条含 permalink、fetched_at、author、posted_at、text、engagement 等字段，噪声与广告条目单列 is_ad 标记。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且写入 goals/goal-5/data-collection-24.json",
+      "每条记录包含 permalink、fetched_at、author、posted_at、text、engagement 字段",
+      "覆盖「通义千问」「Qwen」「Tongyi Qianwen」三个关键词的检索结果",
+      "涵盖使用体验、开源版本反馈、办公与学习场景口碑三类语料",
+      "噪声与广告条目通过 is_ad 布尔字段单列标记"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-collection-24.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "xiaohongshu",
+      "keywords": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen"
+      ],
+      "coverage": [
+        "使用体验",
+        "开源版本反馈",
+        "办公与学习场景口碑"
+      ],
+      "ad_flag_field": "is_ad",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "posted_at",
+        "text",
+        "engagement",
+        "is_ad"
+      ]
+    }
+  }
+}

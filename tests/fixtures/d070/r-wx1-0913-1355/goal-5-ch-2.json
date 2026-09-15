@@ -1,0 +1,54 @@
+{
+  "chapter_type": "tagging",
+  "opening": {
+    "inputs": [],
+    "task": "对数据清洗输出逐条打维度标签：产品力、增长、商业模式、与「字节跳动」体系协同、竞争位次（对标「DeepSeek」与「Kimi」）；同时标注情感倾向（正面/中性/负面）与来源类型（科技媒体/行业分析师/KOL），并回填原始 permalink",
+    "acceptance": [
+      "每条记录均带有产品力/增长/商业模式/协同/竞争位次五个维度标签",
+      "情感倾向仅取 正面/中性/负面 三值之一",
+      "来源类型仅取 科技媒体/行业分析师/KOL 三值之一",
+      "原始 permalink 字段完整回填且可访问",
+      "输出写入 goals/goal-5/tagging-2.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/tagging-2.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动",
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "产品力",
+        "增长",
+        "商业模式",
+        "与字节跳动体系协同",
+        "竞争位次"
+      ],
+      "sentiment_labels": [
+        "正面",
+        "中性",
+        "负面"
+      ],
+      "source_types": [
+        "科技媒体",
+        "行业分析师",
+        "KOL"
+      ],
+      "benchmarks": [
+        "DeepSeek",
+        "Kimi"
+      ],
+      "permalink_backfill": true,
+      "upstream": {
+        "agent_id": "data-cleaning-5",
+        "path": "goals/goal-5/data-cleaning-5.md"
+      }
+    }
+  }
+}

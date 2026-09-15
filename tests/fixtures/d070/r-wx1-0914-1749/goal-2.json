@@ -1,0 +1,82 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-2-report.json",
+    "description": "四款对标产品（DeepSeek、Kimi、文心一言、通义千问）与豆包的产品画像与国内定位对照基线报告，逐个采集产品定位、能力侧重、母公司背景、上线节奏与国内市场差异化卖点，输出节化文档信封形对象。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "报告 JSON 顶层为 object，且包含「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」五个实体的画像小节。",
+    "每个实体画像小节均覆盖产品定位、能力侧重、母公司背景、上线节奏、国内差异化卖点五个字段，缺失时以结构化缺口口径标注。",
+    "所有采集类 agent 的输出 JSON 顶层为数组，且每条记录包含 permalink 与 fetched_at 字段。",
+    "必采清单两条「微博数据抓取·DeepSeek」与「X 数据抓取·豆包」均已产出对应 array 文件。",
+    "本 goal 内新增采集章的 source_id 与 entity 组合，与上游 goal-1 已采集组合及本 goal 内其他章均不重复。",
+    "交叉验证章对来自不同源、不同实体的关键事实条目给出一致或冲突的结论，冲突处附结构化缺口口径。",
+    "报告撰写章引用的所有事实条目均可回溯到本 goal 采集数组或上游 goal-1 的四个产物路径之一。"
+  ],
+  "agents": [
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博平台抓取围绕「深度求索、DeepSeek、DeepSeek-V3、DeepSeek-R1」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开博文与讨论，输出数组，每条含 permalink、fetched_at 及原文摘要字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·豆包",
+      "task": "在 X 平台抓取围绕「豆包、Doubao、豆包AI、字节豆包」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开推文与讨论，输出数组，每条含 permalink、fetched_at 及原文摘要字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "通过网页搜索汇集关于「Kimi智能助手、Kimi、Kimi Chat、kimi、月之暗面Kimi、MoonshotAI Kimi」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开资料，输出数组，每条含 permalink、fetched_at 及标题摘要字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·文心一言",
+      "task": "通过网页搜索汇集关于「文心一言、ERNIE Bot、百度文心、文心大模型」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开资料，输出数组，每条含 permalink、fetched_at 及标题摘要字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·通义千问",
+      "task": "通过网页搜索汇集关于「通义千问、Qwen、Tongyi Qianwen」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开资料，输出数组，每条含 permalink、fetched_at 及标题摘要字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 五条采集数组以及上游产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 进行去重、字段规范化与实体归属校验，按豆包、DeepSeek、Kimi、文心一言、通义千问五实体分组输出统一结构。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "校验清洗后各实体在产品定位、能力侧重、母公司背景、上线节奏、差异化卖点五个字段上的表述是否内部一致，对同实体多源分歧标注冲突或结构化缺口口径。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨源交叉比对豆包、DeepSeek、Kimi、文心一言、通义千问的关键事实条目，对分歧点给出裁决或结构化缺口口径，并记录支撑证据来源路径。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "汇总清洗、一致性检查与交叉验证结论，生成五个实体的画像小节与对照基线正文，覆盖产品定位、能力侧重、母公司背景、上线节奏、国内差异化卖点，形成节化文档信封形对象。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

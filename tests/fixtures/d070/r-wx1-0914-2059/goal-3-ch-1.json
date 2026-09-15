@@ -1,0 +1,53 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书检索并采集国内用户关于「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」的笔记、评论与话题聚合，覆盖长文本阅读、论文速读、职场办公与学习场景反馈，输出数组，每条含 permalink、fetched_at 及原文正文与互动指标",
+    "acceptance": [
+      "输出为数组，且每条记录均包含 permalink、fetched_at、正文与互动指标（点赞/收藏/评论/分享等）字段",
+      "关键词检索覆盖「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面Kimi」「Kimi.ai」五个别名，且笔记来源均为小红书国内用户",
+      "样本内容需覆盖长文本阅读、论文速读、职场办公与学习四类场景反馈，缺失场景需在 notes 中说明",
+      "permalink 可访问且指向小红书原始笔记或评论，fetched_at 使用 ISO 8601 时间戳",
+      "输出文件写入 goals/goal-3/data-collection-14.json，UTF-8 编码，JSON 结构合法"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-14.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "Kimi",
+        "Kimi智能助手",
+        "Kimi Chat",
+        "月之暗面Kimi",
+        "Kimi.ai"
+      ],
+      "scenarios": [
+        "长文本阅读",
+        "论文速读",
+        "职场办公",
+        "学习"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "content",
+        "interaction_metrics"
+      ],
+      "interaction_metrics": [
+        "likes",
+        "collects",
+        "comments",
+        "shares"
+      ],
+      "language": "zh-CN",
+      "collection_date": "2026-09-14"
+    }
+  }
+}

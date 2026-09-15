@@ -1,0 +1,66 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "核对本 goal 采集章与所消费上游产物的合规性：实体叫法是否落在叫法闭集内、permalink 与 fetched_at 是否齐备、来源与市场归属是否符合 cn_product 覆盖表、是否存在跨实体叫法混写、是否有采集章重复了清单或上游 (source_id, entity) 组合；输出问题清单、合规摘要、阻断项与缓解建议的节化文档。",
+    "acceptance": [
+      "输出 goals/goal-3/consistency-check-2.md，并以节化结构组织：问题清单、合规摘要、阻断项、缓解建议。",
+      "逐条核对 data-collection-21/22/23/24 的实体叫法是否落在叫法闭集内（豆包），并列出偏差记录。",
+      "逐条核对 permalink 与 fetched_at 字段是否齐备，缺失项在问题清单中标注 source_id 与条目定位。",
+      "校验来源与市场归属符合 cn_product 覆盖表，跨市场或超出覆盖表的来源需给出阻断判定。",
+      "检测是否存在跨实体叫法混写（如豆包与其他叫法混用）并列出证据。",
+      "检测本 goal 内采集章是否重复了清单或上游 (source_id, entity) 组合，重复项在问题清单中标注。",
+      "对每一条问题给出阻断/非阻断判定与缓解建议，阻断项需可追溯到具体上游产物。"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/consistency-check-2.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "goal_id": "goal-3",
+      "scope": "audit_goal3_collection_vs_upstream",
+      "naming_closed_set": [
+        "豆包"
+      ],
+      "cn_product_coverage_ref": "cn_product 覆盖表",
+      "collection_chapters_under_audit": [
+        "goals/goal-3/data-collection-21.json",
+        "goals/goal-3/data-collection-22.json",
+        "goals/goal-3/data-collection-23.json",
+        "goals/goal-3/data-collection-24.json"
+      ],
+      "upstream_artifacts_under_audit": [
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/reliability-audit-25.json",
+        "goals/goal-3/reliability-audit-24.json",
+        "goals/goal-3/reliability-audit-23.json",
+        "goals/goal-3/reliability-audit-22.json"
+      ],
+      "checks": [
+        "naming_in_closed_set",
+        "permalink_present",
+        "fetched_at_present",
+        "source_market_matches_cn_product_coverage",
+        "no_cross_entity_naming_mix",
+        "no_duplicate_source_id_entity_pair"
+      ],
+      "sections": [
+        "问题清单",
+        "合规摘要",
+        "阻断项",
+        "缓解建议"
+      ],
+      "severity_levels": [
+        "blocker",
+        "warning",
+        "info"
+      ],
+      "derived_from": "plan"
+    }
+  }
+}

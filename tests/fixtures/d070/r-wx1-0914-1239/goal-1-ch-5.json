@@ -1,0 +1,49 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 平台采集提及 「豆包」「Doubao」「豆包AI」「豆包大模型」 的推文与转评，覆盖产品发布、版本迭代、商业化与用户规模讨论；输出 JSON 数组，每条含 permalink、fetched_at、author_handle、posted_at、text、like_count、repost_count、reply_count。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条包含 permalink、fetched_at、author_handle、posted_at、text、like_count、repost_count、reply_count 全部字段",
+      "推文内容须提及「豆包」「Doubao」「豆包AI」「豆包大模型」之一，且主题覆盖产品发布、版本迭代、商业化与用户规模讨论",
+      "所有 permalink 唯一且指向 X 平台真实推文",
+      "fetched_at 与 posted_at 使用 ISO 8601 时间格式",
+      "结果写入 goals/goal-1/data-collection-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "X",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "topics": [
+        "产品发布",
+        "版本迭代",
+        "商业化",
+        "用户规模讨论"
+      ],
+      "fields": [
+        "permalink",
+        "fetched_at",
+        "author_handle",
+        "posted_at",
+        "text",
+        "like_count",
+        "repost_count",
+        "reply_count"
+      ],
+      "output_format": "JSON array"
+    }
+  }
+}

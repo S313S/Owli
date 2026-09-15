@@ -1,0 +1,87 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-5-report.json",
+    "description": "通义千问国内用户口碑与评价的证据集合与结构化研究报告，涵盖小红书、微博、微信公众号、抖音、网页搜索五源证据，含开源版本反馈、使用场景口碑与缺口说明。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「goal-5-report.json」，且顶层为 object 节化文档信封。",
+    "必采清单硬性满足：至少存在一个名为「小红书数据抓取·通义千问」的采集 agent，其 output.shape=array。",
+    "所有采集 agent 的 task 文本中出现的通义千问指称仅限于「通义千问」「Qwen」「Tongyi Qianwen」，不得出现其他四个实体的任何叫法。",
+    "所有采集 agent 的 source_id 均落在 applicable_sources={douyin, hacker_news, product_hunt, reddit, web_search, wechat_mp, weibo, x, xhs} 之内。",
+    "本 goal 内不出现与必采清单及上游已采集 (source_id, entity) 组合重复的采集章；同一 (source_id, entity) 至多一次采集。",
+    "采集 JSON 顶层为数组，每条记录含「permalink」与「fetched_at」字段。",
+    "JSON 字符串值内部未出现未转义的英文双引号，引用名称统一使用中文引号「」。",
+    "非采集 agent 的 name 严格取自职能闭集：数据清洗、一致性检查、交叉验证、报告撰写。",
+    "采集 agent 的 name 使用「注册表原名·通义千问」结构化格式，逐字对应注册表源名。",
+    "数据不足时以结构化缺口口径记录，不写死实体最小条数。",
+    "agents 每项仅含 name、task、output，且 output 仅含 shape 字段（object 或 array）。",
+    "报告撰写、交叉验证、一致性检查等汇总章 output.shape 一律为 object。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·通义千问",
+      "task": "在小红书站内检索「通义千问」「Qwen」「Tongyi Qianwen」相关笔记与评论，覆盖使用体验、开源版本反馈、办公与学习场景口碑；输出顶层数组，每条含 permalink、fetched_at、author、posted_at、text、engagement 等字段，噪声与广告条目单列 is_ad 标记。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·通义千问",
+      "task": "在微博检索「通义千问」「Qwen」「Tongyi Qianwen」相关博文、话题与热评，聚焦国内用户口碑、版本更新讨论与开源生态反馈；顶层数组，每条含 permalink、fetched_at、author、posted_at、text、repost/comment/like 计数。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·通义千问",
+      "task": "抓取微信公众号中关于「通义千问」「Qwen」「Tongyi Qianwen」的深度评测、企业落地案例与开发者使用心得；顶层数组，每条含 permalink、fetched_at、account、posted_at、title、read/like 计数与正文摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·通义千问",
+      "task": "在抖音检索「通义千问」「Qwen」「Tongyi Qianwen」相关短视频与评论区口碑，覆盖 C 端使用演示与吐槽；顶层数组，每条含 permalink、fetched_at、author、posted_at、caption、like/comment/share 计数。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·通义千问",
+      "task": "通过网页搜索汇集「通义千问」「Qwen」「Tongyi Qianwen」的中文媒体评测、开发者社区帖、开源仓库讨论与用户问答；顶层数组，每条含 permalink、fetched_at、source_domain、title、snippet、published_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 五个采集数组进行去重、去广告、正文清洗、时间字段归一，输出统一 schema 的证据集合，标注每条证据的 source_id、entity=「通义千问」、原始 permalink 与清洗后文本。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "校验各采集章 permalink/fetched_at 完备性、task 文本别名闭集合规、(source_id, entity) 组合与上游及必采清单的不重复性，产出检查结论与问题清单。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨小红书、微博、微信公众号、抖音、网页搜索五源比对「通义千问」「Qwen」「Tongyi Qianwen」的口碑主题（开源反馈、企业落地、C 端体验、价格与生态），标注一致证据、冲突证据与结构化缺口。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗、一致性与交叉验证结果，撰写通义千问国内用户口碑与开源反馈章节化报告，包含证据引用（中文引号「」包裹的 permalink 与摘录）、场景口碑分布、争议点与缺口口径，形成 goal-5 侧证据产物。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

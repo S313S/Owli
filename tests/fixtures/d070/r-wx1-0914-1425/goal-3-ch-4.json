@@ -1,0 +1,71 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "基于数据清洗产物，对国内媒体与行业评论中的主流叙事（如模型能力档位、C 端体验、生态铺设、商业化路径）与争议点进行跨来源相互印证与冲突识别，每条叙事登记至少两条来源 permalink，输出节化 object 信封含 narratives、conflicts、evidence_index。",
+    "acceptance": [
+      "输出为节化 object 信封，顶层包含 narratives、conflicts、evidence_index 三个字段",
+      "narratives 覆盖模型能力档位、C 端体验、生态铺设、商业化路径等主流叙事维度",
+      "每条 narrative 至少登记两条不同来源的 permalink 作为相互印证证据",
+      "conflicts 明确列出跨来源在同一议题上的冲突陈述，并给出对应 permalink",
+      "evidence_index 为 permalink 到来源元数据的可回溯索引，覆盖所有引用证据",
+      "输出文件写入 goals/goal-3/cross-validation-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/cross-validation-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "envelope": "object",
+      "top_level_keys": [
+        "narratives",
+        "conflicts",
+        "evidence_index"
+      ],
+      "min_sources_per_narrative": 2,
+      "narrative_dimensions": [
+        "模型能力档位",
+        "C端体验",
+        "生态铺设",
+        "商业化路径"
+      ],
+      "evidence_field": "permalink",
+      "cross_source_required": true,
+      "conflict_registration": "同议题冲突陈述需成对登记并保留 permalink",
+      "source_scope": "国内媒体与行业评论"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取本 goal 的六个采集产物以及需要复用的上游产物 goals/goal-1/data-collection-7.json、goals/goal-2/data-collection-9.json、goals/goal-2/data-collection-10.json、goals/goal-2/data-collection-11.json、goals/goal-2/data-collecti",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/data-cleaning-3.md",
+      "六个本 goal 采集产物与上游复用产物均被读取并进行字段级归一化",
+      "字段清洗规则、缺失值处理与冲突解决过程在 md 中显式记录",
+      "清洗后的实体、指标口径与上游 goal-1/goal-2 保持一致可比",
+      "所有引用的上游 output.path 与全卷采集章清单一致，未自造路径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_role": "对本 goal 采集产物及上游复用产物进行统一清洗与口径对齐",
+      "cleaning_scope": [
+        "字段命名归一化",
+        "数值单位与货币口径统一",
+        "缺失值与占位符处理",
+        "重复条目去重",
+        "跨来源冲突解决"
+      ],
+      "upstream_reuse": [
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-2/data-collection-9.json",
+        "goals/goal-2/data-collection-10.json",
+        "goals/goal-2/data-collection-11.json",
+        "goals/goal-2/data-collection-12.json"
+      ],
+      "local_inputs": [
+        "goals/goal-3/data-collection-21.json",
+        "goals/goal-3/data-collection-22.json",
+        "goals/goal-3/data-collection-23.json",
+        "goals/goal-3/data-collection-24.json"
+      ],
+      "output_format": "markdown"
+    }
+  }
+}

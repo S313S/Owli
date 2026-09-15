@@ -1,0 +1,100 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_product_profile.json"
+      },
+      {
+        "path": "goals/goal-2/bytedance-doubao-strategy.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      }
+    ],
+    "task": "在微信公众号生态检索并抓取国内科技媒体与行业评论账号对「豆包」「Doubao」「豆包AI」「豆包大模型」的评测、深度分析与观点文章，输出顶层数组，每条含 permalink、fetched_at、标题、账号名、发布时间、摘要与原文关键片段，聚焦能力、体验、生态与争议维度。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且路径为 goals/goal-3/data-collection-13.json",
+      "每条记录包含 permalink、fetched_at、标题、账号名、发布时间、摘要与原文关键片段等必填字段",
+      "内容来源为微信公众号平台，账号类型覆盖国内科技媒体与行业评论账号",
+      "文章围绕「豆包」「Doubao」「豆包AI」「豆包大模型」展开，且属于评测、深度分析或观点类型",
+      "关键片段能够体现能力、体验、生态与争议四个维度中的至少一个"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-13.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "微信公众号",
+      "source_types": [
+        "国内科技媒体",
+        "行业评论账号"
+      ],
+      "content_types": [
+        "评测",
+        "深度分析",
+        "观点文章"
+      ],
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "focus_dimensions": [
+        "能力",
+        "体验",
+        "生态",
+        "争议"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "标题",
+        "账号名",
+        "发布时间",
+        "摘要",
+        "原文关键片段"
+      ],
+      "output_shape": "顶层 JSON 数组"
+    }
+  }
+}

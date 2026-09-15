@@ -1,0 +1,19 @@
+{
+  "canonical": "字节跳动",
+  "names": {
+    "zh": "字节跳动",
+    "en": "ByteDance",
+    "aliases": [
+      "ByteDance",
+      "字节",
+      "bytedance",
+      "跳动"
+    ]
+  },
+  "official_handles": {
+    "weibo": "字节跳动",
+    "wechat_mp": "字节跳动"
+  },
+  "same_product": true,
+  "note": "字节跳动是一家中国互联网科技公司，旗下拥有抖音、TikTok、今日头条、豆包等多款产品；此处研究对象为公司本身而非其单一产品。"
+}

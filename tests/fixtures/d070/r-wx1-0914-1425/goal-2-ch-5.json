@@ -1,0 +1,41 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合清洗结果与交叉验证结论，撰写覆盖组织架构、投入规模、商业化布局、对外表态四个小节的字节跳动对豆包战略与资源投入报告对象，附引用列表与缺口说明。",
+    "acceptance": [
+      "报告包含组织架构、投入规模、商业化布局、对外表态四个小节",
+      "每个结论均附引用来源",
+      "明确列出信息缺口与不确定性",
+      "结论与清洗结果及交叉验证结论保持一致",
+      "输出为结构化 JSON 对象且路径正确"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/bytedance-doubao-strategy.json"
+    },
+    "entities": [
+      "字节跳动",
+      "豆包"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "sections": [
+        "组织架构",
+        "投入规模",
+        "商业化布局",
+        "对外表态"
+      ],
+      "upstream_sources": [
+        "goals/goal-2/cross-validation-2.json",
+        "goals/goal-2/data-cleaning-2.md",
+        "goals/goal-2/reliability-audit-9.json",
+        "goals/goal-2/data-collection-9.json"
+      ],
+      "includes_citations": true,
+      "includes_gap_notes": true,
+      "output_format": "json"
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-5/data-cleaning.json"
+      },
+      {
+        "path": "goals/goal-5/cross-validation.json"
+      },
+      {
+        "path": "goals/goal-3/media-review-report.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      }
+    ],
+    "task": "读取 goals/goal-5/data-cleaning.json 与 goals/goal-5/cross-validation.json，撰写节化文档信封形报告到 goals/goal-5/goal-5-report.json，顶层 object 包含 meta、sections、citations、gaps；sections 至少含「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四小",
+    "acceptance": [
+      "输出文件 goals/goal-5/goal-5-report.json 为合法 JSON object",
+      "顶层 object 必须包含 meta、sections、citations、gaps 四个字段",
+      "sections 至少包含「产品事实」「媒体评价」「用户口碑」「竞争定位差异化」四个小节",
+      "每个 section 中的关键陈述均在 citations 中给出来源引用",
+      "gaps 字段列举清洗与交叉校验后仍未闭合的信息缺口"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/goal-5-report.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "report_shape": "envelope",
+      "top_level_keys": [
+        "meta",
+        "sections",
+        "citations",
+        "gaps"
+      ],
+      "required_sections": [
+        "产品事实",
+        "媒体评价",
+        "用户口碑",
+        "竞争定位差异化"
+      ],
+      "upstream_sources": [
+        "goals/goal-5/data-cleaning.json",
+        "goals/goal-5/cross-validation.json",
+        "goals/goal-3/media-review-report.json",
+        "goals/goal-4/goal-4-report.json"
+      ],
+      "positioning": "以「产品事实」小节承载豆包官方定位与核心场景描述，并对齐字节跳动母公司定位",
+      "pricing": "在「产品事实」与「竞争定位差异化」小节中说明豆包的定价/免费策略，若清洗数据不足则登记至 gaps",
+      "feature_differences": "「竞争定位差异化」小节需列出豆包与主要竞品在模型能力、多模态、生态整合等方面的差异",
+      "social_proof": "「媒体评价」与「用户口碑」小节汇总来自 goal-3 媒体评审与 goal-4 用户反馈的引用，附 citations",
+      "strengths_weaknesses": "「竞争定位差异化」小节综合媒体与用户信号总结豆包的优势与劣势，未覆盖项写入 gaps",
+      "citation_policy": "所有关键陈述均须回引 data-cleaning/cross-validation/上游报告中的记录 id 或 URL",
+      "gap_policy": "cross-validation 中未闭合冲突与缺失字段必须在 gaps 中显式登记"
+    }
+  }
+}

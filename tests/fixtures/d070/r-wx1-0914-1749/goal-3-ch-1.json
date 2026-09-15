@@ -1,0 +1,71 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/goal1_doubao_product_profile.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      }
+    ],
+    "task": "通过网页搜索检索国内媒体、评测站与内容社区关于「Kimi」「Kimi智能助手」「Kimi Chat」「kimi」「月之暗面Kimi」「MoonshotAI Kimi」的使用体验、优缺点、吐槽与推荐场景类文章与讨论，聚焦国内 cn_product 语境；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、title、snippet、source_site、publis",
+    "acceptance": [
+      "输出文件为顶层数组的 JSON，位于 goals/goal-3/data-collection-10.json",
+      "每条记录包含 permalink、fetched_at、title、snippet、source_site、publish 等字段",
+      "检索关键词覆盖「Kimi」「Kimi智能助手」「Kimi Chat」「kimi」「月之暗面Kimi」「MoonshotAI Kimi」",
+      "内容聚焦国内 cn_product 语境，来源为国内媒体、评测站与内容社区",
+      "记录内容涵盖使用体验、优缺点、吐槽与推荐场景"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-10.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "language": "zh-CN",
+      "context": "cn_product",
+      "search_keywords": [
+        "Kimi",
+        "Kimi智能助手",
+        "Kimi Chat",
+        "kimi",
+        "月之暗面Kimi",
+        "MoonshotAI Kimi"
+      ],
+      "source_types": [
+        "国内媒体",
+        "评测站",
+        "内容社区"
+      ],
+      "content_focus": [
+        "使用体验",
+        "优缺点",
+        "吐槽",
+        "推荐场景"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "title",
+        "snippet",
+        "source_site",
+        "publish"
+      ],
+      "output_format": "顶层为数组的 JSON"
+    }
+  }
+}

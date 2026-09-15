@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在抖音采集与「豆包」「Doubao」「豆包AI」相关的短视频文案、话题页与高热评论，记录视频文本、发布时间、点赞评论转发计数、permalink 与 fetched_at；输出顶层数组。",
+    "acceptance": [
+      "输出为 goals/goal-4/data-collection-17.json 的顶层 JSON 数组",
+      "每条记录包含视频文本、发布时间、点赞数、评论数、转发数、permalink 与 fetched_at 字段",
+      "采集关键词覆盖「豆包」「Doubao」「豆包AI」三种表达",
+      "覆盖短视频文案、话题页与高热评论三类内容",
+      "permalink 为可访问的抖音原始链接",
+      "fetched_at 使用 ISO8601 时间格式"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-17.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "douyin",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI"
+      ],
+      "content_types": [
+        "短视频文案",
+        "话题页",
+        "高热评论"
+      ],
+      "required_fields": [
+        "video_text",
+        "published_at",
+        "likes",
+        "comments",
+        "shares",
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "top-level array"
+    }
+  }
+}

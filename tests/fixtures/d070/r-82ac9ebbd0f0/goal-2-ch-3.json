@@ -1,0 +1,33 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对上述采集 agent 的原始数组进行去重、语言标注、情感初判与字段规范化，按来源与语义标签维度汇总语料条数、字段缺失与去重口径，输出 object 信封",
+    "acceptance": [
+      "输出为 object 信封，字段结构规范化完整",
+      "完成去重、语言标注、情感初判三项处理",
+      "按来源与语义标签维度汇总语料条数、字段缺失与去重口径",
+      "写入路径 goals/goal-2/data-cleaning-2.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_strategy": "基于文本指纹与 URL 归一化去重",
+      "language_tagging": "zh/en 双语标注，未识别记为 unknown",
+      "sentiment_initial": "positive/neutral/negative 三分类初判",
+      "field_normalization": "统一 source/timestamp/author/text/tags 字段",
+      "aggregation_dimensions": [
+        "source",
+        "semantic_tags"
+      ],
+      "missing_field_report": "按字段维度统计缺失率"
+    }
+  }
+}

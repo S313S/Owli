@@ -1,0 +1,51 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News 通过 Algolia Search API 采集关于豆包（含 Doubao、豆包AI、字节豆包）的 stories 与 comments，查询参数固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，重点提取技术社区对豆包模型能力、生态与商业化的观点；每条记录含 permalink 与 fe",
+    "acceptance": [
+      "成功调用 Hacker News Algolia Search API 并返回 stories 与 comments 数据",
+      "查询参数严格遵循 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000",
+      "采集内容涵盖豆包、Doubao、豆包AI、字节豆包等关键词",
+      "每条记录包含 permalink 与 fe 字段",
+      "重点提取技术社区对豆包模型能力、生态与商业化的观点",
+      "结果写入 goals/goal-1/data-collection-7.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-7.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Hacker News Algolia Search API",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "query_params": {
+        "created_at_i": ">执行时点UTC epoch-7776000",
+        "points": ">50",
+        "hitsPerPage": 1000
+      },
+      "record_fields": [
+        "permalink",
+        "fe"
+      ],
+      "focus": [
+        "模型能力",
+        "生态",
+        "商业化"
+      ],
+      "data_types": [
+        "stories",
+        "comments"
+      ]
+    }
+  }
+}

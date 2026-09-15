@@ -1,0 +1,19 @@
+{
+  "canonical": "Kimi",
+  "names": {
+    "zh": "Kimi智能助手",
+    "en": "Kimi",
+    "aliases": [
+      "Kimi Chat",
+      "kimi",
+      "月之暗面Kimi",
+      "Kimi.ai"
+    ]
+  },
+  "official_handles": {
+    "weibo": "Kimi.ai",
+    "xhs": "Kimi智能助手"
+  },
+  "same_product": true,
+  "note": "Kimi 是月之暗面（Moonshot AI）推出的中文 AI 智能助手，主打超长上下文和长文本理解能力。"
+}

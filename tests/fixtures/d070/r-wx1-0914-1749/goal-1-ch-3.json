@@ -1,0 +1,41 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 全站检索「豆包」「Doubao」「豆包AI」「字节豆包」相关帖子与评论，抓取产品介绍、母公司背景讨论、功能演示与用户规模披露线索；输出 JSON 数组，每条含 permalink 与 fetched_at。",
+    "acceptance": [
+      "输出为 JSON 数组，每条记录必须包含 permalink 与 fetched_at 字段",
+      "覆盖「豆包」「Doubao」「豆包AI」「字节豆包」四个关键词的检索结果",
+      "内容需涉及产品介绍、母公司背景讨论、功能演示或用户规模披露线索",
+      "输出文件写入 goals/goal-1/data-collection-2.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Reddit",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "focus": [
+        "产品介绍",
+        "母公司背景讨论",
+        "功能演示",
+        "用户规模披露线索"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at"
+      ]
+    }
+  }
+}

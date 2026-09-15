@@ -1,0 +1,56 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      }
+    ],
+    "task": "将本 goal 清洗结果与 goal-1 的四份豆包上游产物（goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json）对照，围绕「字节跳动」与「豆包」的战略叙述抽取一致点、",
+    "acceptance": [
+      "逐条列出四份 goal-1 豆包上游产物与本 goal 字节跳动清洗结果之间的一致点、分歧点与缺口",
+      "围绕「字节跳动」与「豆包」的战略叙述形成结构化对照表，覆盖公司定位、产品矩阵、投入承诺等维度",
+      "对每个分歧点标注来源产物路径与证据片段，便于回溯",
+      "输出为合法 JSON，写入 goals/goal-2/cross-validation-2.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation-2.json"
+    },
+    "entities": [
+      "字节跳动",
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "cross_source_scope": "goal-1 四份豆包上游产物 + 本 goal 字节跳动采集/清洗结果",
+      "comparison_axes": [
+        "公司与产品定位",
+        "豆包战略角色",
+        "投入与组织承诺",
+        "市场与用户叙述",
+        "风险与挑战"
+      ],
+      "output_sections": [
+        "consistencies",
+        "discrepancies",
+        "gaps"
+      ],
+      "evidence_requirement": "每条结论需标注来源 path 与原文片段",
+      "downstream": "供 goal-2 后续综述章与报告章引用"
+    }
+  }
+}

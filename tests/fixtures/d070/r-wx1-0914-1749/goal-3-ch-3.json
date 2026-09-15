@@ -1,0 +1,23 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News Algolia 接口检索「豆包」「Doubao」「豆包AI」「字节豆包」相关帖子与评论，查询固定使用 created_at_i 大于执行时点 UTC epoch 减 7776000、points 大于 50、hitsPerPage 等于 1000；输出顶层为数组的 JSON，每条记录包含 permalink、fetched_at、objectID、title、url、p",
+    "acceptance": [
+      "输出文件 goals/goal-3/data-collection-11.json 顶层为 JSON 数组",
+      "查询条件严格使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000",
+      "每条记录包含 permalink、fetched_at、objectID、title、url、p 等字段",
+      "仅检索与「豆包」「Doubao」「豆包AI」「字节豆包」相关的帖子与评论"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-11.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {}
+  }
+}

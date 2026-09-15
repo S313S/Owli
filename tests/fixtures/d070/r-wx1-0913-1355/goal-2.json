@@ -1,0 +1,76 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-2-report.json",
+    "description": "字节跳动 AI 战略与资源投入采集章节化交付物，汇聚小红书、微信公众号、网页搜索、微博多源证据，配合交叉验证结论与要点摘要，用以解释豆包在国内舆论中的资源背景与预期，并以 DeepSeek、Kimi 作对比锚点。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为 goal-2-report.json，shape 为 object，文件顶层为节化文档信封结构。",
+    "必采清单条目「小红书数据抓取·字节跳动」被执行且 output 顶层为 JSON 数组，每条含 permalink 与 fetched_at 字段。",
+    "所有采集章 output 顶层为数组，任务文本仅使用字节跳动、ByteDance 等本实体叫法，未混入豆包、DeepSeek、Kimi 的叫法。",
+    "本 goal 新增采集章的 (source_id, entity) 组合与上游 goal-1 已采集列表及必采清单均不重复，且 source_id 均取自 applicable_sources 白名单。",
+    "交叉验证章基于至少三个不同 source_id 的采集产物，对字节跳动战略布局、组织架构、算力投入、流量倾斜四个维度做一致与冲突比对。",
+    "报告撰写章按战略布局、组织架构、算力投入、流量倾斜四节成文，并以 DeepSeek、Kimi 作为国内舆论中的对比锚点解释豆包的资源预期。",
+    "数据不足场景使用结构化缺口口径记录缺失字段与原因，未写死上游无法保证的实体最小条数。",
+    "所有 JSON 字符串值内引用名称一律使用中文「」引号，字符串内部未出现未转义的英文双引号。"
+  ],
+  "agents": [
+    {
+      "name": "规划",
+      "task": "为 goal-2 制定字节跳动 AI 战略与资源投入采集的章节顺序、四源覆盖矩阵、交叉验证维度以及报告结构，输出可执行的规划文档并标注对 goal-1 上游产物 goals/goal-1/data-collection.json 等的复用点。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "小红书数据抓取·字节跳动",
+      "task": "在小红书围绕字节跳动、ByteDance 检索大模型战略动作、组织架构调整、算力储备与流量倾斜相关笔记，采集条目输出为 JSON 数组，每条含 permalink 与 fetched_at 字段，数据不足时按结构化缺口口径记录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·字节跳动",
+      "task": "在微信公众号检索字节跳动、ByteDance 的 AI 战略、大模型布局、组织架构调整、算力与流量倾斜相关报道，采集文章元数据输出为 JSON 数组，每条含 permalink 与 fetched_at 字段，数据不足时按结构化缺口口径记录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·字节跳动",
+      "task": "使用网页搜索检索字节跳动、ByteDance 在生成式 AI 与大模型上的战略动作、投资并购、组织架构、算力储备与流量入口部署等公开信息，采集结果输出为 JSON 数组，每条含 permalink 与 fetched_at 字段，数据不足时按结构化缺口口径记录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·字节跳动",
+      "task": "在微博检索字节跳动、ByteDance 关于 AI 战略、组织架构、算力投入与流量倾斜的官方发声与舆论讨论，采集微博条目输出为 JSON 数组，每条含 permalink 与 fetched_at 字段，数据不足时按结构化缺口口径记录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "整合本 goal 四个采集章产物与 goal-1 已有豆包侧素材（inputs 引用 goals/goal-1/data-collection.json 等 8 份产物），做字段规范化、去重与主题标签抽取，围绕战略、组织、算力、流量四个维度输出统一结构的清洗结果。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对小红书、微信公众号、网页搜索、微博四源中关于字节跳动 AI 战略与资源投入的关键陈述做一致与冲突比对，标记高置信、需存疑、结构化缺口三类条目，形成节化验证文档。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗与交叉验证结果撰写字节跳动 AI 战略与资源投入报告，按战略布局、组织架构、算力投入、流量倾斜四节展开，并以 DeepSeek、Kimi 为对比锚点解释豆包在国内舆论中的资源背景与预期。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

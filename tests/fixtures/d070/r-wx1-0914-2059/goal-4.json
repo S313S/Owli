@@ -1,0 +1,79 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-4-report.json",
+    "description": "文心一言国内用户口碑与评价的证据汇编与结论报告，含小红书、微博、微信公众号、抖音、网页搜索多源采集与交叉验证结果，形成文心一言侧的独立产物。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「goal-4-report.json」，且 shape 为 object",
+    "必采清单项「小红书数据抓取·文心一言」存在且 source_id=xhs、entity=文心一言、产物为顶层数组",
+    "所有采集 agent 的产物顶层为数组，且每条记录含 permalink 与 fetched_at 字段",
+    "所有采集 agent 的任务文本仅使用文心一言的叫法闭集（文心一言、ERNIE Bot、文心大模型、Yiyan），未混入其他四个实体的叫法",
+    "采集 agent 选择的 source_id 全部落在 applicable_sources=[douyin, hacker_news, product_hunt, reddit, web_search, wechat_mp, weibo, x, xhs] 之内",
+    "本 goal 内不出现与上游 goal-1/goal-2/goal-3 已采集的 (source_id, entity) 重复组合，且本 goal 内部同一 (source_id, entity) 不重复",
+    "非采集 agent 的 name 逐字取自职能闭集（数据清洗、交叉验证、报告撰写）",
+    "交叉验证与报告撰写章的 output.shape 为 object，且 deliverable.shape 为 object",
+    "报告内区分「优点」「缺点」「生态定位认知」「典型场景」四类主题标签，并给出证据引用与来源分布",
+    "证据不足时以结构化缺口口径标注（缺口来源、缺口原因），不写死上游未保证的实体最小条数",
+    "JSON 字符串内部不含未转义的英文双引号，所有引用名称使用中文引号「」"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·文心一言",
+      "task": "在小红书采集国内用户对「文心一言」（含叫法：文心一言、ERNIE Bot、文心大模型、Yiyan）的使用体验、优缺点吐槽、生态定位讨论与场景笔记；顶层输出数组，每条含 permalink、fetched_at，保留标题、正文、点赞、评论、发布时间、作者昵称等原始字段；仅使用文心一言的叫法闭集作为检索词。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·文心一言",
+      "task": "在微博采集与「文心一言」「ERNIE Bot」「文心大模型」「Yiyan」相关的用户评价、媒体账号观点、生态定位讨论与话题热帖；顶层输出数组，每条含 permalink、fetched_at，保留博文正文、转赞评数、发布时间、作者认证信息等原始字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·文心一言",
+      "task": "在微信公众号采集围绕「文心一言」「ERNIE Bot」「文心大模型」「Yiyan」的深度评测、行业观察、企业侧接入体验与生态定位分析文章；顶层输出数组，每条含 permalink、fetched_at，保留标题、公众号名、发布时间、正文摘要、阅读/点赞等可得字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·文心一言",
+      "task": "在抖音采集关于「文心一言」「ERNIE Bot」「文心大模型」「Yiyan」的短视频测评、使用演示与用户口碑吐槽；顶层输出数组，每条含 permalink、fetched_at，保留视频标题、文案、点赞、评论、分享、发布时间、作者昵称等字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·文心一言",
+      "task": "通过网页搜索采集国内媒体与评测站点对「文心一言」「ERNIE Bot」「文心大模型」「Yiyan」的报道、榜单、优缺点讨论与生态定位分析；顶层输出数组，每条含 permalink、fetched_at，保留标题、站点、发布时间、摘要等字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 下五个采集产物做去重、脏数据剔除、字段规范化与情感/主题预标注（优点、缺点、生态定位、典型场景），保留 permalink 与 fetched_at 溯源，输出统一结构的清洗结果信封。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨小红书、微博、微信公众号、抖音、网页搜索五源对文心一言的口碑主张进行交叉比对，标注一致证据、冲突证据与孤证，并对每条结论给出多源引用与来源分布，缺口按结构化缺口口径记录。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "撰写「文心一言国内用户口碑与评价」报告，分节呈现优点、缺点、生态定位认知、典型场景与结构化缺口口径，每条结论附带证据 permalink 与来源；使用中文引号「」引用实体与产品名，输出节化文档信封。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

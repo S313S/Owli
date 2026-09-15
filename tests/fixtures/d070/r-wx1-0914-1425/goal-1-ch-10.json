@@ -1,0 +1,58 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "对清洗后的条目做多源交叉验证，标注每条事实的支撑源数量、冲突记录与官方/非官方分层，输出维度到证据的映射信封。",
+    "acceptance": [
+      "每条事实标注支撑源数量与来源列表",
+      "记录所有冲突项及冲突类型",
+      "按官方/非官方对来源进行分层",
+      "输出维度到证据的映射信封",
+      "结果写入 goals/goal-1/cross-validation.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "validation_method": "multi-source cross-check",
+      "source_tiers": [
+        "official",
+        "non_official"
+      ],
+      "conflict_tracking": true,
+      "dimension_evidence_envelope": true
+    }
+  }
+}

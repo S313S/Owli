@@ -1,0 +1,67 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "输出节化文档信封（object），含「DeepSeek」「Kimi」「文心一言」「通义千问」四实体独立章节、横向对比小结、可靠度与交叉验证附录，以及结构化缺口清单，作为豆包对比分析的参照系。",
+    "acceptance": [
+      "输出顶层为 JSON object 形式的节化文档信封",
+      "包含 DeepSeek、Kimi、文心一言、通义千问 四个实体各自独立的章节",
+      "包含面向四实体的横向对比小结章节",
+      "附录中包含可靠度审计与交叉验证结果",
+      "附录中包含结构化的缺口清单（gap list）",
+      "整体信封可直接作为豆包（goal-1/goal-3）对比分析的参照系",
+      "输出文件写入 goals/goal-2/goal-2-competitor-dossier.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/goal-2-competitor-dossier.json"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "envelope_shape": "object",
+      "sections": [
+        "deepseek_chapter",
+        "kimi_chapter",
+        "wenxin_chapter",
+        "tongyi_chapter",
+        "cross_entity_comparison",
+        "reliability_and_cross_validation_appendix",
+        "structured_gap_list"
+      ],
+      "per_competitor_note_schema": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "reference_for": "豆包（goal-1 / goal-3）对比分析参照系",
+      "upstream_sources": {
+        "collections": [
+          "goals/goal-2/data-collection-9.json",
+          "goals/goal-2/data-collection-10.json",
+          "goals/goal-2/data-collection-11.json",
+          "goals/goal-2/data-collection-12.json"
+        ],
+        "reliability_audits": [
+          "goals/goal-2/reliability-audit-9.json",
+          "goals/goal-2/reliability-audit-10.json",
+          "goals/goal-2/reliability-audit-11.json",
+          "goals/goal-2/reliability-audit-12.json",
+          "goals/goal-2/reliability-audit-13.json"
+        ],
+        "cross_validation": "goals/goal-2/cross-validation-2.json",
+        "consistency_check": "goals/goal-2/consistency-check.md",
+        "data_cleaning": "goals/goal-2/data-cleaning-2.md"
+      },
+      "gap_list_shape": "array of {entity, dimension, missing_field, severity, suggested_action}"
+    }
+  }
+}

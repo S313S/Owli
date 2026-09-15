@@ -1,0 +1,103 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-20.json"
+      }
+    ],
+    "task": "基于清洗后的六维事实清单，跨小红书、Reddit、网页搜索、微信公众号四源核对同一事实的一致性，标注多源印证项、单源项、冲突项及冲突处置策略，形成节化对象。",
+    "acceptance": [
+      "六维事实清单中的每一条均标注来源覆盖状态（多源印证/单源/冲突）",
+      "多源印证项须至少给出2个独立来源的定位信息（平台+链接或帖子ID）",
+      "单源项须显式标注唯一来源并附带可复核字段",
+      "冲突项须列出冲突描述、冲突来源清单与最终处置策略（保留/取舍/存疑）",
+      "输出为结构化 JSON 节化对象，字段与六维事实清单一一对应",
+      "输出路径为 goals/goal-1/cross-validation.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sources": [
+        "小红书",
+        "Reddit",
+        "网页搜索",
+        "微信公众号"
+      ],
+      "fact_dimensions": [
+        "定位",
+        "定价",
+        "功能差异",
+        "社交证明",
+        "优势",
+        "劣势"
+      ],
+      "cross_source_labels": [
+        "multi_source_confirmed",
+        "single_source",
+        "conflict"
+      ],
+      "conflict_resolution_strategies": [
+        "保留高权威源",
+        "标注存疑",
+        "并列展示多方观点",
+        "剔除低可信度陈述"
+      ],
+      "output_schema": {
+        "fact_id": "string",
+        "dimension": "string",
+        "statement": "string",
+        "source_coverage": "multi_source_confirmed|single_source|conflict",
+        "sources": [
+          {
+            "platform": "string",
+            "ref": "string"
+          }
+        ],
+        "conflict": {
+          "description": "string",
+          "resolution": "string"
+        }
+      },
+      "upstream_reference": {
+        "cleaned_facts": "goals/goal-1/data-cleaning.md",
+        "reliability_audits": [
+          "goals/goal-1/reliability-audit.json",
+          "goals/goal-1/reliability-audit-2.json"
+        ]
+      },
+      "scope": "goal-1 单实体（豆包）六维事实四源交叉核验"
+    }
+  }
+}

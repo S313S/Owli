@@ -1,0 +1,45 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗证据池、交叉验证与一致性检查结果，撰写豆包国内口碑与用户评价的舆论画像基础素材节化文档，含总体印象、功能维度评价、正负面观点分布、典型场景标签、代表性引用（附 permalink）、跨源冲突与结构化缺口口径，输出 object 节化信封。",
+    "acceptance": [
+      "输出为 object 节化信封，结构符合舆论画像基础素材要求",
+      "包含总体印象、功能维度评价、正负面观点分布、典型场景标签、代表性引用（附 permalink）、跨源冲突与结构化缺口口径等章节",
+      "所有代表性引用必须附带可溯源的 permalink",
+      "画像结论基于清洗证据池、交叉验证与一致性检查结果，不得引入未经验证的信息",
+      "跨源冲突与结构化缺口需给出明确口径与处理说明",
+      "输出文件写入 goals/goal-1/doubao_reputation_profile.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/doubao_reputation_profile.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_type": "report",
+      "envelope": "object",
+      "subject": "豆包国内口碑与用户评价舆论画像基础素材",
+      "sections": [
+        "总体印象",
+        "功能维度评价",
+        "正负面观点分布",
+        "典型场景标签",
+        "代表性引用",
+        "跨源冲突",
+        "结构化缺口口径"
+      ],
+      "citation_requirement": "代表性引用必须附 permalink",
+      "evidence_base": [
+        "清洗证据池",
+        "交叉验证结果",
+        "一致性检查结果"
+      ],
+      "traceability": "所有结论需可回溯至上游采集与审计产物"
+    }
+  }
+}

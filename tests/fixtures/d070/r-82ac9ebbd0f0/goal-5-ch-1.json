@@ -1,0 +1,45 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内围绕「通义千问」「Qwen」「Tongyi Qianwen」检索国内用户笔记、评测与使用心得，覆盖办公、学习、编程、创作等场景，输出数组，每条含 permalink、fetched_at、作者、正文、互动指标与话题标签。",
+    "acceptance": [
+      "输出为数组，每条包含 permalink、fetched_at、作者、正文、互动指标与话题标签字段",
+      "覆盖办公、学习、编程、创作等多种使用场景",
+      "检索关键词覆盖「通义千问」「Qwen」「Tongyi Qianwen」三种表述",
+      "所有笔记均来自小红书站内，permalink 可访问",
+      "fetched_at 使用 ISO 8601 时间戳，正文与互动指标为原始抓取值"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-collection-34.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen"
+      ],
+      "scenarios": [
+        "办公",
+        "学习",
+        "编程",
+        "创作"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "互动指标",
+        "话题标签"
+      ]
+    }
+  }
+}

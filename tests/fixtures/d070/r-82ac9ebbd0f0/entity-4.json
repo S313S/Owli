@@ -1,0 +1,19 @@
+{
+  "canonical": "文心一言",
+  "names": {
+    "zh": "文心一言",
+    "en": "ERNIE Bot",
+    "aliases": [
+      "文心",
+      "ERNIE",
+      "Ernie Bot",
+      "文心大模型"
+    ]
+  },
+  "official_handles": {
+    "weibo": "文心一言",
+    "wechat_mp": "文心一言"
+  },
+  "same_product": true,
+  "note": "百度推出的基于文心大模型的生成式 AI 对话产品，2023 年发布，对标 ChatGPT。"
+}

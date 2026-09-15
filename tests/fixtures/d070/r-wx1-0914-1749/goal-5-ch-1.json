@@ -1,0 +1,117 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/goal1_doubao_product_profile.json"
+      },
+      {
+        "path": "goals/goal-2/goal-2-report.json"
+      },
+      {
+        "path": "goals/goal-3/report.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-12.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      }
+    ],
+    "task": "在微信公众号平台围绕本实体的闭集叫法「通义千问」「Qwen」「Tongyi Qianwen」采集近三个月的中文长文、评测与行业观察，聚焦本实体在国内 AI 助手赛道的口碑定位、用户群画像、能力评价与未来预期表述；不得在任务文本或结果字段中混入其他实体的专名；如遇与上游 goals/goal-4/data-collection-19.json 相同的 permalink 需去重合并；顶层结构为数组，",
+    "acceptance": [
+      "输出文件位于 goals/goal-5/data-collection-20.json，顶层为 JSON 数组",
+      "所有条目均来自微信公众号平台，发布时间落在最近三个月内（以 2026-09-14 为基准）",
+      "每条记录仅围绕闭集叫法「通义千问」「Qwen」「Tongyi Qianwen」展开，不得混入其他实体的专名",
+      "内容类型限定为中文长文、评测或行业观察，涵盖口碑定位、用户群画像、能力评价与未来预期表述四个维度中的至少一项",
+      "与 goals/goal-4/data-collection-19.json 存在相同 permalink 的条目需去重合并，保留最完整版本",
+      "每条记录包含 permalink、title、publish_time、author/account、summary 等基础字段以便后续交叉验证"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-collection-20.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "微信公众号",
+      "entity_aliases": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen"
+      ],
+      "time_window": "最近三个月（基准日 2026-09-14）",
+      "content_types": [
+        "中文长文",
+        "评测",
+        "行业观察"
+      ],
+      "focus_dimensions": [
+        "口碑定位",
+        "用户群画像",
+        "能力评价",
+        "未来预期表述"
+      ],
+      "dedup_rule": "与 goals/goal-4/data-collection-19.json 相同 permalink 的记录需去重合并",
+      "top_level_structure": "array",
+      "exclusion": "任务文本与结果字段中不得混入其他实体的专名"
+    }
+  }
+}

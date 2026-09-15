@@ -1,0 +1,51 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在抖音采集关于豆包（含 Doubao、豆包AI、字节豆包）的短视频、直播回放、评论区与话题标签，覆盖豆包的功能演示、教程、测评与用户反馈，重点提取热门视频与高互动评论；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-collection-2.json 且顶层为数组",
+      "每条记录必须包含 permalink 与 fetched_at 字段",
+      "覆盖短视频、直播回放、评论区与话题标签四类内容",
+      "内容覆盖功能演示、教程、测评与用户反馈四个方向",
+      "包含热门视频与高互动评论的重点提取",
+      "关键词覆盖 豆包、Doubao、豆包AI、字节豆包"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "抖音",
+      "content_types": [
+        "短视频",
+        "直播回放",
+        "评论区",
+        "话题标签"
+      ],
+      "coverage_dimensions": [
+        "功能演示",
+        "教程",
+        "测评",
+        "用户反馈"
+      ],
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "focus": "热门视频与高互动评论",
+      "record_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_structure": "array"
+    }
+  }
+}

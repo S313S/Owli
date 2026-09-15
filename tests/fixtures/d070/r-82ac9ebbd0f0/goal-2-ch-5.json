@@ -1,0 +1,29 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗与交叉验证结果撰写 DeepSeek 国内口碑章节化报告，覆盖模型能力、开源属性、场景表现、典型讨论四个维度，数据不足处以结构化缺口口径标注，输出 object 信封",
+    "acceptance": [
+      "报告以 object 信封输出且落盘至 goals/goal-2/goal-2-deepseek-reputation.json",
+      "四个维度（模型能力/开源属性/场景表现/典型讨论）均以章节化结构呈现",
+      "数据不足处以结构化缺口口径显式标注，禁止臆造",
+      "口碑观点须回溯至 data-cleaning-2 与 cross-validation-2 结论"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/goal-2-deepseek-reputation.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "positioning": "面向开发者与研究者的国产开源大模型代表，以推理与代码能力见长的技术型定位",
+      "pricing": "API 与开源权重同时提供，价格竞争力显著，具体档位以清洗后事实记录为准",
+      "feature_differences": "MoE 架构、长上下文与代码推理特性突出；相较闭源竞品在开源生态与本地部署上具差异化优势",
+      "social_proof": "国内技术社区讨论热度高，GitHub 与知乎/微博等渠道有持续正向反馈，具体计数以采集与交叉验证结果为准",
+      "strengths_weaknesses": "优势为开源可用、推理与代码性能强、成本低；劣势为多模态与产品化生态相对薄弱，数据缺口处以结构化缺口口径标注"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并上述采集产物，去重并规范 permalink 与 fetched_at，按产品形态、功能矩阵、版本迭代、面向用户群、官方口径五个维度打标，输出结构化条目数组。",
+    "acceptance": [
+      "合并所有上游采集产物并完成去重",
+      "permalink 与 fetched_at 字段格式统一规范",
+      "按产品形态、功能矩阵、版本迭代、面向用户群、官方口径五个维度完成打标",
+      "输出为结构化条目数组",
+      "产物写入 goals/goal-1/data-cleaning.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "产品形态",
+        "功能矩阵",
+        "版本迭代",
+        "面向用户群",
+        "官方口径"
+      ],
+      "dedup_keys": [
+        "permalink",
+        "title"
+      ],
+      "normalization": {
+        "permalink": "去除追踪参数并统一为绝对 URL",
+        "fetched_at": "ISO 8601 UTC"
+      },
+      "output_schema": "structured_entries_array"
+    }
+  }
+}

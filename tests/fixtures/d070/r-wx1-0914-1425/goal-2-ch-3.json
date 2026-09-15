@@ -1,0 +1,44 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 四份采集数组做去重、字段规整、时间归一化与主题打标（组织架构 / 投入规模 / 商业化布局 / 对外表态），输出统一结构的清洗结果对象，保留原始 permalink 引用。",
+    "acceptance": [
+      "输出为统一结构的清洗结果对象，字段命名一致、类型规范",
+      "对四份采集数组完成跨源去重（依据 permalink / 标题 / 时间戳组合键）",
+      "所有条目的时间字段归一化为 ISO 8601（UTC），缺失时间的条目单独标记",
+      "每条记录至少打上一个主题标签：组织架构 / 投入规模 / 商业化布局 / 对外表态",
+      "保留每条记录的原始 permalink 引用与来源 agent_id",
+      "最终结果写入 goals/goal-2/data-cleaning-2.md，并给出条目计数与去重比"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_key": "permalink + normalized_title + published_at",
+      "time_normalization": "ISO 8601 (UTC)",
+      "topic_tags": [
+        "组织架构",
+        "投入规模",
+        "商业化布局",
+        "对外表态"
+      ],
+      "preserved_fields": [
+        "permalink",
+        "source_agent_id",
+        "published_at",
+        "title",
+        "summary",
+        "topic_tags"
+      ],
+      "source_count": 4,
+      "traceability": "每条记录保留原始 permalink 与来源 agent_id 以便回溯"
+    }
+  }
+}

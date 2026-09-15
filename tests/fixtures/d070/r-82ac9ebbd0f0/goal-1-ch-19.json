@@ -1,0 +1,83 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "对豆包核心争议点与高频功能评价，在小红书、抖音、微博、微信公众号、Reddit、X、HN、Product Hunt、网页搜索中至少 3 个源之间做相互印证与冲突标注，输出 object 含论点、支持源、反驳源、证据链与不确定度评分。",
+    "acceptance": [
+      "每条论点至少覆盖 3 个不同来源",
+      "支持源与反驳源分别列出并附证据链引用",
+      "不确定度评分范围 0-1 且标注依据",
+      "冲突点明确标注并给出可能解释",
+      "输出为结构化 JSON object"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platforms": [
+        "小红书",
+        "抖音",
+        "微博",
+        "微信公众号",
+        "Reddit",
+        "X",
+        "HN",
+        "Product Hunt",
+        "网页搜索"
+      ],
+      "min_sources_per_claim": 3,
+      "uncertainty_scale": "0-1",
+      "conflict_labeling": true,
+      "output_structure": [
+        "claim",
+        "supporting_sources",
+        "refuting_sources",
+        "evidence_chain",
+        "uncertainty_score"
+      ]
+    }
+  }
+}

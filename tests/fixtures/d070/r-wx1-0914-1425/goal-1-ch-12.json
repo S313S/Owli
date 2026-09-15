@@ -1,0 +1,38 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗、交叉验证与一致性检查结果撰写豆包产品与官方定位画像报告，输出 object 信封含产品形态、功能矩阵、版本迭代、面向用户群、官方口径与缺口口径六节。",
+    "acceptance": [
+      "输出为 JSON object 信封，顶层包含产品形态、功能矩阵、版本迭代、面向用户群、官方口径与缺口口径六节",
+      "六节内容均基于清洗、交叉验证与一致性检查后的证据撰写，可追溯至上游采集与审计产物",
+      "官方口径与缺口口径分离，明确标注官方来源与缺口原因",
+      "写入 goals/goal-1/doubao_product_profile.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/doubao_product_profile.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "产品形态",
+        "功能矩阵",
+        "版本迭代",
+        "面向用户群",
+        "官方口径",
+        "缺口口径"
+      ],
+      "envelope": "object",
+      "based_on": [
+        "cleaning",
+        "cross_validation",
+        "consistency_check"
+      ]
+    }
+  }
+}

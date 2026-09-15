@@ -1,0 +1,90 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "domestic-doubao-reviews.json",
+    "description": "国内用户、媒体与开发者对豆包的评价综述报告，含小红书、抖音、微博、微信公众号四个来源的正负面主题、典型使用场景、争议话题、情绪分布以及与 DeepSeek、Kimi、文心一言、通义千问的同市场并列对照。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 指向的文件在 goal-3 目录下存在且顶层为 object，包含来源分节、主题分节与竞品对照分节。",
+    "报告设立小红书、抖音、微博、微信公众号四个独立小节，每个小节均给出正面主题、负面主题、典型使用场景与情绪分布，且注明数据来自本 goal 对应采集章。",
+    "报告设立与「DeepSeek」「Kimi」「文心一言」「通义千问」的同市场并列对照小节，未跨市场对同名产品做交叉推断。",
+    "报告中每条被引用的原始素材均可通过 permalink 追溯至对应采集 agent 的 output，采集数组每条含 permalink 与 fetched_at。",
+    "所有涉及实体的表述严格使用叫法闭集内的名称，未在「豆包」章节混写其他实体的叫法，也未把「Kimi」与海外同名产品混写。",
+    "对数据不足的分节以结构化缺口口径披露，未编造条目数量或伪造上游未覆盖的实体最小样本。",
+    "一致性检查产物列出所有采集与消费产物的合规状态，未存在阻断问题或已给出缓解方案。",
+    "交叉验证产物按源并列列出主题与情绪，未跨市场做同名竞品的推断式融合。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·豆包",
+      "task": "在小红书站内检索并采集与「豆包」相关的用户笔记、评论、话题与合集；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的正负面反馈、典型使用场景（写作、学习、情感陪伴、办公、创作等）与情绪分布；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少包含 permalink 与 fetched_at 字段，字符串值内的名称一律使用中文引号「」。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·豆包",
+      "task": "在抖音检索并采集与「豆包」相关的短视频、评论区、话题挑战与创作者案例；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的评价、槽点、真实使用体验与用户情绪；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博检索并采集与「豆包」相关的博文、评论、超话与热搜条目；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的正负面舆情、争议话题、KOL 观点与情绪分布；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号采集与「豆包」相关的深度文章、测评、行业解读与开发者视角内容；覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」的功能评价、使用案例、争议话题与商业化观察；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博采集与「DeepSeek」相关的博文、评论、超话与热搜条目；覆盖「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的正负面口碑、争议话题与情绪分布，供豆包在同市场并列对照使用；只写本实体叫法闭集内的名称；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·Kimi",
+      "task": "在微博采集与「Kimi」相关的博文、评论、超话与热搜条目；覆盖「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」的口碑、争议与情绪分布；不与海外同名产品混写，仅采集国内月之暗面语境下的内容；顶层输出为数组，每条至少含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "读取本 goal 的六个采集产物以及需要复用的上游产物 goals/goal-1/data-collection-7.json、goals/goal-2/data-collection-9.json、goals/goal-2/data-collection-10.json、goals/goal-2/data-collection-11.json、goals/goal-2/data-collection-12.json、goals/goal-2/data-collection-17.json、goals/goal-2/data-collection-18.json、goals/goal-2/data-collection-19.json、goals/goal-2/data-collection-20.json；统一字段结构、去重、清洗噪音，标注实体、源、市场与初步情绪；顶层输出为数组的规整记录集合。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "核对本 goal 采集章与所消费上游产物的合规性：实体叫法是否落在叫法闭集内、permalink 与 fetched_at 是否齐备、来源与市场归属是否符合 cn_product 覆盖表、是否存在跨实体叫法混写、是否有采集章重复了清单或上游 (source_id, entity) 组合；输出问题清单、合规摘要、阻断项与缓解建议的节化文档。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "按小红书、抖音、微博、微信公众号四个源分别汇总关于豆包的正负面主题、典型场景、争议话题与情绪分布，并把「DeepSeek」「Kimi」「文心一言」「通义千问」在国内同市场的评价与豆包并列列出；仅做同市场并列，不做跨市场同名产品的交叉推断；输出为节化文档 object，包含来源分节、主题分节与竞品对照分节。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于数据清洗与交叉验证结果撰写《国内用户、媒体与开发者对豆包的评价》综述，结构包含四大平台分源小节、正负面主题矩阵、典型使用场景、争议话题、情绪分布、开发者视角以及与「DeepSeek」「Kimi」「文心一言」「通义千问」的同市场对照小节；数据不足处以结构化缺口口径披露，不编造条目数量；输出为节化文档 object，作为 deliverable。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "canonical": "文心一言",
+  "names": {
+    "zh": "文心一言",
+    "en": "ERNIE Bot",
+    "aliases": [
+      "文心",
+      "ERNIE",
+      "文心大模型",
+      "Yiyan"
+    ]
+  },
+  "official_handles": {
+    "weibo": "百度文心一言",
+    "wechat_mp": "文心一言"
+  },
+  "same_product": true,
+  "note": "百度推出的生成式 AI 对话产品，基于文心大模型（ERNIE），面向中文用户提供问答、写作、绘图等能力。"
+}

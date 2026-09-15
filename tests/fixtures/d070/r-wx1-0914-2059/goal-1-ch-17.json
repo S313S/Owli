@@ -1,0 +1,51 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "整合上述 8 个采集数组，按（source_id, permalink）去重，标注语种、发布日期、作者可识别度、噪声等级与情感线索，剔除广告与非用户观点内容，输出节化清洗快照并登记结构化缺口口径。",
+    "acceptance": [
+      "按 (source_id, permalink) 完成全局去重，保留首次出现记录并记录被合并计数",
+      "每条留存记录标注语种、发布日期、作者可识别度、噪声等级与情感线索五个字段",
+      "剔除广告、营销软文与非用户观点内容并登记剔除原因与计数",
+      "输出节化清洗快照到 goals/goal-1/data-cleaning.md 并登记结构化缺口口径"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_key": [
+        "source_id",
+        "permalink"
+      ],
+      "annotation_fields": [
+        "language",
+        "published_at",
+        "author_identifiability",
+        "noise_level",
+        "sentiment_cue"
+      ],
+      "exclusion_rules": [
+        "advertisement",
+        "promotional_repost",
+        "non_user_opinion"
+      ],
+      "upstream_sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json"
+      ],
+      "structural_gap_registry": "记录字段缺失率、时间窗覆盖缺口与来源不均衡情况"
+    }
+  }
+}

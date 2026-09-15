@@ -1,0 +1,45 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博平台抓取围绕「深度求索、DeepSeek、DeepSeek-V3、DeepSeek-R1」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开博文与讨论，输出数组，每条含 permalink、fetched_at 及原文摘要字段。",
+    "acceptance": [
+      "输出为 JSON 数组，每条至少包含 permalink、fetched_at、原文摘要字段",
+      "关键词覆盖「深度求索、DeepSeek、DeepSeek-V3、DeepSeek-R1」四个变体",
+      "内容涉及产品定位、能力侧重、母公司背景、上线节奏、国内差异化卖点等维度",
+      "仅采集微博平台的公开博文与讨论，permalink 指向微博站内可访问链接",
+      "fetched_at 采用 ISO8601 时间戳，代表本次抓取时间"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-5.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "微博",
+      "keywords": [
+        "深度求索",
+        "DeepSeek",
+        "DeepSeek-V3",
+        "DeepSeek-R1"
+      ],
+      "dimensions": [
+        "产品定位",
+        "能力侧重",
+        "母公司背景",
+        "上线节奏",
+        "国内差异化卖点"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "原文摘要"
+      ],
+      "scope": "公开博文与讨论"
+    }
+  }
+}

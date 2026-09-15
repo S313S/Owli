@@ -1,0 +1,42 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "评估每个采集源对「文心一言」议题的样本量、时效性、账号可信度与潜在偏见，产出源级可靠度评分表与风险缺口清单，缺口须结构化登记。",
+    "acceptance": [
+      "每个采集源均给出样本量、时效性、账号可信度、潜在偏见四个维度的评分及依据",
+      "输出源级可靠度评分表，字段包含 source_id、sample_size、freshness、account_credibility、bias_risk、overall_score",
+      "识别出的风险缺口以结构化条目登记，含 gap_id、source_id、dimension、severity、mitigation",
+      "结果写入 goals/goal-4/reliability-audit-25.json 且实体聚焦于「文心一言」"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/reliability-audit-25.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scoring_scale": "0-1 连续分，四维加权得到 overall_score",
+      "dimensions": [
+        "sample_size",
+        "freshness",
+        "account_credibility",
+        "bias_risk"
+      ],
+      "gap_registry_fields": [
+        "gap_id",
+        "source_id",
+        "dimension",
+        "severity",
+        "mitigation"
+      ],
+      "downstream": [
+        "cross-validation-4",
+        "consistency-check-2"
+      ]
+    }
+  }
+}

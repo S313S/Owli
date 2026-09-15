@@ -1,0 +1,63 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "media-commentary-report.json",
+    "description": "国内科技媒体与行业观察者对豆包的公开评价与深度报道的分维汇总报告，覆盖产品力、增长、商业模式、与字节体系协同、竞争位次五个维度",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 取「media-commentary-report.json」且 deliverable.shape 为 object",
+    "报告分节覆盖 产品力、增长、商业模式、与字节体系协同、竞争位次 五个维度，每节均给出观点摘录、出处 permalink 与观察者身份标签",
+    "所有引用来源须来自 goals/goal-1/data-collection.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-4/data-collection-24.json 中已存在的记录，禁止新造 permalink",
+    "数据清洗产物为 array，每条记录保留 permalink 与 fetched_at 字段并去重",
+    "标签产物为 array，每条含 维度标签、情感倾向、来源类型（科技媒体/行业分析师/KOL）三项",
+    "交叉验证章列出不少于 5 条关键媒体断言并给出支持来源、冲突来源与可信度评级",
+    "一致性检查章对「豆包」「字节跳动」「DeepSeek」「Kimi」四实体的称谓与口径逐一核对，落入允许叫法闭集",
+    "JSON 字符串值内不出现未转义英文双引号，实体与出处名称统一使用「」包裹",
+    "上游数据不足时按结构化缺口口径记录（缺口维度、缺口描述、影响面），不得写死上游无法保证的最小条数"
+  ],
+  "agents": [
+    {
+      "name": "数据清洗",
+      "task": "读取上游产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 与 goals/goal-4/data-collection-24.json，筛选讨论「豆包」「Doubao」「豆包AI」「豆包大模型」的国内科技媒体、行业分析师与 KOL 内容，保留 permalink、fetched_at、作者、发布渠道、正文摘要与关键引语字段，剔除纯粹用户生活向内容，并按 permalink 去重",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "标签",
+      "task": "对数据清洗输出逐条打维度标签：产品力、增长、商业模式、与「字节跳动」体系协同、竞争位次（对标「DeepSeek」与「Kimi」）；同时标注情感倾向（正面/中性/负面）与来源类型（科技媒体/行业分析师/KOL），并回填原始 permalink",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "从标签产物中抽取涉及「豆包」的关键断言（如日活、月活、增长曲线、模型能力评测、商业化路径、与「字节跳动」协同效应、对比「DeepSeek」「Kimi」的位次判断），跨来源交叉比对，输出每条断言的支持来源列表、冲突来源列表、可信度评级与保留意见",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "核对全篇对「豆包」「字节跳动」「DeepSeek」「Kimi」四实体称谓是否落入允许叫法闭集，检查同一维度不同来源口径是否自洽，产出不一致清单与建议修订，并对超出闭集的表述给出替换方案",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "摘要",
+      "task": "为 产品力、增长、商业模式、与「字节跳动」体系协同、竞争位次 五个维度分别产出中文摘要，突出国内媒体与行业观察者对「豆包」的主流看法、少数派观点与主要分歧点，每维度不超过 300 字",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "整合数据清洗、标签、交叉验证、一致性检查与摘要产物，撰写《国内媒体与行业观察者对「豆包」的评论采集报告》，按五维度分节呈现观点、来源索引、可信度结论，并在末节汇总数据缺口与后续采集建议",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

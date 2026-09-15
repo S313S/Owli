@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微信公众号采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的深度评测、行业观察与用户体验文章；顶层输出数组，每条含 permalink、fetched_at、公众号名、标题、发布日期、正文摘要与结论要点。",
+    "acceptance": [
+      "输出为 JSON 数组，顶层为数组结构",
+      "每条记录包含 permalink、fetched_at、公众号名、标题、发布日期、正文摘要、结论要点等字段",
+      "采集内容需与豆包／Doubao／字节豆包／豆包AI／豆包大模型 强相关",
+      "覆盖深度评测、行业观察与用户体验三类文章",
+      "permalink 为微信公众号可访问的原文链接",
+      "fetched_at 使用 ISO 8601 时间格式",
+      "发布日期真实来源于原文，非采集时间"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微信公众号",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "字节豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "article_categories": [
+        "深度评测",
+        "行业观察",
+        "用户体验"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "公众号名",
+        "标题",
+        "发布日期",
+        "正文摘要",
+        "结论要点"
+      ],
+      "top_level_structure": "array"
+    }
+  }
+}

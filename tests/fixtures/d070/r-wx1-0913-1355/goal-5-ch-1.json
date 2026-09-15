@@ -1,0 +1,132 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_product_profile.json"
+      },
+      {
+        "path": "goals/goal-2/goal-2-report.json"
+      },
+      {
+        "path": "goals/goal-3/competitor-benchmark.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-18.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-20.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-21.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "读取上游产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 与 goals/goal-4/data-collection-24.json，筛选讨论「豆包」「Doubao」「豆包AI」「豆包大模型」的国内科技媒体、行业分析师与 KOL ",
+    "acceptance": [
+      "输出为 Markdown 文档 goals/goal-5/data-cleaning-5.md，结构分节清晰",
+      "严格筛选出讨论「豆包」「Doubao」「豆包AI」「豆包大模型」的条目，过滤无关噪声",
+      "来源分类明确为国内科技媒体、行业分析师、KOL 三类，并保留原始出处与链接",
+      "剔除重复项与非中文/非国内主体条目，保留可溯源的字段（作者/媒体/日期/URL）",
+      "标注每条记录的关键词命中项与情感倾向初判，缺失字段用空值占位并在 notes 中说明"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-cleaning-5.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "source_types": [
+        "国内科技媒体",
+        "行业分析师",
+        "KOL"
+      ],
+      "language_scope": "zh-CN",
+      "dedup_strategy": "URL + 标题归一化去重",
+      "field_schema": [
+        "source_name",
+        "source_type",
+        "author",
+        "publish_date",
+        "url",
+        "keyword_hits",
+        "sentiment_hint"
+      ],
+      "upstream_focus": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json"
+      ],
+      "note_on_missing_input": "task 提及 goals/goal-4/data-collection-24.json 未在全卷采集章清单中登记，将在正文中标注为缺失并跳过，不阻塞清洗流程"
+    }
+  }
+}

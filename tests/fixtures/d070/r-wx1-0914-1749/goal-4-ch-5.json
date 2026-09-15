@@ -1,0 +1,40 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取本 goal 六条新增采集产物与上游 13 条产物路径（goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection",
+    "acceptance": [
+      "产出 goals/goal-4/data-cleaning-4.md，包含清洗前后字段对照、缺失/异常处理说明与保留证据链",
+      "对本 goal 新增的 data-collection-14（文心一言）与 data-collection-15（豆包）字段做去重、单位归一、类型规范化",
+      "标注所有被丢弃或修正的原始值及其来源 path 与行内定位，保证可追溯",
+      "输出与上游 reliability-audit-14 / reliability-audit-15 的关联结论一致，不引入新的未审计字段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-cleaning-4.md"
+    },
+    "entities": [
+      "文心一言",
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "goal-4 新增采集产物清洗",
+      "upstream_new": [
+        "goals/goal-4/data-collection-14.json",
+        "goals/goal-4/data-collection-15.json",
+        "goals/goal-4/reliability-audit-14.json",
+        "goals/goal-4/reliability-audit-15.json"
+      ],
+      "cleaning_actions": [
+        "字段去重",
+        "单位归一",
+        "类型规范化",
+        "空值与异常值标注"
+      ],
+      "traceability": "保留原始 path 与字段级引用",
+      "downstream": "供后续对比/交叉验证章节直接消费"
+    }
+  }
+}

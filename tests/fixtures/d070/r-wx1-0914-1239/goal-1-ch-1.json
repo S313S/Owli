@@ -1,0 +1,45 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集关于 「字节跳动」「ByteDance」「抖音集团」 的公开笔记与官方号动态，聚焦其大模型业务的组织架构、投入力度、招聘与官方表态；输出 JSON 数组，每条含 permalink、fetched_at、author、posted_at、text、engagement 等字段。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条记录包含 permalink、fetched_at、author、posted_at、text、engagement 字段",
+      "采集内容聚焦字节跳动/ByteDance/抖音集团在大模型业务方面的组织架构、投入力度、招聘与官方表态",
+      "所有 permalink 为可访问的小红书公开笔记或官方号动态链接，fetched_at 使用 ISO8601 时间戳",
+      "结果写入 goals/goal-1/data-collection.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "xiaohongshu",
+      "keywords": [
+        "字节跳动",
+        "ByteDance",
+        "抖音集团"
+      ],
+      "focus": [
+        "大模型业务组织架构",
+        "投入力度",
+        "招聘",
+        "官方表态"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "posted_at",
+        "text",
+        "engagement"
+      ],
+      "collection_date": "2026-09-14"
+    }
+  }
+}

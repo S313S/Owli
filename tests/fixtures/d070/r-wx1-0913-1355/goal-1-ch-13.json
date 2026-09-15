@@ -1,0 +1,24 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News 使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 参数检索与「Doubao」「豆包」相关的故事及评论，输出顶层为数组的 JSON，每条含 permalink、fetched_at、story_title、story_url、points、num_comments、created_at_i、a",
+    "acceptance": [
+      "输出为顶层数组的 JSON 文件",
+      "每条记录包含 permalink、fetched_at、story_title、story_url、points、num_comments、created_at_i 等字段",
+      "使用 created_at_i>执行时点UTC epoch-7776000 时间过滤",
+      "使用 points>50、hitsPerPage=1000 检索参数",
+      "检索关键词覆盖「Doubao」与「豆包」"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-7.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {}
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "以至少三个不同 source_id 的清洗产物比对同一话题结论，标注一致或分歧、识别孤证与反例，结果以节化文档形式组织。",
+    "acceptance": [
+      "覆盖至少三个不同 source_id 的清洗产物",
+      "逐话题标注一致/分歧结论，并识别孤证与反例",
+      "结果以节化文档形式组织并落盘到指定 output.path",
+      "每条结论均可回溯至具体 source_id 与原始条目"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/cross-validation-4.json"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "min_source_ids": 3,
+      "source_ids_used": [
+        "data-collection",
+        "data-collection-10",
+        "data-collection-17",
+        "data-collection-25",
+        "data-collection-34"
+      ],
+      "topics_compared": [
+        "定位",
+        "定价",
+        "核心能力",
+        "社会证明",
+        "优势与劣势"
+      ],
+      "agreement_labels": [
+        "consistent",
+        "divergent",
+        "single_source",
+        "counter_example"
+      ],
+      "structure": "sectioned_document",
+      "traceability": "每条结论保留 source_id 与原始条目引用"
+    }
+  }
+}

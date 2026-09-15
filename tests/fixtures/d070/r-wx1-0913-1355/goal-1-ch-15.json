@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 采集与「Doubao」「豆包」相关的产品条目、发布页、评论与投票信息，输出顶层为数组的 JSON，每条含 permalink、fetched_at、product_name、tagline、description、upvotes、comment_count、launched_at 字段，用于确认豆包在海外产品社区的定位与曝光度。",
+    "acceptance": [
+      "输出为顶层数组的合法 JSON，写入 goals/goal-1/data-collection-8.json",
+      "每条记录包含 permalink、fetched_at、product_name、tagline、description、upvotes、comment_count、launched_at 字段",
+      "采集内容需与 Doubao/豆包 相关，覆盖 Product Hunt 上的产品条目、发布页、评论与投票信息",
+      "permalink 必须为 Product Hunt 域名下可访问的原始链接",
+      "fetched_at 使用 ISO 8601 时间格式，反映实际抓取时间"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-8.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Product Hunt",
+      "search_keywords": [
+        "Doubao",
+        "豆包"
+      ],
+      "data_types": [
+        "product_entry",
+        "launch_page",
+        "comment",
+        "upvote"
+      ],
+      "purpose": "确认豆包在海外产品社区的定位与曝光度",
+      "top_level_structure": "array",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "product_name",
+        "tagline",
+        "description",
+        "upvotes",
+        "comment_count",
+        "launched_at"
+      ]
+    }
+  }
+}

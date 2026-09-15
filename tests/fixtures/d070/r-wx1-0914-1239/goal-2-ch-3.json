@@ -1,0 +1,44 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书检索「Kimi」「Kimi Chat」「kimi.ai」「月之暗面Kimi」「KimiAI」相关笔记与评论，聚焦国内市场语境下的产品特征、长文本能力与口碑证据，输出数组顶层，每条含 permalink 与 fetched_at。",
+    "acceptance": [
+      "输出为数组顶层结构",
+      "每条记录包含 permalink 字段",
+      "每条记录包含 fetched_at 字段",
+      "检索关键词覆盖 Kimi、Kimi Chat、kimi.ai、月之暗面Kimi、KimiAI",
+      "内容聚焦国内市场语境下的产品特征、长文本能力与口碑证据"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-10.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "search_keywords": [
+        "Kimi",
+        "Kimi Chat",
+        "kimi.ai",
+        "月之暗面Kimi",
+        "KimiAI"
+      ],
+      "focus": [
+        "产品特征",
+        "长文本能力",
+        "口碑证据"
+      ],
+      "market_context": "国内市场",
+      "record_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "output_structure": "数组顶层"
+    }
+  }
+}

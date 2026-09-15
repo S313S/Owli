@@ -1,0 +1,51 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 检索 「豆包」「Doubao」「豆包AI」「豆包大模型」 相关帖子与评论，聚焦产品定位、功能矩阵、版本迭代、用户规模、商业化路径讨论；输出 JSON 数组，每条含 permalink、fetched_at、subreddit、author、created_utc、title、body、score、num_comments。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条记录包含 permalink、fetched_at、subreddit、author、created_utc、title、body、score、num_comments 全部字段",
+      "检索关键词覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」四个变体",
+      "内容聚焦产品定位、功能矩阵、版本迭代、用户规模、商业化路径等讨论主题",
+      "permalink 去重且指向 Reddit 有效帖子或评论",
+      "fetched_at 使用 ISO 8601 UTC 时间戳"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Reddit",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "focus": [
+        "产品定位",
+        "功能矩阵",
+        "版本迭代",
+        "用户规模",
+        "商业化路径"
+      ],
+      "record_schema": [
+        "permalink",
+        "fetched_at",
+        "subreddit",
+        "author",
+        "created_utc",
+        "title",
+        "body",
+        "score",
+        "num_comments"
+      ],
+      "dedup_key": "permalink"
+    }
+  }
+}

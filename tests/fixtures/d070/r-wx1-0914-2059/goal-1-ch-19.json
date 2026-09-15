@@ -1,0 +1,89 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-24.json"
+      }
+    ],
+    "task": "校验报告中引用的每条证据是否可回溯到采集数组的 permalink，检查实体叫法是否越界至 DeepSeek、Kimi、文心一言、通义千问，输出一致性检查记录与需要回补的条目清单。",
+    "acceptance": [
+      "报告中每条证据均能在对应采集章的 permalink 集合中命中，未命中的条目形成回补清单",
+      "goal-1 相关证据的实体叫法严格限定为豆包，未越界引用 DeepSeek/Kimi/文心一言/通义千问",
+      "跨目标引用（goal-2 至 goal-5）的实体叫法与其采集章声明的实体一一对应，不发生错位",
+      "一致性检查记录明确列出核验项、命中/未命中状态、需回补条目及其归属采集章 output.path"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/consistency-check.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "对 goal-1 报告及跨目标引用的证据链进行 permalink 回溯与实体命名越界检查",
+      "trace_sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json",
+        "goals/goal-2/data-collection-9.json",
+        "goals/goal-3/data-collection-14.json",
+        "goals/goal-4/data-collection-19.json",
+        "goals/goal-5/data-collection-24.json"
+      ],
+      "entity_boundary_rules": {
+        "goal-1": "豆包",
+        "goal-2": "DeepSeek",
+        "goal-3": "Kimi",
+        "goal-4": "文心一言",
+        "goal-5": "通义千问"
+      },
+      "deliverable_sections": [
+        "证据 permalink 回溯表",
+        "实体命名越界告警清单",
+        "需回补条目清单（含归属采集章路径）"
+      ],
+      "failure_policy": "任一证据无法回溯或出现实体越界即在记录中标注为 fail 并加入回补清单"
+    }
+  }
+}

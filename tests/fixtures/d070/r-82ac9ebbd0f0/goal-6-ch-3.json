@@ -1,0 +1,74 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "消费带标签记录，对每个维度抽取「豆包」相对「DeepSeek」「Kimi」「文心一言」「通义千问」的核心横向对比论断；每条论断须由至少 2 个不同 source_id 的记录佐证，若不足则登记为结构化证据缺口并列出候选 permalink，输出交叉验证结论文档信封。",
+    "acceptance": [
+      "对 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五个维度均产出至少一条豆包 vs 四家竞品的横向对比论断",
+      "每条论断附带 >=2 个不同 source_id 的证据引用，且引用记录来源于 opening.inputs 中的采集产物",
+      "证据不足的论断显式登记为 evidence_gap，列出候选 permalink 及缺失原因",
+      "输出严格写入 goals/goal-6/cross-validation-6.json，符合交叉验证结论文档信封结构"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/cross-validation-6.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "positioning": "抽取豆包相对 DeepSeek/Kimi/文心一言/通义千问 的定位差异横向论断，覆盖目标用户、场景侧重与生态归属",
+      "pricing": "抽取豆包与四家竞品在计费模式、免费额度、API 单价与订阅套餐上的横向对比论断",
+      "feature_differences": "抽取豆包在多模态、上下文长度、插件生态、Agent 能力等特性上的相对差异论断",
+      "social_proof": "抽取媒体评测、榜单排名、用户口碑等社会证据层面的横向论断",
+      "strengths_weaknesses": "综合抽取豆包相对四家竞品的核心优势与劣势论断，并对每条附证据充分度评级",
+      "evidence_policy": "每条论断须至少 2 个不同 source_id 佐证，不足者转录为 evidence_gap 并列候选 permalink"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-3/goal-3-kimi-reputation.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-25.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-34.json"
+      }
+    ],
+    "task": "对不同 source_id 关于 Kimi 长文本能力、联网搜索质量、稳定性、免费额度与商业化体验的观点进行共识与冲突识别，标注证据来源与出现频次；对采集不足的维度按结构化缺口口径披露，不假设最小条数。",
+    "acceptance": [
+      "对长文本能力、联网搜索质量、稳定性、免费额度、商业化体验五个维度分别输出共识条目与冲突条目，每条附 source_id 列表与出现频次。",
+      "冲突项需标注对立观点及其各自的证据来源与频次，不做主观裁定。",
+      "对证据不足或缺失的维度以结构化缺口字段披露，不假设最小条数、不编造来源。",
+      "输出文件写入 goals/goal-3/cross-validation-3.json，实体范围限定为 Kimi。"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/cross-validation-3.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "长文本能力",
+        "联网搜索质量",
+        "稳定性",
+        "免费额度",
+        "商业化体验"
+      ],
+      "method": "按维度聚合观点，标注 source_id 与出现频次，区分共识与冲突条目",
+      "gap_disclosure": "对采集不足维度以结构化缺口口径披露，不假设最小条数",
+      "source_scope": "以 goals/goal-3/data-collection-17.json 为主源，其他 goal 的采集文件仅作为交叉参照",
+      "no_fabrication": "不编造 source_id、不推断缺失证据"
+    }
+  }
+}

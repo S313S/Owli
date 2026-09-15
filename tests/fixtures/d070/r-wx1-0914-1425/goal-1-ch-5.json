@@ -1,0 +1,23 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News 以固定参数 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 检索「豆包」「Doubao」「豆包AI」「豆包大模型」，抓取相关讨论帖及评论。",
+    "acceptance": [
+      "按固定参数 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 在 Hacker News 完成检索",
+      "检索关键词覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」四项",
+      "抓取相关讨论帖及其评论内容",
+      "结果写入 goals/goal-1/data-collection-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {}
+  }
+}

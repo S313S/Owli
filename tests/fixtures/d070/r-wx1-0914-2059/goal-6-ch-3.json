@@ -1,0 +1,49 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "核对交叉验证产物中的实体叫法是否落入闭集五实体的允许叫法集合、矩阵是否覆盖全部五个 canonical、引用 permalink 是否可回溯、结论是否回避了闭集外实体、缺口是否使用结构化占位、他方名称是否统一使用中文引号「」；对不一致条目回写修订清单",
+    "acceptance": [
+      "所有实体叫法均落入闭集五实体（豆包 / DeepSeek / Kimi / 文心一言 / 通义千问）的允许叫法集合，越界或近义叫法逐条标注",
+      "矩阵覆盖检查确认五个 canonical 实体全部出现，任一缺失需列入修订清单",
+      "每条引用均带可回溯的 permalink，失效或缺失链接标注为结构化占位并进入修订清单",
+      "结论段落不出现闭集外实体，若发现越界表述需回写并给出替换建议",
+      "缺口位置一律使用结构化占位（如 null / \"N/A\" / {status:\"missing\"}），禁止自然语言留白",
+      "他方名称在正文与表格中统一使用中文引号「」包裹，直引号或书名号视为不一致",
+      "所有不一致条目汇总为修订清单，标注定位、问题类型与建议处理方式"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/consistency-check-3.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "audit_scope": "cross-validation-5 与 data-cleaning-6 产物",
+      "closed_set": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "checks": {
+        "entity_naming": "校验实体叫法是否落入闭集允许别名集合",
+        "matrix_coverage": "校验矩阵是否覆盖全部五个 canonical",
+        "permalink_traceability": "校验每条引用 permalink 是否可回溯",
+        "conclusion_boundary": "校验结论段是否回避闭集外实体",
+        "gap_placeholder": "校验缺口是否使用结构化占位",
+        "quote_style": "校验他方名称是否统一使用中文引号「」"
+      },
+      "deliverable": "对不一致条目回写修订清单（含定位、问题类型、建议处理方式）",
+      "chapter_type_rationale": "本章属于 audit，opening.inputs 按系统声明设为空数组"
+    }
+  }
+}

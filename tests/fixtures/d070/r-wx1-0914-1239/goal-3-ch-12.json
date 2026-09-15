@@ -1,0 +1,65 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于数据清洗与交叉验证结果撰写《国内用户、媒体与开发者对豆包的评价》综述，结构包含四大平台分源小节、正负面主题矩阵、典型使用场景、争议话题、情绪分布、开发者视角以及与「DeepSeek」「Kimi」「文心一言」「通义千问」的同市场对照小节；数据不足处以结构化缺口口径披露，不编造条目数量；输出为节化文档 object，作为 deliverable。",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/domestic-doubao-reviews.json，为节化文档 object",
+      "文档包含四大平台（如微博/知乎/小红书/B站或等价来源）分源小节，每节标注来源与证据引用",
+      "包含正负面主题矩阵、典型使用场景、争议话题、情绪分布、开发者视角六大分析模块",
+      "包含与 DeepSeek、Kimi、文心一言、通义千问 四款同市场竞品的对照小节",
+      "所有条目均可追溯至上游清洗与交叉验证结果，未编造条目数量",
+      "数据不足处以结构化缺口口径（如 gap/insufficient_evidence 字段）披露，不进行虚构补齐"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/domestic-doubao-reviews.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "deliverable_type": "sectioned_document_object",
+      "sections": [
+        "platform_breakdown_weibo",
+        "platform_breakdown_zhihu",
+        "platform_breakdown_xiaohongshu",
+        "platform_breakdown_bilibili",
+        "positive_negative_theme_matrix",
+        "typical_use_cases",
+        "controversial_topics",
+        "sentiment_distribution",
+        "developer_perspective",
+        "competitor_comparison_deepseek",
+        "competitor_comparison_kimi",
+        "competitor_comparison_wenxin",
+        "competitor_comparison_qwen"
+      ],
+      "gap_disclosure_policy": "数据不足处以 structured_gap 字段披露（含 field/reason/upstream_ref），不编造条目数量",
+      "evidence_traceability": "每条引用需回指上游 data-cleaning-3 / cross-validation-3 / consistency-check-2 输出",
+      "upstream_dependencies": [
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/cross-validation-3.json",
+        "goals/goal-3/consistency-check-2.md",
+        "goals/goal-3/reliability-audit-22.json",
+        "goals/goal-3/reliability-audit-23.json",
+        "goals/goal-3/reliability-audit-24.json",
+        "goals/goal-3/reliability-audit-25.json"
+      ],
+      "no_fabrication": true,
+      "target_entity": "豆包",
+      "comparators": [
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ]
+    }
+  }
+}

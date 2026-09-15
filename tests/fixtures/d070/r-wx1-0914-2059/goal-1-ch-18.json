@@ -1,0 +1,59 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "对豆包的优点、缺点、典型使用场景与舆情倾向逐条汇总，跨源核对同一主张的一致性与冲突点，未获两源以上支持的主张标记为「单源待证」，输出跨源验证结论。",
+    "acceptance": [
+      "逐条汇总豆包的优点、缺点、典型使用场景与舆情倾向",
+      "跨源核对同一主张的一致性并标注冲突点",
+      "未获两源以上支持的主张标记为「单源待证」",
+      "输出跨源验证结论至 goals/goal-1/cross-validation.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/cross-validation.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "优点",
+        "缺点",
+        "典型使用场景",
+        "舆情倾向"
+      ],
+      "consistency_rule": "同一主张须至少两源支持方视为已证",
+      "single_source_flag": "单源待证",
+      "conflict_handling": "记录冲突主张与来源以供后续裁决",
+      "source_count": 8
+    }
+  }
+}

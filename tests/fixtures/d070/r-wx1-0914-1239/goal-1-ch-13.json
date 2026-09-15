@@ -1,0 +1,42 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗与交叉验证结果撰写豆包本体事实底座节化文档，覆盖 「产品定位」「功能矩阵」「版本迭代」「用户规模」「商业化路径」「组织架构」「投入力度」「官方表态」 八节，缺口以 gap 字段标注；输出节化对象，含 sections、citations、gap。",
+    "acceptance": [
+      "输出为节化 JSON 对象，顶层含 sections、citations、gap 三个字段",
+      "sections 必须覆盖八个节点：产品定位、功能矩阵、版本迭代、用户规模、商业化路径、组织架构、投入力度、官方表态",
+      "每节内容基于 data-cleaning 与 cross-validation 结果撰写，关键陈述需在 citations 中给出来源引用",
+      "任何未获数据支撑或存在冲突未解的节点必须在 gap 字段中显式标注缺口原因",
+      "输出文件写入 goals/goal-1/goal1_doubao_bytedance_factbase.json 且为合法 JSON"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/goal1_doubao_bytedance_factbase.json"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": 8,
+    "notes": {
+      "sections_required": [
+        "产品定位",
+        "功能矩阵",
+        "版本迭代",
+        "用户规模",
+        "商业化路径",
+        "组织架构",
+        "投入力度",
+        "官方表态"
+      ],
+      "gap_policy": "任何缺口、冲突或低置信度均在 gap 字段列出，禁止臆造数据",
+      "citation_policy": "关键数值与官方表态需附来源与采集出处",
+      "upstream_dependency": [
+        "goals/goal-1/data-cleaning.md",
+        "goals/goal-1/cross-validation.json"
+      ]
+    }
+  }
+}

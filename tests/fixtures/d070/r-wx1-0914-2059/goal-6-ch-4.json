@@ -1,0 +1,99 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_reputation_baseline.json"
+      },
+      {
+        "path": "goals/goal-2/deepseek-reputation-report.json"
+      },
+      {
+        "path": "goals/goal-3/kimi-reputation-report.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      }
+    ],
+    "task": "综合数据清洗、交叉验证与一致性检查产物撰写节化报告，输出信封结构 object，节包括：标题与执行摘要、五方对比矩阵、豆包画像、豆包对「DeepSeek」对照、豆包对「Kimi」对照、豆包对「文心一言」对照、豆包对「通义千问」对照、差异化标签、国内整体看法、缺口与后续研究方向；每条论断附来源 permalink 与 fetched_at，他方名称一律使用中文引号「」",
+    "acceptance": [
+      "输出为信封结构 JSON object，顶层包含元信息与节化正文两部分",
+      "节数量与命名严格覆盖：标题与执行摘要、五方对比矩阵、豆包画像、豆包对「DeepSeek」对照、豆包对「Kimi」对照、豆包对「文心一言」对照、豆包对「通义千问」对照、差异化标签、国内整体看法、缺口与后续研究方向",
+      "五方对比矩阵覆盖豆包、「DeepSeek」、「Kimi」、「文心一言」、「通义千问」五个实体，字段口径一致",
+      "每一条论断均附带来源 permalink 与 fetched_at 字段，缺失来源的论断不得写入",
+      "所有他方名称（DeepSeek、Kimi、文心一言、通义千问）在正文中一律使用中文引号「」包裹，豆包作为主体不加引号",
+      "报告须显式引用 5 个上游目标产物（goal-1 至 goal-5）中的关键指标，并与一致性检查、交叉验证、数据清洗结果保持不冲突",
+      "缺口与后续研究方向节须列出至少一条未被证据覆盖的问题及下一步采集建议",
+      "最终写入 goals/goal-6/final-report.json，可被 JSON 解析且 UTF-8 无 BOM"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/final-report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 10,
+    "notes": {
+      "envelope": "object",
+      "sections": [
+        "标题与执行摘要",
+        "五方对比矩阵",
+        "豆包画像",
+        "豆包对「DeepSeek」对照",
+        "豆包对「Kimi」对照",
+        "豆包对「文心一言」对照",
+        "豆包对「通义千问」对照",
+        "差异化标签",
+        "国内整体看法",
+        "缺口与后续研究方向"
+      ],
+      "primary_subject": "豆包",
+      "competitors": [
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "citation_requirements": {
+        "per_claim_fields": [
+          "permalink",
+          "fetched_at"
+        ],
+        "missing_source_policy": "drop_claim"
+      },
+      "naming_convention": {
+        "third_party_quote_style": "「」",
+        "applies_to": [
+          "DeepSeek",
+          "Kimi",
+          "文心一言",
+          "通义千问"
+        ],
+        "primary_subject_unquoted": "豆包"
+      },
+      "upstream_inputs": [
+        "goals/goal-1/doubao_reputation_baseline.json",
+        "goals/goal-2/deepseek-reputation-report.json",
+        "goals/goal-3/kimi-reputation-report.json",
+        "goals/goal-4/goal-4-report.json",
+        "goals/goal-5/goal-5-report.json"
+      ],
+      "consumed_intermediate_artifacts": [
+        "goals/goal-6/data-cleaning-6.md",
+        "goals/goal-6/cross-validation-5.json",
+        "goals/goal-6/consistency-check-3.md"
+      ],
+      "encoding": "UTF-8 no BOM",
+      "language": "zh-CN"
+    }
+  }
+}

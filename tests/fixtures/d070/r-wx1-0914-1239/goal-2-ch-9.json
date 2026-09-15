@@ -1,0 +1,44 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "合并本 goal 全部采集产物，按「DeepSeek」「Kimi」「文心一言」「通义千问」四实体分区，抽取产品特征、市场定位、用户口碑、中文媒体评价四维度字段，保留 permalink 与 fetched_at 溯源，删除噪声与重复，缺口以结构化占位标注。",
+    "acceptance": [
+      "输出文件 goals/goal-2/data-cleaning-2.md 存在且可读",
+      "内容按 DeepSeek / Kimi / 文心一言 / 通义千问 四实体分区，且顺序清晰",
+      "每个实体下均含产品特征、市场定位、用户口碑、中文媒体评价四维度字段",
+      "每条清洗后的记录保留 permalink 与 fetched_at 溯源字段",
+      "重复条目与噪声内容已去除，字段缺口以结构化占位（如 null 或 \"未获取\"）标注",
+      "清洗过程未引入 goal-2 采集清单以外的数据源"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "partition_strategy": "按四实体（DeepSeek / Kimi / 文心一言 / 通义千问）分区输出",
+      "dimensions": [
+        "产品特征",
+        "市场定位",
+        "用户口碑",
+        "中文媒体评价"
+      ],
+      "provenance_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "dedup_rule": "以 permalink 为主键去重，同源多次抓取取最新 fetched_at",
+      "noise_filter": "删除广告、导航、样板文本、与四维度无关的内容",
+      "gap_placeholder": "字段缺失使用 null 或 \"未获取\" 结构化占位标注，不使用空字符串",
+      "source_scope": "仅使用 goal-2 内 data-collection-9/10/11/12 的采集产物"
+    }
+  }
+}

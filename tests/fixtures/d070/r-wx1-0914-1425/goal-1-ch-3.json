@@ -1,0 +1,40 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 抓取涉及「豆包」「Doubao」「豆包AI」「豆包大模型」的官方账号推文与讨论，重点收集官方发布口径、功能公告与版本节点。",
+    "acceptance": [
+      "覆盖「豆包」「Doubao」「豆包AI」「豆包大模型」四组关键词的检索结果",
+      "包含官方账号推文与相关讨论两类内容",
+      "记录官方发布口径、功能公告与版本节点信息",
+      "结果写入 goals/goal-1/data-collection-2.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "X",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "focus": [
+        "官方发布口径",
+        "功能公告",
+        "版本节点"
+      ],
+      "content_types": [
+        "官方账号推文",
+        "相关讨论"
+      ]
+    }
+  }
+}

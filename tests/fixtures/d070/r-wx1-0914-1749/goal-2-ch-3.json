@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 平台抓取围绕「豆包、Doubao、豆包AI、字节豆包」的产品定位、能力侧重、母公司背景、上线节奏与国内差异化卖点的公开推文与讨论，输出数组，每条含 permalink、fetched_at 及原文摘要字段。",
+    "acceptance": [
+      "输出为 JSON 数组，每条推文对象包含 permalink、fetched_at 与原文摘要字段",
+      "覆盖「豆包、Doubao、豆包AI、字节豆包」四个检索关键词，并在摘要中体现产品定位、能力侧重、母公司背景、上线节奏或国内差异化卖点中的至少一项",
+      "permalink 均为 X 平台可访问的公开推文链接，fetched_at 使用 ISO8601 时间戳",
+      "结果写入 goals/goal-2/data-collection-6.json，且条目数量不少于预期计数"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-6.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 20,
+    "notes": {
+      "platform": "X",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "focus": [
+        "产品定位",
+        "能力侧重",
+        "母公司背景",
+        "上线节奏",
+        "国内差异化卖点"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "原文摘要"
+      ],
+      "language_scope": [
+        "zh",
+        "en"
+      ],
+      "dedup_key": "permalink"
+    }
+  }
+}

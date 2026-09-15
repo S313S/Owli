@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集关于「字节跳动」或「ByteDance」的公开笔记与评论，聚焦「字节跳动」大模型组织架构、投入规模、商业化布局与「ByteDance」官方对外表态；输出 JSON 数组，每条含 permalink 与 fetched_at，并附标题、正文摘录、作者、发布时间、互动数。",
+    "acceptance": [
+      "输出为 JSON 数组，每条记录均包含 permalink 与 fetched_at 字段",
+      "每条记录附带标题、正文摘录、作者、发布时间、互动数五项元数据",
+      "内容聚焦字节跳动大模型组织架构、投入规模、商业化布局与官方对外表态",
+      "采集来源限定于小红书平台的公开笔记与评论",
+      "输出文件写入 goals/goal-2/data-collection-9.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-9.json"
+    },
+    "entities": [
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "content_types": [
+        "公开笔记",
+        "评论"
+      ],
+      "focus_topics": [
+        "大模型组织架构",
+        "投入规模",
+        "商业化布局",
+        "ByteDance 官方对外表态"
+      ],
+      "keywords": [
+        "字节跳动",
+        "ByteDance"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "标题",
+        "正文摘录",
+        "作者",
+        "发布时间",
+        "互动数"
+      ],
+      "output_format": "JSON 数组"
+    }
+  }
+}

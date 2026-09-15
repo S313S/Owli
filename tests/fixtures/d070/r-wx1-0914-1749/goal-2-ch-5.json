@@ -1,0 +1,35 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对本 goal 五条采集数组以及上游产物 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json 进行去重、字段规范化与实体归属校验，按豆包、DeepSeek、Kimi、文",
+    "acceptance": [
+      "产出 goals/goal-2/data-cleaning-2.md，说明去重、字段规范化与实体归属校验的方法与结果",
+      "覆盖本 goal 五条采集数组以及 goal-1 的四个上游采集产物",
+      "按豆包、DeepSeek、Kimi、文心一言等实体分组呈现清洗后数据",
+      "记录被剔除或修正的条目及原因，保证字段命名与取值统一"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "scope": "本 goal 五条采集数组 + goals/goal-1/data-collection.json、data-collection-2.json、data-collection-3.json、data-collection-4.json",
+      "operations": [
+        "去重",
+        "字段规范化",
+        "实体归属校验"
+      ],
+      "grouping": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言"
+      ],
+      "output_format": "markdown"
+    }
+  }
+}

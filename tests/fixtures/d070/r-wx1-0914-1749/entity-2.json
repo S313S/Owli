@@ -1,0 +1,16 @@
+{
+  "canonical": "DeepSeek",
+  "names": {
+    "zh": "深度求索",
+    "en": "DeepSeek",
+    "aliases": [
+      "DS",
+      "深度求索",
+      "DeepSeek-V3",
+      "DeepSeek-R1"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "由杭州深度求索公司开发的开源大语言模型及其对话助手，以低成本高性能的推理能力著称。"
+}

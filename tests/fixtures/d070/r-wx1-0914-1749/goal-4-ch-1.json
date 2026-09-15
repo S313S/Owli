@@ -1,0 +1,74 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-2/goal-2-report.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      }
+    ],
+    "task": "在抖音平台采集国内用户与创作者围绕「文心一言」「ERNIE Bot」「百度文心」「文心大模型」的短视频、评论与话题数据，聚焦对文心一言的能力评测、使用体验吐槽、价格与会员讨论、与其它国产大模型比较的片段；输出数组，每条含 permalink、fetched_at、作者、正文或字幕、点赞评论转发计数、发布时间、话题标签。",
+    "acceptance": [
+      "输出为 JSON 数组，每条记录包含 permalink、fetched_at、作者、正文或字幕、点赞数、评论数、转发数、发布时间、话题标签字段",
+      "数据来源限定为抖音平台，覆盖「文心一言」「ERNIE Bot」「百度文心」「文心大模型」四个关键词",
+      "内容需聚焦能力评测、使用体验吐槽、价格与会员讨论、与其它国产大模型比较的片段",
+      "permalink 可访问且 fetched_at 使用 ISO8601 时间格式",
+      "话题标签为数组形式，保留原文 # 号前的标签内容"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-14.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "抖音",
+      "keywords": [
+        "文心一言",
+        "ERNIE Bot",
+        "百度文心",
+        "文心大模型"
+      ],
+      "focus_topics": [
+        "能力评测",
+        "使用体验吐槽",
+        "价格与会员讨论",
+        "与其它国产大模型比较"
+      ],
+      "content_types": [
+        "短视频",
+        "评论",
+        "话题"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文或字幕",
+        "点赞数",
+        "评论数",
+        "转发数",
+        "发布时间",
+        "话题标签"
+      ],
+      "timestamp_format": "ISO8601"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗、一致性与交叉验证结果，撰写通义千问国内用户口碑与开源反馈章节化报告，包含证据引用（中文引号「」包裹的 permalink 与摘录）、场景口碑分布、争议点与缺口口径，形成 goal-5 侧证据产物。",
+    "acceptance": [
+      "报告输出为结构化 JSON，落盘至 goals/goal-5/goal-5-report.json",
+      "章节覆盖场景口碑分布、争议点与缺口口径三大维度",
+      "所有证据引用使用中文引号「」包裹 permalink 与摘录，且可回溯至上游采集/清洗/一致性/交叉验证产物",
+      "仅围绕实体『通义千问』展开，不混入其它竞品口碑",
+      "对数据缺口与不确定性显式标注口径与来源"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/goal-5-report.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "report_sections": [
+        "场景口碑分布",
+        "争议点",
+        "缺口口径"
+      ],
+      "citation_style": "中文引号「」包裹 permalink 与摘录",
+      "upstream_dependencies": [
+        "goals/goal-5/data-collection-24.json",
+        "goals/goal-5/reliability-audit-24.json",
+        "goals/goal-5/data-cleaning-5.md",
+        "goals/goal-5/consistency-check-2.md",
+        "goals/goal-5/cross-validation-4.json"
+      ],
+      "goal_id": "goal-5",
+      "evidence_requirements": {
+        "permalink_required": true,
+        "excerpt_required": true,
+        "quote_wrapper": "「」"
+      },
+      "scope": "国内用户口碑与开源反馈"
+    }
+  }
+}

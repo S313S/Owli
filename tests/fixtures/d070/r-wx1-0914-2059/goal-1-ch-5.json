@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」有关的博文、话题与转评，聚焦舆情倾向与优缺点讨论；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动指标与话题标签。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录包含 permalink、fetched_at、作者、正文、互动指标与话题标签字段",
+      "采集内容须与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关，聚焦舆情倾向与优缺点讨论",
+      "permalink 为可访问的微博原文链接，fetched_at 使用 ISO 8601 时间戳",
+      "互动指标包含转发数、评论数、点赞数等可量化字段",
+      "话题标签保留原始 # 号形式，覆盖博文、话题页与转评三类来源",
+      "输出写入 goals/goal-1/data-collection-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "微博",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "字节豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "content_scope": [
+        "博文",
+        "话题",
+        "转评"
+      ],
+      "focus": "舆情倾向与优缺点讨论",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "互动指标",
+        "话题标签"
+      ]
+    }
+  }
+}

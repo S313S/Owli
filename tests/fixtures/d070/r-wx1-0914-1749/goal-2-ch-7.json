@@ -1,0 +1,88 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-20.json"
+      }
+    ],
+    "task": "跨源交叉比对豆包、DeepSeek、Kimi、文心一言、通义千问的关键事实条目，对分歧点给出裁决或结构化缺口口径，并记录支撑证据来源路径。",
+    "acceptance": [
+      "对豆包、DeepSeek、Kimi、文心一言、通义千问五个实体的关键事实条目逐一进行跨源比对",
+      "所有分歧点均给出裁决结论或以结构化缺口口径明确标记",
+      "每条裁决/缺口均记录支撑证据的来源路径（对齐 inputs 中的采集产物）",
+      "输出为合法 JSON object 并写入 goals/goal-2/cross-validation-2.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation-2.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "comparison_dimensions": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "adjudication_policy": "对同一事实条目存在跨源冲突时，优先采信具备一手来源与时间戳更新的采集记录；无法裁决则登记为结构化缺口",
+      "gap_schema": {
+        "entity": "实体名称",
+        "dimension": "所属维度",
+        "conflict_sources": "冲突来源路径列表",
+        "resolution": "adjudicated|gap",
+        "evidence_paths": "支撑证据来源路径列表"
+      },
+      "evidence_source_paths": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-2/data-collection-5.json",
+        "goals/goal-2/data-collection-6.json",
+        "goals/goal-3/data-collection-10.json",
+        "goals/goal-3/data-collection-11.json",
+        "goals/goal-4/data-collection-14.json",
+        "goals/goal-4/data-collection-15.json",
+        "goals/goal-5/data-collection-20.json"
+      ],
+      "upstream_reference": [
+        "goals/goal-2/consistency-check.md",
+        "goals/goal-2/data-cleaning-2.md",
+        "goals/goal-2/reliability-audit-5.json",
+        "goals/goal-2/reliability-audit-6.json"
+      ]
+    }
+  }
+}

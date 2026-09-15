@@ -1,0 +1,49 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 采集与「豆包／Doubao」相关的产品页、点评与讨论，抓取用户投票、评论与优缺点标签；顶层输出数组，每条含 permalink、fetched_at、产品名、发布日期、upvote 数、评论摘要与主题标签。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录包含 permalink、fetched_at、产品名、发布日期、upvote 数、评论摘要与主题标签字段",
+      "覆盖 Product Hunt 上与「豆包／Doubao」相关的产品页、点评与讨论页面",
+      "抓取 upvote 数与评论摘要，并提炼优缺点主题标签",
+      "permalink 为可访问的 Product Hunt 原始 URL，fetched_at 使用 ISO 8601 时间戳",
+      "输出文件写入 goals/goal-1/data-collection-8.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-8.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Product Hunt",
+      "coverage": [
+        "产品页",
+        "点评",
+        "讨论"
+      ],
+      "fields": [
+        "permalink",
+        "fetched_at",
+        "产品名",
+        "发布日期",
+        "upvote 数",
+        "评论摘要",
+        "主题标签"
+      ],
+      "tag_dimensions": [
+        "优点",
+        "缺点"
+      ],
+      "language": [
+        "zh",
+        "en"
+      ],
+      "timestamp_format": "ISO 8601"
+    }
+  }
+}

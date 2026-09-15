@@ -1,0 +1,52 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "综合数据清洗、交叉验证与一致性检查结果，撰写「国内媒体与行业评论对豆包的评价」节化报告，按能力评价、体验评价、生态与商业化评价、争议与批评四节组织，每节引用证据 permalink，最终输出 object 信封含 sections、sources、gaps。",
+    "acceptance": [
+      "报告按能力评价、体验评价、生态与商业化评价、争议与批评四节组织",
+      "每节均引用证据 permalink",
+      "最终输出 object 信封包含 sections、sources、gaps 三个字段",
+      "综合利用数据清洗、交叉验证与一致性检查结果",
+      "输出文件写入 goals/goal-3/media-review-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/media-review-report.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "report_structure": {
+        "envelope": "object",
+        "top_level_fields": [
+          "sections",
+          "sources",
+          "gaps"
+        ],
+        "sections": [
+          "能力评价",
+          "体验评价",
+          "生态与商业化评价",
+          "争议与批评"
+        ]
+      },
+      "evidence_policy": {
+        "require_permalink_per_section": true,
+        "cross_reference_upstream": true
+      },
+      "upstream_dependencies": [
+        "goals/goal-3/data-collection-13.json",
+        "goals/goal-3/reliability-audit-13.json",
+        "goals/goal-3/data-cleaning-3.md",
+        "goals/goal-3/cross-validation-3.json",
+        "goals/goal-3/consistency-check-2.md"
+      ],
+      "language": "zh-CN",
+      "output_format": "json"
+    }
+  }
+}

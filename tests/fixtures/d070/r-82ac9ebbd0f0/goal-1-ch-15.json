@@ -1,0 +1,46 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 采集豆包（含 Doubao、豆包AI、字节豆包）相关产品页、发布事件、maker 说明、评论与投票，覆盖豆包官方或相关应用条目下的国际用户评价与功能反馈；每条记录含 permalink 与 fetched_at，顶层为数组。",
+    "acceptance": [
+      "顶层为 JSON 数组，可直接被下游读取",
+      "每条记录必须包含 permalink 与 fetched_at 字段",
+      "覆盖豆包/Doubao/豆包AI/字节豆包相关的产品页、发布事件、maker 说明、评论与投票",
+      "记录来源限定于 Product Hunt 平台",
+      "包含国际用户对豆包官方或相关应用条目的评价与功能反馈"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-8.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_platform": "Product Hunt",
+      "keywords": [
+        "豆包",
+        "Doubao",
+        "豆包AI",
+        "字节豆包"
+      ],
+      "record_types": [
+        "product_page",
+        "launch_event",
+        "maker_description",
+        "comment",
+        "vote"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "top_level_structure": "array",
+      "language_scope": "international",
+      "focus": "国际用户评价与功能反馈"
+    }
+  }
+}

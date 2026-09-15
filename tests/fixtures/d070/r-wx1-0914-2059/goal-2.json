@@ -1,0 +1,74 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "deepseek-reputation-report.json",
+    "description": "国内舆论与评测中对 DeepSeek 的口碑证据、使用体验与技术印象的节化汇总文档，为后续与豆包对比提供可追溯证据。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "小红书数据抓取·DeepSeek 章的输出为顶层数组，且每条记录均含 permalink 与 fetched_at 字段。",
+    "本 goal 所有采集章的任务文本只出现 DeepSeek 的叫法闭集（深度求索、DeepSeek、DeepSeek-V3、DeepSeek-R1），不掺入豆包、Kimi、文心一言、通义千问的叫法。",
+    "本 goal 的采集章 (source_id, entity) 组合不与必采清单及上游 goal-1 的组合重复。",
+    "报告撰写章覆盖至少三个不同 source_id 的采集证据，并对关键结论逐条给出 permalink 引用。",
+    "交叉验证章按正面、负面、中性与技术印象四类聚合观点，并列出证据来源分布与冲突点。",
+    "当某源数据不足时，交叉验证与报告撰写章以结构化缺口口径注明来源与缺口原因，不虚构条数。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·DeepSeek",
+      "task": "在小红书采集国内用户关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的笔记、评论与使用体验分享，聚焦口碑评价、模型能力印象、场景化用法与差异化认知；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博采集中文用户关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的讨论、评测转发、KOL 观点与热搜话题，聚焦口碑趋势、性能印象与技术叙事；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·DeepSeek",
+      "task": "在微信公众号抓取关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的深度评测、行业解读与产品分析文章，提取标题、发布主体、核心观点与关键引述；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·DeepSeek",
+      "task": "在抖音采集国内创作者关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的短视频、直播切片与评论，覆盖上手体验、场景演示与话题传播热度；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·DeepSeek",
+      "task": "通过网页搜索采集中文媒体、评测站点、知乎问答与技术博客中关于 DeepSeek（含 深度求索、DeepSeek-V3、DeepSeek-R1）的报道、评价与访谈文本，覆盖技术特性、开源生态与用户口碑；顶层输出为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对本 goal 各采集章的原始记录进行去重、噪声剔除、字段规范化与来源标注，保留 permalink、fetched_at、source_id、正文、作者、互动指标等关键字段，输出统一结构。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对清洗后的 DeepSeek 证据按正面、负面、中性与技术印象四类聚合，比对不同来源在使用体验、性能表现、性价比与差异化认知上的口径一致性，标注冲突点、共识点与证据来源分布。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "综合各源清洗与交叉验证结果，撰写 DeepSeek 国内口碑与评价的节化报告，包含使用体验、技术印象、差异化认知、典型场景与后续对比豆包的证据线索，关键结论逐条附 permalink 引用与来源标注。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

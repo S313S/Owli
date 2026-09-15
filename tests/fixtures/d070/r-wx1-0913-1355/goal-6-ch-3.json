@@ -1,0 +1,69 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "以「豆包」为核心坐标，对照「DeepSeek」与「Kimi」的舆论条目，在能力、体验、生态、争议四个维度输出相对形象差异结论；同时验证「字节跳动」资源投入与产品走向如何映射到「豆包」的舆论认知，输出每维度的证据矩阵与坐标定位",
+    "acceptance": [
+      "能力/体验/生态/争议四维度均给出「豆包」相对于「DeepSeek」「Kimi」的差异结论并附证据条目引用",
+      "「字节跳动」资源投入与产品走向的舆论条目能对应映射到「豆包」认知，形成因果或关联性说明",
+      "每个维度的证据矩阵覆盖至少两家竞品，且引用的条目均可回溯到 opening.inputs 中的采集文件",
+      "最终输出坐标定位描述，明确「豆包」在四维度上的相对强弱位置"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/cross-validation-6.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "字节跳动"
+    ],
+    "expected_count": 4,
+    "notes": {
+      "positioning": "以「豆包」为核心坐标，将「DeepSeek」定位于技术深度对照系、「Kimi」定位于长文本体验对照系，「字节跳动」作为资源与生态背书维度",
+      "pricing": "汇总三家在免费额度、API 价格、增值订阅上的舆论差异条目，标注价格敏感度对形象的影响",
+      "feature_differences": "从能力（模型/多模态）、体验（响应/交互）、生态（分发/接入）、争议（合规/口碑）四维度输出差异矩阵",
+      "social_proof": "整理用户评价、媒体报道、开发者反馈等社会证据，按维度归入证据矩阵并标记来源条目 ID",
+      "strengths_weaknesses": "输出「豆包」在四维度上的相对强项与弱项坐标，并叠加「字节跳动」资源投入映射的解释项"
+    }
+  }
+}

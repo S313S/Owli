@@ -1,0 +1,57 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-4/data-collection-19.json"
+      }
+    ],
+    "task": "跨小红书、微博、微信公众号、抖音、网页搜索五源对文心一言的口碑主张进行交叉比对，标注一致证据、冲突证据与孤证，并对每条结论给出多源引用与来源分布，缺口按结构化缺口口径记录。",
+    "acceptance": [
+      "覆盖小红书、微博、微信公众号、抖音、网页搜索五个来源，逐源可追溯",
+      "每条结论标注一致证据/冲突证据/孤证三类之一，并附至少一条多源或单源引用",
+      "每条结论给出来源分布统计（来源命中数与条目数）",
+      "缺口按结构化缺口口径记录（字段齐备，含来源、维度、缺口类型与影响）",
+      "输出为 JSON 且落盘于 goals/goal-4/cross-validation-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/cross-validation-3.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity": "文心一言",
+      "sources": [
+        "xiaohongshu",
+        "weibo",
+        "wechat_mp",
+        "douyin",
+        "web_search"
+      ],
+      "evidence_categories": [
+        "consistent",
+        "conflicting",
+        "isolated"
+      ],
+      "per_claim_fields": [
+        "claim",
+        "category",
+        "citations",
+        "source_distribution"
+      ],
+      "gap_schema": [
+        "source",
+        "dimension",
+        "gap_type",
+        "impact",
+        "note"
+      ],
+      "citation_rule": "每条结论至少一条引用；一致证据需≥2来源，孤证仅1来源，冲突证据需并列展示对立引用",
+      "source_distribution_rule": "以来源命中数与条目数双口径统计，零命中来源需显式记录为缺口"
+    }
+  }
+}

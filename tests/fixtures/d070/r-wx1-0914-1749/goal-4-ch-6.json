@@ -1,0 +1,78 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-15.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-20.json"
+      }
+    ],
+    "task": "对清洗后的多源证据在同一实体×维度上做跨源一致性核验，标记单源孤证、时间冲突、口径分歧与情感极性偏差，产出可信度分级与需在报告中特别披露的争议点集合。",
+    "acceptance": [
+      "覆盖所有清洗后实体×维度组合，缺项需显式列出",
+      "单源孤证、时间冲突、口径分歧、情感极性偏差四类标签齐备且互不重叠",
+      "每条结论给出可信度分级（高/中/低）及判定依据",
+      "输出争议点集合，标注需在最终报告中特别披露的项",
+      "结果写入 goals/goal-4/cross-validation-4.json 且为合法 JSON"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/cross-validation-4.json"
+    },
+    "entities": [
+      "豆包",
+      "文心一言",
+      "DeepSeek",
+      "Kimi",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions_checked": [
+        "positioning",
+        "pricing",
+        "feature",
+        "social_proof",
+        "sentiment",
+        "timeline"
+      ],
+      "conflict_tags": [
+        "single_source",
+        "time_conflict",
+        "caliber_divergence",
+        "sentiment_polarity_bias"
+      ],
+      "confidence_levels": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "disclosure_policy": "争议点若可信度<高或含时间冲突则必须在报告中披露",
+      "cross_source_pairs": "对同一实体在多个 data-collection 输出间两两比对"
+    }
+  }
+}

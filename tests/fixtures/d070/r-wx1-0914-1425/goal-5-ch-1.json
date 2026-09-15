@@ -1,0 +1,73 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-3/media-review-report.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-17.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-18.json"
+      }
+    ],
+    "task": "消费 inputs=[goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-2/data-collection-5.json、goals/goal-",
+    "acceptance": [
+      "输出文件 goals/goal-5/data-cleaning-5.md 存在且非空",
+      "对所有上游 inputs 完成字段对齐、去重与缺失值处理",
+      "记录清洗规则、丢弃条目原因及数据质量指标",
+      "保留主体实体（豆包/字节跳动）标识一致性"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-cleaning-5.md"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动"
+    ],
+    "expected_count": null,
+    "notes": {
+      "cleaning_scope": "合并 goal-1~goal-4 的采集与报告数据，进行字段标准化与去重",
+      "dedup_key": "source_url + published_at + entity",
+      "missing_value_policy": "关键字段缺失(entity/source/timestamp)直接剔除；非关键字段留空并标注",
+      "normalization": [
+        "日期统一为 ISO-8601",
+        "价格统一为 CNY",
+        "实体名称统一为规范中文名"
+      ],
+      "quality_metrics": [
+        "原始条目数",
+        "去重后条目数",
+        "被剔除条目数与原因分布"
+      ],
+      "downstream": "为 goal-5 后续对比/交叉验证章提供清洗后基线数据"
+    }
+  }
+}

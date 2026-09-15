@@ -1,0 +1,99 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-13.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-14.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      }
+    ],
+    "task": "从标签产物中抽取涉及「豆包」的关键断言（如日活、月活、增长曲线、模型能力评测、商业化路径、与「字节跳动」协同效应、对比「DeepSeek」「Kimi」的位次判断），跨来源交叉比对，输出每条断言的支持来源列表、冲突来源列表、可信度评级与保留意见",
+    "acceptance": [
+      "每条关键断言必须列出支持来源清单与冲突来源清单，且来源均可回溯到全卷采集章的 output.path",
+      "每条断言必须给出可信度评级（高/中/低）与保留意见文本，评级依据需在 notes 中说明",
+      "涉及日活/月活/增长曲线等数值型断言需标注数据口径、时间窗口与单位，避免跨口径直接比较",
+      "对比「DeepSeek」「Kimi」的位次判断需至少来自两个独立来源方可评为高可信度",
+      "输出文件必须为合法 JSON，落盘至 goals/goal-5/cross-validation-5.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/cross-validation-5.json"
+    },
+    "entities": [
+      "豆包",
+      "字节跳动",
+      "DeepSeek",
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "assertion_dimensions": [
+        "日活",
+        "月活",
+        "增长曲线",
+        "模型能力评测",
+        "商业化路径",
+        "与字节跳动协同效应",
+        "对比DeepSeek位次",
+        "对比Kimi位次"
+      ],
+      "confidence_scale": {
+        "high": "≥2 个独立来源相互印证且无冲突",
+        "medium": "单一来源或存在轻度口径差异",
+        "low": "来源单一且与其他来源存在冲突或缺乏佐证"
+      },
+      "conflict_handling": "对同一断言的冲突来源需在 conflicts 字段中并列列出，并在 reservation 中说明保留意见与后续核实建议",
+      "traceability": "所有 supports/conflicts 引用必须使用全卷采集章的 output.path 原文",
+      "upstream_reference": {
+        "tagging": "goals/goal-5/tagging-2.md",
+        "data_cleaning": "goals/goal-5/data-cleaning-5.md"
+      },
+      "output_schema": {
+        "assertion_id": "string",
+        "assertion_text": "string",
+        "dimension": "string",
+        "supports": [
+          "path"
+        ],
+        "conflicts": [
+          "path"
+        ],
+        "confidence": "high|medium|low",
+        "reservation": "string"
+      }
+    }
+  }
+}

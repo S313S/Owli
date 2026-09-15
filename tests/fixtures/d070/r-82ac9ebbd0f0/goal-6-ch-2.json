@@ -1,0 +1,50 @@
+{
+  "chapter_type": "tagging",
+  "opening": {
+    "inputs": [],
+    "task": "在数据清洗产物基础上，为每条记录打上维度标签（能力、体验、生态、口碑倾向、用户群差异）、情感倾向（正面/中性/负面）与所涉实体标签（限定于「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」闭集），并输出带标签的记录数组，便于后续按维度切片检索。",
+    "acceptance": [
+      "每条记录必须包含 dimension_tags、sentiment、entity_tags 三个字段，缺一不可",
+      "dimension_tags 取值必须来自闭集：能力/体验/生态/口碑倾向/用户群差异",
+      "sentiment 取值必须来自闭集：正面/中性/负面",
+      "entity_tags 取值必须来自闭集：豆包/DeepSeek/Kimi/文心一言/通义千问，不允许出现闭集之外的实体",
+      "输出为可按维度切片检索的结构化记录数组，且记录条数与数据清洗产物一致"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/tagging.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimension_tag_set": [
+        "能力",
+        "体验",
+        "生态",
+        "口碑倾向",
+        "用户群差异"
+      ],
+      "sentiment_set": [
+        "正面",
+        "中性",
+        "负面"
+      ],
+      "entity_tag_set": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "multi_label": "同一条记录允许同时携带多个维度标签与多个实体标签",
+      "downstream_usage": "支持按维度、情感、实体三类切片进行检索与聚合"
+    }
+  }
+}

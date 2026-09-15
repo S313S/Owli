@@ -1,0 +1,59 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-3/data-collection-21.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-23.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-24.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-10.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-11.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-12.json"
+      }
+    ],
+    "task": "按小红书、抖音、微博、微信公众号四个源分别汇总关于豆包的正负面主题、典型场景、争议话题与情绪分布，并把「DeepSeek」「Kimi」「文心一言」「通义千问」在国内同市场的评价与豆包并列列出；仅做同市场并列，不做跨市场同名产品的交叉推断；输出为节化文档 object，包含来源分节、主题分节与竞品对照分节。",
+    "acceptance": [
+      "输出为节化文档 object，包含来源分节（小红书/抖音/微博/微信公众号）、主题分节（正负面主题/典型场景/争议话题/情绪分布）与竞品对照分节（豆包 vs DeepSeek/Kimi/文心一言/通义千问）",
+      "仅在国内同市场范围内做豆包与四个竞品的并列对照，不做跨市场同名产品的交叉推断",
+      "四个来源的正负面主题、典型场景、争议话题与情绪分布均须齐备，不得缺项",
+      "竞品对照分节使用 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五个字段进行结构化对照",
+      "所有引用与结论均可回溯至 opening.inputs 中的采集章 output.path"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/cross-validation-3.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "positioning": "以国内同市场为限，分别给出豆包与 DeepSeek/Kimi/文心一言/通义千问的定位标签，并按小红书、抖音、微博、微信公众号四源分别记录用户认知定位",
+      "pricing": "汇总各产品在四个来源中被讨论到的价格/付费/免费额度/会员权益相关观感，仅收录同市场语境下的讨论，不做跨市场同名产品价格比较",
+      "feature_differences": "按能力域（写作、代码、多模态、长文本、搜索、语音等）列出豆包与四个竞品的功能差异点，标注来源与出现频次",
+      "social_proof": "分来源汇总口碑证据（点赞/收藏/转发/评论量级、KOL 提及、案例故事），并区分正向、负向、中性三类社会证据",
+      "strengths_weaknesses": "以豆包为基准逐一对照四个竞品的相对优势与短板，并按来源分节标注争议话题与情绪分布倾向"
+    }
+  }
+}

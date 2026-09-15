@@ -1,0 +1,50 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集涉及「Kimi」「Kimi智能助手」「Kimi Chat」「kimi」「月之暗面Kimi」「Kimi.ai」的用户笔记、话题与评论，聚焦产品定位、代表能力、口碑标签与国内用户基础四类线索；输出 JSON 顶层为数组，每条记录必须包含 permalink 与 fetched_at 字段。",
+    "acceptance": [
+      "输出文件位于 goals/goal-3/data-collection-14.json，JSON 顶层为数组结构",
+      "每条记录均包含非空的 permalink 与 fetched_at 字段",
+      "采集内容覆盖产品定位、代表能力、口碑标签与国内用户基础四类线索",
+      "关键词覆盖 Kimi、Kimi智能助手、Kimi Chat、kimi、月之暗面Kimi、Kimi.ai 全部别名",
+      "数据来源限定为小红书平台的笔记、话题与评论"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-14.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "entity_aliases": [
+        "Kimi",
+        "Kimi智能助手",
+        "Kimi Chat",
+        "kimi",
+        "月之暗面Kimi",
+        "Kimi.ai"
+      ],
+      "content_types": [
+        "用户笔记",
+        "话题",
+        "评论"
+      ],
+      "focus_dimensions": [
+        "产品定位",
+        "代表能力",
+        "口碑标签",
+        "国内用户基础"
+      ],
+      "record_required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "output_shape": "JSON 顶层为数组"
+    }
+  }
+}

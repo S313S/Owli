@@ -1,0 +1,53 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」相关的笔记、评论与话题内容，聚焦用户看法、优缺点评价、使用场景反馈；顶层输出数组，每条含 permalink、fetched_at、作者、正文、互动量、话题标签与情感线索。",
+    "acceptance": [
+      "顶层输出为 JSON 数组，每条记录包含 permalink、fetched_at、作者、正文、互动量、话题标签与情感线索七类字段",
+      "采集内容须与「豆包／Doubao／字节豆包／豆包AI／豆包大模型」直接相关，剔除无关或重复笔记",
+      "permalink 为小红书原始笔记或评论链接，fetched_at 使用 ISO8601 时间戳",
+      "互动量字段需拆分点赞、收藏、评论、分享等可得的计数指标",
+      "情感线索需给出正面/负面/中性倾向标注及关键证据片段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "entity_aliases": [
+        "豆包",
+        "Doubao",
+        "字节豆包",
+        "豆包AI",
+        "豆包大模型"
+      ],
+      "content_scope": [
+        "笔记正文",
+        "评论区互动",
+        "话题标签讨论"
+      ],
+      "focus": [
+        "用户看法",
+        "优缺点评价",
+        "使用场景反馈"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "互动量",
+        "话题标签",
+        "情感线索"
+      ],
+      "dedup_strategy": "以 permalink 为主键去重，保留最新 fetched_at 版本"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "读取本 goal 三个采集章产物以及上游 goals/goal-2/data-collection-7.json、goals/goal-2/data-collection-8.json，对文本去重、剔除广告与非评论内容、标准化时间与来源字段，按能力、体验、生态、争议四类打上初步观点标签，输出节化 object 信封含 records、dedup_stats、gaps。",
+    "acceptance": [
+      "输出文件 goals/goal-3/data-cleaning-3.md 存在且为节化 object 信封",
+      "records 中每条记录包含标准化的时间与来源字段",
+      "dedup_stats 报告去重前后数量及剔除的广告/非评论条数",
+      "每条 record 至少归属于能力/体验/生态/争议四类标签之一",
+      "gaps 字段列出缺失或异常的数据来源与字段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-cleaning-3.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "envelope": "object",
+      "sections": [
+        "records",
+        "dedup_stats",
+        "gaps"
+      ],
+      "tag_taxonomy": [
+        "能力",
+        "体验",
+        "生态",
+        "争议"
+      ],
+      "normalization": [
+        "时间字段统一为 ISO8601",
+        "来源字段统一枚举"
+      ],
+      "filters": [
+        "去重",
+        "剔除广告",
+        "剔除非评论内容"
+      ],
+      "upstream_sources": [
+        "goals/goal-3/data-collection-13.json",
+        "goals/goal-2/data-collection-7.json",
+        "goals/goal-2/data-collection-8.json"
+      ]
+    }
+  }
+}
