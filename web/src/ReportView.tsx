@@ -374,7 +374,15 @@ function ExportButtons({ researchId, report, onDone, template, onTemplateChange,
         if (!body.ok) return
         setTemplates(body.data.templates)
         onTemplates(body.data.templates)
-        if (body.data.recommended) onRecommended(body.data.recommended)
+        // §RPT-4 货 5 续：推荐的模板还没整理过、而别的模板已有稿时，默认打开有稿的那份——
+        // 09-15 实测题面「国内大家对豆包的看法」推荐舆情简报（未整理），读者一打开看到的是工作稿，
+        // 已经整理好的咨询体正式稿要自己去下拉里找。推荐只是省一次点击，不该把读者带到空处。
+        const list = body.data.templates
+        const recommended = body.data.recommended
+        const pick = recommended && list.find((t) => t.name === recommended)?.has_polished === false
+          ? (list.find((t) => t.has_polished)?.name ?? recommended)
+          : recommended
+        if (pick) onRecommended(pick)
       } catch { /* 拿不到清单就只留默认模板，按钮照样能按 */ }
     })()
     // 只在挂载时取一次：onRecommended 每次渲染都是新函数，进依赖会让它反复抢回推荐值。
