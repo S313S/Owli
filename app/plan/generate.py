@@ -1757,6 +1757,7 @@ async def generate_plan(
             errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
                 collection_plan=collection_plan,
+                require_deliverable_producer=True,
             )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -1820,6 +1821,7 @@ async def generate_plan(
             chapter_errors = lint(
                 plan, max_chapters_per_goal=max_chapters,
                 collection_plan=collection_plan,
+                require_deliverable_producer=True,
             )["errors"]
         except PlanSegmentError as exc:
             raise PlanGenerationError(str(exc)) from exc

@@ -1431,16 +1431,54 @@ def _rule_33(raw: Mapping[str, Any]) -> list[str]:
     return duplicate_entity_errors(raw.get("entities"))
 
 
+def _rule_34(goals: list[dict[str, Any]]) -> list[str]:
+    """§D-071：每个 goal 的 deliverable.path 必须恰有一章 output.path 产出。
+
+    兜底闸，不替代修连删：r-d9c69fb6132a goal-3 的撰写链被删卡闸连删后，交付物无章产出，
+    lint 全过——规则 17 只在交付物有归属章时核 shape，没有归属章就一条不报；执行期 goal
+    完成不查交付物、下游综合章静默少一份输入照写。这条让规划期失败得早。
+    """
+    messages: list[str] = []
+    for goal in goals:
+        goal_id = str(goal.get("goal_id", ""))
+        path = str(goal.get("deliverable", {}).get("path", ""))
+        producers = [
+            str(agent.get("agent_id", ""))
+            for agent in goal.get("agents", [])
+            if path and str(agent.get("output", {}).get("path", "")) == path
+        ]
+        if len(producers) == 1:
+            continue
+        if not producers:
+            present = "、".join(str(agent.get("agent_id", "")) for agent in goal.get("agents", []))
+            messages.append(
+                f"[规则34] {goal_id} 交付物 {path or '(deliverable.path 为空)'} 没有任何章产出"
+                f"（本 goal 现有章：{present or '无'}）；请在本 goal 末尾补一章报告撰写，"
+                f"读本 goal 的采集 / 评级 / 清洗产物，output.path 写 {path}"
+            )
+        else:
+            messages.append(
+                f"[规则34] {goal_id} 交付物 {path} 有 {len(producers)} 章同时产出："
+                f"{'、'.join(producers)}；只保留最后那一章报告撰写写它，其余章改写各自的产物路径"
+            )
+    return messages
+
+
 def lint(
     plan: Plan | Mapping[str, Any], *, for_approval: bool = False,
     max_chapters_per_goal: int | None = None,
     collection_plan: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
+    require_deliverable_producer: bool = False,
 ) -> dict[str, list[str]]:
     """按 §10 返回问题；规则 12/29 是批准闸门，普通保存不阻断。
 
     collection_plan 是 §PLAN-1 的采集分配表（goal_id → [{entity, source_id,
     collector_name}]），只在生成期传入：规则 25 借它把错误锚到该实体被分配的
     goal，规则 31 核每个分配对是否落实。批准闸门不传，两条规则退回旧行为。
+
+    require_deliverable_producer 开规则 34（§D-071「交付物必须恰有一章产出」），只在
+    生成期开：编辑接口 / 批准闸门 / 已存旧计划不拦（手写计划与 09-13 前存盘的计划里本就
+    有交付物无章产出的，全局开会让它们存不了、批不了）。
     """
     raw = _data(plan)
     goals = list(raw.get("goals", []))
@@ -1479,4 +1517,6 @@ def lint(
     errors.extend(_rule_31(goals, collection_plan))
     errors.extend(_rule_32(raw, goals))
     errors.extend(_rule_33(raw))
+    if require_deliverable_producer:
+        errors.extend(_rule_34(goals))
     return {"errors": errors, "warnings": _warnings(goals)}
