@@ -102,6 +102,39 @@ conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 texts = [r[0] for r in conn.execute("select payload from events where research_id=? order by sequence", (RID,))]
 conn.close()
 lines.append(f"chapter_lint_not_converged 出现次数={sum('chapter_lint_not_converged' in t for t in texts)}｜事件 {len(texts)} 条")
+lines.append(f"[规则34] 触发次数={sum('[规则34]' in t for t in texts)}")
+# [修正31] 连删 / 改接留痕原文（去重保序）；删表外卡的逐张留痕只计数不全列
+notes31: list[str] = []
+card_drops = 0
+rating_drops: dict[str, set[str]] = {}
+for t in texts:
+    try:
+        text = str((json.loads(t).get("data") or {}).get("text", ""))
+    except json.JSONDecodeError:
+        continue
+    if "[修正31]" not in text:
+        continue
+    if "不在分配表里，已删除" in text:
+        card_drops += 1
+        continue
+    if "/reliability-audit" in text and "的上游采集卡已删" in text:
+        rating_drops.setdefault(text.split("/")[0].split()[-1], set()).add(text)
+        continue
+    if text not in notes31:
+        notes31.append(text)
+lines.append(f"[修正31] 删表外卡留痕 {card_drops} 条（含重复轮次）；随卡连删评级章（按 goal 计）="
+             f"{ {g: len(v) for g, v in sorted(rating_drops.items())} }；其余连删/改接/移出留痕原文：")
+for text in notes31:
+    lines.append(f"    {text.removeprefix('机械修正：')}")
+# 规划段以「规划」章打头的 goal
+heads = []
+for seg in sorted(SEG.glob("goal-[0-9]*.json")):
+    if "-ch-" in seg.name:
+        continue
+    names = [a.get("name") for a in (json.loads(seg.read_text("utf-8")).get("agents") or [])]
+    if names and "规划" in str(names[0]) and "数据抓取" not in str(names[0]):
+        heads.append(f"{seg.stem}（首章「{names[0]}」，共 {len(names)} 个 agent）")
+lines.append(f"规划段以「规划」章打头的 goal={heads or '无'}")
 stale = subprocess.run([sys.executable, str(Path(__file__).with_name("wx1_stale_acceptance.py")),
                         str(plan_path), str(DB), RID], capture_output=True, text=True)
 try:
