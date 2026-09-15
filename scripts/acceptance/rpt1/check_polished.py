@@ -756,9 +756,27 @@ def overlapping_findings(markdown: str) -> list[str]:
     return problems
 
 
+def _table_pairs(block: list[str]) -> set[tuple[str, str]]:
+    """一张表的「行标签 × 数」集合：每个数据行取第一格作标签，其余格里的整数各配一对。
+
+    按集合比、不按字面比：09-14 评审那份稿里「情感陪伴 正 10 / 中 1 / 负 4」以透视表、
+    长表、带合计的表三种形状摆了三次，逐字比一次也抓不到。角标（S12）不算数。
+    """
+    pairs: set[tuple[str, str]] = set()
+    for line in block[2:]:                       # 跳过表头与分隔行
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        label = "".join(cells[0].split())
+        for cell in cells[1:]:
+            for number in re.findall(r"(?<![S\d])\d+", MARK_ANY.sub("", cell)):
+                pairs.add((label, number))
+    return pairs
+
+
 def duplicate_tables(markdown: str) -> list[str]:
-    """⒠ 同一张表在写手正文里摆了不止一次（表头 + 各行逐字相同算同一张）。"""
-    seen: dict[str, int] = {}
+    """⒠ 同一组数在写手正文里摆了不止一次（换了表形也算）。"""
+    earlier: list[tuple[int, set[tuple[str, str]]]] = []
     problems = []
     block: list[str] = []
     start = 0
@@ -767,15 +785,17 @@ def duplicate_tables(markdown: str) -> list[str]:
         if line.strip().startswith("|"):
             if not block:
                 start = index
-            block.append("".join(line.split()))
+            block.append(line)
             continue
         if len(block) >= 3:            # 表头 + 分隔行 + 至少一行数据
-            key = "\n".join(block)
-            if key in seen:
-                problems.append(f"第 {start} 行的表与第 {seen[key]} 行的表一模一样："
-                                f"后面写「见第 N 条发现的表」即可")
-            else:
-                seen[key] = start
+            pairs = _table_pairs(block)
+            for first, seen in earlier:
+                small = min(len(pairs), len(seen))
+                if small >= 2 and len(pairs & seen) / small >= MARK_OVERLAP:
+                    problems.append(f"第 {start} 行的表与第 {first} 行的表是同一组数"
+                                    f"（{len(pairs & seen)}/{small} 对重合）：后面写「见第 N 条发现的表」即可")
+                    break
+            earlier.append((start, pairs))
         block = []
     return problems
 
