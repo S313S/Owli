@@ -1,0 +1,84 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_positioning_and_reputation.json"
+      },
+      {
+        "path": "goals/goal-2/goal-2-report.json"
+      },
+      {
+        "path": "goals/goal-3/kimi-profile.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      }
+    ],
+    "task": "基于数据清洗、交叉验证、一致性检查三章产物撰写节化文档信封形式的《豆包与四家对手的国内评价横向对比与综合结论》，包含：五维度横向对比矩阵、「豆包」相对位置画像、国内大家对「豆包」的整体看法综合结论、与「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化亮点与短板、缺口与局限说明、附录证据索引（回链到 permalink 与上游 output.path），所有实体名称严格遵守叫法闭集，引",
+    "acceptance": [
+      "输出必须为节化文档信封形式的 JSON，落盘至 goals/goal-6/goal-6-cross-comparison-report.json",
+      "报告必须包含五维度（定位/定价/功能差异/社会证明/优缺点）横向对比矩阵，且五家实体齐备",
+      "必须给出「豆包」相对位置画像与国内大家对「豆包」的整体看法综合结论",
+      "必须逐一给出与「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化亮点与短板，并说明缺口与局限",
+      "附录证据索引必须回链到 permalink 与上游 output.path，且所有实体名称严格遵守叫法闭集：豆包/DeepSeek/Kimi/文心一言/通义千问"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/goal-6-cross-comparison-report.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "report_sections": [
+        "五维度横向对比矩阵",
+        "「豆包」相对位置画像",
+        "国内大家对「豆包」的整体看法综合结论",
+        "与四家对手的差异化亮点与短板",
+        "缺口与局限说明",
+        "附录证据索引"
+      ],
+      "comparison_dimensions": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "upstream_goal_reports": [
+        "goals/goal-1/doubao_positioning_and_reputation.json",
+        "goals/goal-2/goal-2-report.json",
+        "goals/goal-3/kimi-profile.json",
+        "goals/goal-4/goal-4.json",
+        "goals/goal-5/goal-5-report.json"
+      ],
+      "upstream_goal6_artifacts": [
+        "goals/goal-6/data-cleaning-6.md",
+        "goals/goal-6/cross-validation-5.json",
+        "goals/goal-6/consistency-check-3.md"
+      ],
+      "naming_closed_set": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "envelope_format": "sectioned_document_envelope",
+      "evidence_index_requirements": [
+        "permalink 回链",
+        "上游 output.path 回链"
+      ]
+    }
+  }
+}

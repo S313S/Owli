@@ -1,0 +1,63 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内检索「豆包」「豆包AI」「字节豆包」「Doubao」相关笔记，覆盖使用体验、功能测评、优缺点吐槽、场景推荐等主题，采集近 12 个月内高互动笔记与评论摘要；输出顶层数组，每条含 permalink、fetched_at、作者、正文摘要、点赞/收藏/评论数、话题标签、情感倾向初判。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，非对象包裹",
+      "每条记录包含 permalink、fetched_at、作者、正文摘要、点赞数、收藏数、评论数、话题标签、情感倾向初判等字段",
+      "笔记发布时间均在近 12 个月内（2025-09-15 至 2026-09-15）",
+      "检索关键词覆盖「豆包」「豆包AI」「字节豆包」「Doubao」四类",
+      "主题覆盖使用体验、功能测评、优缺点吐槽、场景推荐等维度",
+      "情感倾向初判取值范围为 正面/中性/负面",
+      "permalink 为小红书站内可访问链接，fetched_at 使用 ISO8601 时间戳"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 40,
+    "notes": {
+      "platform": "xiaohongshu",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "字节豆包",
+        "Doubao"
+      ],
+      "time_window": {
+        "start": "2025-09-15",
+        "end": "2026-09-15"
+      },
+      "topics": [
+        "使用体验",
+        "功能测评",
+        "优缺点吐槽",
+        "场景推荐"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "content_summary",
+        "likes",
+        "collects",
+        "comments",
+        "hashtags",
+        "sentiment"
+      ],
+      "sentiment_labels": [
+        "正面",
+        "中性",
+        "负面"
+      ],
+      "sort_strategy": "按互动量（点赞+收藏+评论）降序",
+      "dedupe": "按 permalink 去重",
+      "output_shape": "top-level array"
+    }
+  }
+}

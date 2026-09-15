@@ -1,0 +1,569 @@
+{
+  "goals": [
+    {
+      "title": "豆包产品定位与国内用户口碑采集",
+      "objective": "采集豆包的产品定位、功能特性、用户规模、官方叙事，以及国内社媒（知乎、微博、小红书、B 站、抖音等）与科技媒体上关于豆包的使用体验、优缺点评价与典型讨论，形成豆包侧的证据基线。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "doubao_positioning_and_reputation.json",
+        "description": "豆包产品定位与国内用户口碑证据基线，含官方叙事、功能特性、用户规模，以及国内外社媒与科技媒体上关于豆包的使用体验、优缺点评价与典型讨论摘要。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为「doubao_positioning_and_reputation.json」，顶层为 object 信封，包含产品定位、功能特性、用户规模、官方叙事、社媒口碑、科技媒体讨论、结构化缺口等章节键。",
+        "必采八源（小红书、抖音、微博、微信公众号、Reddit、X、HN、Product Hunt）均产出对应采集数组产物，且每条记录含 permalink 与 fetched_at 字段。",
+        "所有采集 agent 的 task 文本只出现豆包实体的允许叫法（豆包、Doubao、豆包AI、字节豆包），未混入 DeepSeek、Kimi、文心一言、通义千问的任何叫法。",
+        "HN 采集章明确使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的查询口径。",
+        "同一 (source_id, entity) 组合在本 goal 内不重复出现；清单外若增补采集章，其 source_id 属于 applicable_sources 且与清单及上游不重复。",
+        "报告撰写章输出为 object，形成豆包侧的证据基线信封文档，覆盖官方叙事与用户口碑两大主线并标注证据出处。",
+        "数据不足处采用结构化缺口口径记录，未写死上游无法保证的实体最小条数。",
+        "所有 JSON 字符串值内部不含未转义的英文双引号，引用名称统一使用中文引号「」。"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·豆包",
+          "task": "在小红书站内检索「豆包」「豆包AI」「字节豆包」「Doubao」相关笔记，覆盖使用体验、功能测评、优缺点吐槽、场景推荐等主题，采集近 12 个月内高互动笔记与评论摘要；输出顶层数组，每条含 permalink、fetched_at、作者、正文摘要、点赞/收藏/评论数、话题标签、情感倾向初判。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "抖音数据抓取·豆包",
+          "task": "在抖音检索「豆包」「豆包AI」「字节豆包」「Doubao」相关视频与评论，覆盖官方号、KOL 测评、用户实拍等，采集近 12 个月内高播放/高互动条目；输出顶层数组，每条含 permalink、fetched_at、作者、标题或文案、播放量、点赞/评论/转发、评论区代表性观点摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·豆包",
+          "task": "在微博检索「豆包」「豆包AI」「字节豆包」「Doubao」相关微博与热搜话题，覆盖官方账号动态、媒体报道、KOL 与普通用户评价，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、转评赞数、话题标签、观点极性。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·豆包",
+          "task": "在微信公众号生态检索「豆包」「豆包AI」「字节豆包」「Doubao」相关深度文章，覆盖官方号、科技媒体、行业观察号，采集近 12 个月内代表性长文；输出顶层数组，每条含 permalink、fetched_at、公众号名称、标题、发布时间、阅读量或在看数（若可得）、正文摘要、核心观点。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Reddit 数据抓取·豆包",
+          "task": "在 Reddit 检索「Doubao」「豆包」相关 submission 与高分评论，覆盖 r/ChineseLanguage、r/ArtificialInteligence、r/LocalLLaMA、r/ChatGPT 等子版，采集近 12 个月内讨论；输出顶层数组，每条含 permalink、fetched_at、subreddit、标题或内容、score、评论数、代表性观点摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "X 数据抓取·豆包",
+          "task": "在 X 平台检索「Doubao」「豆包」「ByteDance Doubao」「字节豆包」相关推文与讨论串，覆盖官方账号、AI 领域 KOL、普通用户使用反馈，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、点赞/转推/回复数、语言、观点极性初判。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "HN 数据抓取·豆包",
+          "task": "在 Hacker News Algolia 接口检索「Doubao」「豆包」「ByteDance Doubao」，固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的过滤条件，采集 story 与 comment；输出顶层数组，每条含 permalink、fetched_at、标题或评论正文、points、num_comments、作者、created_at、类型。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Product Hunt 数据抓取·豆包",
+          "task": "在 Product Hunt 检索「Doubao」「豆包」「豆包AI」相关产品页面与讨论，覆盖官方或第三方登记条目、评论与投票；输出顶层数组，每条含 permalink、fetched_at、产品名、tagline、发布日期、upvotes、评论数、评论正文摘要、Maker 或 Hunter 信息（若可得）。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "对上游八个采集数组进行去重、字段规范化、时间字段统一为 ISO8601、观点摘要压缩、无关噪声剔除，并按源打上市场标签（cn_product 或 global），产出统一 schema 的清洗后记录集合信封，标注每源保留条数与丢弃原因。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "一致性检查",
+          "task": "对清洗后关于豆包的官方叙事（功能、定位、用户规模）与用户口碑（优点、缺点、典型场景）进行跨源一致性核对，标注共识观点、分歧观点、孤证与结构化缺口，形成一致性检查信封文档。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "整合清洗与一致性检查结果，撰写豆包侧证据基线信封文档，章节涵盖产品定位、功能特性、用户规模、官方叙事、国内社媒口碑（小红书、抖音、微博、微信公众号）、海外及科技媒体讨论（Reddit、X、HN、Product Hunt）、优缺点画像、典型讨论案例、结构化缺口；每条论断附证据 permalink 引用，产物为 object 信封。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "DeepSeek 产品定位与国内舆论评价采集",
+      "objective": "采集 DeepSeek 的产品定位、模型能力亮点、发布节奏，以及国内用户与开发者社区对其性能、开源策略、性价比的评价与讨论，为后续与豆包的横向对比提供证据。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-2-report.json",
+        "description": "DeepSeek 产品定位、模型能力亮点、发布节奏与国内用户及开发者社区评价的多源采集与结构化汇总产物，供后续与豆包横向对比使用。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为 goal-2-report.json 且 shape=object，内部至少含「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节",
+        "所有采集类 agent 输出的 JSON 顶层为数组，且每条记录必须包含 permalink 与 fetched_at 两个字段",
+        "小红书数据抓取·DeepSeek 章节必然存在且实体仅出现「深度求索」「DeepSeek」「DeepSeek-R1」「DeepSeek-V3」四类叫法之一，不得混入其它实体名称",
+        "各采集章节的 (source_id, entity) 组合彼此不重复，且不与上游 goal-1 已采集组合冲突",
+        "HN 相关查询固定使用 created_at_i 大于「执行时点 UTC epoch 减 7776000」、points 大于 50、hitsPerPage 等于 1000 的参数口径",
+        "交叉验证与报告撰写章节输出 shape=object 的节化文档信封，引用来源统一使用「」中文引号包裹",
+        "数据缺口以结构化字段「gap_reason / affected_dimension / mitigation」记录，不写死上游无法保证的实体最小条数",
+        "报告最终节须给出 DeepSeek 与豆包对比的可衔接锚点字段，便于后续 goal 引用"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·DeepSeek",
+          "task": "在小红书采集与「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关的笔记、评论与话题，聚焦国内用户对产品定位、性价比、开源策略的口碑；每条记录需含 permalink 与 fetched_at，正文与标题保留原文，引用一律用「」中文引号；实体名称只能使用上述四种叫法。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·DeepSeek",
+          "task": "在微博采集关键词「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的热门讨论、KOL 观点与评论区反馈，覆盖发布节奏、模型能力亮点与舆论情绪；每条记录含 permalink 与 fetched_at，实体叫法仅限本清单四类。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·DeepSeek",
+          "task": "抓取微信公众号涉及「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的深度文章，重点提取产品定位、发布节奏时间线、开源策略与性价比论证；输出数组，每条含 permalink 与 fetched_at，引用文本使用「」中文引号。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·DeepSeek",
+          "task": "通过网页搜索检索国内媒体与技术博客对「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的报道，采集官方产品页、发布公告与评测；每条记录必含 permalink 与 fetched_at，实体名称仅使用四种许可叫法。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "HN 数据抓取·DeepSeek",
+          "task": "在 Hacker News Algolia 检索「DeepSeek」「DeepSeek-R1」「DeepSeek-V3」，查询参数固定为 created_at_i 大于「执行时点 UTC epoch 减 7776000」、points 大于 50、hitsPerPage 等于 1000，采集帖子标题、正文与高赞评论摘要；每条含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Reddit 数据抓取·DeepSeek",
+          "task": "在 Reddit 相关 subreddit 采集关于「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的讨论帖与高票评论，覆盖开源策略、性价比与开发者体验的英文视角评价，用作与国内舆论的交叉参照；每条含 permalink 与 fetched_at。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "X 数据抓取·DeepSeek",
+          "task": "在 X 平台采集「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的推文、转推与回复讨论，聚焦发布节奏与国际社区反响；输出数组，每条含 permalink 与 fetched_at，实体名称仅限四种许可叫法。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "汇总本 goal 全部采集章节与上游 goal-1 中与 DeepSeek 讨论直接对照的豆包舆论数据，剔除广告和站外重复，规范化字段（permalink、fetched_at、source_id、entity、text、author、metrics），标注实体叫法归一化结果，输出结构化清洗产物，引用文本一律用「」中文引号。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "对清洗后的多源证据进行事实交叉核验，围绕 DeepSeek 的产品定位、能力亮点、发布节奏、开源策略与性价比五个维度识别一致与冲突证据，标注冲突严重度与置信度，产出节化文档信封（含 verified_claims、conflicts、gaps 三节）。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于清洗与交叉验证结果撰写 DeepSeek 定位与舆论评价报告，按「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节组织，并给出与豆包横向对比的锚点字段，引用统一使用「」中文引号，数据缺口以结构化字段（gap_reason、affected_dimension、mitigation）记录。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Kimi 产品定位与国内舆论评价采集",
+      "objective": "采集月之暗面 Kimi 的产品定位、长文本能力、场景优势，以及国内用户在学术、办公、写作场景下对 Kimi 的口碑与吐槽，为对比章节备料。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "kimi-profile.json",
+        "description": "汇总月之暗面 Kimi 的产品定位、长文本能力、学术办公写作场景优势，以及国内用户口碑亮点与吐槽的结构化档案，供后续对比章节调用。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "产物文件 kimi-profile.json 存在且为 JSON object，顶层键至少覆盖「产品定位」「长文本能力」「场景优势」「口碑亮点」「主要吐槽」「信息缺口」六项。",
+        "每个采集 agent 的 output 顶层为数组，且每条记录含 permalink 与 fetched_at 字段。",
+        "所有 agent 的 task 文本只使用 Kimi 的叫法闭集「Kimi智能助手、Kimi、kimi、Kimi Chat、月之暗面、Moonshot」，未混入豆包、DeepSeek、文心一言、通义千问等其他实体的专名。",
+        "必采清单条目「小红书数据抓取·Kimi」已建卡并写出对应 output。",
+        "所有采集 agent 的 source_id 均落在 applicable_sources=「douyin、hacker_news、product_hunt、reddit、web_search、wechat_mp、weibo、x、xhs」之内。",
+        "同一 (source_id, entity) 组合在本 goal 内不重复出现，且未与上游已采清单冲突。",
+        "交叉验证与报告撰写章的 output.shape 均为 object，采用节化文档信封形。",
+        "样本量不足时以结构化缺口口径在「信息缺口」节说明，未写死上游无法保证的最小条数。"
+      ],
+      "agents": [
+        {
+          "name": "规划",
+          "task": "拆解本 goal 的采集与合成路径，明确围绕 Kimi（Kimi智能助手、Kimi Chat、月之暗面 Moonshot）在产品定位、长文本能力、学术办公写作场景、国内口碑与吐槽方面的采集要点、检索词与合成节次结构。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "小红书数据抓取·Kimi",
+          "task": "在小红书检索「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」等关键词，采集用户对 Kimi 长文本、学术阅读、办公写作等场景的使用笔记与吐槽，输出数组，每条含 permalink、fetched_at、标题、正文、互动量、场景标签。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·Kimi",
+          "task": "在微博检索「Kimi」「Kimi智能助手」「月之暗面」「Moonshot」相关话题与热帖，采集国内用户对 Kimi 产品定位与长文本能力的讨论、口碑与吐槽，输出数组，每条含 permalink、fetched_at、作者、正文、转评赞、话题标签。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·Kimi",
+          "task": "在微信公众号检索「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」相关文章，采集针对 Kimi 产品定位、长文本能力、学术办公写作场景的评测与深度稿件，输出数组，每条含 permalink、fetched_at、公众号名、标题、摘要、发布时间。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·Kimi",
+          "task": "使用网页搜索检索「Kimi 智能助手 长文本」「月之暗面 Moonshot 产品定位」「Kimi Chat 学术 办公 写作 评测」等查询，采集 Kimi 的官方定位介绍与第三方评测报道，输出数组，每条含 permalink、fetched_at、标题、来源站点、摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "x 数据抓取·Kimi",
+          "task": "在 X 平台检索「Kimi」「Moonshot」「月之暗面」「Kimi Chat」等关键词，采集海外及国内华语用户对 Kimi 长文本能力与场景表现的讨论，输出数组，每条含 permalink、fetched_at、作者、正文、互动数据。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "hn 数据抓取·Kimi",
+          "task": "在 Hacker News Algolia 接口检索「Kimi」「Moonshot」「Kimi Chat」相关帖子，查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，采集技术社区对 Kimi 长文本能力与产品定位的评价，输出数组，每条含 permalink、fetched_at、标题、points、评论数、摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "对上述 Kimi 相关采集数据做去重、去噪、场景归类（学术、办公、写作、长文本、其他），标注情感倾向与话题标签，输出清洗后的结构化记录集合。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "跨小红书、微博、微信公众号、网页搜索、X、Hacker News 六路证据核对 Kimi 的产品定位表述、长文本上下文长度声明与用户口碑倾向，标注一致点、冲突点与证据强度，输出节化 object。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于清洗结果与交叉验证结论，撰写 Kimi 产品定位与国内舆论评价的结构化档案，覆盖产品定位、长文本能力、学术办公写作场景优势、口碑亮点、主要吐槽与信息缺口，输出节化 object 写入 kimi-profile.json。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "文心一言产品定位与国内舆论评价采集",
+      "objective": "采集百度文心一言的产品定位、模型迭代、生态整合，以及国内用户与媒体对其能力、体验、商业化路径的正负面评价，形成文心一言侧证据。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-4.json",
+        "description": "文心一言产品定位、模型迭代、生态整合与国内正负面舆论评价的多源证据与结构化报告",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为「goal-4.json」且 shape 为 object",
+        "采集类 agent 覆盖必采清单：至少包含「小红书数据抓取·文心一言」一条",
+        "所有采集 agent 的 name 均使用「注册表原名·文心一言」结构化格式，且 (source_id, entity) 组合在本 goal 内不重复、与上游 goal-1/goal-2/goal-3 已采集组合不冲突",
+        "所有采集 agent 的 source_id 均属于 applicable_sources={douyin, hacker_news, product_hunt, reddit, web_search, wechat_mp, weibo, x, xhs}",
+        "每个采集 agent 的 task 文本仅使用文心一言的叫法闭集（文心一言、ERNIE Bot、文小言、百度文心），不得混入豆包/DeepSeek/Kimi/通义千问的任何叫法",
+        "每条采集产物顶层为数组，且每条记录包含 permalink 与 fetched_at 字段",
+        "涉及 Hacker News 的采集查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000",
+        "数据不足时以结构化缺口口径记录，不写死上游无法保证的实体最小条数",
+        "非采集 agent 的 name 逐字取自职能闭集（数据清洗、一致性检查、交叉验证、报告撰写等）",
+        "交叉验证、报告撰写、摘要等汇总章 output.shape 为 object，与 deliverable.shape 保持一致",
+        "JSON 字符串内部无未转义英文双引号，引用名称统一使用中文引号「」",
+        "最终报告覆盖文心一言的产品定位、模型迭代（ERNIE Bot/文小言/百度文心）、生态整合、用户体验、商业化路径的正负面证据"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·文心一言",
+          "task": "在小红书采集关于「文心一言」「ERNIE Bot」「文小言」「百度文心」的近 90 天笔记、评论与话题热度，重点覆盖产品定位、模型迭代、C 端体验、商业化路径的正负面讨论；输出顶层数组，每条含 permalink、fetched_at、作者、正文、互动数据、检索关键词等字段；数据不足时以结构化缺口口径标记。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·文心一言",
+          "task": "在微博采集「文心一言」「ERNIE Bot」「文小言」「百度文心」相关的博文、话题、KOL 讨论与舆情事件，聚焦模型版本迭代、发布会评价、B 端/C 端商业化与生态整合口碑；输出顶层数组，每条含 permalink、fetched_at、博主、正文、互动量、话题标签等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·文心一言",
+          "task": "在微信公众号采集针对「文心一言」「ERNIE Bot」「文小言」「百度文心」的深度评测、行业分析、发布会解读与商业化案例文章，覆盖百度大模型战略、生态整合、企业客户反馈；输出顶层数组，每条含 permalink、fetched_at、公众号名、标题、正文摘要、发布时间等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·文心一言",
+          "task": "通过网页搜索采集权威媒体、行业研究、官方发布关于「文心一言」「ERNIE Bot」「文小言」「百度文心」的产品定位、模型迭代、生态整合与商业化路径报道，覆盖正负面评价；输出顶层数组，每条含 permalink、fetched_at、来源、标题、摘要、发布时间等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "抖音数据抓取·文心一言",
+          "task": "在抖音采集与「文心一言」「ERNIE Bot」「文小言」「百度文心」相关的短视频、评论与话题热度，聚焦 C 端用户体验、场景使用、对比测评的直观反馈；输出顶层数组，每条含 permalink、fetched_at、作者、视频描述、点赞/评论/转发量、话题等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "X 数据抓取·文心一言",
+          "task": "在 X 平台采集海外与国内英文语境下对「文心一言」「ERNIE Bot」「文小言」「百度文心」的讨论，涵盖模型能力评价、迭代节奏、生态与商业化路径观点；输出顶层数组，每条含 permalink、fetched_at、作者、正文、互动量、语言等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Reddit 数据抓取·文心一言",
+          "task": "在 Reddit 相关 subreddit（如 r/LocalLLaMA、r/ChineseLanguage、r/artificial 等）采集关于「文心一言」「ERNIE Bot」「文小言」「百度文心」的帖子与评论，覆盖模型评测、使用体验、与其他中文大模型对比、商业化路径讨论；输出顶层数组，每条含 permalink、fetched_at、subreddit、作者、标题、正文、得分、评论数等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "HN 数据抓取·文心一言",
+          "task": "在 Hacker News 采集关于「文心一言」「ERNIE Bot」「文小言」「百度文心」的相关讨论；查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000；覆盖模型迭代、生态、商业化的英文讨论；输出顶层数组，每条含 permalink、fetched_at、标题、URL、points、评论数、作者等字段。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "对上述八路「文心一言」采集产物进行去重、字段规范化、时间戳统一、噪声剔除与实体命中校验（仅保留命中「文心一言/ERNIE Bot/文小言/百度文心」叫法闭集的记录），并按定位/迭代/生态/体验/商业化五维打标；输出结构化清洗结果对象。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "一致性检查",
+          "task": "对清洗后的「文心一言」多源证据进行一致性检查：跨源核对模型版本号、发布时间线、生态合作方、商业化案例是否一致，标注冲突与缺口，输出一致性检查报告对象。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "对「文心一言」的关键论断（产品定位、模型迭代节奏、生态整合广度、商业化路径成效、正负面口碑）在小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News 至少两源之间进行交叉验证，标注证据强度与冲突项，输出交叉验证结果对象。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于清洗、一致性与交叉验证结果，撰写「文心一言产品定位与国内舆论评价采集」章节化报告，包含产品定位、模型迭代（ERNIE Bot/文小言/百度文心）、生态整合、用户体验、商业化路径的正负面评价，以及证据引用与结构化缺口说明，输出报告对象作为最终 deliverable。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "通义千问产品定位与国内舆论评价采集",
+      "objective": "采集阿里通义千问的产品定位、开源版本表现、企业与个人用户口碑，以及在国内技术社区与社媒中的讨论热点，为对比提供证据。",
+      "depends_on": [],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-5-report.json",
+        "description": "围绕通义千问（含 Qwen、Tongyi Qianwen、Qwen3、阿里通义 等叫法）的产品定位、开源版本表现、企业与个人用户口碑及国内社媒/技术社区讨论热点的证据汇总文档，含各源采集条目引用、清洗后的观点标签、交叉验证结论与结构化缺口说明。",
+        "shape": "object"
+      },
+      "acceptance": [
+        "deliverable.path 为「goal-5-report.json」且 shape 为 object，节化文档信封形。",
+        "必采清单条目「小红书数据抓取·通义千问」存在且 output.shape 为 array。",
+        "所有采集 agent 的 name 采用「注册表原名·通义千问」结构化格式，且 source_id 与 entity 组合不与上游 goal-1 至 goal-4 的 (source_id, entity) 组合重复。",
+        "所有采集 agent 的 source_id 均落在 applicable_sources=[douyin, hacker_news, product_hunt, reddit, web_search, wechat_mp, weibo, x, xhs] 之内。",
+        "采集 agent 的 task 文本仅使用通义千问的叫法闭集：通义千问、Qwen、Tongyi Qianwen、Qwen3、阿里通义，且不出现其他实体的叫法。",
+        "非采集 agent 的 name 仅从职能闭集取值：数据清洗、交叉验证、报告撰写。",
+        "采集产物顶层为数组且每条含 permalink、fetched_at 字段。",
+        "Hacker News 采集使用固定查询约束 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000。",
+        "报告撰写、交叉验证等汇总类 agent 的 output.shape 取 object。",
+        "输出仅包含 deliverable/acceptance/agents 及骨架字段，无 id/engine/capability/prompt/状态/重试/时间字段，字符串内部无未转义英文双引号，引用名称使用「」。",
+        "数据不足时采用结构化缺口口径记录，不写死上游无法保证的实体最小条数。"
+      ],
+      "agents": [
+        {
+          "name": "小红书数据抓取·通义千问",
+          "task": "在小红书站内以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为关键词，抓取近 90 天与产品定位、开源版本表现、企业与个人用户口碑相关的笔记、评论、话题页；每条记录必须含 permalink、fetched_at，并附作者、发布时间、点赞、收藏、评论数、正文与话题标签。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微博数据抓取·通义千问",
+          "task": "在微博以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为关键词，抓取近 90 天的热门微博、话题主持人贴、评论区高赞回复；每条记录含 permalink、fetched_at、作者、转评赞数、发布时间与正文。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "微信公众号数据抓取·通义千问",
+          "task": "抓取微信公众号中围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的深度评测、企业落地案例、开源模型解读文章；每条记录含 permalink、fetched_at、公众号名称、发布时间、阅读量或在看量（若可得）与摘要。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "网页搜索数据抓取·通义千问",
+          "task": "通过网页搜索汇总关于「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的官方产品页、榜单排名、评测报告、开源仓库讨论；每条记录含 permalink、fetched_at、站点、标题、发布时间与正文摘录。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "抖音数据抓取·通义千问",
+          "task": "在抖音抓取涉及「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的视频、直播切片与话题聚合，覆盖近 90 天；每条记录含 permalink、fetched_at、账号、发布时间、点赞、评论、分享与视频描述。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "X 数据抓取·通义千问",
+          "task": "在 X 平台抓取围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的英文与中文推文，聚焦开源模型发布、跑分对比与开发者反馈；每条记录含 permalink、fetched_at、作者、发布时间、点赞与转推数。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "Reddit 数据抓取·通义千问",
+          "task": "在 Reddit r/LocalLLaMA、r/MachineLearning 等版块检索「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」相关帖与高赞评论；每条记录含 permalink、fetched_at、subreddit、作者、发布时间、score 与正文。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "HN 数据抓取·通义千问",
+          "task": "使用 Algolia HN 接口以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为查询词，固定过滤 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，抓取相关 story 与评论；每条记录含 permalink、fetched_at、作者、points、num_comments、创建时间与标题正文。",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "对上述 8 个采集产物执行去重、时间归一化、字段对齐与观点标签抽取，将围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人口碑维度拆成结构化条目，标注情感极性与证据强度，并记录结构化缺口。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "跨小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News 各源比对关于「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的关键论断，标记多源共识、单源孤证与相互冲突项，输出可复核的证据映射表。",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "汇总清洗与交叉验证结果，撰写围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人用户口碑及国内讨论热点的节化文档，引用采集条目 permalink，并附结构化缺口说明与后续采集建议。",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    },
+    {
+      "title": "豆包与四家对手的国内评价横向对比与综合结论",
+      "objective": "基于前五个 goal 的采集结果，横向对比豆包与 DeepSeek、Kimi、文心一言、通义千问在能力、体验、口碑、用户画像、场景偏好上的差异，回答国内大家对豆包的整体看法及其相对位置。",
+      "depends_on": [
+        "goal-1",
+        "goal-2",
+        "goal-3",
+        "goal-4",
+        "goal-5"
+      ],
+      "deliverable": {
+        "format": "json",
+        "path": "goal-6-cross-comparison-report.json",
+        "description": "基于 goal-1 至 goal-5 的三十五个上游采集产物及本 goal 补采数据，横向对比「豆包」与「DeepSeek」「Kimi」「文心一言」「通义千问」在能力、体验、口碑、用户画像、场景偏好五维度的差异，输出国内大家对「豆包」的整体看法与相对位置综合结论的节化文档信封",
+        "shape": "object"
+      },
+      "acceptance": [
+        "报告结论必须可逐条回溯到 goal-1 至 goal-5 的三十五个上游 output.path 或本 goal 补采产物中的具体 permalink，禁止无源结论",
+        "横向对比矩阵必须完整覆盖能力、体验、口碑、用户画像、场景偏好五个维度，每维度对「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」逐一给出证据引用",
+        "报告及中间产物中出现的实体名称必须严格落在闭集「豆包、DeepSeek、Kimi、文心一言、通义千问」及各自允许叫法内，不得跨实体混用叫法",
+        "任何维度证据不足时必须用结构化缺口口径说明缺口来源、影响范围与降级策略，不得编造条数或写死上游无法保证的实体最小条数",
+        "所有引用名称一律使用中文引号「」，JSON 字符串值内部不得出现未转义的英文双引号",
+        "补采采集章顶层为数组，每条含 permalink 与 fetched_at 字段，且不与上游三十五个 (source_id, entity) 组合重复",
+        "本 goal 补采采集章的 source_id 必须落在 applicable_sources=[douyin、hacker_news、product_hunt、reddit、web_search、wechat_mp、weibo、x、xhs] 之内",
+        "交叉验证、一致性检查、报告撰写三章 shape 均为 object，且最终 deliverable.shape 为 object，节化文档信封结构完整",
+        "数据清洗产物必须按实体×维度建立统一字段的证据条目集合，保留 permalink、fetched_at、source_id、entity、维度标签、原文摘录、情感倾向等字段"
+      ],
+      "agents": [
+        {
+          "name": "网页搜索·豆包",
+          "task": "针对实体「豆包」在网页搜索源采集横向对比与综合评价类公开内容，检索关键词仅使用叫法闭集「豆包」「Doubao」「豆包AI」「字节豆包」，并可与维度关键词（能力、体验、口碑、用户画像、场景偏好）组合；填补上游 goal-1 对「豆包」在网页搜索源的采集缺口，输出顶层为数组，每条至少含 permalink、fetched_at、title、snippet、source_domain、matched_alias 字段，禁止在任务文本中写入其他四个竞品的叫法",
+          "output": {
+            "shape": "array"
+          }
+        },
+        {
+          "name": "数据清洗",
+          "task": "通过 inputs 消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-collection-6.json、goals/goal-1/data-collection-7.json、goals/goal-1/data-collection-8.json、goals/goal-2/data-collection-9.json 至 goals/goal-2/data-collection-15.json、goals/goal-3/data-collection-16.json 至 goals/goal-3/data-collection-21.json、goals/goal-4/data-collection-22.json 至 goals/goal-4/data-collection-28.json、goals/goal-5/data-collection-29.json 至 goals/goal-5/data-collection-35.json 以及本 goal「网页搜索·豆包」补采产物，按实体（「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」）与五个维度建立统一字段的证据条目集合，剔除叫法越界或与闭集实体无关的条目，保留 permalink、fetched_at、source_id、entity、alias_hit、维度标签、原文摘录、情感倾向、置信度字段",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "交叉验证",
+          "task": "对数据清洗产物按实体×维度做跨源交叉验证，识别多源一致口径、单源孤证与源间矛盾，特别核对「豆包」在能力、体验、口碑、用户画像、场景偏好上的评价是否在小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索多源间稳定成立，并与「DeepSeek」「Kimi」「文心一言」「通义千问」做同维度对照，输出节化文档信封，每条结论标注支撑源数量、冲突源列表与置信度",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "一致性检查",
+          "task": "对交叉验证产物与 goal-1 至 goal-5 各自的单实体结论做一致性核对，识别横向对比中出现的口径漂移、实体叫法越界、维度错配、数据缺口未标注等问题，输出节化文档信封，列出通过项、需返工项与建议修正方案，确保最终报告在叫法闭集与维度框架上不越界",
+          "output": {
+            "shape": "object"
+          }
+        },
+        {
+          "name": "报告撰写",
+          "task": "基于数据清洗、交叉验证、一致性检查三章产物撰写节化文档信封形式的《豆包与四家对手的国内评价横向对比与综合结论》，包含：五维度横向对比矩阵、「豆包」相对位置画像、国内大家对「豆包」的整体看法综合结论、与「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化亮点与短板、缺口与局限说明、附录证据索引（回链到 permalink 与上游 output.path），所有实体名称严格遵守叫法闭集，引用名称使用中文引号「」",
+          "output": {
+            "shape": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

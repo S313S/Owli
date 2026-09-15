@@ -1,0 +1,71 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "汇总本 goal 全部采集章节与上游 goal-1 中与 DeepSeek 讨论直接对照的豆包舆论数据，剔除广告和站外重复，规范化字段（permalink、fetched_at、source_id、entity、text、author、metrics），标注实体叫法归一化结果，输出结构化清洗产物，引用文本一律用「」中文引号。",
+    "acceptance": [
+      "输出文件位于 goals/goal-2/data-cleaning-2.md，结构化清洗产物字段齐备（permalink、fetched_at、source_id、entity、text、author、metrics）。",
+      "剔除广告与站外重复条目，保留与 DeepSeek 讨论直接对照的豆包舆论以及本 goal DeepSeek 采集数据。",
+      "实体叫法归一化为统一标准（如豆包 / Doubao、DeepSeek / 深度求索），并在产物中标注映射结果。",
+      "所有引用原文一律使用「」中文引号包裹，不出现英文引号或裸文本。",
+      "对每条记录标注来源采集章节（agent_id 或 output.path），可追溯到 goal-1 与 goal-2 的原始采集 JSON。"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-cleaning-2.md"
+    },
+    "entities": [
+      "DeepSeek",
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "scope": "本 goal-2 全部采集章节 + goal-1 中与 DeepSeek 讨论直接对照的豆包舆论数据",
+      "sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json",
+        "goals/goal-2/data-collection-9.json"
+      ],
+      "normalized_fields": [
+        "permalink",
+        "fetched_at",
+        "source_id",
+        "entity",
+        "text",
+        "author",
+        "metrics"
+      ],
+      "entity_normalization": {
+        "DeepSeek": [
+          "DeepSeek",
+          "深度求索",
+          "deepseek",
+          "DS"
+        ],
+        "豆包": [
+          "豆包",
+          "Doubao",
+          "doubao",
+          "字节豆包"
+        ]
+      },
+      "dedup_rules": {
+        "advertisement_filter": "剔除含推广、投放、返利、下载链接等广告特征的条目",
+        "cross_site_duplicate": "按 permalink 规范化 + text 归一化哈希去重，跨平台转载保留最早发布的一条"
+      },
+      "quote_style": "所有引用文本使用「」中文引号包裹",
+      "cross_reference": "goal-1 豆包数据仅保留与 DeepSeek 直接对照（同段落/同讨论串/明确比较语义）的条目",
+      "upstream_dependency": [
+        "reliability-audit-9",
+        "data-collection-9"
+      ]
+    }
+  }
+}

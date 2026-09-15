@@ -1,0 +1,86 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-30.json"
+      }
+    ],
+    "task": "对清洗后的多源证据进行事实交叉核验，围绕 DeepSeek 的产品定位、能力亮点、发布节奏、开源策略与性价比五个维度识别一致与冲突证据，标注冲突严重度与置信度，产出节化文档信封（含 verified_claims、conflicts、gaps 三节）。",
+    "acceptance": [
+      "输出文件位于 goals/goal-2/cross-validation.json 且为合法 JSON",
+      "包含 verified_claims、conflicts、gaps 三个章节且结构完整",
+      "覆盖产品定位、能力亮点、发布节奏、开源策略、性价比五个维度",
+      "每条 conflict 标注严重度（high/medium/low）与置信度",
+      "所有 claim 与 conflict 均引用来源证据 ID，可追溯至输入采集/清洗产物"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/cross-validation.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "verified_claims",
+        "conflicts",
+        "gaps"
+      ],
+      "dimensions": [
+        "产品定位",
+        "能力亮点",
+        "发布节奏",
+        "开源策略",
+        "性价比"
+      ],
+      "conflict_severity_scale": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "confidence_scale": "0.0-1.0",
+      "traceability": "每条结论需回溯至清洗证据与原采集来源 ID",
+      "upstream_ref": [
+        "data-cleaning-2",
+        "reliability-audit-9",
+        "data-collection-9"
+      ]
+    }
+  }
+}

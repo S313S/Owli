@@ -1,0 +1,74 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-5/data-collection-30.json"
+      }
+    ],
+    "task": "跨小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News 各源比对关于「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的关键论断，标记多源共识、单源孤证与相互冲突项，输出可复核的证据映射表。",
+    "acceptance": [
+      "证据映射表覆盖八个来源（小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News），且每条论断均可追溯至 data-collection-30 中的原始条目 ID/URL",
+      "对每条关键论断明确标注 consensus（≥2 源一致）、single_source（仅 1 源）或 conflict（多源结论不一致）三态之一，并给出判定依据",
+      "所有别名（通义千问/Qwen/Tongyi Qianwen/Qwen3/阿里通义）在比对时归一处理，避免因命名差异漏配或误配",
+      "冲突项需并列列出对立陈述、来源与时间戳，并说明可能的分歧原因或不可判定的原因",
+      "输出为结构化 JSON，字段包含 claim/aliases/sources/verdict/evidence_refs/notes，可直接被下游报告章消费"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/cross-validation-4.json"
+    },
+    "entities": [
+      "通义千问",
+      "Qwen",
+      "Tongyi Qianwen",
+      "Qwen3",
+      "阿里通义"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source_channels": [
+        "小红书",
+        "微博",
+        "微信公众号",
+        "网页搜索",
+        "抖音",
+        "X",
+        "Reddit",
+        "Hacker News"
+      ],
+      "verdict_taxonomy": {
+        "consensus": "≥2 个来源相互印证的论断",
+        "single_source": "仅 1 个来源支持的孤证论断",
+        "conflict": "多源之间存在事实或结论冲突的论断"
+      },
+      "alias_normalization": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen",
+        "Qwen3",
+        "阿里通义"
+      ],
+      "evidence_mapping_schema": {
+        "claim": "string",
+        "aliases_hit": "array<string>",
+        "sources": "array<{channel, doc_id, url, timestamp}>",
+        "verdict": "consensus|single_source|conflict",
+        "evidence_refs": "array<string>",
+        "conflict_detail": "array<{stance, source, quote}>|null",
+        "remarks": "string|null"
+      },
+      "upstream_reference": {
+        "data_collection": "goals/goal-5/data-collection-30.json",
+        "data_cleaning": "goals/goal-5/data-cleaning-5.md",
+        "reliability_audit": "goals/goal-5/reliability-audit-30.json"
+      },
+      "coverage_requirement": "每条论断必须给出来源清单与证据引用，孤证与冲突需单独汇总便于人工复核",
+      "out_of_scope": [
+        "主观情感倾向打分",
+        "跨实体（非通义千问系列）比较"
+      ]
+    }
+  }
+}

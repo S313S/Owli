@@ -1,0 +1,97 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/doubao_positioning_and_reputation.json"
+      },
+      {
+        "path": "goals/goal-2/goal-2-report.json"
+      },
+      {
+        "path": "goals/goal-3/kimi-profile.json"
+      },
+      {
+        "path": "goals/goal-4/goal-4.json"
+      },
+      {
+        "path": "goals/goal-5/goal-5-report.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-30.json"
+      }
+    ],
+    "task": "通过 inputs 消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goa",
+    "acceptance": [
+      "输出文件 goals/goal-6/data-cleaning-6.md 存在且为规范的 Markdown 文档",
+      "清洗结果覆盖 5 个实体（豆包、DeepSeek、Kimi、文心一言、通义千问）的字段归一化条目",
+      "针对缺失/冲突/重复字段给出明确处理策略与保留来源标记",
+      "所有 17 个 inputs 均被引用或在遗漏说明中显式列出，不得静默丢弃"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/data-cleaning-6.md"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "chapter_role": "data_cleaning",
+      "scope": "对 goal-1 至 goal-5 的采集与报告输出进行字段归一、去重、冲突消解，供 goal-6 汇总/对比使用",
+      "normalization_axes": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "conflict_policy": "以官方站点/白皮书为最高优先级，其次为已核对的报告章，最后为一般采集章；冲突条目保留 source_a/source_b 及裁决理由",
+      "missing_policy": "缺失字段以 null 占位并在 gaps 列表登记；不得以推测值填充",
+      "dedup_policy": "按 (entity, dimension, source_url) 三元组去重，保留最新时间戳条目",
+      "downstream": [
+        "goal-6 竞品对比章",
+        "goal-6 交叉验证章"
+      ],
+      "derived_from": "plan+collection_inventory"
+    }
+  }
+}

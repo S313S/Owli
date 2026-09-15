@@ -1,0 +1,49 @@
+{
+  "chapter_type": "audit",
+  "opening": {
+    "inputs": [],
+    "task": "对交叉验证产物与 goal-1 至 goal-5 各自的单实体结论做一致性核对，识别横向对比中出现的口径漂移、实体叫法越界、维度错配、数据缺口未标注等问题，输出节化文档信封，列出通过项、需返工项与建议修正方案，确保最终报告在叫法闭集与维度框架上不越界",
+    "acceptance": [
+      "产出文件位于 goals/goal-6/consistency-check-3.md，采用节化文档信封结构",
+      "逐条核对 goal-1 至 goal-5 的单实体结论与交叉验证产物之间的口径一致性，覆盖率 100%",
+      "识别并列出所有口径漂移、实体叫法越界、维度错配、数据缺口未标注问题，每条附证据引用",
+      "输出通过项/需返工项/建议修正方案三段式清单，返工项须给出可执行修正指令",
+      "实体叫法严格限定在 {豆包, DeepSeek, Kimi, 文心一言, 通义千问} 闭集内，维度框架不得越界"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/consistency-check-3.md"
+    },
+    "entities": [],
+    "expected_count": null,
+    "notes": {
+      "chapter_role": "consistency_audit",
+      "scope": "cross-validation-5.json 与 goal-1..goal-5 单实体结论的横向一致性核对",
+      "upstream_refs": [
+        "goals/goal-6/cross-validation-5.json",
+        "goals/goal-6/data-cleaning-6.md"
+      ],
+      "entity_whitelist": [
+        "豆包",
+        "DeepSeek",
+        "Kimi",
+        "文心一言",
+        "通义千问"
+      ],
+      "audit_dimensions": [
+        "口径漂移",
+        "实体叫法越界",
+        "维度错配",
+        "数据缺口未标注"
+      ],
+      "output_sections": [
+        "通过项",
+        "需返工项",
+        "建议修正方案"
+      ],
+      "envelope_format": "sectioned_markdown",
+      "boundary_guarantee": "最终报告在叫法闭集与维度框架上不越界"
+    }
+  }
+}

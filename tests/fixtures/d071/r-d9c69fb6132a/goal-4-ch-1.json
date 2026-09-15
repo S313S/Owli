@@ -1,0 +1,69 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集关于「文心一言」「ERNIE Bot」「文小言」「百度文心」的近 90 天笔记、评论与话题热度，重点覆盖产品定位、模型迭代、C 端体验、商业化路径的正负面讨论；输出顶层数组，每条含 permalink、fetched_at、作者、正文、互动数据、检索关键词等字段；数据不足时以结构化缺口口径标记。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，写入 goals/goal-4/data-collection-22.json",
+      "每条记录包含 permalink、fetched_at、作者、正文、互动数据（点赞/收藏/评论/分享）、检索关键词等字段",
+      "覆盖检索词至少包含「文心一言」「ERNIE Bot」「文小言」「百度文心」四类关键词",
+      "笔记发布时间落在近 90 天窗口（2026-06-17 至 2026-09-15）",
+      "讨论主题覆盖产品定位、模型迭代、C 端体验、商业化路径四个维度，并区分正负面",
+      "数据不足或字段缺失时使用结构化缺口口径标记（如 gap_reason、missing_fields）"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-collection-22.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": 60,
+    "notes": {
+      "platform": "xiaohongshu",
+      "time_window_days": 90,
+      "time_window_range": "2026-06-17 ~ 2026-09-15",
+      "search_keywords": [
+        "文心一言",
+        "ERNIE Bot",
+        "文小言",
+        "百度文心"
+      ],
+      "coverage_dimensions": [
+        "产品定位",
+        "模型迭代",
+        "C端体验",
+        "商业化路径"
+      ],
+      "sentiment_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "content",
+        "interactions",
+        "search_keyword",
+        "topic_dimension",
+        "sentiment"
+      ],
+      "interaction_fields": [
+        "likes",
+        "collects",
+        "comments",
+        "shares"
+      ],
+      "gap_convention": {
+        "flag_field": "data_gap",
+        "reason_field": "gap_reason",
+        "missing_field_list": "missing_fields"
+      },
+      "output_format": "top_level_array",
+      "dedup_key": "permalink"
+    }
+  }
+}

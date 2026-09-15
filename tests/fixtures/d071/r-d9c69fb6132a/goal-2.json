@@ -1,0 +1,90 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-2-report.json",
+    "description": "DeepSeek 产品定位、模型能力亮点、发布节奏与国内用户及开发者社区评价的多源采集与结构化汇总产物，供后续与豆包横向对比使用。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为 goal-2-report.json 且 shape=object，内部至少含「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节",
+    "所有采集类 agent 输出的 JSON 顶层为数组，且每条记录必须包含 permalink 与 fetched_at 两个字段",
+    "小红书数据抓取·DeepSeek 章节必然存在且实体仅出现「深度求索」「DeepSeek」「DeepSeek-R1」「DeepSeek-V3」四类叫法之一，不得混入其它实体名称",
+    "各采集章节的 (source_id, entity) 组合彼此不重复，且不与上游 goal-1 已采集组合冲突",
+    "HN 相关查询固定使用 created_at_i 大于「执行时点 UTC epoch 减 7776000」、points 大于 50、hitsPerPage 等于 1000 的参数口径",
+    "交叉验证与报告撰写章节输出 shape=object 的节化文档信封，引用来源统一使用「」中文引号包裹",
+    "数据缺口以结构化字段「gap_reason / affected_dimension / mitigation」记录，不写死上游无法保证的实体最小条数",
+    "报告最终节须给出 DeepSeek 与豆包对比的可衔接锚点字段，便于后续 goal 引用"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·DeepSeek",
+      "task": "在小红书采集与「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关的笔记、评论与话题，聚焦国内用户对产品定位、性价比、开源策略的口碑；每条记录需含 permalink 与 fetched_at，正文与标题保留原文，引用一律用「」中文引号；实体名称只能使用上述四种叫法。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·DeepSeek",
+      "task": "在微博采集关键词「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的热门讨论、KOL 观点与评论区反馈，覆盖发布节奏、模型能力亮点与舆论情绪；每条记录含 permalink 与 fetched_at，实体叫法仅限本清单四类。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·DeepSeek",
+      "task": "抓取微信公众号涉及「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的深度文章，重点提取产品定位、发布节奏时间线、开源策略与性价比论证；输出数组，每条含 permalink 与 fetched_at，引用文本使用「」中文引号。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·DeepSeek",
+      "task": "通过网页搜索检索国内媒体与技术博客对「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的报道，采集官方产品页、发布公告与评测；每条记录必含 permalink 与 fetched_at，实体名称仅使用四种许可叫法。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·DeepSeek",
+      "task": "在 Hacker News Algolia 检索「DeepSeek」「DeepSeek-R1」「DeepSeek-V3」，查询参数固定为 created_at_i 大于「执行时点 UTC epoch 减 7776000」、points 大于 50、hitsPerPage 等于 1000，采集帖子标题、正文与高赞评论摘要；每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·DeepSeek",
+      "task": "在 Reddit 相关 subreddit 采集关于「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的讨论帖与高票评论，覆盖开源策略、性价比与开发者体验的英文视角评价，用作与国内舆论的交叉参照；每条含 permalink 与 fetched_at。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·DeepSeek",
+      "task": "在 X 平台采集「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」的推文、转推与回复讨论，聚焦发布节奏与国际社区反响；输出数组，每条含 permalink 与 fetched_at，实体名称仅限四种许可叫法。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "汇总本 goal 全部采集章节与上游 goal-1 中与 DeepSeek 讨论直接对照的豆包舆论数据，剔除广告和站外重复，规范化字段（permalink、fetched_at、source_id、entity、text、author、metrics），标注实体叫法归一化结果，输出结构化清洗产物，引用文本一律用「」中文引号。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对清洗后的多源证据进行事实交叉核验，围绕 DeepSeek 的产品定位、能力亮点、发布节奏、开源策略与性价比五个维度识别一致与冲突证据，标注冲突严重度与置信度，产出节化文档信封（含 verified_claims、conflicts、gaps 三节）。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗与交叉验证结果撰写 DeepSeek 定位与舆论评价报告，按「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节组织，并给出与豆包横向对比的锚点字段，引用统一使用「」中文引号，数据缺口以结构化字段（gap_reason、affected_dimension、mitigation）记录。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对上游八个采集数组进行去重、字段规范化、时间字段统一为 ISO8601、观点摘要压缩、无关噪声剔除，并按源打上市场标签（cn_product 或 global），产出统一 schema 的清洗后记录集合信封，标注每源保留条数与丢弃原因。",
+    "acceptance": [
+      "输出文件位于 goals/goal-1/data-cleaning.md，包含统一 schema 的清洗后记录集合信封",
+      "对八个上游采集数组完成去重、字段规范化，时间字段统一转换为 ISO8601 格式",
+      "对每条记录按源打上市场标签（cn_product 或 global），并完成观点摘要压缩与无关噪声剔除",
+      "每个源必须标注保留条数与丢弃原因，可追溯来源 agent_id"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-cleaning.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_type": "data_cleaning",
+      "market_tag": "cn_product",
+      "upstream_sources": [
+        "goals/goal-1/data-collection.json",
+        "goals/goal-1/data-collection-2.json",
+        "goals/goal-1/data-collection-3.json",
+        "goals/goal-1/data-collection-4.json",
+        "goals/goal-1/data-collection-5.json",
+        "goals/goal-1/data-collection-6.json",
+        "goals/goal-1/data-collection-7.json",
+        "goals/goal-1/data-collection-8.json"
+      ],
+      "cleaning_rules": [
+        "dedup_by_url_and_title_hash",
+        "field_normalization",
+        "timestamp_to_iso8601",
+        "summary_compression",
+        "noise_filter",
+        "market_tagging"
+      ],
+      "schema_fields": [
+        "record_id",
+        "source_agent_id",
+        "url",
+        "title",
+        "published_at_iso8601",
+        "summary",
+        "market_tag",
+        "raw_ref"
+      ],
+      "per_source_report": "每源保留条数与丢弃原因将在输出信封的 per_source 字段中标注"
+    }
+  }
+}

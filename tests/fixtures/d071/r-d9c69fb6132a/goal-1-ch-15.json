@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Product Hunt 检索「Doubao」「豆包」「豆包AI」相关产品页面与讨论，覆盖官方或第三方登记条目、评论与投票；输出顶层数组，每条含 permalink、fetched_at、产品名、tagline、发布日期、upvotes、评论数、评论正文摘要、Maker 或 Hunter 信息（若可得）。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且每条记录字段完备（permalink、fetched_at、产品名、tagline、发布日期、upvotes、评论数、评论正文摘要、Maker 或 Hunter 信息）",
+      "覆盖 Product Hunt 上「Doubao」「豆包」「豆包AI」相关的官方或第三方登记条目、评论与投票数据",
+      "permalink 均为 Product Hunt 域下可访问链接，fetched_at 为 ISO 8601 时间戳",
+      "评论正文摘要基于实际抓取内容撰写，不得凭空生成；无 Maker 或 Hunter 信息时显式标注为 null"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-8.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Product Hunt",
+      "search_keywords": [
+        "Doubao",
+        "豆包",
+        "豆包AI"
+      ],
+      "coverage": [
+        "产品页面",
+        "讨论/评论",
+        "投票数据"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "产品名",
+        "tagline",
+        "发布日期",
+        "upvotes",
+        "评论数",
+        "评论正文摘要",
+        "Maker 或 Hunter 信息"
+      ],
+      "missing_field_policy": "缺失字段以 null 标记，不得编造",
+      "output_shape": "top-level JSON array"
+    }
+  }
+}

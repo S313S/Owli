@@ -1,0 +1,90 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "kimi-profile.json",
+    "description": "汇总月之暗面 Kimi 的产品定位、长文本能力、学术办公写作场景优势，以及国内用户口碑亮点与吐槽的结构化档案，供后续对比章节调用。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "产物文件 kimi-profile.json 存在且为 JSON object，顶层键至少覆盖「产品定位」「长文本能力」「场景优势」「口碑亮点」「主要吐槽」「信息缺口」六项。",
+    "每个采集 agent 的 output 顶层为数组，且每条记录含 permalink 与 fetched_at 字段。",
+    "所有 agent 的 task 文本只使用 Kimi 的叫法闭集「Kimi智能助手、Kimi、kimi、Kimi Chat、月之暗面、Moonshot」，未混入豆包、DeepSeek、文心一言、通义千问等其他实体的专名。",
+    "必采清单条目「小红书数据抓取·Kimi」已建卡并写出对应 output。",
+    "所有采集 agent 的 source_id 均落在 applicable_sources=「douyin、hacker_news、product_hunt、reddit、web_search、wechat_mp、weibo、x、xhs」之内。",
+    "同一 (source_id, entity) 组合在本 goal 内不重复出现，且未与上游已采清单冲突。",
+    "交叉验证与报告撰写章的 output.shape 均为 object，采用节化文档信封形。",
+    "样本量不足时以结构化缺口口径在「信息缺口」节说明，未写死上游无法保证的最小条数。"
+  ],
+  "agents": [
+    {
+      "name": "规划",
+      "task": "拆解本 goal 的采集与合成路径，明确围绕 Kimi（Kimi智能助手、Kimi Chat、月之暗面 Moonshot）在产品定位、长文本能力、学术办公写作场景、国内口碑与吐槽方面的采集要点、检索词与合成节次结构。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "小红书数据抓取·Kimi",
+      "task": "在小红书检索「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」等关键词，采集用户对 Kimi 长文本、学术阅读、办公写作等场景的使用笔记与吐槽，输出数组，每条含 permalink、fetched_at、标题、正文、互动量、场景标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·Kimi",
+      "task": "在微博检索「Kimi」「Kimi智能助手」「月之暗面」「Moonshot」相关话题与热帖，采集国内用户对 Kimi 产品定位与长文本能力的讨论、口碑与吐槽，输出数组，每条含 permalink、fetched_at、作者、正文、转评赞、话题标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·Kimi",
+      "task": "在微信公众号检索「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」相关文章，采集针对 Kimi 产品定位、长文本能力、学术办公写作场景的评测与深度稿件，输出数组，每条含 permalink、fetched_at、公众号名、标题、摘要、发布时间。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·Kimi",
+      "task": "使用网页搜索检索「Kimi 智能助手 长文本」「月之暗面 Moonshot 产品定位」「Kimi Chat 学术 办公 写作 评测」等查询，采集 Kimi 的官方定位介绍与第三方评测报道，输出数组，每条含 permalink、fetched_at、标题、来源站点、摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "x 数据抓取·Kimi",
+      "task": "在 X 平台检索「Kimi」「Moonshot」「月之暗面」「Kimi Chat」等关键词，采集海外及国内华语用户对 Kimi 长文本能力与场景表现的讨论，输出数组，每条含 permalink、fetched_at、作者、正文、互动数据。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "hn 数据抓取·Kimi",
+      "task": "在 Hacker News Algolia 接口检索「Kimi」「Moonshot」「Kimi Chat」相关帖子，查询固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，采集技术社区对 Kimi 长文本能力与产品定位的评价，输出数组，每条含 permalink、fetched_at、标题、points、评论数、摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对上述 Kimi 相关采集数据做去重、去噪、场景归类（学术、办公、写作、长文本、其他），标注情感倾向与话题标签，输出清洗后的结构化记录集合。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨小红书、微博、微信公众号、网页搜索、X、Hacker News 六路证据核对 Kimi 的产品定位表述、长文本上下文长度声明与用户口碑倾向，标注一致点、冲突点与证据强度，输出节化 object。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于清洗结果与交叉验证结论，撰写 Kimi 产品定位与国内舆论评价的结构化档案，覆盖产品定位、长文本能力、学术办公写作场景优势、口碑亮点、主要吐槽与信息缺口，输出节化 object 写入 kimi-profile.json。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

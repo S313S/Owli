@@ -1,0 +1,59 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微博检索「豆包」「豆包AI」「字节豆包」「Doubao」相关微博与热搜话题，覆盖官方账号动态、媒体报道、KOL 与普通用户评价，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、转评赞数、话题标签、观点极性。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且非空",
+      "每条记录包含 permalink、fetched_at、作者、正文、转评赞数、话题标签、观点极性字段",
+      "检索关键词覆盖「豆包」「豆包AI」「字节豆包」「Doubao」四项",
+      "条目发布时间均在近 12 个月内（2025-09-15 至 2026-09-15）",
+      "样本覆盖官方账号动态、媒体报道、KOL 与普通用户评价四类来源",
+      "观点极性字段取值限定为 正面/中性/负面",
+      "permalink 为微博站内可访问的原文链接，fetched_at 为 ISO8601 时间戳"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-3.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 40,
+    "notes": {
+      "platform": "微博 (weibo.com)",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "字节豆包",
+        "Doubao"
+      ],
+      "time_window": {
+        "start": "2025-09-15",
+        "end": "2026-09-15"
+      },
+      "source_types": [
+        "官方账号动态",
+        "媒体报道",
+        "KOL 评价",
+        "普通用户评价"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "正文",
+        "转评赞数",
+        "话题标签",
+        "观点极性"
+      ],
+      "polarity_values": [
+        "正面",
+        "中性",
+        "负面"
+      ],
+      "sampling_strategy": "按四类来源均衡采样，兼顾热搜话题与长尾评价"
+    }
+  }
+}

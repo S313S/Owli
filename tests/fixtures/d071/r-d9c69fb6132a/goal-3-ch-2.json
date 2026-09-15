@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书检索「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」等关键词，采集用户对 Kimi 长文本、学术阅读、办公写作等场景的使用笔记与吐槽，输出数组，每条含 permalink、fetched_at、标题、正文、互动量、场景标签。",
+    "acceptance": [
+      "输出为 JSON 数组，且每条笔记包含 permalink、fetched_at、标题、正文、互动量、场景标签六个字段",
+      "覆盖「Kimi」「Kimi智能助手」「Kimi Chat」「月之暗面」「Moonshot」等关键词，且笔记场景覆盖长文本、学术阅读、办公写作等 Kimi 核心使用场景",
+      "permalink 为小红书站内可访问链接，fetched_at 使用 ISO 8601 时间戳，互动量为数值类型",
+      "场景标签使用中文短语标注，能够体现用户笔记中的正面使用体验或吐槽点",
+      "结果写入 goals/goal-3/data-collection-16.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/data-collection-16.json"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "Kimi",
+        "Kimi智能助手",
+        "Kimi Chat",
+        "月之暗面",
+        "Moonshot"
+      ],
+      "scenarios": [
+        "长文本",
+        "学术阅读",
+        "办公写作"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "标题",
+        "正文",
+        "互动量",
+        "场景标签"
+      ],
+      "output_format": "JSON array"
+    }
+  }
+}

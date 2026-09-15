@@ -1,0 +1,46 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Reddit 检索「Doubao」「豆包」相关 submission 与高分评论，覆盖 r/ChineseLanguage、r/ArtificialInteligence、r/LocalLLaMA、r/ChatGPT 等子版，采集近 12 个月内讨论；输出顶层数组，每条含 permalink、fetched_at、subreddit、标题或内容、score、评论数、代表性观点摘要。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且不少于最低条数要求",
+      "每条记录包含 permalink、fetched_at、subreddit、标题或内容、score、评论数、代表性观点摘要字段",
+      "覆盖 r/ChineseLanguage、r/ArtificialInteligence、r/LocalLLaMA、r/ChatGPT 等目标子版",
+      "所有采集内容发布时间位于近 12 个月内",
+      "关键词命中「Doubao」或「豆包」，与主体强相关"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-5.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Reddit",
+      "subreddits": [
+        "r/ChineseLanguage",
+        "r/ArtificialInteligence",
+        "r/LocalLLaMA",
+        "r/ChatGPT"
+      ],
+      "keywords": [
+        "Doubao",
+        "豆包"
+      ],
+      "time_window_months": 12,
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "subreddit",
+        "title_or_content",
+        "score",
+        "num_comments",
+        "representative_opinion_summary"
+      ]
+    }
+  }
+}

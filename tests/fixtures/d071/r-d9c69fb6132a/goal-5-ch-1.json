@@ -1,0 +1,57 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书站内以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为关键词，抓取近 90 天与产品定位、开源版本表现、企业与个人用户口碑相关的笔记、评论、话题页；每条记录必须含 permalink、fetched_at，并附作者、发布时间、点赞、收藏、评论数、正文与话题标签。",
+    "acceptance": [
+      "每条记录必须含 permalink 与 fetched_at 字段",
+      "记录须包含作者、发布时间、点赞、收藏、评论数、正文与话题标签",
+      "关键词覆盖「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」",
+      "抓取时间窗口限定为近 90 天",
+      "内容维度须覆盖产品定位、开源版本表现、企业与个人用户口碑",
+      "输出写入 goals/goal-5/data-collection-30.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-collection-30.json"
+    },
+    "entities": [
+      "通义千问"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "小红书",
+      "keywords": [
+        "通义千问",
+        "Qwen",
+        "Tongyi Qianwen",
+        "Qwen3",
+        "阿里通义"
+      ],
+      "time_window_days": 90,
+      "content_types": [
+        "笔记",
+        "评论",
+        "话题页"
+      ],
+      "coverage_dimensions": [
+        "产品定位",
+        "开源版本表现",
+        "企业用户口碑",
+        "个人用户口碑"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "published_at",
+        "likes",
+        "collects",
+        "comments",
+        "content",
+        "hashtags"
+      ]
+    }
+  }
+}

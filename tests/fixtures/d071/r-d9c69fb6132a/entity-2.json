@@ -1,0 +1,16 @@
+{
+  "canonical": "DeepSeek",
+  "names": {
+    "zh": "深度求索",
+    "en": "DeepSeek",
+    "aliases": [
+      "深度求索",
+      "DS",
+      "DeepSeek-R1",
+      "DeepSeek-V3"
+    ]
+  },
+  "official_handles": {},
+  "same_product": true,
+  "note": "由杭州深度求索公司开发的国产大语言模型及AI对话产品，以低成本高性能著称，主力模型包括 DeepSeek-V3 与对标 OpenAI o1 的 DeepSeek-R1。"
+}

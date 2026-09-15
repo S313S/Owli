@@ -1,0 +1,60 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对上述 8 个采集产物执行去重、时间归一化、字段对齐与观点标签抽取，将围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人口碑维度拆成结构化条目，标注情感极性与证据强度，并记录结构化缺口。",
+    "acceptance": [
+      "产出 goals/goal-5/data-cleaning-5.md，包含去重、时间归一化、字段对齐与标签抽取四个处理段落",
+      "结构化条目覆盖通义千问/Qwen/Tongyi Qianwen/Qwen3/阿里通义等别名合并，且每条含情感极性(positive/neutral/negative)与证据强度(strong/medium/weak)",
+      "按产品定位、开源版本表现、企业口碑、个人口碑四个维度分类汇总，并显式列出结构化缺口清单",
+      "所有条目保留 source_url、collected_at(ISO8601)、原始片段与归一化后字段的对应关系"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/data-cleaning-5.md"
+    },
+    "entities": [
+      "通义千问",
+      "Qwen",
+      "Tongyi Qianwen",
+      "Qwen3",
+      "阿里通义"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dedup_strategy": "基于 source_url + 标题 + 正文 SimHash 三重去重，别名(通义千问/Qwen/Tongyi Qianwen/Qwen3/阿里通义)统一映射为 canonical_entity=通义千问",
+      "time_normalization": "所有时间字段统一为 Asia/Shanghai 时区的 ISO8601，缺失日期的条目标记 date_missing=true",
+      "field_alignment": [
+        "canonical_entity",
+        "aliases",
+        "dimension",
+        "sub_topic",
+        "sentiment",
+        "evidence_strength",
+        "source_url",
+        "collected_at",
+        "raw_snippet",
+        "normalized_claim"
+      ],
+      "dimensions": [
+        "产品定位",
+        "开源版本表现",
+        "企业口碑",
+        "个人口碑"
+      ],
+      "sentiment_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "evidence_strength_labels": [
+        "strong",
+        "medium",
+        "weak"
+      ],
+      "gap_tracking": "对缺少定价、版本号、发布时间、样本量、行业归属等字段的条目登记到 structured_gaps 列表，供后续补采参考",
+      "downstream": "输出供 comparison-5 / cross-validation-5 / report-5 引用"
+    }
+  }
+}

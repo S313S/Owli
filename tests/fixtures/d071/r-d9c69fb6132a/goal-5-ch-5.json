@@ -1,0 +1,45 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "汇总清洗与交叉验证结果，撰写围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人用户口碑及国内讨论热点的节化文档，引用采集条目 permalink，并附结构化缺口说明与后续采集建议。",
+    "acceptance": [
+      "报告需包含产品定位、开源版本表现、企业用户口碑、个人用户口碑与国内讨论热点五个章节",
+      "所有关键论断均引用采集条目的 permalink 作为来源",
+      "结构化缺口说明覆盖数据缺失、样本偏差与验证不足",
+      "附带可执行的后续采集建议清单",
+      "输出为合法 JSON 且写入 goals/goal-5/goal-5-report.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-5/goal-5-report.json"
+    },
+    "entities": [
+      "通义千问",
+      "Qwen",
+      "Tongyi Qianwen",
+      "Qwen3",
+      "阿里通义"
+    ],
+    "expected_count": null,
+    "notes": {
+      "sections": [
+        "产品定位",
+        "开源版本表现",
+        "企业用户口碑",
+        "个人用户口碑",
+        "国内讨论热点"
+      ],
+      "citation_policy": "每条关键论断需附 permalink，缺失来源需在缺口说明中标注",
+      "gap_analysis_required": true,
+      "followup_collection_suggestions_required": true,
+      "upstream_sources": [
+        "goals/goal-5/data-collection-30.json",
+        "goals/goal-5/data-cleaning-5.md",
+        "goals/goal-5/cross-validation-4.json",
+        "goals/goal-5/reliability-audit-30.json"
+      ]
+    }
+  }
+}

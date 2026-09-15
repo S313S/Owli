@@ -1,0 +1,50 @@
+{
+  "chapter_type": "data_cleaning",
+  "opening": {
+    "inputs": [],
+    "task": "对上述八路「文心一言」采集产物进行去重、字段规范化、时间戳统一、噪声剔除与实体命中校验（仅保留命中「文心一言/ERNIE Bot/文小言/百度文心」叫法闭集的记录），并按定位/迭代/生态/体验/商业化五维打标；输出结构化清洗结果对象。",
+    "acceptance": [
+      "去重后每条记录具有唯一稳定 ID，且原始来源可追溯",
+      "字段命名与类型统一（title/url/source/publish_time/author/content/tags 等），空值显式标注",
+      "时间戳全部规范化为 ISO 8601 (UTC+8) 格式并可比较",
+      "剔除广告、导航、模板化噪声与与主题无关的内容",
+      "仅保留命中实体闭集「文心一言/ERNIE Bot/文小言/百度文心」的记录，其余标记并剔除",
+      "每条记录按定位/迭代/生态/体验/商业化五个维度完成标签打标，允许多标签",
+      "输出为结构化对象并写入 goals/goal-4/data-cleaning-4.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/data-cleaning-4.md"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity_alias_closure": [
+        "文心一言",
+        "ERNIE Bot",
+        "文小言",
+        "百度文心"
+      ],
+      "dimensions": [
+        "定位",
+        "迭代",
+        "生态",
+        "体验",
+        "商业化"
+      ],
+      "cleaning_steps": [
+        "dedup",
+        "field_normalization",
+        "timestamp_unification",
+        "noise_removal",
+        "entity_hit_validation",
+        "five_dim_tagging"
+      ],
+      "timestamp_format": "ISO 8601 (UTC+8)",
+      "output_format": "structured_object"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "title": "通义千问产品定位与国内舆论评价采集",
+  "objective": "采集阿里通义千问的产品定位、开源版本表现、企业与个人用户口碑，以及在国内技术社区与社媒中的讨论热点，为对比提供证据。",
+  "depends_on": [],
+  "subjects": [
+    "豆包",
+    "DeepSeek",
+    "Kimi",
+    "文心一言",
+    "通义千问"
+  ],
+  "subjects_justification": "研究主体为豆包，比较对象为 DeepSeek、Kimi、文心一言、通义千问，均为可逐个采集的具体大模型产品专名，符合「主体自身 + 比较对象」的边界。",
+  "deliverable": {
+    "format": "json",
+    "path": "goal-5-report.json",
+    "description": "围绕通义千问（含 Qwen、Tongyi Qianwen、Qwen3、阿里通义 等叫法）的产品定位、开源版本表现、企业与个人用户口碑及国内社媒/技术社区讨论热点的证据汇总文档，含各源采集条目引用、清洗后的观点标签、交叉验证结论与结构化缺口说明。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「goal-5-report.json」且 shape 为 object，节化文档信封形。",
+    "必采清单条目「小红书数据抓取·通义千问」存在且 output.shape 为 array。",
+    "所有采集 agent 的 name 采用「注册表原名·通义千问」结构化格式，且 source_id 与 entity 组合不与上游 goal-1 至 goal-4 的 (source_id, entity) 组合重复。",
+    "所有采集 agent 的 source_id 均落在 applicable_sources=[douyin, hacker_news, product_hunt, reddit, web_search, wechat_mp, weibo, x, xhs] 之内。",
+    "采集 agent 的 task 文本仅使用通义千问的叫法闭集：通义千问、Qwen、Tongyi Qianwen、Qwen3、阿里通义，且不出现其他实体的叫法。",
+    "非采集 agent 的 name 仅从职能闭集取值：数据清洗、交叉验证、报告撰写。",
+    "采集产物顶层为数组且每条含 permalink、fetched_at 字段。",
+    "Hacker News 采集使用固定查询约束 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000。",
+    "报告撰写、交叉验证等汇总类 agent 的 output.shape 取 object。",
+    "输出仅包含 deliverable/acceptance/agents 及骨架字段，无 id/engine/capability/prompt/状态/重试/时间字段，字符串内部无未转义英文双引号，引用名称使用「」。",
+    "数据不足时采用结构化缺口口径记录，不写死上游无法保证的实体最小条数。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·通义千问",
+      "task": "在小红书站内以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为关键词，抓取近 90 天与产品定位、开源版本表现、企业与个人用户口碑相关的笔记、评论、话题页；每条记录必须含 permalink、fetched_at，并附作者、发布时间、点赞、收藏、评论数、正文与话题标签。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·通义千问",
+      "task": "在微博以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为关键词，抓取近 90 天的热门微博、话题主持人贴、评论区高赞回复；每条记录含 permalink、fetched_at、作者、转评赞数、发布时间与正文。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·通义千问",
+      "task": "抓取微信公众号中围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的深度评测、企业落地案例、开源模型解读文章；每条记录含 permalink、fetched_at、公众号名称、发布时间、阅读量或在看量（若可得）与摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "网页搜索数据抓取·通义千问",
+      "task": "通过网页搜索汇总关于「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的官方产品页、榜单排名、评测报告、开源仓库讨论；每条记录含 permalink、fetched_at、站点、标题、发布时间与正文摘录。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·通义千问",
+      "task": "在抖音抓取涉及「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的视频、直播切片与话题聚合，覆盖近 90 天；每条记录含 permalink、fetched_at、账号、发布时间、点赞、评论、分享与视频描述。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·通义千问",
+      "task": "在 X 平台抓取围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的英文与中文推文，聚焦开源模型发布、跑分对比与开发者反馈；每条记录含 permalink、fetched_at、作者、发布时间、点赞与转推数。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·通义千问",
+      "task": "在 Reddit r/LocalLLaMA、r/MachineLearning 等版块检索「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」相关帖与高赞评论；每条记录含 permalink、fetched_at、subreddit、作者、发布时间、score 与正文。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·通义千问",
+      "task": "使用 Algolia HN 接口以「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」为查询词，固定过滤 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000，抓取相关 story 与评论；每条记录含 permalink、fetched_at、作者、points、num_comments、创建时间与标题正文。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对上述 8 个采集产物执行去重、时间归一化、字段对齐与观点标签抽取，将围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人口碑维度拆成结构化条目，标注情感极性与证据强度，并记录结构化缺口。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "跨小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News 各源比对关于「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的关键论断，标记多源共识、单源孤证与相互冲突项，输出可复核的证据映射表。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "汇总清洗与交叉验证结果，撰写围绕「通义千问」「Qwen」「Tongyi Qianwen」「Qwen3」「阿里通义」的产品定位、开源版本表现、企业与个人用户口碑及国内讨论热点的节化文档，引用采集条目 permalink，并附结构化缺口说明与后续采集建议。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

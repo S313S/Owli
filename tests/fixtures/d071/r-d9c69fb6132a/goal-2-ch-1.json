@@ -1,0 +1,51 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在小红书采集与「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」相关的笔记、评论与话题，聚焦国内用户对产品定位、性价比、开源策略的口碑；每条记录需含 permalink 与 fetched_at，正文与标题保留原文，引用一律用「」中文引号；实体名称只能使用上述四种叫法。",
+    "acceptance": [
+      "采集平台限定为小红书，覆盖笔记、评论与相关话题三类内容",
+      "关键词严格限定为「DeepSeek」「深度求索」「DeepSeek-R1」「DeepSeek-V3」四种叫法，不得出现其他别名",
+      "每条记录必须包含 permalink 与 fetched_at 字段，缺失字段的记录一律剔除",
+      "正文与标题保留小红书原文，任何引用统一使用「」中文引号",
+      "口碑话题需覆盖产品定位、性价比与开源策略三个维度，且可回溯至 permalink",
+      "输出写入 goals/goal-2/data-collection-9.json，结构可被后续对比与交叉校验章直接读取"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/data-collection-9.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "xiaohongshu",
+      "entity_aliases": [
+        "DeepSeek",
+        "深度求索",
+        "DeepSeek-R1",
+        "DeepSeek-V3"
+      ],
+      "content_types": [
+        "note",
+        "comment",
+        "topic"
+      ],
+      "focus_dimensions": [
+        "产品定位",
+        "性价比",
+        "开源策略"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at"
+      ],
+      "quotation_style": "「」",
+      "text_preservation": "标题与正文保留原文，不做改写",
+      "fetched_at_timezone": "Asia/Shanghai",
+      "collection_date": "2026-09-15"
+    }
+  }
+}

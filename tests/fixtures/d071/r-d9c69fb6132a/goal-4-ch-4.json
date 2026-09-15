@@ -1,0 +1,38 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-4/data-collection-22.json"
+      }
+    ],
+    "task": "对清洗后的「文心一言」多源证据进行一致性检查：跨源核对模型版本号、发布时间线、生态合作方、商业化案例是否一致，标注冲突与缺口，输出一致性检查报告对象。",
+    "acceptance": [
+      "跨源核对模型版本号、发布时间线、生态合作方、商业化案例四个维度均有比对结论",
+      "明确列出冲突项与信息缺口，并注明涉及的来源",
+      "输出文件位于 goals/goal-4/consistency-check-2.md，结构化呈现一致性检查结果"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/consistency-check-2.md"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity": "文心一言",
+      "dimensions_checked": [
+        "模型版本号",
+        "发布时间线",
+        "生态合作方",
+        "商业化案例"
+      ],
+      "conflict_flags": "在报告中以字段标注冲突项及来源",
+      "gap_flags": "在报告中以字段标注信息缺口及来源",
+      "source_count": 1,
+      "report_format": "markdown"
+    }
+  }
+}

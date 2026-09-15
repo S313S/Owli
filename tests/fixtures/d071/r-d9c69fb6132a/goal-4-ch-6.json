@@ -1,0 +1,45 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗、一致性与交叉验证结果，撰写「文心一言产品定位与国内舆论评价采集」章节化报告，包含产品定位、模型迭代（ERNIE Bot/文小言/百度文心）、生态整合、用户体验、商业化路径的正负面评价，以及证据引用与结构化缺口说明，输出报告对象作为最终 deliverable。",
+    "acceptance": [
+      "报告以 JSON object 形式输出至 goals/goal-4/goal-4.json，并以文心一言为核心实体",
+      "章节涵盖产品定位、模型迭代（ERNIE Bot/文小言/百度文心）、生态整合、用户体验、商业化路径五大维度，且每个维度均含正负面评价",
+      "所有关键论断均引用上游清洗、一致性与交叉验证证据，并对结构化缺口给出显式说明",
+      "报告结构清晰、字段完整，可作为最终 deliverable 交付"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/goal-4.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": null,
+    "notes": {
+      "chapter_role": "final_report",
+      "coverage": [
+        "产品定位",
+        "模型迭代(ERNIE Bot/文小言/百度文心)",
+        "生态整合",
+        "用户体验",
+        "商业化路径"
+      ],
+      "sentiment_dimensions": [
+        "positive",
+        "negative"
+      ],
+      "evidence_sources": [
+        "goals/goal-4/data-collection-22.json",
+        "goals/goal-4/reliability-audit-22.json",
+        "goals/goal-4/data-cleaning-4.md",
+        "goals/goal-4/consistency-check-2.md",
+        "goals/goal-4/cross-validation-3.json"
+      ],
+      "gap_reporting": "对未覆盖或证据不足的字段以显式 structural_gaps 段落说明",
+      "deliverable": true
+    }
+  }
+}

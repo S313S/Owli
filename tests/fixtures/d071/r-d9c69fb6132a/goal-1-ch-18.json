@@ -1,0 +1,62 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      }
+    ],
+    "task": "对清洗后关于豆包的官方叙事（功能、定位、用户规模）与用户口碑（优点、缺点、典型场景）进行跨源一致性核对，标注共识观点、分歧观点、孤证与结构化缺口，形成一致性检查信封文档。",
+    "acceptance": [
+      "覆盖八个采集源的官方叙事与用户口碑维度",
+      "明确标注共识观点、分歧观点与孤证",
+      "指出结构化缺口以便后续补采",
+      "输出写入 goals/goal-1/consistency-check.md"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/consistency-check.md"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "dimensions": [
+        "功能",
+        "定位",
+        "用户规模",
+        "优点",
+        "缺点",
+        "典型场景"
+      ],
+      "consensus": "跨源共识观点清单",
+      "divergence": "跨源分歧观点清单",
+      "single_source": "仅出现于单一来源的孤证",
+      "gaps": "结构化字段缺失或未覆盖的信息缺口",
+      "source_count": 8
+    }
+  }
+}

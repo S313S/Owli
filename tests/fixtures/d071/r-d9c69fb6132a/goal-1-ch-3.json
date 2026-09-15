@@ -1,0 +1,52 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在抖音检索「豆包」「豆包AI」「字节豆包」「Doubao」相关视频与评论，覆盖官方号、KOL 测评、用户实拍等，采集近 12 个月内高播放/高互动条目；输出顶层数组，每条含 permalink、fetched_at、作者、标题或文案、播放量、点赞/评论/转发、评论区代表性观点摘要。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，非对象包裹",
+      "每条记录包含 permalink、fetched_at、作者、标题或文案、播放量、点赞/评论/转发、评论区代表性观点摘要字段",
+      "采集时间窗口为近 12 个月内（2025-09-15 至 2026-09-15）",
+      "覆盖抖音平台官方号、KOL 测评、用户实拍等多种账号类型",
+      "检索关键词涵盖「豆包」「豆包AI」「字节豆包」「Doubao」",
+      "仅纳入高播放或高互动条目，permalink 可直达抖音源页面"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-2.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "抖音",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "字节豆包",
+        "Doubao"
+      ],
+      "time_window": "近 12 个月（2025-09-15 至 2026-09-15）",
+      "account_types": [
+        "官方号",
+        "KOL 测评",
+        "用户实拍"
+      ],
+      "selection_criteria": "高播放量或高互动（点赞/评论/转发）",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "作者",
+        "标题或文案",
+        "播放量",
+        "点赞",
+        "评论",
+        "转发",
+        "评论区代表性观点摘要"
+      ],
+      "output_shape": "顶层数组"
+    }
+  }
+}

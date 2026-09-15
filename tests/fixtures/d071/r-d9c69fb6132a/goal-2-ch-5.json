@@ -1,0 +1,55 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "基于清洗与交叉验证结果撰写 DeepSeek 定位与舆论评价报告，按「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节组织，并给出与豆包横向对比的锚点字段，引用统一使用「」中文引号，数据缺口以结构化字段（gap_reason、affected_dimension、mitigation）记录。",
+    "acceptance": [
+      "报告必须包含「产品定位」「能力亮点」「发布节奏」「社区评价」「性价比与开源策略」「证据索引」六节，且顺序一致",
+      "所有直接引用统一使用中文「」引号，禁止使用英文引号或书名号替代",
+      "与豆包横向对比锚点字段齐备（至少覆盖 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五维）",
+      "数据缺口以结构化对象记录，字段包含 gap_reason、affected_dimension、mitigation，缺一不可",
+      "证据索引节须回链清洗与交叉验证产物的具体条目 ID，不得出现未溯源结论",
+      "输出文件写入 goals/goal-2/goal-2-report.json，JSON 可解析且结构自洽"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-2/goal-2-report.json"
+    },
+    "entities": [
+      "DeepSeek"
+    ],
+    "expected_count": 1,
+    "notes": {
+      "sections": [
+        "产品定位",
+        "能力亮点",
+        "发布节奏",
+        "社区评价",
+        "性价比与开源策略",
+        "证据索引"
+      ],
+      "quote_style": "中文「」引号",
+      "comparison_anchor_fields": [
+        "positioning",
+        "pricing",
+        "feature_differences",
+        "social_proof",
+        "strengths_weaknesses"
+      ],
+      "comparison_target": "豆包",
+      "gap_record_schema": [
+        "gap_reason",
+        "affected_dimension",
+        "mitigation"
+      ],
+      "upstream_dependencies": [
+        "goals/goal-2/cross-validation.json",
+        "goals/goal-2/data-cleaning-2.md",
+        "goals/goal-2/reliability-audit-9.json",
+        "goals/goal-2/data-collection-9.json"
+      ],
+      "cross_goal_reference": "goals/goal-1 系列采集与报告用于豆包横向对比锚点"
+    }
+  }
+}

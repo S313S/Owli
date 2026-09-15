@@ -1,0 +1,75 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-1/data-collection.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-2.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-3.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-4.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-5.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-6.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-7.json"
+      },
+      {
+        "path": "goals/goal-1/data-collection-8.json"
+      },
+      {
+        "path": "goals/goal-2/data-collection-9.json"
+      },
+      {
+        "path": "goals/goal-3/data-collection-16.json"
+      },
+      {
+        "path": "goals/goal-4/data-collection-22.json"
+      },
+      {
+        "path": "goals/goal-5/data-collection-30.json"
+      },
+      {
+        "path": "goals/goal-6/data-cleaning-6.md"
+      }
+    ],
+    "task": "对数据清洗产物按实体×维度做跨源交叉验证，识别多源一致口径、单源孤证与源间矛盾，特别核对「豆包」在能力、体验、口碑、用户画像、场景偏好上的评价是否在小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索多源间稳定成立，并与「DeepSeek」「Kimi」「文心一言」「通义千问」做同维度对照，输出节化文档信封，每条结论标注支撑源数量、冲突源列表与",
+    "acceptance": [
+      "每条结论必须标注支撑源数量与冲突源列表，并区分多源一致、单源孤证、源间矛盾三类置信标签",
+      "豆包在能力、体验、口碑、用户画像、场景偏好五个维度均需在小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索九个源上完成覆盖度核对",
+      "豆包与DeepSeek、Kimi、文心一言、通义千问在同维度上有可对照的横向差异结论",
+      "输出为节化文档信封，closing.notes 使用 positioning/pricing/feature_differences/social_proof/strengths_weaknesses 五字段",
+      "opening.inputs 中所有路径均来自全卷采集章清单或上游数据清洗产物，不得自造路径",
+      "输出路径严格为 goals/goal-6/cross-validation-5.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-6/cross-validation-5.json"
+    },
+    "entities": [
+      "豆包",
+      "DeepSeek",
+      "Kimi",
+      "文心一言",
+      "通义千问"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "positioning": "对豆包在字节生态内定位（通用助手+内容创作入口）与DeepSeek/Kimi/文心一言/通义千问在推理、长文本、企业级、多模态四类定位上的差异做多源交叉核验，标注各源对定位口径的一致性与冲突",
+      "pricing": "核对豆包免费策略与竞品在C端免费/Pro订阅/API计费上的口径差异，识别单源孤证价格点与多源一致的免费/付费边界",
+      "feature_differences": "按能力（推理/写作/多模态/长上下文/联网/插件）、体验（响应速度/交互流畅度/移动端）两条主线，比对五个实体在九个源上的稳定结论与源间矛盾",
+      "social_proof": "汇总小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索对豆包及四个竞品的口碑、用户画像与场景偏好的支撑源计数与冲突源列表",
+      "strengths_weaknesses": "输出豆包对DeepSeek/Kimi/文心一言/通义千问的相对优势与劣势矩阵，每条附支撑源数量、冲突源列表与置信标签（多源一致/单源孤证/源间矛盾）"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "chapter_type": "cross_validation",
+  "opening": {
+    "inputs": [
+      {
+        "path": "goals/goal-4/data-collection-22.json"
+      }
+    ],
+    "task": "对「文心一言」的关键论断（产品定位、模型迭代节奏、生态整合广度、商业化路径成效、正负面口碑）在小红书、微博、微信公众号、网页搜索、抖音、X、Reddit、Hacker News 至少两源之间进行交叉验证，标注证据强度与冲突项，输出交叉验证结果对象。",
+    "acceptance": [
+      "每条关键论断至少覆盖两个不同来源的证据引用，且注明来源平台与原文位置",
+      "对每条论断标注证据强度（strong/medium/weak）以及是否存在冲突（consistent/partial/conflicting）",
+      "冲突项需列出具体差异描述、涉及平台与可能原因假设",
+      "覆盖五个论断维度：产品定位、模型迭代节奏、生态整合广度、商业化路径成效、正负面口碑",
+      "输出为结构化 JSON 对象并保存至 goals/goal-4/cross-validation-3.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-4/cross-validation-3.json"
+    },
+    "entities": [
+      "文心一言"
+    ],
+    "expected_count": 5,
+    "notes": {
+      "dimensions": [
+        "产品定位",
+        "模型迭代节奏",
+        "生态整合广度",
+        "商业化路径成效",
+        "正负面口碑"
+      ],
+      "platforms_considered": [
+        "小红书",
+        "微博",
+        "微信公众号",
+        "网页搜索",
+        "抖音",
+        "X",
+        "Reddit",
+        "Hacker News"
+      ],
+      "min_sources_per_claim": 2,
+      "evidence_strength_scale": [
+        "strong",
+        "medium",
+        "weak"
+      ],
+      "conflict_labels": [
+        "consistent",
+        "partial",
+        "conflicting"
+      ],
+      "output_format": "json_object",
+      "conflict_reporting": "列出差异描述、涉及平台、可能原因"
+    }
+  }
+}

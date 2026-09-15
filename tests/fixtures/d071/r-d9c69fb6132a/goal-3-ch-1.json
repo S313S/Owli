@@ -1,0 +1,68 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "拆解本 goal 的采集与合成路径，明确围绕 Kimi（Kimi智能助手、Kimi Chat、月之暗面 Moonshot）在产品定位、长文本能力、学术办公写作场景、国内口碑与吐槽方面的采集要点、检索词与合成节次结构。",
+    "acceptance": [
+      "输出 goals/goal-3/goal-planning.md，覆盖 Kimi 产品定位、长文本能力、学术办公写作场景、国内口碑与吐槽四大维度的采集要点",
+      "为每个维度列出至少 3 条中文检索词/官方渠道/社媒关键词，并区分官方来源与用户口碑来源",
+      "给出后续合成章节的目录结构与节次编排，明确与 goal-3 下 data-collection-16 采集产物的衔接方式",
+      "标注可能的信息缺口与吐槽风险点（如上下文长度宣传与实际体感、限流、Kimi+ 会员定价争议等）"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-3/goal-planning.md"
+    },
+    "entities": [
+      "Kimi"
+    ],
+    "expected_count": null,
+    "notes": {
+      "entity_aliases": [
+        "Kimi",
+        "Kimi智能助手",
+        "Kimi Chat",
+        "月之暗面",
+        "Moonshot AI"
+      ],
+      "collection_dimensions": [
+        "产品定位与厂商背景（月之暗面 Moonshot AI）",
+        "长文本/长上下文能力（200万字上下文、文件解析）",
+        "学术与办公写作场景（论文阅读、资料汇总、PPT/邮件起草）",
+        "国内口碑与吐槽（限流、幻觉、会员付费、投流争议）"
+      ],
+      "search_terms_seed": [
+        "Kimi 智能助手 官网",
+        "Kimi 长文本 200万字",
+        "Kimi Chat 论文阅读",
+        "月之暗面 Moonshot 融资",
+        "Kimi 吐槽 限流 崩溃",
+        "Kimi+ 会员 价格 值得吗",
+        "Kimi vs 豆包 vs DeepSeek"
+      ],
+      "source_channels": [
+        "Kimi 官网与月之暗面官方公告",
+        "微信公众号/知乎/小红书用户评测",
+        "微博/B站吐槽与实测视频",
+        "36氪/虎嗅/极客公园等科技媒体报道",
+        "AppStore/华为应用市场评论区"
+      ],
+      "synthesis_outline": [
+        "1. 产品与厂商概览",
+        "2. 核心能力：长文本与文件处理",
+        "3. 典型场景：学术、办公、写作",
+        "4. 用户口碑：优点、槽点、争议",
+        "5. 与同类产品的差异化与风险提示"
+      ],
+      "downstream_collection_refs": [
+        "goals/goal-3/data-collection-16.json"
+      ],
+      "risk_gaps": [
+        "官方宣传上下文长度与实际体感差异需交叉验证",
+        "限流、排队等舆情随时间波动，需注明采集时点（2026-09-15）",
+        "Kimi+ 会员权益与价格可能已多次调整，需以最新公告为准"
+      ]
+    }
+  }
+}

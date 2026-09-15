@@ -1,0 +1,48 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 Hacker News Algolia 接口检索「Doubao」「豆包」「ByteDance Doubao」，固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的过滤条件，采集 story 与 comment；输出顶层数组，每条含 permalink、fetched_at、标题或评论正文、points、num_",
+    "acceptance": [
+      "输出文件 goals/goal-1/data-collection-7.json 为顶层 JSON 数组",
+      "检索关键词覆盖「Doubao」「豆包」「ByteDance Doubao」三个词",
+      "严格使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 三项过滤条件",
+      "同时采集 story 与 comment 两种对象类型",
+      "每条记录包含 permalink、fetched_at、标题或评论正文、points、num_ 等字段"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-7.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "source": "Hacker News Algolia API",
+      "keywords": [
+        "Doubao",
+        "豆包",
+        "ByteDance Doubao"
+      ],
+      "filters": {
+        "created_at_i_gt": "执行时点UTC epoch-7776000",
+        "points_gt": 50,
+        "hitsPerPage": 1000
+      },
+      "object_types": [
+        "story",
+        "comment"
+      ],
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "title_or_comment_text",
+        "points",
+        "num_"
+      ],
+      "output_shape": "top-level JSON array"
+    }
+  }
+}

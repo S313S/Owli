@@ -1,0 +1,56 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "goal-6-cross-comparison-report.json",
+    "description": "基于 goal-1 至 goal-5 的三十五个上游采集产物及本 goal 补采数据，横向对比「豆包」与「DeepSeek」「Kimi」「文心一言」「通义千问」在能力、体验、口碑、用户画像、场景偏好五维度的差异，输出国内大家对「豆包」的整体看法与相对位置综合结论的节化文档信封",
+    "shape": "object"
+  },
+  "acceptance": [
+    "报告结论必须可逐条回溯到 goal-1 至 goal-5 的三十五个上游 output.path 或本 goal 补采产物中的具体 permalink，禁止无源结论",
+    "横向对比矩阵必须完整覆盖能力、体验、口碑、用户画像、场景偏好五个维度，每维度对「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」逐一给出证据引用",
+    "报告及中间产物中出现的实体名称必须严格落在闭集「豆包、DeepSeek、Kimi、文心一言、通义千问」及各自允许叫法内，不得跨实体混用叫法",
+    "任何维度证据不足时必须用结构化缺口口径说明缺口来源、影响范围与降级策略，不得编造条数或写死上游无法保证的实体最小条数",
+    "所有引用名称一律使用中文引号「」，JSON 字符串值内部不得出现未转义的英文双引号",
+    "补采采集章顶层为数组，每条含 permalink 与 fetched_at 字段，且不与上游三十五个 (source_id, entity) 组合重复",
+    "本 goal 补采采集章的 source_id 必须落在 applicable_sources=[douyin、hacker_news、product_hunt、reddit、web_search、wechat_mp、weibo、x、xhs] 之内",
+    "交叉验证、一致性检查、报告撰写三章 shape 均为 object，且最终 deliverable.shape 为 object，节化文档信封结构完整",
+    "数据清洗产物必须按实体×维度建立统一字段的证据条目集合，保留 permalink、fetched_at、source_id、entity、维度标签、原文摘录、情感倾向等字段"
+  ],
+  "agents": [
+    {
+      "name": "网页搜索·豆包",
+      "task": "针对实体「豆包」在网页搜索源采集横向对比与综合评价类公开内容，检索关键词仅使用叫法闭集「豆包」「Doubao」「豆包AI」「字节豆包」，并可与维度关键词（能力、体验、口碑、用户画像、场景偏好）组合；填补上游 goal-1 对「豆包」在网页搜索源的采集缺口，输出顶层为数组，每条至少含 permalink、fetched_at、title、snippet、source_domain、matched_alias 字段，禁止在任务文本中写入其他四个竞品的叫法",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "通过 inputs 消费 goals/goal-1/data-collection.json、goals/goal-1/data-collection-2.json、goals/goal-1/data-collection-3.json、goals/goal-1/data-collection-4.json、goals/goal-1/data-collection-5.json、goals/goal-1/data-collection-6.json、goals/goal-1/data-collection-7.json、goals/goal-1/data-collection-8.json、goals/goal-2/data-collection-9.json 至 goals/goal-2/data-collection-15.json、goals/goal-3/data-collection-16.json 至 goals/goal-3/data-collection-21.json、goals/goal-4/data-collection-22.json 至 goals/goal-4/data-collection-28.json、goals/goal-5/data-collection-29.json 至 goals/goal-5/data-collection-35.json 以及本 goal「网页搜索·豆包」补采产物，按实体（「豆包」「DeepSeek」「Kimi」「文心一言」「通义千问」）与五个维度建立统一字段的证据条目集合，剔除叫法越界或与闭集实体无关的条目，保留 permalink、fetched_at、source_id、entity、alias_hit、维度标签、原文摘录、情感倾向、置信度字段",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "交叉验证",
+      "task": "对数据清洗产物按实体×维度做跨源交叉验证，识别多源一致口径、单源孤证与源间矛盾，特别核对「豆包」在能力、体验、口碑、用户画像、场景偏好上的评价是否在小红书、抖音、微博、微信公众号、Reddit、X、Hacker News、Product Hunt、网页搜索多源间稳定成立，并与「DeepSeek」「Kimi」「文心一言」「通义千问」做同维度对照，输出节化文档信封，每条结论标注支撑源数量、冲突源列表与置信度",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "对交叉验证产物与 goal-1 至 goal-5 各自的单实体结论做一致性核对，识别横向对比中出现的口径漂移、实体叫法越界、维度错配、数据缺口未标注等问题，输出节化文档信封，列出通过项、需返工项与建议修正方案，确保最终报告在叫法闭集与维度框架上不越界",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "基于数据清洗、交叉验证、一致性检查三章产物撰写节化文档信封形式的《豆包与四家对手的国内评价横向对比与综合结论》，包含：五维度横向对比矩阵、「豆包」相对位置画像、国内大家对「豆包」的整体看法综合结论、与「DeepSeek」「Kimi」「文心一言」「通义千问」的差异化亮点与短板、缺口与局限说明、附录证据索引（回链到 permalink 与上游 output.path），所有实体名称严格遵守叫法闭集，引用名称使用中文引号「」",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

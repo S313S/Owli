@@ -1,0 +1,50 @@
+{
+  "chapter_type": "report",
+  "opening": {
+    "inputs": [],
+    "task": "整合清洗与一致性检查结果，撰写豆包侧证据基线信封文档，章节涵盖产品定位、功能特性、用户规模、官方叙事、国内社媒口碑（小红书、抖音、微博、微信公众号）、海外及科技媒体讨论（Reddit、X、HN、Product Hunt）、优缺点画像、典型讨论案例、结构化缺口；每条论断附证据 permalink 引用，产物为 object 信封。",
+    "acceptance": [
+      "产物为 JSON object 信封，写入 goals/goal-1/doubao_positioning_and_reputation.json",
+      "章节必须覆盖产品定位、功能特性、用户规模、官方叙事、国内社媒口碑（小红书/抖音/微博/微信公众号）、海外及科技媒体讨论（Reddit/X/HN/Product Hunt）、优缺点画像、典型讨论案例、结构化缺口九大板块",
+      "每条论断必须附证据 permalink 引用，未覆盖或证据缺失的条目须落入结构化缺口章节",
+      "内容仅围绕实体『豆包』，需以清洗与一致性检查后的数据为准，不得引入未经核验的来源"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/doubao_positioning_and_reputation.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "envelope_type": "object",
+      "sections": [
+        "product_positioning",
+        "feature_highlights",
+        "user_scale",
+        "official_narrative",
+        "domestic_social_reputation",
+        "overseas_and_tech_media_discussion",
+        "strengths_weaknesses_profile",
+        "representative_discussion_cases",
+        "structured_gaps"
+      ],
+      "domestic_social_channels": [
+        "小红书",
+        "抖音",
+        "微博",
+        "微信公众号"
+      ],
+      "overseas_channels": [
+        "Reddit",
+        "X",
+        "HN",
+        "Product Hunt"
+      ],
+      "citation_requirement": "每条论断必须附证据 permalink 引用",
+      "gap_handling": "未覆盖或证据不足的条目须落入 structured_gaps 章节"
+    }
+  }
+}

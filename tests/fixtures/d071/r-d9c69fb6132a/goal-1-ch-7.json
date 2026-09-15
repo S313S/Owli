@@ -1,0 +1,47 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在微信公众号生态检索「豆包」「豆包AI」「字节豆包」「Doubao」相关深度文章，覆盖官方号、科技媒体、行业观察号，采集近 12 个月内代表性长文；输出顶层数组，每条含 permalink、fetched_at、公众号名称、标题、发布时间、阅读量或在看数（若可得）、正文摘要、核心观点。",
+    "acceptance": [
+      "输出为顶层 JSON 数组，且每条记录字段齐全：permalink、fetched_at、公众号名称、标题、发布时间、阅读量或在看数（若可得）、正文摘要、核心观点",
+      "检索关键词覆盖「豆包」「豆包AI」「字节豆包」「Doubao」四个变体",
+      "来源覆盖官方号、科技媒体、行业观察号三类公众号",
+      "所有文章发布时间落在近 12 个月（2025-09-15 至 2026-09-15）区间内",
+      "permalink 均为可访问的微信公众号文章链接，fetched_at 使用 ISO 8601 时间戳",
+      "正文摘要与核心观点为原创提炼，不得直接复制全文"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-4.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": 15,
+    "notes": {
+      "source_scope": "微信公众号生态，覆盖官方号、科技媒体、行业观察号三类主体",
+      "keywords": [
+        "豆包",
+        "豆包AI",
+        "字节豆包",
+        "Doubao"
+      ],
+      "time_window": "2025-09-15 至 2026-09-15，近 12 个月",
+      "record_fields": [
+        "permalink",
+        "fetched_at",
+        "公众号名称",
+        "标题",
+        "发布时间",
+        "阅读量或在看数",
+        "正文摘要",
+        "核心观点"
+      ],
+      "metrics_optional": "阅读量或在看数在页面不可得时允许留空，需在字段中显式标记 null",
+      "dedup_rule": "以 permalink 归一化后作为唯一键去重，同一篇文章不重复采集",
+      "output_format": "顶层 JSON 数组，UTF-8 编码"
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "deliverable": {
+    "format": "json",
+    "path": "doubao_positioning_and_reputation.json",
+    "description": "豆包产品定位与国内用户口碑证据基线，含官方叙事、功能特性、用户规模，以及国内外社媒与科技媒体上关于豆包的使用体验、优缺点评价与典型讨论摘要。",
+    "shape": "object"
+  },
+  "acceptance": [
+    "deliverable.path 为「doubao_positioning_and_reputation.json」，顶层为 object 信封，包含产品定位、功能特性、用户规模、官方叙事、社媒口碑、科技媒体讨论、结构化缺口等章节键。",
+    "必采八源（小红书、抖音、微博、微信公众号、Reddit、X、HN、Product Hunt）均产出对应采集数组产物，且每条记录含 permalink 与 fetched_at 字段。",
+    "所有采集 agent 的 task 文本只出现豆包实体的允许叫法（豆包、Doubao、豆包AI、字节豆包），未混入 DeepSeek、Kimi、文心一言、通义千问的任何叫法。",
+    "HN 采集章明确使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的查询口径。",
+    "同一 (source_id, entity) 组合在本 goal 内不重复出现；清单外若增补采集章，其 source_id 属于 applicable_sources 且与清单及上游不重复。",
+    "报告撰写章输出为 object，形成豆包侧的证据基线信封文档，覆盖官方叙事与用户口碑两大主线并标注证据出处。",
+    "数据不足处采用结构化缺口口径记录，未写死上游无法保证的实体最小条数。",
+    "所有 JSON 字符串值内部不含未转义的英文双引号，引用名称统一使用中文引号「」。"
+  ],
+  "agents": [
+    {
+      "name": "小红书数据抓取·豆包",
+      "task": "在小红书站内检索「豆包」「豆包AI」「字节豆包」「Doubao」相关笔记，覆盖使用体验、功能测评、优缺点吐槽、场景推荐等主题，采集近 12 个月内高互动笔记与评论摘要；输出顶层数组，每条含 permalink、fetched_at、作者、正文摘要、点赞/收藏/评论数、话题标签、情感倾向初判。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "抖音数据抓取·豆包",
+      "task": "在抖音检索「豆包」「豆包AI」「字节豆包」「Doubao」相关视频与评论，覆盖官方号、KOL 测评、用户实拍等，采集近 12 个月内高播放/高互动条目；输出顶层数组，每条含 permalink、fetched_at、作者、标题或文案、播放量、点赞/评论/转发、评论区代表性观点摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微博数据抓取·豆包",
+      "task": "在微博检索「豆包」「豆包AI」「字节豆包」「Doubao」相关微博与热搜话题，覆盖官方账号动态、媒体报道、KOL 与普通用户评价，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、转评赞数、话题标签、观点极性。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "微信公众号数据抓取·豆包",
+      "task": "在微信公众号生态检索「豆包」「豆包AI」「字节豆包」「Doubao」相关深度文章，覆盖官方号、科技媒体、行业观察号，采集近 12 个月内代表性长文；输出顶层数组，每条含 permalink、fetched_at、公众号名称、标题、发布时间、阅读量或在看数（若可得）、正文摘要、核心观点。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Reddit 数据抓取·豆包",
+      "task": "在 Reddit 检索「Doubao」「豆包」相关 submission 与高分评论，覆盖 r/ChineseLanguage、r/ArtificialInteligence、r/LocalLLaMA、r/ChatGPT 等子版，采集近 12 个月内讨论；输出顶层数组，每条含 permalink、fetched_at、subreddit、标题或内容、score、评论数、代表性观点摘要。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "X 数据抓取·豆包",
+      "task": "在 X 平台检索「Doubao」「豆包」「ByteDance Doubao」「字节豆包」相关推文与讨论串，覆盖官方账号、AI 领域 KOL、普通用户使用反馈，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、点赞/转推/回复数、语言、观点极性初判。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "HN 数据抓取·豆包",
+      "task": "在 Hacker News Algolia 接口检索「Doubao」「豆包」「ByteDance Doubao」，固定使用 created_at_i>执行时点UTC epoch-7776000、points>50、hitsPerPage=1000 的过滤条件，采集 story 与 comment；输出顶层数组，每条含 permalink、fetched_at、标题或评论正文、points、num_comments、作者、created_at、类型。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "Product Hunt 数据抓取·豆包",
+      "task": "在 Product Hunt 检索「Doubao」「豆包」「豆包AI」相关产品页面与讨论，覆盖官方或第三方登记条目、评论与投票；输出顶层数组，每条含 permalink、fetched_at、产品名、tagline、发布日期、upvotes、评论数、评论正文摘要、Maker 或 Hunter 信息（若可得）。",
+      "output": {
+        "shape": "array"
+      }
+    },
+    {
+      "name": "数据清洗",
+      "task": "对上游八个采集数组进行去重、字段规范化、时间字段统一为 ISO8601、观点摘要压缩、无关噪声剔除，并按源打上市场标签（cn_product 或 global），产出统一 schema 的清洗后记录集合信封，标注每源保留条数与丢弃原因。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "一致性检查",
+      "task": "对清洗后关于豆包的官方叙事（功能、定位、用户规模）与用户口碑（优点、缺点、典型场景）进行跨源一致性核对，标注共识观点、分歧观点、孤证与结构化缺口，形成一致性检查信封文档。",
+      "output": {
+        "shape": "object"
+      }
+    },
+    {
+      "name": "报告撰写",
+      "task": "整合清洗与一致性检查结果，撰写豆包侧证据基线信封文档，章节涵盖产品定位、功能特性、用户规模、官方叙事、国内社媒口碑（小红书、抖音、微博、微信公众号）、海外及科技媒体讨论（Reddit、X、HN、Product Hunt）、优缺点画像、典型讨论案例、结构化缺口；每条论断附证据 permalink 引用，产物为 object 信封。",
+      "output": {
+        "shape": "object"
+      }
+    }
+  ]
+}

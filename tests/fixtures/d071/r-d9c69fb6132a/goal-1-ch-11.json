@@ -1,0 +1,49 @@
+{
+  "chapter_type": "collection",
+  "opening": {
+    "inputs": [],
+    "task": "在 X 平台检索「Doubao」「豆包」「ByteDance Doubao」「字节豆包」相关推文与讨论串，覆盖官方账号、AI 领域 KOL、普通用户使用反馈，采集近 12 个月内典型条目；输出顶层数组，每条含 permalink、fetched_at、作者、正文、点赞/转推/回复数、语言、观点极性初判。",
+    "acceptance": [
+      "输出为顶层数组，且每条记录包含 permalink、fetched_at、作者、正文、点赞数、转推数、回复数、语言、观点极性初判字段",
+      "覆盖官方账号、AI 领域 KOL、普通用户使用反馈三类来源，条目发布时间在近 12 个月内",
+      "检索关键词覆盖「Doubao」「豆包」「ByteDance Doubao」「字节豆包」四类",
+      "输出文件写入 goals/goal-1/data-collection-6.json"
+    ]
+  },
+  "closing": {
+    "output": {
+      "path": "goals/goal-1/data-collection-6.json"
+    },
+    "entities": [
+      "豆包"
+    ],
+    "expected_count": null,
+    "notes": {
+      "platform": "X (Twitter)",
+      "time_window": "近 12 个月",
+      "keywords": [
+        "Doubao",
+        "豆包",
+        "ByteDance Doubao",
+        "字节豆包"
+      ],
+      "source_types": [
+        "官方账号",
+        "AI 领域 KOL",
+        "普通用户使用反馈"
+      ],
+      "required_fields": [
+        "permalink",
+        "fetched_at",
+        "author",
+        "content",
+        "likes",
+        "retweets",
+        "replies",
+        "language",
+        "sentiment_polarity"
+      ],
+      "output_shape": "top-level array"
+    }
+  }
+}
