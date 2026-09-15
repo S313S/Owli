@@ -21,8 +21,16 @@ import sqlite3
 import sys
 from pathlib import Path
 
-OUT = Path(sys.argv[1]).resolve()
-PLAN = json.loads((OUT / "plan.json").read_text(encoding="utf-8"))
+# 用法一（一次性小跑库）：wx1_stale_acceptance.py <out_dir>          读 <out_dir>/plan.json + <out_dir>/owli.db 全部事件
+# 用法二（留服库，多研究同库）：wx1_stale_acceptance.py <plan.json> <db> <research_id>  事件按 research_id 过滤
+if len(sys.argv) >= 4:
+    PLAN_PATH, DB_PATH, RESEARCH_ID = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
+else:
+    OUT = Path(sys.argv[1]).resolve()
+    PLAN_PATH, DB_PATH, RESEARCH_ID = OUT / "plan.json", OUT / "owli.db", None
+PLAN = json.loads(PLAN_PATH.read_text(encoding="utf-8"))
+if "goals" not in PLAN and isinstance(PLAN.get("data"), dict):
+    PLAN = PLAN["data"].get("plan") or PLAN["data"]
 
 # 删卡留痕原文形状：「[修正31] goal-5/data-collection-19 采集卡「reddit·字节跳动」不在分配表里，已删除」
 DELETED = re.compile(r"\[修正31\] (goal-\d+)/(\S+?) 采集卡「([^「」·]+)·([^「」]+)」不在分配表里")
@@ -30,9 +38,13 @@ SUBJECT = re.compile(r"新增\s*\d*\s*(条|份|张)?\s*采集|采集章|采集\s
 
 
 def deleted_cards() -> dict[str, list[tuple[str, str, str]]]:
-    conn = sqlite3.connect(f"file:{OUT / 'owli.db'}?mode=ro", uri=True)
-    texts = [str((json.loads(r[0]).get("data") or {}).get("text", ""))
-             for r in conn.execute("select payload from events order by sequence")]
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    if RESEARCH_ID:
+        cursor = conn.execute(
+            "select payload from events where research_id=? order by sequence", (RESEARCH_ID,))
+    else:
+        cursor = conn.execute("select payload from events order by sequence")
+    texts = [str((json.loads(r[0]).get("data") or {}).get("text", "")) for r in cursor]
     conn.close()
     found: dict[str, set[tuple[str, str, str]]] = {}
     for text in texts:
