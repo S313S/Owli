@@ -65,6 +65,36 @@ for goal in goals:
         note = (((a.get("chapter") or {}).get("closing") or {}).get("notes") or {}).get("chapter_type_correction")
         if note:
             corrections.append(f"{goal['goal_id']}/{a.get('agent_id')}: {json.dumps(note, ensure_ascii=False)}")
+# 产出章核对（调度 09-15 加项）：交付物与下游读的每条路径，逐条列谁产出；自己按路径字符串匹配，不借生产判定。
+produced: dict[str, list[str]] = {}
+for goal in goals:
+    for a in goal.get("agents") or []:
+        out = str((a.get("output") or {}).get("path") or "")
+        chapter_out = str((((a.get("chapter") or {}).get("closing") or {}).get("output") or {}).get("path") or "")
+        for path in {out, chapter_out} - {""}:
+            produced.setdefault(path, []).append(f"{goal['goal_id']}/{a.get('agent_id')}")
+def _norm(goal_id: str, path: str) -> str:
+    return path if path.startswith("goals/") else f"goals/{goal_id}/{path}"
+lines.append("产出章核对（交付物）：")
+for goal in goals:
+    raw = str((goal.get("deliverable") or {}).get("path") or "")
+    full = _norm(goal["goal_id"], raw) if raw else ""
+    who = produced.get(full) or produced.get(raw) or []
+    lines.append(f"  {goal['goal_id']} deliverable={full or '（无）'} 产出章={who or '❌ 无'}")
+lines.append("产出章核对（各章读的输入路径）：")
+orphans = []
+for goal in goals:
+    for a in goal.get("agents") or []:
+        paths = [str(i.get("artifact")) for i in (a.get("inputs") or []) if isinstance(i, dict) and i.get("artifact")]
+        paths += [str(i.get("path")) for i in (((a.get("chapter") or {}).get("opening") or {}).get("inputs") or [])
+                  if isinstance(i, dict) and i.get("path")]
+        for path in sorted(set(paths)):
+            who = produced.get(path) or []
+            if not who and path.endswith(".rows.json") and produced.get(path[: -len(".rows.json")] + ".json"):
+                continue  # 评级章读的物化行文件由执行期从库行生成（runtime 起评级章前落盘），源采集章在即算有产出
+            if not who:
+                orphans.append(f"{goal['goal_id']}/{a.get('agent_id')} ← {path}")
+lines.append(f"  无产出章的输入路径={orphans or '无'}")
 empty = [g["goal_id"] for g in goals if not g.get("agents")]
 lines.append(f"合计 goal {len(goals)} 章 {total}｜0 章 goal={empty or '无'}")
 lines.append(f"chapter_type_correction={corrections or '无'}")
