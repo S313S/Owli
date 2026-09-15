@@ -721,8 +721,7 @@ MARK_OVERLAP = 2 / 3
 #: 开篇节里关键发现那几行：`1. 【A】结论句 [S12][S18]`。
 FINDING_LINE = re.compile(r"^\s*\d+[.)、]\s*【")
 #: ⒡：09-14 评审逐条抓到的机器话。「N 条被引证据」是把引用池条数当成正文实引写进了摘要。
-MACHINE_TALK = (r"程序按", r"占比\s*0\.\d", r"身份未知", r"读者身份不明", r"提问方",
-                r"\d+\s*条被引证据")
+from app.report.polish.run import MACHINE_TALK_PATTERNS as MACHINE_TALK  # noqa: E402  写作期闸同一份
 
 
 def summary_findings(markdown: str) -> list[tuple[str, set[int]]]:

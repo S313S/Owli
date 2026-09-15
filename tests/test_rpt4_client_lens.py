@@ -378,3 +378,15 @@ def test_逐字闸不把全角弯引号落成半角当改字_改了字照样打�
     assert altered_quotes(ok, corpus) == []
     bad = ok.replace("囚徒博弈", "囚徒困境")
     assert altered_quotes(bad, corpus), "改了字照样打回"
+
+
+def test_机器话在写作期就打回_原声引用块不查_尺子与闸同一份名单() -> None:
+    from app.report.polish.run import MACHINE_TALK_PATTERNS, machine_talk_lines
+
+    text = ("豆包陪伴场景里被程序按互动量取为代表的原声[S06]。\n"
+            "⛔ 不能读成多位独立用户。\n"
+            "> 程序按我说的做就行\n> —— 小红书 · A [S01]\n"
+            "这两条来自同一个帖子[S01][S04]。\n")
+    assert [word for _, word in machine_talk_lines(text)] == ["程序按", "⛔"]
+    ruler = _ruler()
+    assert ruler.MACHINE_TALK is MACHINE_TALK_PATTERNS

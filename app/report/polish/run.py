@@ -811,6 +811,27 @@ def _audience_view(data: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+#: §RPT-4 C-11：系统自己的话。验收尺子 ⒡ 与写作期闸共用这一份（`check_polished` import 它）。
+#: 前六条是 09-14 评审逐条抓到的；`⛔` 与「按规矩」是 09-15 重出稿读到的——写手把提示词里的
+#: 规矩符号和「按规矩挂附录」原样写给了客户。
+MACHINE_TALK_PATTERNS = (r"程序按", r"占比\s*0\.\d", r"身份未知", r"读者身份不明", r"提问方",
+                         r"\d+\s*条被引证据", r"⛔", r"按规矩")
+
+
+def machine_talk_lines(markdown: str) -> list[tuple[int, str]]:
+    """写手文本里命中机器话的行：`(行号, 命中的字)`。原声引用块（`>` 开头）不查——那是发帖人的话。"""
+    hits = []
+    for index, line in enumerate(markdown.splitlines(), start=1):
+        if line.lstrip().startswith(">"):
+            continue
+        for pattern in MACHINE_TALK_PATTERNS:
+            found = re.search(pattern, line)
+            if found:
+                hits.append((index, found.group(0)))
+                break
+    return hits
+
+
 def offpool_marks(markdown: str, pool: frozenset[int]) -> list[str]:
     """成稿里越出信息源池的角标，升序去重。与工作稿的 `_shard_stale_citations` 同思路。"""
     used = {int(n) for n in _MARK.findall(markdown)}
@@ -1284,6 +1305,12 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
         quote_problems = altered_quotes(text, corpus) + lowgrade_quotes(text, grade_by_mark)
         if current in ADVICE_SECTIONS:
             quote_problems += singlesource_advice(text.splitlines(), crossref)
+        # §RPT-4 C-11：机器话挡在写作期。09-15 重出稿软检读到「被程序按互动量取为代表」「⛔ 不能读成」，
+        # 只判黄的话整轮 50 分钟付完才看得见；这几个词在客户稿里没有合法用法，当轮重写这一节/片。
+        quote_problems += [
+            f"第 {line_no} 行写了系统自己的话「{word}」：这类说明是写给你的，不是写给读者的，"
+            "换成人话或删掉（取数、挑原声的过程不写；规矩符号 ⛔ 不写）。"
+            for line_no, word in machine_talk_lines(text)]
         if quote_problems:
             errors = tuple(f"{unit}{p}" for p in quote_problems)
             _reject("quote")
