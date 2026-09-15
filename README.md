@@ -38,8 +38,8 @@
   注意：视频不要提交进仓库；免费账号单个视频上限 10MB，压好的文件是 8.5MB。
 -->
 
-> 完整演示：**[2 分 53 秒 · 从提问到出报告](https://weixin.qq.com/sph/ALFQ3wylm)**<!-- 换成 user-attachments 链接 -->
-> 更长的无剪辑全流程录屏见 [6 分钟 · 一镜到底无人托管Agents舆情监督工具](https://weixin.qq.com/sph/A1FeZR2wL)。
+> 完整演示：**[2 分 53 秒 · 从提问到出报告](https://github.com/user-attachments/assets/e105a011-c6f5-4115-a6f5-b1cd6b8267fb)**<!-- 换成 user-attachments 链接 -->
+> 更长的无剪辑全流程录屏见 [一镜到底无人托管Agents舆情监督工具](https://weixin.qq.com/sph/A1FeZR2wL)。
 > 文字版实录：[公众号文章](https://mp.weixin.qq.com/s/kGCSCmHF8XHaEYS1t4O2nw)<!-- 换成 mp.weixin.qq.com 那篇的链接 -->
 
 ### 为什么做这个
