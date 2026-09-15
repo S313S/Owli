@@ -101,7 +101,7 @@ DEGREE_WORDS = ("最", "更", "近半", "过半", "多数", "少数", "普遍", 
 #: 不可能把任何一格判红（这个集合只在 `_body_subheadings` 里做排除）。
 STRUCTURAL_SECTIONS = frozenset({
     "论据与数据", "建议", "附录", "需要回应的点", "谁强在哪", "对比总览", "时间线",
-    "对不同读者的含义", "对提问方意味着什么",
+    "对不同读者的含义", "对提问方意味着什么", IMPLICATIONS_SECTION,
 })
 MARK = re.compile(r"\[S(\d{2,})\]")
 #: 附录的信息源清单里角标是裸写的（`S01｜A 级｜…`），也得当角标认，
@@ -708,7 +708,87 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           "⑰ 原声表只在附录")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
-WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅")
+WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅",
+            # §RPT-4 货 3：客户视角四道软检。判黄理由同上——红一格要整节重写，
+            # 这几条是提示词规矩的兜底读数，调度 09-14 拍「提示词 + 程序软检判黄，不硬拦」。
+            "⒞ 摘要关键发现跑题", "⒟ 两条关键发现角标重合", "⒠ 同一张表正文重复", "⒡ 机器话残留")
+
+
+#: ⒞：一条关键发现的角标里旁证（对照实体 / 海外平台）占到这个比例就判黄。
+OFFTOPIC_SHARE = 0.8
+#: ⒟：两条关键发现的角标集合，重合数 / 较小那条的角标数 ≥ 这个比例就判黄。
+MARK_OVERLAP = 2 / 3
+#: 开篇节里关键发现那几行：`1. 【A】结论句 [S12][S18]`。
+FINDING_LINE = re.compile(r"^\s*\d+[.)、]\s*【")
+#: ⒡：09-14 评审逐条抓到的机器话。「N 条被引证据」是把引用池条数当成正文实引写进了摘要。
+MACHINE_TALK = (r"程序按", r"占比\s*0\.\d", r"身份未知", r"读者身份不明", r"提问方",
+                r"\d+\s*条被引证据")
+
+
+def summary_findings(markdown: str) -> list[tuple[str, set[int]]]:
+    """开篇节里的关键发现行与各自的角标。"""
+    bodies = _section_bodies(markdown)
+    lines = [line for name in OPENING_SECTIONS for line in bodies.get(name, [])]
+    return [(line.strip(), {int(n) for n in MARK.findall(line)})
+            for line in lines if FINDING_LINE.match(line)]
+
+
+def offtopic_findings(markdown: str, offtopic: set[int]) -> list[str]:
+    """⒞ 关键发现的角标大半是旁证——题面问国内看研究对象，它答的是别处或别家。"""
+    problems = []
+    for index, (line, marks) in enumerate(summary_findings(markdown), start=1):
+        if marks and len(marks & offtopic) / len(marks) >= OFFTOPIC_SHARE:
+            problems.append(f"第 {index} 条关键发现的角标 {len(marks & offtopic)}/{len(marks)} "
+                            f"是旁证（对照实体或海外平台）：{line[:40]}")
+    return problems
+
+
+def overlapping_findings(markdown: str) -> list[str]:
+    """⒟ 两条关键发现引的是同一批证据——它们多半是一条。"""
+    found = summary_findings(markdown)
+    problems = []
+    for i in range(len(found)):
+        for j in range(i + 1, len(found)):
+            a, b = found[i][1], found[j][1]
+            if a and b and len(a & b) / min(len(a), len(b)) >= MARK_OVERLAP:
+                problems.append(f"第 {i + 1} 条与第 {j + 1} 条关键发现角标重合 "
+                                f"{len(a & b)}/{min(len(a), len(b))}，多半是同一件事")
+    return problems
+
+
+def duplicate_tables(markdown: str) -> list[str]:
+    """⒠ 同一张表在写手正文里摆了不止一次（表头 + 各行逐字相同算同一张）。"""
+    seen: dict[str, int] = {}
+    problems = []
+    block: list[str] = []
+    start = 0
+    lines = writer_body(markdown).splitlines()
+    for index, line in enumerate([*lines, ""], start=1):
+        if line.strip().startswith("|"):
+            if not block:
+                start = index
+            block.append("".join(line.split()))
+            continue
+        if len(block) >= 3:            # 表头 + 分隔行 + 至少一行数据
+            key = "\n".join(block)
+            if key in seen:
+                problems.append(f"第 {start} 行的表与第 {seen[key]} 行的表一模一样："
+                                f"后面写「见第 N 条发现的表」即可")
+            else:
+                seen[key] = start
+        block = []
+    return problems
+
+
+def machine_talk(markdown: str) -> list[str]:
+    """⒡ 系统自己的话漏进写手正文（程序块剜掉之后再查，程序块自己的说明不算）。"""
+    problems = []
+    for index, line in enumerate(writer_body(markdown).splitlines(), start=1):
+        for pattern in MACHINE_TALK:
+            hit = re.search(pattern, line)
+            if hit:
+                problems.append(f"第 {index} 行有机器话「{hit.group(0)}」：{line.strip()[:40]}")
+    return problems
 
 
 def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str]]:
@@ -757,12 +837,27 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
     return findings
 
 
-def warnings_of(md_path: Path) -> dict[str, list[str]]:
+def warnings_of(md_path: Path, tables_path: Path | None = None) -> dict[str, list[str]]:
     """判黄的那几条。与 `run()` 分开返回：调用方（`rpt1_matrix`）按 `run()` 判过不过，
-    黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。"""
+    黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。
+
+    ⒞ 要读 tables.json 里每条源的「旁证」标；不给 `tables_path` 时按成稿同名规则去找，
+    找不到就当没有旁证（⒞ 读数为空，不猜）。"""
     markdown = md_path.read_text(encoding="utf-8")
+    if tables_path is None:
+        guess = md_path.with_name(md_path.name.removesuffix(".md") + ".tables.json")
+        tables_path = guess if guess.is_file() else None
+    offtopic: set[int] = set()
+    if tables_path is not None:
+        data = json.loads(tables_path.read_text(encoding="utf-8"))
+        offtopic = {int(str(s["mark"])[1:]) for s in data.get("sources") or []
+                    if s.get("mark") and s.get("offtopic")}
     return {WARNINGS[0]: hedge_density(markdown),
-            WARNINGS[1]: length_budget(markdown)}
+            WARNINGS[1]: length_budget(markdown),
+            WARNINGS[2]: offtopic_findings(markdown, offtopic),
+            WARNINGS[3]: overlapping_findings(markdown),
+            WARNINGS[4]: duplicate_tables(markdown),
+            WARNINGS[5]: machine_talk(markdown)}
 
 
 def main(argv: list[str]) -> int:
@@ -780,7 +875,7 @@ def main(argv: list[str]) -> int:
             print(f"        · {problem}")
         if len(problems) > 12:
             print(f"        · …另有 {len(problems) - 12} 处")
-    for name, problems in warnings_of(md_path).items():
+    for name, problems in warnings_of(md_path, tables_path).items():
         print(f"{'OK  ' if not problems else 'WARN'}  {name}"
               + (f"（{len(problems)} 处）" if problems else ""))
         for problem in problems[:12]:

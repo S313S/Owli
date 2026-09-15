@@ -614,6 +614,30 @@ def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
             for mark, verdicts in found.items()}
 
 
+#: §RPT-4 货 3（C-3）：海外平台。题面问的是「国内」时，这些平台上的证据与题面地域不一致。
+#: ⛔ 不挂到 `app/platforms.py`：那张表管的是评级体系里的固有属性，「算不算国内」
+#: 取决于题面，不是平台本身的属性——题面不带「国内」时这里一条都不生效。
+OVERSEAS_PLATFORMS = frozenset({"reddit", "x", "hacker_news", "product_hunt"})
+#: 题面里表示「只看国内」的词。
+DOMESTIC_MARKERS = ("国内", "中国用户", "国人")
+
+
+def offtopic_reason(row: Mapping[str, Any], *, contrast: bool | None,
+                    question: str) -> str | None:
+    """这条证据与题面的对象或地域对不上时，返回「对照实体」/「海外平台」，否则 None。
+
+    09-14 评审实测：题面「国内大家对豆包的看法」，关键发现第 3 条与唯一的具体建议都是
+    Reddit 一个帖子的水印事件，还给了 A 级——五维评分不管「切不切题」。⛔ 评分尺子不动，
+    这里只给写手打个标（信息源池里带「旁证」栏），规矩写在模板里：可以成节，不进摘要关键发现。
+    """
+    if contrast:
+        return "对照实体"
+    if (any(marker in str(question or "") for marker in DOMESTIC_MARKERS)
+            and str(row.get("platform") or "") in OVERSEAS_PLATFORMS):
+        return "海外平台"
+    return None
+
+
 #: 全部可用表名；SKILL.md 的 `tables:` 只能从这里挑（加载器会校验）。
 #: 模板 frontmatter 只能声明这里有的表名（`skills._load_one` 会校验），
 #: 而 `build_prompt` 又只投喂「模板点名过的表」——**两处都对上，写手才看得见一张表**。
@@ -745,6 +769,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     subject_names = set(quote_gate_names(plan))
     entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
     contrast_by_mark = {}
+    question = str(plan.get("research_question") or report.get("research_question") or "")
+    platform_by_mark = {int(r["citation_no"]): r.get("platform") for r in cited}
     for r in cited:
         entity = entity_by_agent.get(str(r.get("agent_name") or ""), "")
         contrast_by_mark[int(r["citation_no"])] = (
@@ -787,7 +813,13 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "crossref": crossref_by_mark.get(int(s["citation_no"])),
                      "title_independent": independent_by_mark.get(int(s["citation_no"]), True),
                      "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"])),
-                     "contrast": contrast_by_mark.get(int(s["citation_no"]))}
+                     "contrast": contrast_by_mark.get(int(s["citation_no"])),
+                     # §RPT-4 货 3：平台与「旁证」标。写手池里带出来，验收软检按它判摘要跑题。
+                     "platform": platform_by_mark.get(int(s["citation_no"])),
+                     "offtopic": offtopic_reason(
+                         {"platform": platform_by_mark.get(int(s["citation_no"]))},
+                         contrast=contrast_by_mark.get(int(s["citation_no"])),
+                         question=question)}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

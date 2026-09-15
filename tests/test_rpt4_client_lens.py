@@ -212,3 +212,82 @@ def test_货2_编码落库带实体_回填只写变了的行(tmp_path: Path) -> 
            for r in store.list_evidence("r-rpt4")}
     assert got["ev-1"]["entity"] == "主体" and got["ev-2"]["entity"] == "对照"
     assert got["ev-1"]["attitude"] == "负", "只补实体，编码其余字段不动"
+
+
+# ---------------------------------------------------------------- 货 3 写手规则与软检
+
+def test_货3_题面问国内时海外平台与对照实体的源带旁证标_写手池里看得见() -> None:
+    from app.report.polish.run import build_prompt
+    from app.report.polish.skills import get_template
+    from app.report.polish.tables import offtopic_reason
+
+    assert offtopic_reason({"platform": "reddit"}, contrast=False, question="国内大家对豆包的看法") == "海外平台"
+    assert offtopic_reason({"platform": "reddit"}, contrast=False, question="大家对豆包的看法") is None
+    assert offtopic_reason({"platform": "xhs"}, contrast=True, question="国内大家对豆包的看法") == "对照实体"
+    assert offtopic_reason({"platform": "xhs"}, contrast=None, question="国内大家对豆包的看法") is None
+    data = {"research_question": "国内大家对豆包的看法", "tables": {}, "sources": [
+        {"mark": "S01", "grade": "A", "title": "Devs forgot", "url": "u", "offtopic": "海外平台"},
+        {"mark": "S02", "grade": "B", "title": "豆包", "url": "u2"}]}
+    prompt = build_prompt(get_template("consulting"), data, "# 工作稿\n", Path("/tmp/x.md"))
+    assert "- S01｜A 级｜未登记｜旁证·海外平台｜Devs forgot｜u" in prompt
+    assert "- S02｜B 级｜未登记｜豆包｜u2" in prompt
+
+
+def test_货3_把握度行去掉程序前缀并接正文实引数_引用池数只在与实引不同时写(tmp_path: Path) -> None:
+    from app.report.polish.run import confidence_line
+
+    tables = {"crossref_mix": {"n": 3, "rows": [{"交叉验证结论": "SINGLE", "主张数": 3}]}}
+    assert confidence_line(tables) == "主张 3 条：单源 3。"
+    assert confidence_line(tables, {"cited": 80, "正文实引": 28}) == \
+        "主张 3 条：单源 3。正文实际引用证据 28 条（引用池共 80 条）。"
+
+
+def test_货3_小节名与读者不明提示不再出现机器话() -> None:
+    from app.report.polish.run import IMPLICATIONS_SECTION, _audience_view
+    from app.report.polish.skills import get_template, shared_rules
+
+    assert IMPLICATIONS_SECTION == "这意味着什么"
+    assert "这意味着什么" in get_template("competitor-matrix").sections
+    for name in ("consulting", "competitor-matrix", "sentiment-brief"):
+        assert "对提问方" not in get_template(name).body
+    rules = shared_rules()
+    assert "对提问方意味着什么" not in rules
+    assert "本次未采到官方口径" in rules and "旁证·对照实体" in rules
+    assert "身份未知" not in _audience_view({}).split("⛔")[0]
+
+
+def _ruler():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_polished_rpt4", ROOT / "scripts" / "acceptance" / "rpt1" / "check_polished.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_货3_四道软检判黄不判红(tmp_path: Path) -> None:
+    import json
+
+    ruler = _ruler()
+    md = tmp_path / "r.polished.consulting.md"
+    md.write_text(
+        "# 执行摘要\n\n答案[S01]。\n\n"
+        "1. 【A】豆包情感陪伴被夸[S01][S02][S03]\n"
+        "2. 【B】豆包回答质量被骂[S01][S02][S04]\n"
+        "3. 【A】海外玩家嘲笑水印[S05][S06]\n\n"
+        "> 本报告结论的把握度为**低**。\n\n"
+        "# 关键发现\n\n## 一\n\n| 场景 | 条数 |\n|---|---|\n| 陪伴 | 8 |\n\n"
+        "## 二\n\n| 场景 | 条数 |\n|---|---|\n| 陪伴 | 8 |\n\n占比 0.8226，支撑本报告结论的是 80 条被引证据。\n\n"
+        "# 附录\n\n无。\n", encoding="utf-8")
+    tables = md.with_name("r.polished.consulting.tables.json")
+    tables.write_text(json.dumps({"sources": [
+        {"mark": "S05", "offtopic": "海外平台"}, {"mark": "S06", "offtopic": "海外平台"},
+        {"mark": "S01"}]}, ensure_ascii=False), encoding="utf-8")
+    warns = ruler.warnings_of(md)
+    assert len(warns["⒞ 摘要关键发现跑题"]) == 1 and "第 3 条" in warns["⒞ 摘要关键发现跑题"][0]
+    assert len(warns["⒟ 两条关键发现角标重合"]) == 1
+    assert len(warns["⒠ 同一张表正文重复"]) == 1
+    hits = " ".join(warns["⒡ 机器话残留"])
+    assert "占比 0.8" in hits and "80 条被引证据" in hits
+    assert "⒞ 摘要关键发现跑题" not in ruler.CHECKS, "软检只判黄"

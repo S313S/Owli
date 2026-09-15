@@ -1,9 +1,9 @@
 ---
 name: competitor-matrix
 title: 竞品对比稿
-description: 适合多实体题面，如「X 与 Y 的对比」「X 竞品分析」；实体×维度矩阵开篇，逐维度展开，收尾一张「谁强在哪」总表加一节「对提问方意味着什么」。
+description: 适合多实体题面，如「X 与 Y 的对比」「X 竞品分析」；实体×维度矩阵开篇，逐维度展开，收尾一张「谁强在哪」总表加一节「这意味着什么」。
 tables: [entity_dimension, entity_mentions, attitude_by_topic, quotes, scenario_attitude, audience_attitude, trigger_counts, platform_mix, grade_mix, crossref_mix]
-sections: [执行摘要, 对比总览, 逐维度对比, 谁强在哪, 对提问方意味着什么, 建议, 附录]
+sections: [执行摘要, 对比总览, 逐维度对比, 谁强在哪, 这意味着什么, 建议, 附录]
 model: opus
 ---
 
@@ -69,7 +69,7 @@ SCQA 一段（≤150 字），答案那句必须是**一个可比较的判断**�
 表下面用一句话回答读者真正的问题：**如果只能选一个，什么场景选谁。** 如果证据不足以回答，
 就明说不足以回答，不要含糊过去。
 
-## 对提问方意味着什么
+## 这意味着什么
 
 上一节回答的是「谁强在哪」，这一节回答**「所以这对你意味着什么」**——问这个问题的人
 不是来看热闹的，他手上有个决定要做。给你的输入里有一段「读者是谁」，先看那个。
