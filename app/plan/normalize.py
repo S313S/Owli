@@ -267,9 +267,17 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     审计 / 交叉 / 撰写章一路连删、goal 被 D-065 移出，研究丢了跨 goal 综合层
     （WX-1 小跑 r-wx1-0914-1239 的 goal-4）。这些章本来就该吃上游 goal 的产物，
     断的只是「本 goal 自带卡」那条腿——见 `_synthesis_rescue`。
+
+    **例外（§D-071）**：goal 里还有存活的采集卡，综合链却只挂在被删的卡上（r-d9c69fb6132a
+    goal-3：清洗章只依赖表外那张 hn·Kimi），连删会删光清洗 / 交叉 / 撰写、交付物无章产出。
+    这种链不删、链头改接本 goal 存活卡——见 `_surviving_card_rescue`。
+    分工按 goal 分开、互不重叠：**还有存活卡 ⇒ D-071 改接本 goal 的卡；卡全删且有上游 goal ⇒
+    D-067 改接上游 goal 产物；卡全删且无上游 ⇒ 维持删除 + D-065 移出。**
     """
 
-    rescued = _synthesis_rescue(plan, dropped)
+    anchored = _surviving_card_rescue(plan, dropped)
+    rescued = _synthesis_rescue(plan, dropped, skip_goals=set(anchored))
+    kept_ids = {agent_id for rescue in anchored.values() for agent_id in rescue["chain"]}
     notes: list[str] = []
     changed = True
     while changed:
@@ -278,7 +286,10 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
             kept: list[Agent] = []
             for agent in goal.agents:
                 deps = list(agent.depends_on)
-                if deps and all(dep in dropped for dep in deps) and agent.agent_id not in rescued:
+                if (
+                    deps and all(dep in dropped for dep in deps)
+                    and agent.agent_id not in rescued and agent.agent_id not in kept_ids
+                ):
                     dropped.add(agent.agent_id)
                     notes.append(
                         f"[修正31] {goal.goal_id}/{agent.agent_id} 的上游采集卡已删、"
@@ -294,8 +305,10 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     for goal in plan.goals:
         if goal.goal_id in rescued.values():
             notes.append(_rewire_to_upstream_goals(plan, goal, set(rescued), dropped))
+        if goal.goal_id in anchored:
+            notes.append(_rewire_to_surviving_cards(goal, anchored[goal.goal_id], dropped))
         for agent in goal.agents:
-            if agent.agent_id in rescued:
+            if agent.agent_id in rescued or agent.agent_id in kept_ids:
                 continue
             remaining = [dep for dep in agent.depends_on if dep not in dropped]
             if remaining != list(agent.depends_on):
@@ -308,16 +321,8 @@ def _drop_orphans(plan: Plan, dropped: set[str]) -> list[str]:
     return notes
 
 
-def _synthesis_rescue(plan: Plan, dropped: set[str]) -> dict[str, str]:
-    """§D-067：哪些章不该跟着删卡连删——返回 {agent_id: goal_id}。
-
-    判据是 goal 级的（先把级联在 id 上模拟到不动，不改计划）：
-    - goal 有上游 goal（`goal.depends_on` 非空）——没有上游就没有可改接的输入，维持删除 + D-065 移出；
-    - 本 goal 的「综合章」（非采集卡、非只评一张卡的评级章）**全部**会被连删。
-      只断了一部分（别的卡还在、链还通）不救，与旧行为逐字相同。
-
-    评级章照删：它的产物契约就是那一张卡的库行（`rated_collector_id`），卡没了它无物可评。
-    """
+def _doomed(plan: Plan, dropped: set[str]) -> set[str]:
+    """把「依赖全被删就跟着删」的级联在 id 上模拟到不动，不改计划。"""
 
     doomed = set(dropped)
     changed = True
@@ -329,20 +334,120 @@ def _synthesis_rescue(plan: Plan, dropped: set[str]) -> dict[str, str]:
                 if agent.agent_id not in doomed and deps and all(dep in doomed for dep in deps):
                     doomed.add(agent.agent_id)
                     changed = True
-    rescued: dict[str, str] = {}
+    return doomed
+
+
+def _synthesis_chapters(goal: Goal, dropped: set[str]) -> list[Agent]:
+    """本 goal 的「综合章」：非采集卡、非只评一张卡的评级章。"""
+
+    collectors = set(dropped) | {agent.agent_id for agent in goal.agents if _is_collector(agent)}
+    deliverable = str((goal.deliverable or {}).get("path", ""))
+    return [
+        agent for agent in goal.agents
+        if not _is_collector(agent)
+        and not rated_collector_id(
+            output=agent.output, depends_on=agent.depends_on,
+            deliverable_path=deliverable, collector_ids=collectors,
+        )
+    ]
+
+
+def _surviving_card_rescue(plan: Plan, dropped: set[str]) -> dict[str, dict[str, list[str]]]:
+    """§D-071：还有存活采集卡的 goal 里，哪些综合章不该跟着删卡连删。
+
+    返回 {goal_id: {"chain": [会被连删的综合章 id], "anchors": [改接目标 id]}}：
+    - goal 里至少一张采集卡不在 `dropped`；
+    - 至少一个综合章（口径同 `_synthesis_chapters`）会被连删——它的依赖链只通到被删的卡。
+    改接目标 = 每张存活卡的评级章（没有评级章就用卡本身），与生成器「首个汇总章等齐全部评级章」
+    同一口径（`generate._insert_rating_agents`）。
+
+    规划期挂法已在 `generate._leading_collector_block` 修了「规划章打头」那一种；这里兜的是任何
+    「综合链只挂在表外卡上」的挂法（模型改写的 depends_on、编辑后的计划）：卡删对了，但本 goal
+    还吃得到输入的撰写链不该陪葬。评级章照删（同 D-067）。
+    """
+
+    doomed = _doomed(plan, dropped)
+    result: dict[str, dict[str, list[str]]] = {}
     for goal in plan.goals:
-        if not goal.depends_on:
+        survivors = [
+            agent.agent_id for agent in goal.agents
+            if _is_collector(agent) and agent.agent_id not in dropped
+        ]
+        if not survivors:
             continue
-        collectors = set(dropped) | {agent.agent_id for agent in goal.agents if _is_collector(agent)}
+        chain = [agent.agent_id for agent in _synthesis_chapters(goal, dropped) if agent.agent_id in doomed]
+        if not chain:
+            continue
+        collectors = {agent.agent_id for agent in goal.agents if _is_collector(agent)}
         deliverable = str((goal.deliverable or {}).get("path", ""))
-        synthesis = [
-            agent for agent in goal.agents
-            if not _is_collector(agent)
-            and not rated_collector_id(
+        ratings = {
+            rated_collector_id(
                 output=agent.output, depends_on=agent.depends_on,
                 deliverable_path=deliverable, collector_ids=collectors,
-            )
-        ]
+            ): agent.agent_id
+            for agent in goal.agents if not _is_collector(agent)
+        }
+        result[goal.goal_id] = {
+            "chain": chain,
+            "anchors": [ratings.get(card, card) for card in survivors],
+        }
+    return result
+
+
+def _rewire_to_surviving_cards(goal: Goal, rescue: Mapping[str, list[str]], dropped: set[str]) -> str:
+    """§D-071：救下的综合链摘掉已删依赖；依赖摘空的链头改接本 goal 存活卡（的评级章）。
+
+    章规格已生成时（`chapter.opening.inputs`）同步补改接目标的产物路径，与 `_merge_inputs` 同口径。
+    """
+
+    chain = set(rescue["chain"])
+    anchors = list(rescue["anchors"])
+    outputs = {agent.agent_id: str(agent.output.get("path", "")) for agent in goal.agents}
+    heads: list[str] = []
+    for agent in goal.agents:
+        if agent.agent_id not in chain:
+            continue
+        deps = list(agent.depends_on)
+        remaining = [dep for dep in deps if dep not in dropped]
+        if deps and not remaining:
+            remaining = list(anchors)
+            heads.append(agent.agent_id)
+            opening = (agent.chapter or {}).get("opening")
+            inputs = opening.get("inputs") if isinstance(opening, dict) else None
+            if isinstance(inputs, list):
+                paths = {str(item.get("path", "")) for item in inputs if isinstance(item, dict)}
+                inputs.extend(
+                    {"path": outputs[dep]} for dep in anchors
+                    if outputs.get(dep) and outputs[dep] not in paths
+                )
+        agent.depends_on = remaining
+    return (
+        f"[修正31] {goal.goal_id}「{goal.title}」还有存活的采集卡，综合章 "
+        f"{'、'.join(rescue['chain'])} 的依赖只通到已删卡：不删，链头 {'、'.join(heads) or '无'} "
+        f"改接本 goal 存活卡 {'、'.join(anchors)}"
+    )
+
+
+def _synthesis_rescue(
+    plan: Plan, dropped: set[str], *, skip_goals: set[str] | None = None,
+) -> dict[str, str]:
+    """§D-067：哪些章不该跟着删卡连删——返回 {agent_id: goal_id}。
+
+    判据是 goal 级的（先把级联在 id 上模拟到不动，不改计划）：
+    - goal 有上游 goal（`goal.depends_on` 非空）——没有上游就没有可改接的输入，维持删除 + D-065 移出；
+    - 本 goal 的「综合章」（非采集卡、非只评一张卡的评级章）**全部**会被连删。
+      只断了一部分（别的卡还在、链还通）不救，与旧行为逐字相同。
+    - `skip_goals`：§D-071 已按「还有存活卡」改接本 goal 卡的 goal，不再改接上游 goal。
+
+    评级章照删：它的产物契约就是那一张卡的库行（`rated_collector_id`），卡没了它无物可评。
+    """
+
+    doomed = _doomed(plan, dropped)
+    rescued: dict[str, str] = {}
+    for goal in plan.goals:
+        if not goal.depends_on or goal.goal_id in (skip_goals or set()):
+            continue
+        synthesis = _synthesis_chapters(goal, dropped)
         if synthesis and all(agent.agent_id in doomed for agent in synthesis):
             rescued.update({agent.agent_id: goal.goal_id for agent in synthesis})
     return rescued

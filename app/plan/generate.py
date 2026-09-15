@@ -981,13 +981,10 @@ def _build_plan(
                 is_collection = agent["capability"]["profile"] == "web-collector"
                 if is_collection:
                     agent["depends_on"] = []
-                elif agents and all(
-                    item["capability"]["profile"] == "web-collector"
-                    for item in agents
-                ):
+                elif collector_block := _leading_collector_block(agents):
                     # 同一重型 goal 的竞品 × 信息源采集章可并行；首个汇总章
                     # 必须等齐全部采集章，不能只依赖最后一个。
-                    agent["depends_on"] = [item["agent_id"] for item in agents]
+                    agent["depends_on"] = collector_block
                 agents.append(agent)
                 previous_agent_id = agent["agent_id"]
             agents = _insert_rating_agents(
@@ -1158,6 +1155,24 @@ def _build_agent(
         "origin": _origin(),
         "status": "queued",
     }
+
+
+def _leading_collector_block(agents: list[dict[str, Any]]) -> list[str]:
+    """§D-071：当前已排的章若是「(可选的打头非采集章) + 一串采集章」，返回那串采集章 id。
+
+    下一个非采集章就是首个汇总章，要等齐这串采集章。旧判定要求**此前全是**采集章，
+    模型让「规划」一类非采集章打头时条件不成立，清洗章退回只依赖紧挨着的最后一张采集卡、
+    评级章改接（`_insert_rating_agents`）也不触发——那张卡恰是表外卡时，删卡闸连删会把
+    清洗 / 交叉 / 撰写整条链删光（r-d9c69fb6132a goal-3）。打头的非采集章本来就不是
+    采集章的上游（采集章 `depends_on` 恒为空），跳过它不改变任何别的挂法。
+    """
+    index = 0
+    while index < len(agents) and agents[index]["capability"]["profile"] != "web-collector":
+        index += 1
+    block = agents[index:]
+    if not block or any(item["capability"]["profile"] != "web-collector" for item in block):
+        return []
+    return [str(item["agent_id"]) for item in block]
 
 
 def _insert_rating_agents(
