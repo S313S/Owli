@@ -194,6 +194,17 @@ def _with_extra(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def thread_key(row: Mapping[str, Any]) -> str:
+    """这条证据属于哪个帖子：评论认父帖链接，帖子认自己。§RPT-4 C-10。
+
+    09-14 评审实测：情感陪伴 15 条主要出自 3 个帖子的评论区，S08/S12/S16/S19/S21 同一个视频——
+    按条数读会以为是十几位独立用户在说。
+    """
+    if str(row.get("kind") or "post") == "comment" and row.get("parent_permalink"):
+        return str(row.get("parent_permalink"))
+    return str(row.get("permalink") or row.get("id") or "")
+
+
 def _platform_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_platform: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -204,13 +215,19 @@ def _platform_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         out.append({
             "平台": platform, "采集条数": len(group),
             "其中评论": sum(1 for r in group if str(r.get("kind") or "post") == "comment"),
+            # §RPT-4 C-10：同一帖子下的多条评论算一个帖子。
+            "独立帖子数": len({thread_key(r) for r in group}),
             "被引条数": len(cited),
+            "被引来自帖子数": len({thread_key(r) for r in cited}),
             "被引占比": round(len(cited) / len(group), 4) if group else 0.0,
             "marks": _marks(cited),
         })
-    return _table("platform_mix", "各平台采集量与被引量对照", 
-                  ("平台", "采集条数", "其中评论", "被引条数", "被引占比"), out,
-                  n=len(rows), basis="按证据的来源平台分组计数；被引 = 进了引用池的条数。",
+    return _table("platform_mix", "各平台采集量与被引量对照",
+                  ("平台", "采集条数", "其中评论", "独立帖子数", "被引条数", "被引来自帖子数", "被引占比"),
+                  out,
+                  n=len(rows), basis="按证据的来源平台分组计数；被引 = 进了引用池的条数。"
+                                     "独立帖子数把同一帖子下的多条评论算作一个帖子（评论按所挂父帖认），"
+                                     "条数远大于帖子数说明声音集中在少数几个帖子的评论区，不是那么多独立话题。",
                   coverage={"评级覆盖": sum(1 for r in rows if r.get("grade")), "总条数": len(rows)})
 
 
@@ -396,26 +413,140 @@ def quote_gate_names(plan: Mapping[str, Any]) -> list[str]:
                    if len(str(name).strip()) >= 2})
 
 
+#: §RPT-4 货 2：编码行的实体归属三档。写进 `extra.coding.entity`，出表按它分主体/对照。
+ENTITY_SUBJECT, ENTITY_CONTRAST, ENTITY_UNNAMED = "主体", "对照", "未点名"
+
+
+def _own_text(row: Mapping[str, Any]) -> str:
+    """判实体归属时看的「这条证据自己的话」。
+
+    ⛔ 评论行不看 `title`：评论的 title 是「评论 · 父帖标题」（`source_mcp` 拼的），
+    09-15 实测 r-50600e09f7dd 68 行编码按 title+正文判，**全部**命中父帖里的实体——
+    DeepSeek 帖下吐槽「白底晃眼」、Kimi 帖下问「文件为什么不能大于 10m」一样判进豆包。
+    帖子行没有父帖，标题就是它自己的话，照看。
+    """
+    extra = row.get("_extra") if isinstance(row.get("_extra"), Mapping) else None
+    if extra is None:
+        raw = row.get("extra")
+        try:
+            extra = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+        except (json.JSONDecodeError, TypeError, ValueError):
+            extra = {}
+    coding = extra.get("coding") if isinstance(extra.get("coding"), Mapping) else {}
+    body = str(row.get("content_excerpt") or "")
+    quote = str(coding.get("quote") or "")
+    if str(row.get("kind") or "post") != "comment":
+        return f"{row.get('title') or ''}\n{body}\n{quote}"
+    # 评论只在**没有正文**时才借编码摘的原声判——而且原声不能是标题里的字：
+    # 09-15 实测 68 行里 3 条评论的「原声」就是父帖标题（S29「豆包收费不可怕」），
+    # 编码器看到的是「评论 · 父帖标题 + 正文」，摘错了地方。借了它，父帖名就又漏回来了。
+    if not body.strip() and quote and normalize_quote(quote) not in normalize_quote(row.get("title")):
+        return quote
+    return body
+
+
+def coding_entity_roles(plan: Mapping[str, Any],
+                        rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """证据 id → `{"entity": 主体/对照/未点名, "entity_name": canonical 或 None}`。程序算，不经模型。
+
+    §RPT-4 C-4：09-14 评审实测论据章「办公 4 条全负、写作 2 条全负」全是 Kimi PPT 教程
+    评论区和 DeepSeek 长对话的反馈，却摆在「豆包的看法」表里；摘要「回答质量负向 7 条」
+    里说豆包的只有 2 条。病根是编码行没有实体归属，三张态度表按全池计数。
+
+    判法（按顺序）：
+    ① 自己的话（`_own_text`）点名了主角的任何叫法 ⇒ 主体（同时点名竞品也算主体——在拿豆包比）；
+    ② 只点名了对照实体 ⇒ 对照，`entity_name` 取第一个命中的 canonical；
+    ③ 谁都没点名，但挂在对照实体的章下（证据 agent_name → 计划 agent.entity，与
+       `build_tables` 里 `contrast_by_mark` 同一个判法）⇒ 对照——Kimi 教程帖下的
+       「这是一定要逼开会员啊」说的是 Kimi，不是没人说；
+    ④ 其余 ⇒ 未点名（主角章下没点名的评论也在这里：多半在说主角，但原文里查不到，不硬归）。
+
+    主角名单走 `subject_canonicals`、叫法走 `_entity_aliases`、命中走 `mentions`——
+    与原声闸同一把尺子（⛔ 不改那两个函数，D-069 接缝）。题面读不出主角时返回空表，
+    调用方据此**不分主体/对照**（退回旧行为，理由同 `subject_canonicals` 的兜底）。
+    """
+    from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
+
+    subjects = set(subject_canonicals(plan))
+    if not subjects:
+        return {}
+    aliases = {canonical: [n for n in names if len(str(n).strip()) >= 2]
+               for canonical, names in _entity_aliases(plan).items()}
+    rows = list(rows)
+    entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
+    canonical_of = {name: canonical for canonical, names in aliases.items() for name in names}
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        text = _own_text(row)
+        named = [c for c, names in aliases.items() if any(mentions(text, n) for n in names)]
+        if any(c in subjects for c in named):
+            role, name = ENTITY_SUBJECT, sorted(subjects & set(named))[0]
+        elif named:
+            role, name = ENTITY_CONTRAST, named[0]
+        else:
+            chapter_entity = str(entity_by_agent.get(str(row.get("agent_name") or "")) or "")
+            canonical = canonical_of.get(chapter_entity, chapter_entity)
+            if canonical and canonical not in subjects:
+                role, name = ENTITY_CONTRAST, canonical
+            else:
+                role, name = ENTITY_UNNAMED, None
+        out[str(row.get("id"))] = {"entity": role, "entity_name": name}
+    return out
+
+
+def collection_platforms(plan: Mapping[str, Any]) -> dict[str, list[str]]:
+    """实体 canonical → 计划里为它安排了采集的平台（源名，去重升序）。§RPT-4 C-5。
+
+    读 `plan.goals[].agents[]` 的 `entity` 与 `capability.sources`（与 `chapter_rows` 同一处读法）；
+    `entity` 写的是叫法时按 `_entity_aliases` 归到 canonical。
+    """
+    canonical_of = {name: canonical for canonical, names in _entity_aliases(plan).items()
+                    for name in names}
+    found: dict[str, set[str]] = defaultdict(set)
+    for goal in plan.get("goals") or []:
+        if not isinstance(goal, Mapping):
+            continue
+        for agent in goal.get("agents") or []:
+            if not isinstance(agent, Mapping) or not agent.get("entity"):
+                continue
+            capability = agent.get("capability") if isinstance(agent.get("capability"), Mapping) else {}
+            entity = str(agent["entity"])
+            found[canonical_of.get(entity, entity)].update(
+                str(x) for x in capability.get("sources") or [] if x)
+    return {k: sorted(v) for k, v in found.items()}
+
+
 def _entity_mentions(rows: Sequence[Mapping[str, Any]], claims: Sequence[Mapping[str, Any]],
                      plan: Mapping[str, Any]) -> dict[str, Any]:
     aliases = _entity_aliases(plan)
+    platforms = collection_platforms(plan)
     texts = [(row, _text_of(row)) for row in rows]
     out = []
     for canonical, names in aliases.items():
         hit = [row for row, text in texts if any(name in text for name in names)]
         cited = [row for row in hit if row.get("citation_no") is not None]
         out.append({
-            "实体": canonical, "叫法": "/".join(names[:4]), "提及条数": len(hit),
+            "实体": canonical, "叫法": "/".join(names[:4]),
+            "采集平台数": len(platforms.get(canonical, [])),
+            "提及条数": len(hit),
             "其中被引": len(cited),
             "主张命中": sum(1 for c in claims
                         if any(name in str(c.get("text") or "") for name in names)),
             "marks": _marks(cited),
         })
     out.sort(key=lambda r: (-r["提及条数"], r["实体"]))
+    # §RPT-4 C-5：09-14 评审实测「豆包提及量约为 Kimi、DeepSeek 两倍」被写进「对投资与分析」
+    # 当心智占位证据——豆包搜了四个平台、另两家只搜了小红书，提及量是分配出来的。
+    counts = {r["实体"]: r["采集平台数"] for r in out}
+    uneven = len(set(counts.values())) > 1
+    spread = " / ".join(f"{name} {n}" for name, n in counts.items())
+    basis = ("在证据标题+摘要+评论正文上做叫法字符串命中；同条证据命中多个实体则各计一次。"
+             + (f"各实体安排采集的平台数不同（{spread}），**提及量不可横向比较**，"
+                "不能拿来判断谁的声量或心智占位更高。" if uneven else ""))
     return _table("entity_mentions", "各实体的提及量与被引量对照",
-                  ("实体", "叫法", "提及条数", "其中被引", "主张命中"), out,
+                  ("实体", "叫法", "采集平台数", "提及条数", "其中被引", "主张命中"), out,
                   n=len(rows),
-                  basis="在证据标题+摘要+评论正文上做叫法字符串命中；同条证据命中多个实体则各计一次。",
+                  basis=basis,
                   coverage={"参与匹配的证据": len(rows), "实体数": len(aliases)})
 
 
@@ -465,11 +596,44 @@ def _timeline(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
         out.insert(0, {"月份": f"更早（{earlier[0]}–{earlier[-1]}）", "证据条数": len(old_rows),
                        "其中被引": sum(1 for r in old_rows if r.get("citation_no") is not None),
                        "marks": _marks(old_rows)})
+    window = concentration_window({month: len(group) for month, group in by_month.items()})
     return _table("timeline", "证据发布时间分布（按月）",
                   ("月份", "证据条数", "其中被引"), out, n=len(dated),
                   basis="按证据的发布时间分月，只列最近 12 个有数据的月份，"
                         "更早的合并成一行；索引源常拿不到发布时间，未标注的不计入。",
-                  coverage={"有发布时间": len(dated), "总条数": len(rows)})
+                  coverage={"有发布时间": len(dated), "总条数": len(rows),
+                            # §RPT-4 C-14：附录那句「集中在 A 至 B，占 N%」的数就挂在这里。
+                            **({"集中区间": window} if window else {})})
+
+
+#: C-14：「集中在」按覆盖多少算。八成——少于这个说「集中」就言过其实了。
+CONCENTRATION_SHARE = 0.8
+
+
+def concentration_window(by_month: Mapping[str, int]) -> dict[str, Any] | None:
+    """有数据的月份里，最短的一段连续月份（按有数据的月份排序）覆盖 ≥ 八成证据。
+
+    同样短取占比更高的。返回 `{"起", "止", "条数", "占比"}`；没数据返回 None。
+    """
+    months = sorted(m for m, n in by_month.items() if n)
+    total = sum(by_month[m] for m in months)
+    if not total:
+        return None
+    best: tuple[int, float, int, int] | None = None      # (跨度, -占比, 起, 止)
+    for start in range(len(months)):
+        running = 0
+        for end in range(start, len(months)):
+            running += by_month[months[end]]
+            if running / total >= CONCENTRATION_SHARE:
+                key = (end - start, -running / total, start, end)
+                if best is None or key < best:
+                    best = key
+                break
+    assert best is not None
+    _, _, start, end = best
+    count = sum(by_month[m] for m in months[start:end + 1])
+    return {"起": months[start], "止": months[end], "条数": count,
+            "占比": round(count / total, 4)}
 
 
 #: §RULE-1 货 7：矩阵一行最多给几个角标。给多少，写手就往每个格子里抄多少。
@@ -533,6 +697,30 @@ def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
             for mark, verdicts in found.items()}
 
 
+#: §RPT-4 货 3（C-3）：海外平台。题面问的是「国内」时，这些平台上的证据与题面地域不一致。
+#: ⛔ 不挂到 `app/platforms.py`：那张表管的是评级体系里的固有属性，「算不算国内」
+#: 取决于题面，不是平台本身的属性——题面不带「国内」时这里一条都不生效。
+OVERSEAS_PLATFORMS = frozenset({"reddit", "x", "hacker_news", "product_hunt"})
+#: 题面里表示「只看国内」的词。
+DOMESTIC_MARKERS = ("国内", "中国用户", "国人")
+
+
+def offtopic_reason(row: Mapping[str, Any], *, contrast: bool | None,
+                    question: str) -> str | None:
+    """这条证据与题面的对象或地域对不上时，返回「对照实体」/「海外平台」，否则 None。
+
+    09-14 评审实测：题面「国内大家对豆包的看法」，关键发现第 3 条与唯一的具体建议都是
+    Reddit 一个帖子的水印事件，还给了 A 级——五维评分不管「切不切题」。⛔ 评分尺子不动，
+    这里只给写手打个标（信息源池里带「旁证」栏），规矩写在模板里：可以成节，不进摘要关键发现。
+    """
+    if contrast:
+        return "对照实体"
+    if (any(marker in str(question or "") for marker in DOMESTIC_MARKERS)
+            and str(row.get("platform") or "") in OVERSEAS_PLATFORMS):
+        return "海外平台"
+    return None
+
+
 #: 全部可用表名；SKILL.md 的 `tables:` 只能从这里挑（加载器会校验）。
 #: 模板 frontmatter 只能声明这里有的表名（`skills._load_one` 会校验），
 #: 而 `build_prompt` 又只投喂「模板点名过的表」——**两处都对上，写手才看得见一张表**。
@@ -548,6 +736,8 @@ TABLE_NAMES: tuple[str, ...] = (
     "scenario_attitude", "audience_attitude",
     # §RPT-2 货 4③：只在有行标出触发事件时才出现。
     "trigger_counts",
+    # §RPT-4 货 2：对照实体的评论 × 态度。只挂附录，⛔ 三份 SKILL 的 `tables:` 行不点它。
+    "contrast_attitude",
 )
 
 
@@ -609,6 +799,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # 摆出来的候选写手就会用（§RULE-1 货 5 同一条教训），于是「回答质量·负」
         # 那一格唯一的候选 S39 是 C 级，写手引它必被闸打回，**重试多少次都过不去**。
         grade_by_mark=grade_by_mark,
+        # §RPT-4 货 2：正文的态度表只数主体，对照实体另表进附录。
+        entity_roles=coding_entity_roles(plan, rows),
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
@@ -660,6 +852,17 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     subject_names = set(quote_gate_names(plan))
     entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
     contrast_by_mark = {}
+    question = str(plan.get("research_question") or report.get("research_question") or "")
+    platform_by_mark = {int(r["citation_no"]): r.get("platform") for r in cited}
+    # §RPT-4 C-15：库里的原题。工作稿信息源清单是写手誊的，三种写法混着、Reddit 还被译成中文。
+    raw_title_by_mark = {int(r["citation_no"]): r.get("title") for r in cited}
+    # §RPT-4 C-10：角标 → 同一帖子下的其余池内角标。
+    marks_by_thread: dict[str, list[int]] = defaultdict(list)
+    for r in cited:
+        marks_by_thread[thread_key(r)].append(int(r["citation_no"]))
+    same_thread_by_mark = {int(r["citation_no"]): [_mark(n) for n in sorted(marks_by_thread[thread_key(r)])
+                                                   if n != int(r["citation_no"])]
+                           for r in cited}
     for r in cited:
         entity = entity_by_agent.get(str(r.get("agent_name") or ""), "")
         contrast_by_mark[int(r["citation_no"])] = (
@@ -674,6 +877,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # (goal_id, chapter_id) 对上 missing 行——超时但有货的章要写出条数，不能写「没采到」。
         "chapters": chapter_rows(plan, rows),
         "entities": sorted(_entity_aliases(plan)),
+        # §RPT-4 货 2：研究主体（题面点名的那家）。摘要注入「已编码评论 N 条」一行时要写出是谁。
+        "subjects": subject_canonicals(plan),
         # §RPT-2 货 1 ②：读者是谁、他要拿这份报告做什么决定。q-2/q-3 可跳过，
         # 跳过就是「不明」——写手见「不明」要把建议节写成「对不同读者的含义」。
         # 形状以 `_audience` 的平铺键为准（main 上先落的那一版）；
@@ -700,7 +905,15 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "crossref": crossref_by_mark.get(int(s["citation_no"])),
                      "title_independent": independent_by_mark.get(int(s["citation_no"]), True),
                      "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"])),
-                     "contrast": contrast_by_mark.get(int(s["citation_no"]))}
+                     "contrast": contrast_by_mark.get(int(s["citation_no"])),
+                     # §RPT-4 货 3：平台与「旁证」标。写手池里带出来，验收软检按它判摘要跑题。
+                     "platform": platform_by_mark.get(int(s["citation_no"])),
+                     "offtopic": offtopic_reason(
+                         {"platform": platform_by_mark.get(int(s["citation_no"]))},
+                         contrast=contrast_by_mark.get(int(s["citation_no"])),
+                         question=question),
+                     "same_thread": same_thread_by_mark.get(int(s["citation_no"])) or [],
+                     "raw_title": raw_title_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

@@ -108,7 +108,8 @@ def test_组装时按写手各节实引裁清单_附录原声表的角标不算(
 
 def test_摘要把握度句后注入主张计数_三数之和等于n(tmp_path: Path) -> None:
     line = confidence_line(TABLES)
-    assert line == "（程序按交叉验证结论计数）主张 310 条：单源 255 / 偏弱 34 / 多源互证 21。"
+    # §RPT-4 C-11：「（程序按交叉验证结论计数）」前缀是机器话，已去掉（本条锁的正是被替换的旧语义）。
+    assert line == "主张 310 条：单源 255 / 偏弱 34 / 多源互证 21。"
     assert 255 + 34 + 21 == TABLES["crossref_mix"]["n"]
     summary = tmp_path / "a.md"
     summary.write_text("1. 发现一[S02]\n\n> 本报告结论的把握度为**低**，主要因为……\n\n收尾句。\n",
@@ -118,7 +119,8 @@ def test_摘要把握度句后注入主张计数_三数之和等于n(tmp_path: P
     md = assemble([("执行摘要", summary), ("附录", appendix)], POOL, tables=TABLES)
     lines = md.splitlines()
     at = next(i for i, text in enumerate(lines) if "把握度为" in text)
-    assert lines[at + 2] == line and "收尾句" in lines[at + 4]
+    # §RPT-4 C-11：组装时再接一句正文实引条数（这里正文只引了 S02 一条）。
+    assert lines[at + 2] == line + "正文实际引用证据 1 条。" and "收尾句" in lines[at + 4]
     for word in ("SINGLE", "PASS", "WEAK"):
         assert word not in md.split("# 附录")[0], "开篇节不许出现内部口径词（尺子⑦）"
 

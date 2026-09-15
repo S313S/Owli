@@ -582,6 +582,7 @@ def test_ruler_still_catches_a_naked_number_in_prose(tmp_path):
 @pytest.mark.parametrize("section, heading", [
     ("对不同读者的含义", "投资分析"),     # §RPT-2 货 4① 规定的三行之一，实测命中 TOPIC_TITLE
     ("对提问方意味着什么", "竞品对比"),   # §RPT-2 货 4② 的竞品收尾节，同族措辞也会命中
+    ("这意味着什么", "竞品对比"),         # §RPT-4 C-11 改名后的同一节
 ])
 def test_rpt2_structural_sections_are_exempt_from_action_titles(tmp_path, section, heading):
     """⑤ 不查模板规定措辞的结构节：这两节的小标题是 SKILL 规定的，不是写手在起标题。"""
@@ -756,14 +757,14 @@ def test_建议门禁在改名后的节上照样开火(tmp_path):
     assert any("单源孤证" in p for p in findings["⑧ 建议门禁"])
 
 
-# —— §RPT-2 货 4 ②：竞品对比稿收尾「对提问方意味着什么」 ——————————————
+# —— §RPT-2 货 4 ②：竞品对比稿收尾「这意味着什么」 ——————————————
 
-def test_竞品对比稿有对提问方意味着什么这一节():
+def test_竞品对比稿有这意味着什么这一节():
     """借 competitor-profiling 的 Competitive Implications：谁强在哪之后要落到「所以对你」。"""
     names = list(get_template("competitor-matrix").sections)
-    assert "对提问方意味着什么" in names
+    assert "这意味着什么" in names
     # 位置：先摆事实（谁强在哪），再说含义，最后才给动作（建议）
-    assert names.index("谁强在哪") < names.index("对提问方意味着什么") < names.index("建议")
+    assert names.index("谁强在哪") < names.index("这意味着什么") < names.index("建议")
 
 
 def test_对比稿读者不明时建议节不改名():
@@ -789,7 +790,7 @@ def test_建议门禁两节都过一遍(tmp_path):
     md = tmp_path / "r-t.polished.competitor-matrix.md"
     md.write_text(GOOD_V2.replace(
         "# 建议",
-        "# 对提问方意味着什么\n\n- **对竞品团队**：这块口碑最集中[S02]\n\n# 建议"),
+        "# 这意味着什么\n\n- **对竞品团队**：这块口碑最集中[S02]\n\n# 建议"),
         encoding="utf-8")
     work = tmp_path / "work.md"
     work.write_text("".join(f"[{m}]" for m in crossref), encoding="utf-8")
@@ -900,7 +901,7 @@ def test_共用规则给出主题段五步():
     对我意味着什么」，不是「有哪些说法」。"""
     rules = shared_rules()
     assert "## 5.6 主题段的五步" in rules
-    for step in ("主题名", "出现在 X 条 / Y 个平台", "强度", "对提问方意味着什么"):
+    for step in ("主题名", "出现在 X 条 / Y 个平台", "强度", "这意味着什么"):
         assert step in rules, step
     # 强度拿不到就跳过，不许拿条数冒充——这条是防写手编读数的闸
     assert "不许拿条数冒充强度" in rules

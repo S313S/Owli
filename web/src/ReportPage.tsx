@@ -1,4 +1,4 @@
-import { Card, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Card, Space, Spin, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import ReportView from './ReportView'
 import type { ApiEnvelope, ResearchSnapshot } from './types'
@@ -44,9 +44,21 @@ export default function ReportPage({ researchId }: { researchId: string }) {
         <a href={`/researches/${encodeURIComponent(researchId)}`}>← 回工作板</a>
         {' · '}{researchId}
       </Typography.Paragraph>
+      {/* §RPT-4 货 1：「已完成」标签不改（工作板、历史页共用，有用例锁），但有段落没写成时
+          在标题下挂一条黄条——09-14 评审实测三段小红书总结全超时，读者要翻到附录才知道。 */}
+      {snapshot?.status === 'completed' && snapshot.unwritten && snapshot.unwritten.sections > 0 &&
+        <Alert type="warning" showIcon style={{ marginTop: 8 }} data-testid="unwritten-banner"
+          message={unwrittenText(snapshot.unwritten)} />}
     </Card>
     <Card title="报告产物" className="history-report" data-testid="report-page-body">
       <ReportView researchId={researchId} />
     </Card>
   </main>
+}
+
+export function unwrittenText(u: { sections: number; timeouts: number; yielded: number }): string {
+  const what = u.timeouts === u.sections ? `${u.sections} 段采集总结超时没写成` : `${u.sections} 段没写成（其中 ${u.timeouts} 段超时）`
+  return u.yielded > 0
+    ? `${what}：这些段已采到 ${u.yielded} 条，已入库并参与评级与统计，但正文未能引用它们。详见报告附录「哪些没采到」。`
+    : `${what}，详见报告附录「哪些没采到」。`
 }

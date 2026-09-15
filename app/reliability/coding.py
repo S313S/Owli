@@ -581,8 +581,13 @@ def _write_failure(
         pass
 
 
-def _coding_payload(item: Mapping[str, Any], label: Mapping[str, Any]) -> dict[str, Any]:
-    """把一条编码并进 `extra.coding`；`score_total` 与 `grade` 是生成列，不能回写。"""
+def _coding_payload(item: Mapping[str, Any], label: Mapping[str, Any],
+                    entity: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """把一条编码并进 `extra.coding`；`score_total` 与 `grade` 是生成列，不能回写。
+
+    `entity` 是 §RPT-4 货 2 的实体归属（`tables.coding_entity_roles` 程序算的，不经模型）。
+    不给就不写这两个键——题面读不出主角的研究不分主体/对照。
+    """
 
     extra = dict(_extra(item))
     extra["coding"] = {
@@ -593,6 +598,8 @@ def _coding_payload(item: Mapping[str, Any], label: Mapping[str, Any]) -> dict[s
         "topics": list(label["topics"]),
         "quote": label["quote"],
         "coded_by": f"agent:{AGENT_ID}",
+        **({"entity": entity["entity"], "entity_name": entity.get("entity_name")}
+           if entity else {}),
     }
     payload = {
         key: value for key, value in item.items()
@@ -634,6 +641,8 @@ async def code_report(
     # §CODE-2 货 3：把被评实体的叫法带进提示词，让模型挑句子时就避开「夸别人的话」。
     entity_names = _plan_entity_names(report)
     rows = store.list_evidence(report_id)
+    # §RPT-4 货 2：实体归属随编码一起落库（程序算，一次算全表——对照章的判法要看计划）。
+    roles = _entity_roles(report, rows)
     if scope == "quotable":
         # 分母跟着口径走：只数引得了的那批里已编码的，覆盖率才不虚高。
         already = sum(1 for item in quotable_targets(rows, force=True) if is_coded(item))
@@ -679,7 +688,8 @@ async def code_report(
             failed += len(batch)
             return
         store.upsert_evidence_batch([
-            _coding_payload(item, label) for item, label in zip(batch, labels)
+            _coding_payload(item, label, roles.get(str(item.get("id"))))
+            for item, label in zip(batch, labels)
         ])
         coded += len(batch)
         if on_event is not None:
@@ -707,6 +717,58 @@ async def code_report(
         report_id=report_id, targets=total, coded=coded,
         failed=failed, already=(0 if force else already),
     )
+
+
+def _report_plan(report: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    plan = (report or {}).get("plan_snapshot")
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except json.JSONDecodeError:
+            return {}
+    return plan if isinstance(plan, Mapping) else {}
+
+
+def _entity_roles(report: Mapping[str, Any] | None,
+                  rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    from app.report.polish.tables import coding_entity_roles   # 延迟 import：polish 反向 import 本模块
+
+    return coding_entity_roles(_report_plan(report), rows)
+
+
+def assign_coding_entities(store: Any, report_id: str) -> int:
+    """§RPT-4 货 2：给**已编码**的行补/改实体归属，返回改了几行。纯程序，不付引擎。
+
+    老研究（本包之前编的码）没有 `coding.entity`；判法改了的话旧值也会过时——
+    所以按当前判法重算，**只写与库里不同的行**，其余字段一个不动（`_coding_payload`
+    同一条回写路：去掉生成列 `score_total`/`grade` 再 upsert）。
+    题面读不出主角（`coding_entity_roles` 返回空）时一行都不写。
+    """
+
+    report = store.get_report(report_id)
+    if report is None:
+        raise KeyError(f"报告不存在：{report_id}")
+    rows = list(store.list_evidence(report_id))
+    roles = _entity_roles(report, rows)
+    if not roles:
+        return 0
+    payloads = []
+    for item in rows:
+        coding = _extra(item).get("coding")
+        role = roles.get(str(item.get("id")))
+        if not isinstance(coding, Mapping) or not coding.get("coding_version") or role is None:
+            continue
+        if (coding.get("entity"), coding.get("entity_name")) == (role["entity"], role["entity_name"]):
+            continue
+        extra = dict(_extra(item))
+        extra["coding"] = {**dict(coding), "entity": role["entity"],
+                           "entity_name": role["entity_name"]}
+        payload = {k: v for k, v in item.items() if k not in {"score_total", "grade"}}
+        payload["extra"] = extra
+        payloads.append(payload)
+    if payloads:
+        store.upsert_evidence_batch(payloads)
+    return len(payloads)
 
 
 #: 主链路编码的账外记账路径名（`reports.extra.llm_usage_offledger` 的键）。
@@ -1172,20 +1234,58 @@ def polish_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
     total_evidence: int | None = None, entity_names: Sequence[str] | None = None,
     grade_by_mark: Mapping[int, Any] | None = None,
+    entity_roles: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """把 `coding_tables` 的聚合结果包成正式稿要的三张标准壳表。
 
     聚合语义一份、呈现形态一份，不重算——重算两遍迟早对不上账（§RATE-4 踩过：
     两条打分路 447 行不一致，把被测改动整个掩掉了）。
+
+    `entity_roles`（§RPT-4 货 2，`tables.coding_entity_roles` 算的）给了就**只拿主体行**
+    出正文的各张表，点名对照实体的另出一张 `contrast_attitude` 挂附录，谁都没点名的
+    不计入、但在口径里写出条数。不给（题面读不出主角）⇒ 不分，行为与本包之前一字不差。
     """
+
+    from app.report.polish.tables import ENTITY_CONTRAST, ENTITY_SUBJECT, ENTITY_UNNAMED
 
     rows = list(rows)
     marks = dict(citations or {})
+    total = len(rows) if total_evidence is None else total_evidence
+    roles = dict(entity_roles or {})
+    all_rows = rows
+    all_coded = coded_rows(rows)
+
+    def role_of(item: Mapping[str, Any]) -> str | None:
+        return (roles.get(str(item.get("id"))) or {}).get("entity")
+
+    contrast_items = [item for item in all_coded if role_of(item) == ENTITY_CONTRAST]
+    unnamed_count = sum(1 for item in all_coded if role_of(item) == ENTITY_UNNAMED)
+    if roles:
+        coded_ids = {str(item.get("id")) for item in all_coded}
+        rows = [row for row in rows
+                if str(row.get("id")) not in coded_ids or role_of(row) == ENTITY_SUBJECT]
     data = coding_tables(rows, citations=citations, entity_names=entity_names,
                          grade_by_mark=grade_by_mark)
+    if roles:
+        # 原声表与它的丢弃计数按**全部**已编码行算：原声闸本身就只收点名了研究对象的句子
+        # （点名了就判主体，挑出来的句子两边一样），但表注要交代「另有 N 条没提到研究对象」，
+        # 只拿主体行算那个 N 恒为 0，等于把筛掉的量藏起来。
+        everyone = coding_tables(list(all_rows), citations=citations, entity_names=entity_names,
+                                 grade_by_mark=grade_by_mark)
+        data = {**data, "quotes": everyone["quotes"], "quotes_dropped": everyone["quotes_dropped"]}
     coded = coded_rows(rows)
     n = len(coded)
-    total = len(rows) if total_evidence is None else total_evidence
+    # §RPT-4 C-2 甲：「68 条编码样本」被读成从全库抽的。主链路只编引用池里引得了的评论，
+    # 引用池按目标保底、按评分排序，不是随机抽样——口径里要说出来。
+    # 判「是不是全在池里」按数据判，不按调用方：脚本 `--code-only` 编的是全量。
+    pooled = bool(all_coded) and all(item.get("citation_no") is not None for item in all_coded)
+    unit = "引用池里的评论" if pooled else "已编码的 UGC"
+    scope_note = (
+        f"只数正文点名了研究对象的 {n} 条；点名对照实体的 {len(contrast_items)} 条另列附录"
+        f"「对照实体的评论」表，谁都没点名的 {unnamed_count} 条不计入。"
+    ) if roles else ""
+    pool_note = ("这些评论是进了引用池的那一批——引用池按每个研究目标保底、再按证据评分挑出，"
+                 "**不是随机抽样**，条数不能读成全网比例。") if pooled else ""
     # 分母写进 coverage 与 basis：表里的 n 是**已编码的 UGC 条数**，不是全库条数。
     # 写手看不见机器表名，只看得见 title 与 basis，防误读只能靠这两处。
     coverage = {"已编码 UGC 条数": n, "全库证据条数": total,
@@ -1224,7 +1324,8 @@ def polish_tables(
              for row in data["attitude_by_topic"]],
             n=n,
             basis=(
-                f"对 {n} 条 UGC 逐条模型编码后计数（{data['method_note']}）。"
+                scope_note +
+                f"对 {n} 条{unit}逐条模型编码后计数（{data['method_note']}）。"
                 f"一条可命中多个主题，故各格相加是**命中次数** "
                 f"{data['reconciliation']['topic_hit_sum']}，大于条数 {n}；"
                 f"没命中任何主题的归入「{TOPIC_NONE}」，不设它这一格四成条目会凭空消失。"
@@ -1240,8 +1341,9 @@ def polish_tables(
              for row in data["scenario_counts"]],
             n=n,
             basis=(
-                f"每条 UGC 归一个场景，各行相加 = {data['reconciliation']['scenario_sum']}"
-                f" = 已编码条数 {n}。分母是已编码的 UGC，不是全库 {total} 条证据。"
+                scope_note +
+                f"每条归一个场景，各行相加 = {data['reconciliation']['scenario_sum']}"
+                f" = 已编码条数 {n}。分母是{unit}，不是全库 {total} 条证据。" + pool_note +
                 f"{data['audience_note']}，故人群不单独出表。"
             ),
             coverage=coverage),
@@ -1311,9 +1413,40 @@ def polish_tables(
                  by_scene_cell.items(), key=lambda kv: (-len(kv[1]), kv[0]))],
             n=n,
             basis=(
-                f"每条 UGC 归一个场景、一个态度，各行相加 = 已编码条数 {n}。"
-                f"分母是已编码的 UGC，不是全库 {total} 条证据。"
+                scope_note +
+                f"每条归一个场景、一个态度，各行相加 = 已编码条数 {n}。"
+                f"分母是{unit}，不是全库 {total} 条证据。" + pool_note +
                 f"角标只标其中进了引用池的那些，有条数没角标是没进池、不是数据可疑。"
             ),
-            coverage=coverage),
+            # §RPT-4 货 2（C-7）：四档态度合计。执行摘要那行「正 a / 负 b …」就是这几个数，
+            # 挂在表上才进得了尺子 ④ 的白名单——程序注入的数也得有出处。
+            coverage={**coverage, "态度合计": {
+                attitude: sum(1 for item in coded if item["coding"]["attitude"] == attitude)
+                for attitude in ATTITUDES}}),
+        # §RPT-4 货 2：对照实体的评论只作参照，挂附录（run.contrast_reference_table），
+        # 写手看不见——三份 SKILL 的 `tables:` 行不点它。一条都没有就不出。
+        **({} if not contrast_items else {"contrast_attitude": _shell(
+            "contrast_attitude", "对照实体的评论：实体 × 态度条数",
+            ("对照实体", "态度", "条数"),
+            [{"对照实体": name, "态度": attitude, "条数": len(items),
+              "marks": _row_marks(items, marks)}
+             for (name, attitude), items in sorted(
+                 _group(contrast_items, lambda item: (
+                     str((roles.get(str(item.get("id"))) or {}).get("entity_name") or "未登记"),
+                     item["coding"]["attitude"])).items(),
+                 key=lambda kv: (kv[0][0], -len(kv[1]), kv[0][1]))],
+            n=len(contrast_items),
+            basis=(
+                f"{len(contrast_items)} 条{unit}说的是对照实体、不是研究对象（原文只点名了对照实体，"
+                "或没点名但出自对照实体的帖子），**只作参照**，不计入正文的态度表。"
+            ),
+            coverage={"对照实体评论条数": len(contrast_items),
+                      "未点名条数": unnamed_count})}),
     }
+
+
+def _group(items: Iterable[Mapping[str, Any]], key: Any) -> dict[Any, list[Mapping[str, Any]]]:
+    grouped: dict[Any, list[Mapping[str, Any]]] = {}
+    for item in items:
+        grouped.setdefault(key(item), []).append(item)
+    return grouped

@@ -54,7 +54,8 @@ ADVICE_SECTION_UNKNOWN_AUDIENCE = "对不同读者的含义"
 #: §RPT-2 货 4 ②：竞品对比稿自带的「对提问方意味着什么」（借 competitor-profiling
 #: 的 Competitive Implications 一节）。模板里已经有它，建议节就不必再改名——
 #: 否则读者不明时会出现两节讲同一件事。
-IMPLICATIONS_SECTION = "对提问方意味着什么"
+#: §RPT-4 C-11：原名「对提问方意味着什么」——「提问方」是这套系统内部的说法，客户读着像内部文档。
+IMPLICATIONS_SECTION = "这意味着什么"
 
 
 def sections_for(template: Template, data: Mapping[str, Any]) -> tuple[str, ...]:
@@ -120,8 +121,11 @@ BASIS_HEADING = "## 各表口径"
 CONFIDENCE_HEADING = "## 把握度读数（主张的交叉验证与被引证据等级）"
 LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
 QUOTES_HEADING = "## 代表原声（逐字摘录，按互动量排序）"
+CONTRAST_HEADING = "## 对照实体的评论（只作参照，不计入正文态度表）"
+TIMESPAN_HEADING = "## 证据的时间范围"
 PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING,
-                             QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING)
+                             QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING,
+                             CONTRAST_HEADING, TIMESPAN_HEADING)
 
 
 def sources_table(sources: Sequence[Mapping[str, Any]],
@@ -152,7 +156,7 @@ def sources_table(sources: Sequence[Mapping[str, Any]],
              "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
     for item in listed:
         grade = str(item.get("grade") or "?")
-        title = str(item.get("title") or "").replace("|", "｜").strip() or "（无标题）"
+        title = source_title(item).replace("|", "｜") or "（无标题）"
         url = str(item.get("url") or "")
         lines.append(f"| {item['mark']} | {grade} | {grade_note.get(grade, '未评级')} "
                      f"| {title} | {_fetched_at_cell(item.get('fetched_at'))} | {url} |")
@@ -162,6 +166,39 @@ def sources_table(sources: Sequence[Mapping[str, Any]],
         tail = f"（其中对照实体 {contrast} 条）" if contrast else ""
         lines += ["", f"引用池另有 {len(unused)} 条本稿未引用{tail}，不在上表。"]
     return "\n".join(lines) + "\n"
+
+
+#: 信息源清单标题的长度上限（字符）。抖音标题常把整段话题标签拼在后面。
+SOURCE_TITLE_CHARS = 60
+_COMMENT_PREFIX = re.compile(r"^评论\s*[·：:]\s*")
+
+
+def source_title(item: Mapping[str, Any]) -> str:
+    """信息源清单里的标题：只剩「评论 · 帖子标题」一种写法。§RPT-4 C-15。
+
+    09-14 评审实测同一张清单里「评论 · 「…」」「「评论 · …」」「「评论：…」」三种写法并存，
+    Reddit 条目在页面证据表里是英文原题、在正式稿里是中文译名——那是工作稿写手誊清单时
+    各写各的。归一的规矩：
+    - 这条源有独立标题（`title_independent`）且库里有原题（`raw_title`）⇒ 用原题，与页面证据表一致；
+    - 没有独立标题（微博等，库里 title 是正文拷贝）⇒ 沿用工作稿的概括标题；
+    - 两种都剥掉外层书名号、把「评论：」统一成「评论 · 」、压空白、按 60 字截断。
+    ⛔ 不动 `app/adapters/source_mcp.py` 的前缀拼接（调度拍：出稿侧归一）。
+    """
+    raw = str(item.get("raw_title") or "")
+    base = raw if (raw.strip() and item.get("title_independent", True)) else str(item.get("title") or "")
+    text = " ".join(base.split())
+    for _ in range(2):                      # 「评论 · 「X」」两层都剥
+        if text.startswith("「") and text.endswith("」"):
+            text = text[1:-1].strip()
+        match = _COMMENT_PREFIX.match(text)
+        if match:
+            rest = text[match.end():].strip()
+            if rest.startswith("「") and rest.endswith("」"):
+                rest = rest[1:-1].strip()
+            text = f"评论 · {rest}"
+    if len(text) > SOURCE_TITLE_CHARS:
+        text = text[:SOURCE_TITLE_CHARS].rstrip() + "…"
+    return text
 
 
 def _fetched_at_cell(raw: object) -> str:
@@ -315,16 +352,30 @@ def _crossref_counts(tables: Mapping[str, Any]) -> tuple[int, list[tuple[str, in
     return int(table.get("n") or 0), [(k, counts[k]) for k in order if counts.get(k)]
 
 
-def confidence_line(tables: Mapping[str, Any]) -> str:
+def confidence_line(tables: Mapping[str, Any], counts: Mapping[str, Any] | None = None) -> str:
     """§RPT-3 货 4：执行摘要把握度那句之后的一行数字，程序从 crossref_mix 取、不经模型。
 
     评审实测：摘要写「绝大多数结论只有一个来源撑着」，那个数（255/310）读者全文找不到。
+    §RPT-4 C-11：去掉「（程序按交叉验证结论计数）」前缀（机器话）；`counts` 里有正文实引数
+    （`BODY_CITED_KEY`，`polish` 组装后回填）就接一句「正文实际引用证据 N 条」——
+    09-14 评审实测摘要写「支撑本报告结论的是 80 条被引证据」，80 是引用池条数，正文实引 28。
     """
     total, pairs = _crossref_counts(tables)
     if not total or not pairs:
         return ""
     parts = " / ".join(f"{_CROSSREF_WORDS.get(k, '未登记')} {n}" for k, n in pairs)
-    return f"（程序按交叉验证结论计数）主张 {total} 条：{parts}。"
+    tail = ""
+    body_cited = (counts or {}).get(BODY_CITED_KEY)
+    if isinstance(body_cited, int) and not isinstance(body_cited, bool):
+        pool = (counts or {}).get("cited")
+        tail = (f"正文实际引用证据 {body_cited} 条"
+                + (f"（引用池共 {pool} 条）" if isinstance(pool, int) and pool != body_cited else "")
+                + "。")
+    return f"主张 {total} 条：{parts}。{tail}"
+
+
+#: `tables.json` 的 `counts` 里「正文实引条数」的键。组装完才知道，由 `polish` 回填。
+BODY_CITED_KEY = "正文实引"
 
 
 def confidence_tables(tables: Mapping[str, Any]) -> str:
@@ -360,6 +411,44 @@ def confidence_tables(tables: Mapping[str, Any]) -> str:
 
 #: 执行摘要位的节名（三模板）。与验收尺子 `check_polished.OPENING_SECTIONS` 同一组。
 OPENING_SECTIONS = ("执行摘要", "总体倾向")
+
+
+#: §RPT-4 货 2（C-7）：总体态度行的四档顺序，与编码闭集 `coding.ATTITUDES` 同序。
+_ATTITUDE_ORDER = ("正", "负", "中", "混合")
+
+
+def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> str:
+    """执行摘要把握度那句**之前**的一行：已编码评论的总体态度分布，程序从表取、不经模型。
+
+    09-14 评审实测：摘要第一句是「情感陪伴被夸、回答质量被骂」，全篇没有一句「整体上
+    正多还是负多」——那是「大家怎么看」最直接的答案，数在论据章的表里，结论没人写。
+    数从 `scenario_attitude` 取（每条一个场景一个态度，四档相加 = 表的 n）；§RPT-4 货 2
+    之后这张表只数点名了研究对象的评论，所以这一行的分母也是主体。
+    """
+    table = (tables or {}).get("scenario_attitude")
+    if not isinstance(table, Mapping) or not table.get("n"):
+        return ""
+    counts: dict[str, int] = {}
+    for row in table.get("rows") or []:
+        if isinstance(row, Mapping):
+            key = str(row.get("态度"))
+            counts[key] = counts.get(key, 0) + int(row.get("条数") or 0)
+    order = [*_ATTITUDE_ORDER, *sorted(k for k in counts if k not in _ATTITUDE_ORDER)]
+    parts = " / ".join(f"{k} {counts.get(k, 0)}" for k in order if k in _ATTITUDE_ORDER or counts.get(k))
+    who = "、".join(str(s) for s in subjects if s)
+    scope = (f"只数点名了{who}的评论；这批评论取自引用池，不是随机抽样，口径见附录「各表口径」"
+             if who else "这批评论取自引用池，不是随机抽样，口径见附录「各表口径」")
+    return f"已编码评论 {int(table['n'])} 条：{parts}（{scope}）。"
+
+
+def _inject_before_confidence(body: str, line: str) -> str:
+    """把 `line` 插在把握度引用块之前；稿里没有那句就接在节末。"""
+    lines = body.split("\n")
+    hit = next((i for i, text in enumerate(lines)
+                if text.lstrip().startswith(">") and "把握度" in text), None)
+    if hit is None:
+        return body.rstrip() + "\n\n" + line
+    return "\n".join([*lines[:hit], line, "", *lines[hit:]])
 
 
 def _inject_after_confidence(body: str, line: str) -> str:
@@ -452,6 +541,46 @@ def _cell(value: Any) -> str:
     return text or "0"
 
 
+def timespan_block(tables: Mapping[str, Any]) -> str:
+    """§RPT-4 C-14：附录一句「证据发布时间集中在 A 至 B，占 N%」，程序从时间表取。
+
+    09-14 评审实测：时间表算出来了（n=942）但正文一处不引，客户分不清是这个月的舆论还是去年的。
+    """
+    table = (tables or {}).get("timeline")
+    if not isinstance(table, Mapping):
+        return ""
+    coverage = table.get("coverage") or {}
+    window = coverage.get("集中区间")
+    if not isinstance(window, Mapping):
+        return ""
+    share = f"{round(float(window['占比']) * 100):g}%"
+    span = (f"{window['起']}" if window["起"] == window["止"] else f"{window['起']} 至 {window['止']}")
+    return (f"{TIMESPAN_HEADING}\n\n证据发布时间集中在 {span}，占有发布时间的 "
+            f"{coverage.get('有发布时间')} 条里的 {share}（全库 {coverage.get('总条数')} 条，"
+            "拿不到发布时间的不计入）。\n")
+
+
+#: §RPT-4 货 2：对照实体的评论表。写手看不见（三份 SKILL 的 `tables:` 行不点它），由程序挂附录。
+CONTRAST_TABLE = "contrast_attitude"
+
+
+def contrast_reference_table(tables: Mapping[str, Any]) -> str:
+    """对照实体评论的附录版，照 `lexicon_reference_table` 的形态。"""
+    table = (tables or {}).get(CONTRAST_TABLE)
+    if not isinstance(table, Mapping) or not table.get("rows"):
+        return ""
+    columns = [str(c) for c in table.get("columns") or []]
+    lines = [CONTRAST_HEADING, "",
+             "（本节由程序按逐条编码结果直接计数，未经改写。这些评论说的是用来对照的产品，"
+             "不是研究对象，所以不进正文的态度表；放在这里是为了让读者知道它们没有被丢掉。）", "",
+             "| " + " | ".join([*columns, "角标"]) + " |", "|" + "---|" * (len(columns) + 1)]
+    for row in table.get("rows") or []:
+        marks = "".join(f"[{m}]" for m in (row.get("marks") or [])) or "—"
+        lines.append("| " + " | ".join([*(_cell(row.get(c, "")) for c in columns), marks]) + " |")
+    lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
+    return "\n".join(lines) + "\n"
+
+
 def quotes_reference_table(tables: Mapping[str, Any]) -> str:
     """原声表的附录版。写手照样拿得到数据写引用块，这张**表**由程序照列。
 
@@ -483,13 +612,15 @@ def quotes_reference_table(tables: Mapping[str, Any]) -> str:
 def assemble(parts: Sequence[tuple[str, Path]],
              sources: Sequence[Mapping[str, Any]] = (),
              appendix_blocks: Sequence[str] = (),
-             tables: Mapping[str, Any] | None = None) -> str:
+             tables: Mapping[str, Any] | None = None,
+             subjects: Sequence[str] = (),
+             counts: Mapping[str, Any] | None = None) -> str:
     """把各节拼成成稿：一级标题由代码写，写手只交正文。
 
     §RPT-3：给了 `tables` 就在执行摘要把握度那句后面注入主张计数行（货 4）；
     信息源清单只列写手各节里实际出现过的角标（货 3）。
     """
-    chunks = []
+    bodies = []
     for name, path in parts:
         body = path.read_text(encoding="utf-8").strip()
         # 写手偶尔仍会把标题写进正文，重复的那一行去掉，免得出现两个同名一级标题。
@@ -498,11 +629,17 @@ def assemble(parts: Sequence[tuple[str, Path]],
         first, _, rest = body.partition("\n")
         if first.strip() in (f"# {name}", f"## {name}", name):
             body = rest.lstrip("\n")
-        if tables and name in OPENING_SECTIONS and confidence_line(tables):
-            body = _inject_after_confidence(body, confidence_line(tables))
-        chunks.append(f"# {name}\n\n{body}")
+        bodies.append((name, body))
     # 实引角标只数写手写的正文，在挂程序块之前数——原声附录表也带角标，数进去就不是「正文实引」了。
-    cited = {int(n) for n in _MARK.findall("\n".join(chunks))}
+    cited = {int(n) for _, body in bodies for n in _MARK.findall(body)}
+    counts = {**dict(counts or {}), BODY_CITED_KEY: len(cited)}
+    chunks = []
+    for name, body in bodies:
+        if tables and name in OPENING_SECTIONS and attitude_line(tables, subjects):
+            body = _inject_before_confidence(body, attitude_line(tables, subjects))
+        if tables and name in OPENING_SECTIONS and confidence_line(tables, counts):
+            body = _inject_after_confidence(body, confidence_line(tables, counts))
+        chunks.append(f"# {name}\n\n{body}")
     # §POOL-1 丁′：缺失清单与各表口径也由程序生成，与信息源清单一样挂在末节。
     # 它们本来就是「把现成字段照列一遍」，让模型誊抄既费引擎又会抄错。
     # 09-05 那次附录连死两格，修法正是把信息源清单下放给程序；这是同一条路再走一步。
@@ -514,6 +651,12 @@ def assemble(parts: Sequence[tuple[str, Path]],
         chunks[-1] = chunks[-1].rstrip() + "\n\n" + sources_table(sources, cited)
     return "\n\n".join(chunks) + "\n"
 _MARK = re.compile(r"\[S(\d{2,})\]")
+
+
+def body_marks(parts: Sequence[tuple[str, Path]]) -> set[int]:
+    """写手各节正文里出现过的角标号（与 `assemble` 数实引同一口径：程序块挂上之前）。"""
+    return {int(n) for _, path in parts if path.is_file()
+            for n in _MARK.findall(path.read_text(encoding="utf-8"))}
 
 
 def artifact_paths(runs_root: Path, research_id: str, template: str) -> tuple[Path, Path]:
@@ -606,9 +749,13 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     verdicts = {"PASS": "多源互证", "CONFLICT": "多源冲突", "WEAK": "证据偏弱", "SINGLE": "单源孤证"}
     # §RPT-3 货 2：A/B 级评论行在末尾多一栏「原话：…」（`tables.quote_prefix`，程序截取）。
     # 写手按**评论内容**归题、可直接从这一栏摘原声；没有这一栏的行照旧只有标题。
+    # §RPT-4 货 3（C-3）：与题面对象/地域对不上的源多一栏「旁证·对照实体 / 旁证·海外平台」。
     pool = "\n".join(
         f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
-        f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
+        + (f"｜旁证·{s['offtopic']}" if s.get("offtopic") else "")
+        # §RPT-4 C-10：同一帖子下的别的池内评论，写手引用时并排标注、不当成独立用户。
+        + (f"｜同帖：{'、'.join(s['same_thread'])}" if s.get("same_thread") else "")
+        + f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
         + (f"｜原话：{s['quote_prefix']}" if s.get("quote_prefix") else "")
         for s in data.get("sources") or [])
     # 按中文表名交给写手，机器表名（topic_polarity 之类）一律不进提示词——
@@ -630,7 +777,8 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
         f"# 本次研究的目标\n{objectives}",
         f"# 涉及的实体\n{'、'.join(data.get('entities') or [])}",
         f"# 信息源池（只能引这些角标，一个都不许多；第三栏是这条源的交叉验证结论；"
-        f"带「原话」栏的是评论，标题是它挂的父帖，归题看原话不看标题）\n{pool}",
+        f"带「原话」栏的是评论，标题是它挂的父帖，归题看原话不看标题；"
+        f"带「旁证」栏的与题面的对象或地域对不上，怎么用见共用规则 §5.7）\n{pool}",
         f"# 确定性数据表（数字的唯一来源，一个数都不许改）\n```json\n{tables}\n```",
         f"# 工作稿\n\n{_work_view(data, report_text)}",
     ]
@@ -651,13 +799,37 @@ def _audience_view(data: Mapping[str, Any]) -> str:
     # 第一行只写身份本身（main 那一版的形状，别的地方按这个形状读）；
     # 第二行起才是本包加的写法要求。
     if role == AUDIENCE_UNKNOWN:
-        return (f"{AUDIENCE_UNKNOWN}\n读者身份未知。建议节改名「对不同读者的含义」，"
+        # §RPT-4 C-11：09-14 评审实测正文写出「对读者身份未知的这份稿而言」——
+        # 提示词里的「身份未知」被原样搬进了正文，等于告诉客户他跳过了问卷。
+        return (f"{AUDIENCE_UNKNOWN}\n这份稿没有指定读者。建议节改名「对不同读者的含义」，"
                 "分三行分别写给竞品团队 / 本产品团队 / 投资分析，"
-                "每行一句「这对你意味着什么」+ 一个动作。")
+                "每行一句「这对你意味着什么」+ 一个动作。"
+                "⛔ 正文里不许出现「读者身份未知 / 不明」这类话，直接写这件事对哪一类人最要紧。")
     lines = [role, f"每条建议的第一句必须先写「对{role}意味着什么」，再写动作。"]
     if stake and stake != AUDIENCE_UNKNOWN:
         lines.append(f"他们最想知道的：{stake}")
     return "\n".join(lines)
+
+
+#: §RPT-4 C-11：系统自己的话。验收尺子 ⒡ 与写作期闸共用这一份（`check_polished` import 它）。
+#: 前六条是 09-14 评审逐条抓到的；`⛔` 与「按规矩」是 09-15 重出稿读到的——写手把提示词里的
+#: 规矩符号和「按规矩挂附录」原样写给了客户。
+MACHINE_TALK_PATTERNS = (r"程序按", r"占比\s*0\.\d", r"身份未知", r"读者身份不明", r"提问方",
+                         r"\d+\s*条被引证据", r"⛔", r"按规矩")
+
+
+def machine_talk_lines(markdown: str) -> list[tuple[int, str]]:
+    """写手文本里命中机器话的行：`(行号, 命中的字)`。原声引用块（`>` 开头）不查——那是发帖人的话。"""
+    hits = []
+    for index, line in enumerate(markdown.splitlines(), start=1):
+        if line.lstrip().startswith(">"):
+            continue
+        for pattern in MACHINE_TALK_PATTERNS:
+            found = re.search(pattern, line)
+            if found:
+                hits.append((index, found.group(0)))
+                break
+    return hits
 
 
 def offpool_marks(markdown: str, pool: frozenset[int]) -> list[str]:
@@ -735,6 +907,16 @@ def quote_corpus(data: Mapping[str, Any], report_text: str) -> str:
     return _squeeze("\n".join(chunks))
 
 
+#: §RPT-4：引号类字符在逐字比对里一律视作同一个。写手的工具链会把全角弯引号“”落成半角 `"`，
+#: 字一个没改——09-15 沙盒实测 S28「在我看来“是否下载猫箱”是一场典型的囚徒博弈」被这道闸
+#: 连退两次、整稿判失败（09-14 RPT-3 那轮同一句也被退过一次）。只折引号，别的标点照旧逐字比。
+_QUOTE_MARKS = str.maketrans({c: '"' for c in '“”„‟＂「」『』〝〞'} | {c: "'" for c in "‘’‚‛＇"})
+
+
+def _fold_quote_marks(text: str) -> str:
+    return str(text).translate(_QUOTE_MARKS)
+
+
 def altered_quotes(markdown: str, corpus: str) -> list[str]:
     """子串闸：`>` 引语行里对不上原文的那些。
 
@@ -744,11 +926,12 @@ def altered_quotes(markdown: str, corpus: str) -> list[str]:
     from app.reliability.coding import _squeeze          # ⛔ 只 import，不改那个文件
 
     problems = []
+    folded_corpus = _fold_quote_marks(corpus)
     for line_no, texts, _ in quote_blocks(markdown):
         for text in texts:
             for piece in _ELLIPSIS.split(text):
-                squeezed = _squeeze(piece)
-                if len(squeezed) >= QUOTE_MIN_CHARS and squeezed not in corpus:
+                squeezed = _fold_quote_marks(_squeeze(piece))
+                if len(squeezed) >= QUOTE_MIN_CHARS and squeezed not in folded_corpus:
                     problems.append(
                         f"第 {line_no} 行起的原声与原文对不上：「{piece.strip()[:40]}」。"
                         "原声必须逐字照抄，一个字都不许改（错别字也照抄，那是发帖人写的）。")
@@ -1122,6 +1305,12 @@ async def _write_target(adapter: Any, skill: Template, data: Mapping[str, Any],
         quote_problems = altered_quotes(text, corpus) + lowgrade_quotes(text, grade_by_mark)
         if current in ADVICE_SECTIONS:
             quote_problems += singlesource_advice(text.splitlines(), crossref)
+        # §RPT-4 C-11：机器话挡在写作期。09-15 重出稿软检读到「被程序按互动量取为代表」「⛔ 不能读成」，
+        # 只判黄的话整轮 50 分钟付完才看得见；这几个词在客户稿里没有合法用法，当轮重写这一节/片。
+        quote_problems += [
+            f"第 {line_no} 行写了系统自己的话「{word}」：这类说明是写给你的，不是写给读者的，"
+            "换成人话或删掉（取数、挑原声的过程不写；规矩符号 ⛔ 不写）。"
+            for line_no, word in machine_talk_lines(text)]
         if quote_problems:
             errors = tuple(f"{unit}{p}" for p in quote_problems)
             _reject("quote")
@@ -1261,6 +1450,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     from app.report.render import parse_report
 
     markdown = assemble(parts, data.get("sources") or [], tables=data.get("tables") or {},
+                        subjects=data.get("subjects") or (),
+                        counts=data.get("counts") or {},
                         appendix_blocks=(
         # §RPT-3 货 4：把握度的两张分布表由程序挂附录，摘要那句的依据读者看得见。
         confidence_tables(data.get("tables") or {}),
@@ -1274,7 +1465,15 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         # 这张表的数据，因为正文每个主题段要引 2–3 条原声写成引用块（共用规则 §5.6
         # 步骤 4）。挪的是「表」，不是「原话」。
         quotes_reference_table(data.get("tables") or {}),
+        # §RPT-4 货 2：对照实体的评论只作参照，挂附录。
+        contrast_reference_table(data.get("tables") or {}),
+        # §RPT-4 C-14：证据时间范围一句。
+        timespan_block(data.get("tables") or {}),
     ))
+    # §RPT-4 C-11：正文实引条数组装完才知道，回填进 tables.json 的 counts——
+    # 摘要里注入的「正文实际引用证据 N 条」要在尺子 ④ 的白名单里有出处。
+    data.setdefault("counts", {})[BODY_CITED_KEY] = len(body_marks(parts))
+    tables_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。
     md_path.write_text(markdown, encoding="utf-8")
