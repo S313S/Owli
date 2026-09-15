@@ -156,7 +156,7 @@ def sources_table(sources: Sequence[Mapping[str, Any]],
              "| 角标 | 等级 | 说明 | 标题 | 抓取时间 | 链接 |", "|---|---|---|---|---|---|"]
     for item in listed:
         grade = str(item.get("grade") or "?")
-        title = str(item.get("title") or "").replace("|", "｜").strip() or "（无标题）"
+        title = source_title(item).replace("|", "｜") or "（无标题）"
         url = str(item.get("url") or "")
         lines.append(f"| {item['mark']} | {grade} | {grade_note.get(grade, '未评级')} "
                      f"| {title} | {_fetched_at_cell(item.get('fetched_at'))} | {url} |")
@@ -166,6 +166,39 @@ def sources_table(sources: Sequence[Mapping[str, Any]],
         tail = f"（其中对照实体 {contrast} 条）" if contrast else ""
         lines += ["", f"引用池另有 {len(unused)} 条本稿未引用{tail}，不在上表。"]
     return "\n".join(lines) + "\n"
+
+
+#: 信息源清单标题的长度上限（字符）。抖音标题常把整段话题标签拼在后面。
+SOURCE_TITLE_CHARS = 60
+_COMMENT_PREFIX = re.compile(r"^评论\s*[·：:]\s*")
+
+
+def source_title(item: Mapping[str, Any]) -> str:
+    """信息源清单里的标题：只剩「评论 · 帖子标题」一种写法。§RPT-4 C-15。
+
+    09-14 评审实测同一张清单里「评论 · 「…」」「「评论 · …」」「「评论：…」」三种写法并存，
+    Reddit 条目在页面证据表里是英文原题、在正式稿里是中文译名——那是工作稿写手誊清单时
+    各写各的。归一的规矩：
+    - 这条源有独立标题（`title_independent`）且库里有原题（`raw_title`）⇒ 用原题，与页面证据表一致；
+    - 没有独立标题（微博等，库里 title 是正文拷贝）⇒ 沿用工作稿的概括标题；
+    - 两种都剥掉外层书名号、把「评论：」统一成「评论 · 」、压空白、按 60 字截断。
+    ⛔ 不动 `app/adapters/source_mcp.py` 的前缀拼接（调度拍：出稿侧归一）。
+    """
+    raw = str(item.get("raw_title") or "")
+    base = raw if (raw.strip() and item.get("title_independent", True)) else str(item.get("title") or "")
+    text = " ".join(base.split())
+    for _ in range(2):                      # 「评论 · 「X」」两层都剥
+        if text.startswith("「") and text.endswith("」"):
+            text = text[1:-1].strip()
+        match = _COMMENT_PREFIX.match(text)
+        if match:
+            rest = text[match.end():].strip()
+            if rest.startswith("「") and rest.endswith("」"):
+                rest = rest[1:-1].strip()
+            text = f"评论 · {rest}"
+    if len(text) > SOURCE_TITLE_CHARS:
+        text = text[:SOURCE_TITLE_CHARS].rstrip() + "…"
+    return text
 
 
 def _fetched_at_cell(raw: object) -> str:

@@ -854,6 +854,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     contrast_by_mark = {}
     question = str(plan.get("research_question") or report.get("research_question") or "")
     platform_by_mark = {int(r["citation_no"]): r.get("platform") for r in cited}
+    # §RPT-4 C-15：库里的原题。工作稿信息源清单是写手誊的，三种写法混着、Reddit 还被译成中文。
+    raw_title_by_mark = {int(r["citation_no"]): r.get("title") for r in cited}
     # §RPT-4 C-10：角标 → 同一帖子下的其余池内角标。
     marks_by_thread: dict[str, list[int]] = defaultdict(list)
     for r in cited:
@@ -910,7 +912,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                          {"platform": platform_by_mark.get(int(s["citation_no"]))},
                          contrast=contrast_by_mark.get(int(s["citation_no"])),
                          question=question),
-                     "same_thread": same_thread_by_mark.get(int(s["citation_no"])) or []}
+                     "same_thread": same_thread_by_mark.get(int(s["citation_no"])) or [],
+                     "raw_title": raw_title_by_mark.get(int(s["citation_no"]))}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }

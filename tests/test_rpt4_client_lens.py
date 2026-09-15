@@ -345,3 +345,23 @@ def test_货4_时间集中区间取最短覆盖八成的连续月份_附录一�
     assert block.startswith(TIMESPAN_HEADING) and TIMESPAN_HEADING in PROGRAM_APPENDIX_HEADINGS
     assert "集中在 2026-03 至 2026-04，占有发布时间的 10 条里的 90%" in block
     assert timespan_block({}) == ""
+
+
+# ---------------------------------------------------------------- 货 5 信息源标题只剩一种写法
+
+def test_货5_信息源清单标题归一成评论点帖子标题_有独立标题用库里原题() -> None:
+    from app.report.polish.run import source_title, sources_table
+
+    assert source_title({"title": "「评论 · 成年人不配有情感陪伴？」"}) == "评论 · 成年人不配有情感陪伴？"
+    assert source_title({"title": "评论 · 「DeepSeek 官方信息发布」"}) == "评论 · DeepSeek 官方信息发布"
+    assert source_title({"title": "「评论：豆包收费不可怕」"}) == "评论 · 豆包收费不可怕"
+    # Reddit：工作稿誊成了中文译名，清单用库里的原题（与页面证据表一致）
+    assert source_title({"title": "「评论：开发者忘记移除豆包水印」",
+                         "raw_title": "评论 · Devs forgot to remove the Doubao watermark",
+                         "title_independent": True}) == "评论 · Devs forgot to remove the Doubao watermark"
+    # 微博：库里 title 是正文拷贝，沿用工作稿的概括标题
+    assert source_title({"title": "「恩师豆包」", "raw_title": "恩师豆包\n我教师节都忘给豆包发",
+                         "title_independent": False}) == "恩师豆包"
+    assert source_title({"title": "x" * 80}).endswith("…")
+    table = sources_table([{"mark": "S01", "grade": "A", "title": "「评论 · 帖」", "url": "u"}])
+    assert "| 评论 · 帖 |" in table and "「" not in table

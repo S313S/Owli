@@ -47,6 +47,17 @@ export function useReportData(researchId: string) {
   return { report, evidence, error, refresh: () => setReload((n) => n + 1) }
 }
 
+// §RPT-4 C-12：工具栏时间原样显示 `2026-09-14T06:09:40+00:00`，改成本地「9 月 14 日 14:09」。
+// 解析不了就原样返回，别把一个读得懂的机器串换成「Invalid Date」。
+export function localTime(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const at = new Date(raw)
+  if (Number.isNaN(at.getTime())) return raw
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const sameYear = at.getFullYear() === new Date().getFullYear()
+  return `${sameYear ? '' : `${at.getFullYear()} 年 `}${at.getMonth() + 1} 月 ${at.getDate()} 日 ${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
 export function scoreText(item: Partial<EvidenceItem>): string {
   return SCORE_DIMS.map(([field, label]) => `${label}${item[field] ?? '?'}`).join('/')
 }
@@ -433,9 +444,9 @@ function ExportButtons({ researchId, report, onDone, template, onTemplateChange,
     <Button size="small" loading={busy === 'excel'} onClick={() => void run('excel')} data-testid="export-excel">导出 Excel</Button>
     <Button size="small" loading={busy === 'feishu'} onClick={() => void run('feishu')} data-testid="export-feishu">推送飞书</Button>
     {lastPolished && (lastPolished.url
-      ? <a href={lastPolished.url} target="_blank" rel="noreferrer">上次整理 {lastPolished.created_at}</a>
+      ? <a href={lastPolished.url} target="_blank" rel="noreferrer">上次整理 {localTime(lastPolished.created_at)}</a>
       : <Tag color="orange" data-testid="polished-failed">上次整理失败</Tag>)}
-    {excel?.url && <a href={excel.url} target="_blank" rel="noreferrer">上次导出 {excel.created_at}</a>}
+    {excel?.url && <a href={excel.url} target="_blank" rel="noreferrer">上次导出 {localTime(excel.created_at)}</a>}
     {report.feishu.doc_url && <a href={report.feishu.doc_url} target="_blank" rel="noreferrer">飞书云文档</a>}
     {report.feishu.status && report.feishu.status !== 'pending' && <Tag>飞书 {report.feishu.status}</Tag>}
   </>
