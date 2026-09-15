@@ -120,8 +120,10 @@ BASIS_HEADING = "## 各表口径"
 CONFIDENCE_HEADING = "## 把握度读数（主张的交叉验证与被引证据等级）"
 LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
 QUOTES_HEADING = "## 代表原声（逐字摘录，按互动量排序）"
+CONTRAST_HEADING = "## 对照实体的评论（只作参照，不计入正文态度表）"
 PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING,
-                             QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING)
+                             QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING,
+                             CONTRAST_HEADING)
 
 
 def sources_table(sources: Sequence[Mapping[str, Any]],
@@ -362,6 +364,44 @@ def confidence_tables(tables: Mapping[str, Any]) -> str:
 OPENING_SECTIONS = ("执行摘要", "总体倾向")
 
 
+#: §RPT-4 货 2（C-7）：总体态度行的四档顺序，与编码闭集 `coding.ATTITUDES` 同序。
+_ATTITUDE_ORDER = ("正", "负", "中", "混合")
+
+
+def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> str:
+    """执行摘要把握度那句**之前**的一行：已编码评论的总体态度分布，程序从表取、不经模型。
+
+    09-14 评审实测：摘要第一句是「情感陪伴被夸、回答质量被骂」，全篇没有一句「整体上
+    正多还是负多」——那是「大家怎么看」最直接的答案，数在论据章的表里，结论没人写。
+    数从 `scenario_attitude` 取（每条一个场景一个态度，四档相加 = 表的 n）；§RPT-4 货 2
+    之后这张表只数点名了研究对象的评论，所以这一行的分母也是主体。
+    """
+    table = (tables or {}).get("scenario_attitude")
+    if not isinstance(table, Mapping) or not table.get("n"):
+        return ""
+    counts: dict[str, int] = {}
+    for row in table.get("rows") or []:
+        if isinstance(row, Mapping):
+            key = str(row.get("态度"))
+            counts[key] = counts.get(key, 0) + int(row.get("条数") or 0)
+    order = [*_ATTITUDE_ORDER, *sorted(k for k in counts if k not in _ATTITUDE_ORDER)]
+    parts = " / ".join(f"{k} {counts.get(k, 0)}" for k in order if k in _ATTITUDE_ORDER or counts.get(k))
+    who = "、".join(str(s) for s in subjects if s)
+    scope = (f"只数点名了{who}的评论；这批评论取自引用池，不是随机抽样，口径见附录「各表口径」"
+             if who else "这批评论取自引用池，不是随机抽样，口径见附录「各表口径」")
+    return f"已编码评论 {int(table['n'])} 条：{parts}（{scope}）。"
+
+
+def _inject_before_confidence(body: str, line: str) -> str:
+    """把 `line` 插在把握度引用块之前；稿里没有那句就接在节末。"""
+    lines = body.split("\n")
+    hit = next((i for i, text in enumerate(lines)
+                if text.lstrip().startswith(">") and "把握度" in text), None)
+    if hit is None:
+        return body.rstrip() + "\n\n" + line
+    return "\n".join([*lines[:hit], line, "", *lines[hit:]])
+
+
 def _inject_after_confidence(body: str, line: str) -> str:
     """把 `line` 插在把握度引用块之后；稿里没有那句就接在节末。"""
     lines = body.split("\n")
@@ -452,6 +492,27 @@ def _cell(value: Any) -> str:
     return text or "0"
 
 
+#: §RPT-4 货 2：对照实体的评论表。写手看不见（三份 SKILL 的 `tables:` 行不点它），由程序挂附录。
+CONTRAST_TABLE = "contrast_attitude"
+
+
+def contrast_reference_table(tables: Mapping[str, Any]) -> str:
+    """对照实体评论的附录版，照 `lexicon_reference_table` 的形态。"""
+    table = (tables or {}).get(CONTRAST_TABLE)
+    if not isinstance(table, Mapping) or not table.get("rows"):
+        return ""
+    columns = [str(c) for c in table.get("columns") or []]
+    lines = [CONTRAST_HEADING, "",
+             "（本节由程序按逐条编码结果直接计数，未经改写。这些评论说的是用来对照的产品，"
+             "不是研究对象，所以不进正文的态度表；放在这里是为了让读者知道它们没有被丢掉。）", "",
+             "| " + " | ".join([*columns, "角标"]) + " |", "|" + "---|" * (len(columns) + 1)]
+    for row in table.get("rows") or []:
+        marks = "".join(f"[{m}]" for m in (row.get("marks") or [])) or "—"
+        lines.append("| " + " | ".join([*(_cell(row.get(c, "")) for c in columns), marks]) + " |")
+    lines += ["", f"样本量 {table.get('n')} 条｜口径：{plain_words(str(table.get('basis') or ''))}"]
+    return "\n".join(lines) + "\n"
+
+
 def quotes_reference_table(tables: Mapping[str, Any]) -> str:
     """原声表的附录版。写手照样拿得到数据写引用块，这张**表**由程序照列。
 
@@ -483,7 +544,8 @@ def quotes_reference_table(tables: Mapping[str, Any]) -> str:
 def assemble(parts: Sequence[tuple[str, Path]],
              sources: Sequence[Mapping[str, Any]] = (),
              appendix_blocks: Sequence[str] = (),
-             tables: Mapping[str, Any] | None = None) -> str:
+             tables: Mapping[str, Any] | None = None,
+             subjects: Sequence[str] = ()) -> str:
     """把各节拼成成稿：一级标题由代码写，写手只交正文。
 
     §RPT-3：给了 `tables` 就在执行摘要把握度那句后面注入主张计数行（货 4）；
@@ -498,6 +560,8 @@ def assemble(parts: Sequence[tuple[str, Path]],
         first, _, rest = body.partition("\n")
         if first.strip() in (f"# {name}", f"## {name}", name):
             body = rest.lstrip("\n")
+        if tables and name in OPENING_SECTIONS and attitude_line(tables, subjects):
+            body = _inject_before_confidence(body, attitude_line(tables, subjects))
         if tables and name in OPENING_SECTIONS and confidence_line(tables):
             body = _inject_after_confidence(body, confidence_line(tables))
         chunks.append(f"# {name}\n\n{body}")
@@ -1261,6 +1325,7 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
     from app.report.render import parse_report
 
     markdown = assemble(parts, data.get("sources") or [], tables=data.get("tables") or {},
+                        subjects=data.get("subjects") or (),
                         appendix_blocks=(
         # §RPT-3 货 4：把握度的两张分布表由程序挂附录，摘要那句的依据读者看得见。
         confidence_tables(data.get("tables") or {}),
@@ -1274,6 +1339,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         # 这张表的数据，因为正文每个主题段要引 2–3 条原声写成引用块（共用规则 §5.6
         # 步骤 4）。挪的是「表」，不是「原话」。
         quotes_reference_table(data.get("tables") or {}),
+        # §RPT-4 货 2：对照实体的评论只作参照，挂附录。
+        contrast_reference_table(data.get("tables") or {}),
     ))
     draft_path.write_text(markdown, encoding="utf-8")
     # 引擎只写得进 goals/polished/；exports/ 这一份由本模块搬，接口与登记都指它。

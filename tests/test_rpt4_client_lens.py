@@ -75,3 +75,140 @@ def test_货1_已完成但有段超时没写成_快照带未写成读数且标�
 def test_货1_没有缺段的研究不挂黄条(tmp_path: Path) -> None:
     database, research_id = _seed(tmp_path, second="done")
     assert _get(database, research_id, tmp_path)["unwritten"] is None
+
+
+# ---------------------------------------------------------------- 货 2 实体归属
+
+PLAN = {
+    "research_question": "国内大家对豆包的看法", "title": "国内大家对豆包的看法",
+    "entities": [
+        {"id": "豆包", "canonical": "豆包", "names": {"zh": "豆包", "en": "Doubao", "aliases": []}},
+        {"id": "Kimi", "canonical": "Kimi", "names": {"zh": "Kimi", "en": "Kimi", "aliases": ["月之暗面"]}},
+    ],
+    "goals": [{"goal_id": "goal-1", "agents": [
+        {"agent_id": "xhs-doubao", "entity": "豆包", "chapter": {"chapter_id": "ch-1"}},
+        {"agent_id": "xhs-kimi", "entity": "Kimi", "chapter": {"chapter_id": "ch-2"}},
+    ]}],
+}
+
+
+def _coded(index: int, *, agent: str, body: str, title: str = "评论 · 父帖", attitude: str = "负",
+           topics=("回答质量",), scenario: str = "其他", quote: str = "", citation_no: int | None = None,
+           grade: str = "B") -> dict:
+    from app.reliability.coding import CODING_VERSION
+
+    return {
+        "id": f"ev-{index}", "report_id": "r-rpt4", "platform": "xhs", "kind": "comment",
+        "agent_name": agent, "title": title, "content_excerpt": body, "grade": grade,
+        "citation_no": citation_no if citation_no is not None else index,
+        "extra": {"content_kind": "user_opinion", "coding": {
+            "coding_version": CODING_VERSION, "audience": "不明", "scenario": scenario,
+            "attitude": attitude, "topics": list(topics), "quote": quote}},
+    }
+
+
+def test_货2_评论的实体只看评论自己的话_父帖标题里的名字不算() -> None:
+    from app.report.polish.tables import coding_entity_roles
+
+    rows = [
+        # 挂在豆包帖下、却在说 Kimi：父帖标题点了豆包也不算主体
+        _coded(1, agent="xhs-doubao", title="评论 · 豆包将新增付费版本", body="还是Kimi好用"),
+        # 自己点名豆包 ⇒ 主体（顺带提竞品也算主体）
+        _coded(2, agent="xhs-kimi", title="评论 · Kimi 教程", body="豆包比 Kimi 敷衍多了"),
+        # 谁都没点名、挂在竞品章下 ⇒ 对照
+        _coded(3, agent="xhs-kimi", title="评论 · Kimi 教程", body="这是一定要逼开会员啊"),
+        # 谁都没点名、挂在主角章下 ⇒ 未点名（不硬归主体）
+        _coded(4, agent="xhs-doubao", title="评论 · 豆包陪我吃火锅", body="好卡"),
+        # 原声摘自父帖标题（编码器摘错地方）：不许借它把父帖名漏回来
+        _coded(5, agent="xhs-doubao", title="评论 · 豆包收费不可怕", body="",
+               quote="豆包收费不可怕"),
+    ]
+    roles = coding_entity_roles(PLAN, rows)
+    assert roles == {
+        "ev-1": {"entity": "对照", "entity_name": "Kimi"},
+        "ev-2": {"entity": "主体", "entity_name": "豆包"},
+        "ev-3": {"entity": "对照", "entity_name": "Kimi"},
+        "ev-4": {"entity": "未点名", "entity_name": None},
+        "ev-5": {"entity": "未点名", "entity_name": None},
+    }
+
+
+def test_货2_题面读不出主角时不分主体对照() -> None:
+    from app.report.polish.tables import coding_entity_roles
+
+    plan = {**PLAN, "research_question": "国产 AI 助手口碑如何", "title": "国产 AI 助手口碑如何"}
+    assert coding_entity_roles(plan, [_coded(1, agent="xhs-kimi", body="Kimi 慢")]) == {}
+
+
+def test_货2_正文态度表只数主体_对照实体另出附录表_口径写出三档条数() -> None:
+    from app.report.polish.tables import build_tables
+
+    evidence = [
+        _coded(1, agent="xhs-doubao", body="豆包被戳破了还反复出错", attitude="负", scenario="其他"),
+        _coded(2, agent="xhs-doubao", body="豆包是我唯一的朋友", attitude="正", topics=("功能与能力",),
+               scenario="情感陪伴", quote="豆包是我唯一的朋友"),
+        _coded(3, agent="xhs-kimi", body="Kimi 回答重复", attitude="负"),
+        _coded(4, agent="xhs-kimi", body="一周的额度只能用三四天", attitude="负", topics=("价格与付费",)),
+        _coded(5, agent="xhs-doubao", body="好卡", attitude="负", topics=("速度与稳定",)),
+    ]
+    data = build_tables(report={"id": "r-rpt4"}, plan=PLAN, claims=[], evidence=evidence,
+                        view={"title": "t", "sources": []})
+    tables = data["tables"]
+    by_topic = {(r["主题"], r["态度"]): (r["条数"], r["marks"]) for r in tables["attitude_by_topic"]["rows"]}
+    assert tables["attitude_by_topic"]["n"] == 2
+    assert by_topic[("回答质量", "负")] == (1, ["S01"])
+    assert tables["scenario_attitude"]["n"] == tables["scenario_counts"]["n"] == 2
+    contrast = tables["contrast_attitude"]
+    assert contrast["n"] == 2 and [(r["对照实体"], r["态度"], r["条数"]) for r in contrast["rows"]] == [
+        ("Kimi", "负", 2)]
+    basis = tables["scenario_attitude"]["basis"]
+    assert "点名了研究对象的 2 条" in basis and "对照实体的 2 条" in basis and "没点名的 1 条" in basis
+    # C-2 甲：全在引用池里的编码要说「引用池里的评论」「不是随机抽样」
+    assert "引用池里的评论" in basis and "不是随机抽样" in basis
+    assert data["subjects"] == ["豆包"]
+    # 原声表仍按全部行挑（原声闸本身只收点名主角的句子）
+    assert [q["原声"] for q in tables["quotes"]["rows"]] == ["豆包是我唯一的朋友"]
+
+
+def test_货2_总体态度行插在把握度之前_四数之和等于表的n(tmp_path: Path) -> None:
+    from app.report.polish.run import assemble, attitude_line
+
+    tables = {"scenario_attitude": {"n": 24, "rows": [
+        {"场景": "情感陪伴", "态度": "正", "条数": 8}, {"场景": "其他", "态度": "正", "条数": 7},
+        {"场景": "其他", "态度": "负", "条数": 3}, {"场景": "其他", "态度": "中", "条数": 5},
+        {"场景": "其他", "态度": "混合", "条数": 1}]}}
+    line = attitude_line(tables, ["豆包"])
+    assert line.startswith("已编码评论 24 条：正 15 / 负 3 / 中 5 / 混合 1（只数点名了豆包的评论")
+    part = tmp_path / "01-执行摘要.md"
+    part.write_text("摘要第一段。\n\n> 本报告结论的把握度为**低**。\n\n后文。", encoding="utf-8")
+    text = assemble([("执行摘要", part)], tables=tables, subjects=["豆包"])
+    assert text.index("已编码评论 24 条") < text.index("> 本报告结论的把握度")
+    assert attitude_line({}, ["豆包"]) == ""
+
+
+def test_货2_编码落库带实体_回填只写变了的行(tmp_path: Path) -> None:
+    import json
+
+    from app.reliability.coding import _coding_payload, assign_coding_entities
+
+    database = tmp_path / "owli.db"
+    initialize_database_if_empty(database, SCHEMA_PATH)
+    store = Store(database)
+    store.create_report(id="r-rpt4", title="t", research_question=PLAN["research_question"],
+                        created_at="2026-09-15T00:00:00Z", plan_snapshot=PLAN)
+    label = {"audience": "不明", "scenario": "其他", "attitude": "负", "topics": [], "quote": ""}
+    payload = _coding_payload(_coded(9, agent="xhs-kimi", body="慢"), label,
+                              {"entity": "对照", "entity_name": "Kimi"})
+    assert payload["extra"]["coding"]["entity"] == "对照"
+    store.upsert_evidence_batch([
+        {**{k: v for k, v in _coded(i, agent=a, body=b).items() if k != "grade"},
+         "permalink": f"https://www.xiaohongshu.com/explore/{i}",
+         "parent_permalink": "https://www.xiaohongshu.com/explore/parent",
+         "fetched_at": "2026-09-15T00:00:00Z"}
+        for i, a, b in ((1, "xhs-doubao", "豆包太笨"), (2, "xhs-kimi", "会员太贵"))])
+    assert assign_coding_entities(store, "r-rpt4") == 2
+    assert assign_coding_entities(store, "r-rpt4") == 0, "判法没变就一行都不写"
+    got = {r["id"]: (r["extra"] if isinstance(r["extra"], dict) else json.loads(r["extra"]))["coding"]
+           for r in store.list_evidence("r-rpt4")}
+    assert got["ev-1"]["entity"] == "主体" and got["ev-2"]["entity"] == "对照"
+    assert got["ev-1"]["attitude"] == "负", "只补实体，编码其余字段不动"

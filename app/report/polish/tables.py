@@ -396,6 +396,87 @@ def quote_gate_names(plan: Mapping[str, Any]) -> list[str]:
                    if len(str(name).strip()) >= 2})
 
 
+#: §RPT-4 货 2：编码行的实体归属三档。写进 `extra.coding.entity`，出表按它分主体/对照。
+ENTITY_SUBJECT, ENTITY_CONTRAST, ENTITY_UNNAMED = "主体", "对照", "未点名"
+
+
+def _own_text(row: Mapping[str, Any]) -> str:
+    """判实体归属时看的「这条证据自己的话」。
+
+    ⛔ 评论行不看 `title`：评论的 title 是「评论 · 父帖标题」（`source_mcp` 拼的），
+    09-15 实测 r-50600e09f7dd 68 行编码按 title+正文判，**全部**命中父帖里的实体——
+    DeepSeek 帖下吐槽「白底晃眼」、Kimi 帖下问「文件为什么不能大于 10m」一样判进豆包。
+    帖子行没有父帖，标题就是它自己的话，照看。
+    """
+    extra = row.get("_extra") if isinstance(row.get("_extra"), Mapping) else None
+    if extra is None:
+        raw = row.get("extra")
+        try:
+            extra = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+        except (json.JSONDecodeError, TypeError, ValueError):
+            extra = {}
+    coding = extra.get("coding") if isinstance(extra.get("coding"), Mapping) else {}
+    body = str(row.get("content_excerpt") or "")
+    quote = str(coding.get("quote") or "")
+    if str(row.get("kind") or "post") != "comment":
+        return f"{row.get('title') or ''}\n{body}\n{quote}"
+    # 评论只在**没有正文**时才借编码摘的原声判——而且原声不能是标题里的字：
+    # 09-15 实测 68 行里 3 条评论的「原声」就是父帖标题（S29「豆包收费不可怕」），
+    # 编码器看到的是「评论 · 父帖标题 + 正文」，摘错了地方。借了它，父帖名就又漏回来了。
+    if not body.strip() and quote and normalize_quote(quote) not in normalize_quote(row.get("title")):
+        return quote
+    return body
+
+
+def coding_entity_roles(plan: Mapping[str, Any],
+                        rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """证据 id → `{"entity": 主体/对照/未点名, "entity_name": canonical 或 None}`。程序算，不经模型。
+
+    §RPT-4 C-4：09-14 评审实测论据章「办公 4 条全负、写作 2 条全负」全是 Kimi PPT 教程
+    评论区和 DeepSeek 长对话的反馈，却摆在「豆包的看法」表里；摘要「回答质量负向 7 条」
+    里说豆包的只有 2 条。病根是编码行没有实体归属，三张态度表按全池计数。
+
+    判法（按顺序）：
+    ① 自己的话（`_own_text`）点名了主角的任何叫法 ⇒ 主体（同时点名竞品也算主体——在拿豆包比）；
+    ② 只点名了对照实体 ⇒ 对照，`entity_name` 取第一个命中的 canonical；
+    ③ 谁都没点名，但挂在对照实体的章下（证据 agent_name → 计划 agent.entity，与
+       `build_tables` 里 `contrast_by_mark` 同一个判法）⇒ 对照——Kimi 教程帖下的
+       「这是一定要逼开会员啊」说的是 Kimi，不是没人说；
+    ④ 其余 ⇒ 未点名（主角章下没点名的评论也在这里：多半在说主角，但原文里查不到，不硬归）。
+
+    主角名单走 `subject_canonicals`、叫法走 `_entity_aliases`、命中走 `mentions`——
+    与原声闸同一把尺子（⛔ 不改那两个函数，D-069 接缝）。题面读不出主角时返回空表，
+    调用方据此**不分主体/对照**（退回旧行为，理由同 `subject_canonicals` 的兜底）。
+    """
+    from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
+
+    subjects = set(subject_canonicals(plan))
+    if not subjects:
+        return {}
+    aliases = {canonical: [n for n in names if len(str(n).strip()) >= 2]
+               for canonical, names in _entity_aliases(plan).items()}
+    rows = list(rows)
+    entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
+    canonical_of = {name: canonical for canonical, names in aliases.items() for name in names}
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        text = _own_text(row)
+        named = [c for c, names in aliases.items() if any(mentions(text, n) for n in names)]
+        if any(c in subjects for c in named):
+            role, name = ENTITY_SUBJECT, sorted(subjects & set(named))[0]
+        elif named:
+            role, name = ENTITY_CONTRAST, named[0]
+        else:
+            chapter_entity = str(entity_by_agent.get(str(row.get("agent_name") or "")) or "")
+            canonical = canonical_of.get(chapter_entity, chapter_entity)
+            if canonical and canonical not in subjects:
+                role, name = ENTITY_CONTRAST, canonical
+            else:
+                role, name = ENTITY_UNNAMED, None
+        out[str(row.get("id"))] = {"entity": role, "entity_name": name}
+    return out
+
+
 def _entity_mentions(rows: Sequence[Mapping[str, Any]], claims: Sequence[Mapping[str, Any]],
                      plan: Mapping[str, Any]) -> dict[str, Any]:
     aliases = _entity_aliases(plan)
@@ -548,6 +629,8 @@ TABLE_NAMES: tuple[str, ...] = (
     "scenario_attitude", "audience_attitude",
     # §RPT-2 货 4③：只在有行标出触发事件时才出现。
     "trigger_counts",
+    # §RPT-4 货 2：对照实体的评论 × 态度。只挂附录，⛔ 三份 SKILL 的 `tables:` 行不点它。
+    "contrast_attitude",
 )
 
 
@@ -609,6 +692,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # 摆出来的候选写手就会用（§RULE-1 货 5 同一条教训），于是「回答质量·负」
         # 那一格唯一的候选 S39 是 C 级，写手引它必被闸打回，**重试多少次都过不去**。
         grade_by_mark=grade_by_mark,
+        # §RPT-4 货 2：正文的态度表只数主体，对照实体另表进附录。
+        entity_roles=coding_entity_roles(plan, rows),
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
@@ -674,6 +759,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         # (goal_id, chapter_id) 对上 missing 行——超时但有货的章要写出条数，不能写「没采到」。
         "chapters": chapter_rows(plan, rows),
         "entities": sorted(_entity_aliases(plan)),
+        # §RPT-4 货 2：研究主体（题面点名的那家）。摘要注入「已编码评论 N 条」一行时要写出是谁。
+        "subjects": subject_canonicals(plan),
         # §RPT-2 货 1 ②：读者是谁、他要拿这份报告做什么决定。q-2/q-3 可跳过，
         # 跳过就是「不明」——写手见「不明」要把建议节写成「对不同读者的含义」。
         # 形状以 `_audience` 的平铺键为准（main 上先落的那一版）；

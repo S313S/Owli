@@ -120,6 +120,12 @@ def register_delivery_routes(
         """
         from app.reliability import coding
 
+        # §RPT-4 货 2：本包之前编的码没有实体归属，出稿前按当前判法补上（纯程序，不付引擎）。
+        # 补不上不拦出稿——出表那头会按同一个判法当场算，库里这份是给人查的。
+        try:
+            coding.assign_coding_entities(store, research_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("出稿前补实体归属失败：%s", research_id, exc_info=True)
         pending = coding.pending_quotable(store, research_id)
         if not pending:
             return True
