@@ -122,9 +122,10 @@ CONFIDENCE_HEADING = "## 把握度读数（主张的交叉验证与被引证据�
 LEXICON_HEADING = "## 词表命中参考（只数触发词，不是情感判断）"
 QUOTES_HEADING = "## 代表原声（逐字摘录，按互动量排序）"
 CONTRAST_HEADING = "## 对照实体的评论（只作参照，不计入正文态度表）"
+TIMESPAN_HEADING = "## 证据的时间范围"
 PROGRAM_APPENDIX_HEADINGS = (MISSING_HEADING, BASIS_HEADING, LEXICON_HEADING,
                              QUOTES_HEADING, SOURCES_HEADING, CONFIDENCE_HEADING,
-                             CONTRAST_HEADING)
+                             CONTRAST_HEADING, TIMESPAN_HEADING)
 
 
 def sources_table(sources: Sequence[Mapping[str, Any]],
@@ -507,6 +508,25 @@ def _cell(value: Any) -> str:
     return text or "0"
 
 
+def timespan_block(tables: Mapping[str, Any]) -> str:
+    """§RPT-4 C-14：附录一句「证据发布时间集中在 A 至 B，占 N%」，程序从时间表取。
+
+    09-14 评审实测：时间表算出来了（n=942）但正文一处不引，客户分不清是这个月的舆论还是去年的。
+    """
+    table = (tables or {}).get("timeline")
+    if not isinstance(table, Mapping):
+        return ""
+    coverage = table.get("coverage") or {}
+    window = coverage.get("集中区间")
+    if not isinstance(window, Mapping):
+        return ""
+    share = f"{round(float(window['占比']) * 100):g}%"
+    span = (f"{window['起']}" if window["起"] == window["止"] else f"{window['起']} 至 {window['止']}")
+    return (f"{TIMESPAN_HEADING}\n\n证据发布时间集中在 {span}，占有发布时间的 "
+            f"{coverage.get('有发布时间')} 条里的 {share}（全库 {coverage.get('总条数')} 条，"
+            "拿不到发布时间的不计入）。\n")
+
+
 #: §RPT-4 货 2：对照实体的评论表。写手看不见（三份 SKILL 的 `tables:` 行不点它），由程序挂附录。
 CONTRAST_TABLE = "contrast_attitude"
 
@@ -700,6 +720,8 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     pool = "\n".join(
         f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
         + (f"｜旁证·{s['offtopic']}" if s.get("offtopic") else "")
+        # §RPT-4 C-10：同一帖子下的别的池内评论，写手引用时并排标注、不当成独立用户。
+        + (f"｜同帖：{'、'.join(s['same_thread'])}" if s.get("same_thread") else "")
         + f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
         + (f"｜原话：{s['quote_prefix']}" if s.get("quote_prefix") else "")
         for s in data.get("sources") or [])
@@ -1374,6 +1396,8 @@ async def polish(store: Any, research_id: str, runs_root: Path, report_text: str
         quotes_reference_table(data.get("tables") or {}),
         # §RPT-4 货 2：对照实体的评论只作参照，挂附录。
         contrast_reference_table(data.get("tables") or {}),
+        # §RPT-4 C-14：证据时间范围一句。
+        timespan_block(data.get("tables") or {}),
     ))
     # §RPT-4 C-11：正文实引条数组装完才知道，回填进 tables.json 的 counts——
     # 摘要里注入的「正文实际引用证据 N 条」要在尺子 ④ 的白名单里有出处。

@@ -291,3 +291,57 @@ def test_货3_四道软检判黄不判红(tmp_path: Path) -> None:
     hits = " ".join(warns["⒡ 机器话残留"])
     assert "占比 0.8" in hits and "80 条被引证据" in hits
     assert "⒞ 摘要关键发现跑题" not in ruler.CHECKS, "软检只判黄"
+
+
+# ---------------------------------------------------------------- 货 4 表口径
+
+def _post(i: int, platform: str, *, parent: str | None = None, cited: int | None = None,
+          published: str | None = None, text: str = "") -> dict:
+    return {"id": f"p-{i}", "platform": platform, "kind": "comment" if parent else "post",
+            "permalink": f"https://x/{i}", "parent_permalink": parent, "citation_no": cited,
+            "published_at": published, "title": text, "content_excerpt": text}
+
+
+def test_货4_平台表有独立帖子数_同帖评论算一个帖子_写手池标同帖() -> None:
+    from app.report.polish.tables import build_tables
+
+    evidence = [_post(1, "xhs", parent="https://x/a", cited=1), _post(2, "xhs", parent="https://x/a", cited=4),
+                _post(3, "xhs", parent="https://x/b"), _post(4, "xhs")]
+    data = build_tables(report={"id": "r"}, plan={}, claims=[], evidence=evidence,
+                        view={"title": "t", "sources": [{"citation_no": 1}, {"citation_no": 4}]})
+    table = data["tables"]["platform_mix"]
+    assert "独立帖子数" in table["columns"]
+    row = table["rows"][0]
+    assert (row["采集条数"], row["独立帖子数"], row["被引条数"], row["被引来自帖子数"]) == (4, 3, 2, 1)
+    assert {s["mark"]: s["same_thread"] for s in data["sources"]} == {"S01": ["S04"], "S04": ["S01"]}
+
+
+def test_货4_提及量表带采集平台数_平台数不同时口径写不可横向比较() -> None:
+    from app.report.polish.tables import _entity_mentions
+
+    plan = {"entities": [{"id": "豆包", "canonical": "豆包", "names": {"zh": "豆包"}},
+                         {"id": "Kimi", "canonical": "Kimi", "names": {"en": "Kimi"}}],
+            "goals": [{"agents": [
+                {"entity": "豆包", "capability": {"sources": ["xhs"]}},
+                {"entity": "豆包", "capability": {"sources": ["douyin"]}},
+                {"entity": "Kimi", "capability": {"sources": ["xhs"]}}]}]}
+    table = _entity_mentions([], [], plan)
+    assert {r["实体"]: r["采集平台数"] for r in table["rows"]} == {"豆包": 2, "Kimi": 1}
+    assert "不可横向比较" in table["basis"]
+    same = {**plan, "goals": [{"agents": [{"entity": "豆包", "capability": {"sources": ["xhs"]}},
+                                          {"entity": "Kimi", "capability": {"sources": ["xhs"]}}]}]}
+    assert "不可横向比较" not in _entity_mentions([], [], same)["basis"]
+
+
+def test_货4_时间集中区间取最短覆盖八成的连续月份_附录一句由程序挂() -> None:
+    from app.report.polish.run import PROGRAM_APPENDIX_HEADINGS, TIMESPAN_HEADING, timespan_block
+    from app.report.polish.tables import _timeline, concentration_window
+
+    assert concentration_window({"2025-01": 1, "2026-03": 4, "2026-04": 5}) == {
+        "起": "2026-03", "止": "2026-04", "条数": 9, "占比": 0.9}
+    rows = [_post(i, "xhs", published=m) for i, m in enumerate(["2025-01"] + ["2026-03"] * 4 + ["2026-04"] * 5)]
+    table = _timeline(rows)
+    block = timespan_block({"timeline": table})
+    assert block.startswith(TIMESPAN_HEADING) and TIMESPAN_HEADING in PROGRAM_APPENDIX_HEADINGS
+    assert "集中在 2026-03 至 2026-04，占有发布时间的 10 条里的 90%" in block
+    assert timespan_block({}) == ""

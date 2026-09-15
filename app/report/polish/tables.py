@@ -194,6 +194,17 @@ def _with_extra(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def thread_key(row: Mapping[str, Any]) -> str:
+    """这条证据属于哪个帖子：评论认父帖链接，帖子认自己。§RPT-4 C-10。
+
+    09-14 评审实测：情感陪伴 15 条主要出自 3 个帖子的评论区，S08/S12/S16/S19/S21 同一个视频——
+    按条数读会以为是十几位独立用户在说。
+    """
+    if str(row.get("kind") or "post") == "comment" and row.get("parent_permalink"):
+        return str(row.get("parent_permalink"))
+    return str(row.get("permalink") or row.get("id") or "")
+
+
 def _platform_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_platform: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -204,13 +215,19 @@ def _platform_mix(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         out.append({
             "平台": platform, "采集条数": len(group),
             "其中评论": sum(1 for r in group if str(r.get("kind") or "post") == "comment"),
+            # §RPT-4 C-10：同一帖子下的多条评论算一个帖子。
+            "独立帖子数": len({thread_key(r) for r in group}),
             "被引条数": len(cited),
+            "被引来自帖子数": len({thread_key(r) for r in cited}),
             "被引占比": round(len(cited) / len(group), 4) if group else 0.0,
             "marks": _marks(cited),
         })
-    return _table("platform_mix", "各平台采集量与被引量对照", 
-                  ("平台", "采集条数", "其中评论", "被引条数", "被引占比"), out,
-                  n=len(rows), basis="按证据的来源平台分组计数；被引 = 进了引用池的条数。",
+    return _table("platform_mix", "各平台采集量与被引量对照",
+                  ("平台", "采集条数", "其中评论", "独立帖子数", "被引条数", "被引来自帖子数", "被引占比"),
+                  out,
+                  n=len(rows), basis="按证据的来源平台分组计数；被引 = 进了引用池的条数。"
+                                     "独立帖子数把同一帖子下的多条评论算作一个帖子（评论按所挂父帖认），"
+                                     "条数远大于帖子数说明声音集中在少数几个帖子的评论区，不是那么多独立话题。",
                   coverage={"评级覆盖": sum(1 for r in rows if r.get("grade")), "总条数": len(rows)})
 
 
@@ -477,26 +494,59 @@ def coding_entity_roles(plan: Mapping[str, Any],
     return out
 
 
+def collection_platforms(plan: Mapping[str, Any]) -> dict[str, list[str]]:
+    """实体 canonical → 计划里为它安排了采集的平台（源名，去重升序）。§RPT-4 C-5。
+
+    读 `plan.goals[].agents[]` 的 `entity` 与 `capability.sources`（与 `chapter_rows` 同一处读法）；
+    `entity` 写的是叫法时按 `_entity_aliases` 归到 canonical。
+    """
+    canonical_of = {name: canonical for canonical, names in _entity_aliases(plan).items()
+                    for name in names}
+    found: dict[str, set[str]] = defaultdict(set)
+    for goal in plan.get("goals") or []:
+        if not isinstance(goal, Mapping):
+            continue
+        for agent in goal.get("agents") or []:
+            if not isinstance(agent, Mapping) or not agent.get("entity"):
+                continue
+            capability = agent.get("capability") if isinstance(agent.get("capability"), Mapping) else {}
+            entity = str(agent["entity"])
+            found[canonical_of.get(entity, entity)].update(
+                str(x) for x in capability.get("sources") or [] if x)
+    return {k: sorted(v) for k, v in found.items()}
+
+
 def _entity_mentions(rows: Sequence[Mapping[str, Any]], claims: Sequence[Mapping[str, Any]],
                      plan: Mapping[str, Any]) -> dict[str, Any]:
     aliases = _entity_aliases(plan)
+    platforms = collection_platforms(plan)
     texts = [(row, _text_of(row)) for row in rows]
     out = []
     for canonical, names in aliases.items():
         hit = [row for row, text in texts if any(name in text for name in names)]
         cited = [row for row in hit if row.get("citation_no") is not None]
         out.append({
-            "实体": canonical, "叫法": "/".join(names[:4]), "提及条数": len(hit),
+            "实体": canonical, "叫法": "/".join(names[:4]),
+            "采集平台数": len(platforms.get(canonical, [])),
+            "提及条数": len(hit),
             "其中被引": len(cited),
             "主张命中": sum(1 for c in claims
                         if any(name in str(c.get("text") or "") for name in names)),
             "marks": _marks(cited),
         })
     out.sort(key=lambda r: (-r["提及条数"], r["实体"]))
+    # §RPT-4 C-5：09-14 评审实测「豆包提及量约为 Kimi、DeepSeek 两倍」被写进「对投资与分析」
+    # 当心智占位证据——豆包搜了四个平台、另两家只搜了小红书，提及量是分配出来的。
+    counts = {r["实体"]: r["采集平台数"] for r in out}
+    uneven = len(set(counts.values())) > 1
+    spread = " / ".join(f"{name} {n}" for name, n in counts.items())
+    basis = ("在证据标题+摘要+评论正文上做叫法字符串命中；同条证据命中多个实体则各计一次。"
+             + (f"各实体安排采集的平台数不同（{spread}），**提及量不可横向比较**，"
+                "不能拿来判断谁的声量或心智占位更高。" if uneven else ""))
     return _table("entity_mentions", "各实体的提及量与被引量对照",
-                  ("实体", "叫法", "提及条数", "其中被引", "主张命中"), out,
+                  ("实体", "叫法", "采集平台数", "提及条数", "其中被引", "主张命中"), out,
                   n=len(rows),
-                  basis="在证据标题+摘要+评论正文上做叫法字符串命中；同条证据命中多个实体则各计一次。",
+                  basis=basis,
                   coverage={"参与匹配的证据": len(rows), "实体数": len(aliases)})
 
 
@@ -546,11 +596,44 @@ def _timeline(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
         out.insert(0, {"月份": f"更早（{earlier[0]}–{earlier[-1]}）", "证据条数": len(old_rows),
                        "其中被引": sum(1 for r in old_rows if r.get("citation_no") is not None),
                        "marks": _marks(old_rows)})
+    window = concentration_window({month: len(group) for month, group in by_month.items()})
     return _table("timeline", "证据发布时间分布（按月）",
                   ("月份", "证据条数", "其中被引"), out, n=len(dated),
                   basis="按证据的发布时间分月，只列最近 12 个有数据的月份，"
                         "更早的合并成一行；索引源常拿不到发布时间，未标注的不计入。",
-                  coverage={"有发布时间": len(dated), "总条数": len(rows)})
+                  coverage={"有发布时间": len(dated), "总条数": len(rows),
+                            # §RPT-4 C-14：附录那句「集中在 A 至 B，占 N%」的数就挂在这里。
+                            **({"集中区间": window} if window else {})})
+
+
+#: C-14：「集中在」按覆盖多少算。八成——少于这个说「集中」就言过其实了。
+CONCENTRATION_SHARE = 0.8
+
+
+def concentration_window(by_month: Mapping[str, int]) -> dict[str, Any] | None:
+    """有数据的月份里，最短的一段连续月份（按有数据的月份排序）覆盖 ≥ 八成证据。
+
+    同样短取占比更高的。返回 `{"起", "止", "条数", "占比"}`；没数据返回 None。
+    """
+    months = sorted(m for m, n in by_month.items() if n)
+    total = sum(by_month[m] for m in months)
+    if not total:
+        return None
+    best: tuple[int, float, int, int] | None = None      # (跨度, -占比, 起, 止)
+    for start in range(len(months)):
+        running = 0
+        for end in range(start, len(months)):
+            running += by_month[months[end]]
+            if running / total >= CONCENTRATION_SHARE:
+                key = (end - start, -running / total, start, end)
+                if best is None or key < best:
+                    best = key
+                break
+    assert best is not None
+    _, _, start, end = best
+    count = sum(by_month[m] for m in months[start:end + 1])
+    return {"起": months[start], "止": months[end], "条数": count,
+            "占比": round(count / total, 4)}
 
 
 #: §RULE-1 货 7：矩阵一行最多给几个角标。给多少，写手就往每个格子里抄多少。
@@ -771,6 +854,13 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     contrast_by_mark = {}
     question = str(plan.get("research_question") or report.get("research_question") or "")
     platform_by_mark = {int(r["citation_no"]): r.get("platform") for r in cited}
+    # §RPT-4 C-10：角标 → 同一帖子下的其余池内角标。
+    marks_by_thread: dict[str, list[int]] = defaultdict(list)
+    for r in cited:
+        marks_by_thread[thread_key(r)].append(int(r["citation_no"]))
+    same_thread_by_mark = {int(r["citation_no"]): [_mark(n) for n in sorted(marks_by_thread[thread_key(r)])
+                                                   if n != int(r["citation_no"])]
+                           for r in cited}
     for r in cited:
         entity = entity_by_agent.get(str(r.get("agent_name") or ""), "")
         contrast_by_mark[int(r["citation_no"])] = (
@@ -819,7 +909,8 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "offtopic": offtopic_reason(
                          {"platform": platform_by_mark.get(int(s["citation_no"]))},
                          contrast=contrast_by_mark.get(int(s["citation_no"])),
-                         question=question)}
+                         question=question),
+                     "same_thread": same_thread_by_mark.get(int(s["citation_no"])) or []}
                     for s in (view.get("sources") or []) if s.get("citation_no") is not None],
         "tables": tables,
     }
