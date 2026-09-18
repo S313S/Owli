@@ -251,7 +251,9 @@ CLAIMS = [
      "text": "小红书评论区有用户明确反馈 Windows 端豆包输入法起步晚、体验落后于微信输入法。"},
     {"verdict": "SINGLE", "firsthand": ["ev-2"], "evidence_ids": ["ev-2"],
      "text": "微博有用户自述每天和豆包打视频电话、称「要疯了」。"},
-    # 海外平台 / 对照实体：§RPT-4 有意加的旁证闸，本块照它办。⛔ 不绕过。
+    # 对照实体：§RPT-4 有意加的那道闸，本块照它办。⛔ 不绕过。
+    # ⚠️ §SEL-4 起**海外平台不再被这道闸挡**（`ev-1` 是 hacker_news，现在收得进来）——
+    # 这一条锁的正是被替换掉的旧语义，改了不是放水，是口径翻案（用户 09-18 拍乙）。
     {"verdict": "SINGLE", "firsthand": ["ev-1"], "evidence_ids": ["ev-1"],
      "text": "Reddit 玩家因游戏素材遗留豆包水印而抱怨开发者偷懒。"},
     {"verdict": "SINGLE", "firsthand": ["ev-4"], "evidence_ids": ["ev-4"],
@@ -268,11 +270,18 @@ CLAIMS = [
 ]
 
 
-def test_货4_线索只收单源亲历非旁证_且不要求进引用池() -> None:
-    clues = _clues(CLAIMS, CLAIM_ROWS, offtopic_ids={"ev-1", "ev-4"})
-    assert [c["mark"] for c in clues] == [None, "S27"], clues
+def test_货4_线索只收单源亲历非对照实体_且不要求进引用池() -> None:
+    """⚠️ §SEL-4 改了这一条的第 3 条筛法：改前排除「对照实体 + 海外平台」，
+    改后**只排除对照实体**。`ev-1` 是 hacker_news 的海外证据，改前被筛掉、改后收进来。
+    """
+    clues = _clues(CLAIMS, CLAIM_ROWS, contrast_ids={"ev-4"})
+    assert [c["mark"] for c in clues] == [None, "S27", "S11"], clues
     assert "Windows 端" in clues[0]["text"] and clues[0]["platform"] == "小红书"
     assert "要疯了" in clues[1]["text"]
+    # 海外的那条确实是靠放行进来的，不是靠别的筛法漏进来的。
+    assert "Reddit" in clues[2]["text"] and clues[2]["platform"] == "Hacker News"
+    # ⛔ 对照实体那一支一字未动：DeepSeek 那条照旧进不来。
+    assert not any("DeepSeek" in c["text"] for c in clues)
     # 按主张在库里的登记次序，⛔ 不按字数（最长的那句往往是最啰嗦的那句）。
     assert clues[0]["text"].startswith("小红书评论区有用户明确反馈")
 

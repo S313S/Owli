@@ -23,7 +23,7 @@ from app.orchestrator.sectioning import (SectionWallClockExpired,  # 只 import�
 from app.report.polish.sharding import (FINDING_LINE, Finding, merge_shards, parse_findings,
                                         shard_paths, should_shard)
 from app.report.polish.skills import Template, get_template, shared_rules
-from app.report.polish.tables import collect_inputs
+from app.report.polish.tables import OVERSEAS_COLUMN, collect_inputs
 
 AGENT_ID = "report-polisher"
 AGENT_KIND = "report_writing"
@@ -1378,10 +1378,15 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     # §RPT-3 货 2：引得了的评论行（A/B/C 级，§RPT-5 起含 C）在末尾多一栏「原话：…」
     # （`tables.quote_prefix`，程序截取）。
     # 写手按**评论内容**归题、可直接从这一栏摘原声；没有这一栏的行照旧只有标题。
-    # §RPT-4 货 3（C-3）：与题面对象/地域对不上的源多一栏「旁证·对照实体 / 旁证·海外平台」。
+    # §RPT-4 货 3（C-3）：讲别家产品的源多一栏「旁证·对照实体」——这一支照旧不进关键发现。
+    # §SEL-4（用户 09-18 拍乙）：来自海外平台的源另有一栏「海外社区」，⛔ 栏名里**没有
+    # 「旁证」二字**——它已经放行，可以进关键发现与建议，这一栏是在告诉写手
+    # 「引它的时候必须让读者看得出这是海外的声音」，不是在拦它。两栏字面必须分得开，
+    # 写手只读得到这一行字，栏名含糊等于规则没下达。
     pool = "\n".join(
         f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
         + (f"｜旁证·{s['offtopic']}" if s.get("offtopic") else "")
+        + (f"｜{OVERSEAS_COLUMN}" if s.get("overseas") else "")
         # §RPT-4 C-10：同一帖子下的别的池内评论，写手引用时并排标注、不当成独立用户。
         + (f"｜同帖：{'、'.join(s['same_thread'])}" if s.get("same_thread") else "")
         + f"｜{s.get('title') or ''}｜{s.get('url') or ''}"

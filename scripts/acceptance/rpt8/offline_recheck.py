@@ -119,26 +119,28 @@ def main(argv: list[str]) -> int:
                    for r in con.execute(
                        "select id, citation_no, platform, agent_name from evidence "
                        "where report_id=?", (research_id,))]
-        # 旁证判定要按**证据行**算（线索不要求进池，按角标那份覆盖不到没进池的），
-        # 判法与 `sources[].offtopic` 同一个 `offtopic_reason`。
-        from app.report.polish.tables import offtopic_reason
+        # 对照实体的判定要按**证据行**算（线索不要求进池，按角标那份覆盖不到没进池的），
+        # 判法与 `sources[].offtopic` 同一个 `is_contrast_source`。
+        # ⚠️ §SEL-4：这段是 `tables.build_tables` 里那几行的**镜像**，它决定「传谁进 `_clues`」。
+        # 生产侧 09-18 起只筛对照实体（海外放行），这边**必须同步**——只改生产侧不改这里，
+        # 这把尺子量出来的还是旧筛法的条数，会把「海外进来了」量成「没进来」。
+        from app.report.polish.tables import is_contrast_source
 
         subject_names = set(data.get("subjects") or [])
         entity_of = {c["agent_id"]: c.get("entity") for c in data.get("chapters") or []}
-        question = str(data.get("research_question") or "")
-        offtopic_ids = set()
+        # ⚠️ 题面不再参与这里的判定：只有「是不是海外」才看题面地域，而海外已放行。
+        contrast_ids = set()
         for row in rows_db:
             entity = entity_of.get(str(row.get("agent_name") or ""), "")
-            if offtopic_reason({"platform": row.get("platform")},
-                               contrast=None if not entity else entity not in subject_names,
-                               question=question):
-                offtopic_ids.add(str(row["id"]))
-        clues = _clues(claims, rows_db, offtopic_ids)
+            if is_contrast_source(
+                    contrast=None if not entity else entity not in subject_names):
+                contrast_ids.add(str(row["id"]))
+        clues = _clues(claims, rows_db, contrast_ids)
         body_marks = {int(n) for n in __import__("re").findall(
             r"\[S(\d+)\]", md.split("## 信息源清单")[0])}
         print(f"{BEFORE}：`tables.json` 里连 clues 这个键都没有"
               f"（实测 {'有' if 'clues' in data else '没有'}），正文一条线索都没出现。")
-        print(f"{AFTER}：库里 {len(claims)} 条主张，按「单源 + 亲历 + 不是旁证 + 不是自标噪声」"
+        print(f"{AFTER}：库里 {len(claims)} 条主张，按「单源 + 亲历 + 不是对照实体 + 不是自标噪声」"
               f"筛出 {len(clues)} 条候选（⛔ 不要求进引用池：用户点名的那五条信号"
               f"citation_no 全是 None），呈现层剔除正文引过的再封顶：")
         print(clues_block(clues, body_marks) or "  （正文都引过了，整块不出）")

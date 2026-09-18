@@ -703,22 +703,34 @@ def _crossref_by_mark(cited: Sequence[Mapping[str, Any]],
 OVERSEAS_PLATFORMS = frozenset({"reddit", "x", "hacker_news", "product_hunt"})
 #: 题面里表示「只看国内」的词。
 DOMESTIC_MARKERS = ("国内", "中国用户", "国人")
+#: 池里那两栏的字面。§SEL-4：**只有对照实体那一栏还叫「旁证」**——海外放行之后
+#: 再管它叫旁证就是名不副实，写手读到「旁证」二字会照旧把它挡在关键发现外面。
+CONTRAST_COLUMN = "旁证·对照实体"
+OVERSEAS_COLUMN = "海外社区"
 
 
-def offtopic_reason(row: Mapping[str, Any], *, contrast: bool | None,
-                    question: str) -> str | None:
-    """这条证据与题面的对象或地域对不上时，返回「对照实体」/「海外平台」，否则 None。
+def is_contrast_source(*, contrast: bool | None) -> bool:
+    """这条证据说的是**对照实体**（不是研究对象本身）吗？
 
-    09-14 评审实测：题面「国内大家对豆包的看法」，关键发现第 3 条与唯一的具体建议都是
-    Reddit 一个帖子的水印事件，还给了 A 级——五维评分不管「切不切题」。⛔ 评分尺子不动，
-    这里只给写手打个标（信息源池里带「旁证」栏），规矩写在模板里：可以成节，不进摘要关键发现。
+    ⛔ 这一支照旧不进关键发现与建议。09-14 评审加的那道闸在这一支上**原封不动**：
+    题面问「国内大家对豆包的看法」，一条讲 DeepSeek 的评论回答的不是这个问题。
+    `contrast is None` = 这条证据压根没登记实体，⛔ 不当对照（不知道 ≠ 是别家）。
     """
-    if contrast:
-        return "对照实体"
-    if (any(marker in str(question or "") for marker in DOMESTIC_MARKERS)
-            and str(row.get("platform") or "") in OVERSEAS_PLATFORMS):
-        return "海外平台"
-    return None
+    return bool(contrast)
+
+
+def is_overseas_source(row: Mapping[str, Any], *, question: str) -> bool:
+    """题面只问国内，而这条证据来自海外平台吗？
+
+    ✅ **2026-09-18 用户拍乙：这一支放行**——海外平台的证据可以进关键发现与建议，
+    条件是每次用到都得让读者看得出这是海外社区的声音（程序守在验收尺子 ㉑，
+    规则写在 `_shared/writing-rules.md §5.7`）。
+    ⇒ §RPT-4 货 3「与题面对不上的证据不进摘要关键发现」的结论**在这一支上退场**，
+    ⛔ 别再拿它当闸；它现在只是一个**要标注的出身**，不是一道门。
+    ⚠️ 判定本身一个字没变（还是「题面带国内」× 「平台在名单里」），变的是待遇。
+    """
+    return (any(marker in str(question or "") for marker in DOMESTIC_MARKERS)
+            and str(row.get("platform") or "") in OVERSEAS_PLATFORMS)
 
 
 #: 全部可用表名；SKILL.md 的 `tables:` 只能从这里挑（加载器会校验）。
@@ -772,7 +784,7 @@ _CLUE_NOISE = ("噪声", "不采信", "无直接关联", "与豆包无关", "语
 
 
 def _clues(claims: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]],
-           offtopic_ids: Iterable[str]) -> list[dict[str, Any]]:
+           contrast_ids: Iterable[str]) -> list[dict[str, Any]]:
     """§RPT-8 货 4②：值得核的**单条**信号。
 
     用户 09-18 读第三轮稿抓到的：库里躺着「Windows 端输入法起步晚」「每天打视频电话
@@ -783,9 +795,16 @@ def _clues(claims: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]
 
     1. `verdict == "SINGLE"`：正因为它是单源才进这里——这一节收的就是没被印证的信号；
     2. `firsthand`：亲历者自己说的，转述与二手评论不进（`claims[].firsthand`）；
-    3. 不是旁证：对照实体与海外平台的证据不进。判旁证的是 `offtopic_reason`
-       ——§RPT-4 有意加的那道闸，本块**照它办，⛔ 不绕过**（`offtopic_ids` 由
+    3. 不是对照实体：讲**别家产品**的证据不进。判它的是 `is_contrast_source`
+       ——§RPT-4 有意加的那道闸，本块**照它办，⛔ 不绕过**（`contrast_ids` 由
        `build_tables` 按同一个函数算好传进来，那里才有 agent → 实体的映射）；
+       ⚠️ **§SEL-4 改的正是这一条**：改前写的是「对照实体与海外平台都不进」，
+       09-18 用户拍乙放行海外之后，**海外平台的证据照收**——线索块收的就是
+       「没被印证但很具体」的单条信号，海外用户自己说的那一句同样算数，
+       它的出身由呈现层的出处栏（平台名）交代给读者。⛔ 别再拿 §RPT-4 挡它。
+       另外三条筛法（`SINGLE`、`firsthand`、`_CLUE_NOISE`）**一字未动**：
+       它们问的是「这条信号硬不硬、是不是当事人说的、是不是登记备注」，
+       跟证据来自哪个地域没有一点关系，所以放行海外不会动它们的判域。
     4. 自己写着「噪声 / 不采信 / 无直接关联」的不进（`_CLUE_NOISE`）。
 
     ⚠️ **不要求进引用池。** 这是本包实测改掉的一条：用户点名的那五条信号，
@@ -802,7 +821,7 @@ def _clues(claims: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]
     # 渠道名走同一张表（`chapter_rows` 也是从这里取），⛔ 不另写一份中文名映射。
     from app.platforms import PLATFORMS
 
-    skip = {str(x) for x in offtopic_ids or ()}
+    skip = {str(x) for x in contrast_ids or ()}
     by_id = {str(r.get("id")): r for r in rows if r.get("id")}
     picked: dict[str, dict[str, Any]] = {}
     texts: set[str] = set()
@@ -941,20 +960,21 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         entity = entity_by_agent.get(str(r.get("agent_name") or ""), "")
         contrast_by_mark[int(r["citation_no"])] = (
             None if not entity else entity not in subject_names)
-    # §RPT-8 货 4②：哪些证据是旁证（对照实体 / 海外平台）。判法与 `sources[].offtopic`
-    # **同一个** `offtopic_reason`，只是这里按证据行算——线索不要求进引用池，
+    # §RPT-8 货 4②：哪些证据是**对照实体**的。判法与 `sources[].offtopic`
+    # **同一个** `is_contrast_source`，只是这里按证据行算——线索不要求进引用池，
     # 按角标算的那一份不够用（没进池的证据根本没有角标）。
-    offtopic_ids = set()
+    # ⚠️ §SEL-4：这里**只筛对照实体**。海外平台的证据 09-18 起放行，线索块照收
+    # （筛掉它等于把海外用户自己说的那句具体信号丢了，而用户拍的正是「放进来」）。
+    contrast_ids = set()
     for row in rows:
         row_entity = entity_by_agent.get(str(row.get("agent_name") or ""), "")
-        if offtopic_reason({"platform": row.get("platform")},
-                           contrast=None if not row_entity else row_entity not in subject_names,
-                           question=question):
-            offtopic_ids.add(str(row.get("id")))
+        if is_contrast_source(
+                contrast=None if not row_entity else row_entity not in subject_names):
+            contrast_ids.add(str(row.get("id")))
     return {
         # §RPT-8 货 4②：单人线索。放在返回值里而不是算进某张表——它不是一张聚合表，
         # 是几条**具体的单条信号**，程序照抄主张原文挂附录。
-        "clues": _clues(claims, rows, offtopic_ids),
+        "clues": _clues(claims, rows, contrast_ids),
         "research_id": report.get("id"),
         "research_question": plan.get("research_question") or report.get("research_question"),
         "title": view.get("title") or report.get("title"),
@@ -994,10 +1014,15 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                      "quote_prefix": quote_prefix_by_mark.get(int(s["citation_no"])),
                      "contrast": contrast_by_mark.get(int(s["citation_no"])),
                      # §RPT-4 货 3：平台与「旁证」标。写手池里带出来，验收软检按它判摘要跑题。
+                     # ⚠️ §SEL-4 起 `offtopic` **只剩对照实体这一支**（语义收窄，不是加字段）：
+                     # 海外挪到下面那个 `overseas` 布尔位，因为两支的待遇 09-18 起不一样了
+                     # ——对照实体仍不进关键发现，海外进得了但必须标明。两支揉在一个字符串里，
+                     # 下游只会问「它旁证吗」，问不出「它海外吗」。
                      "platform": platform_by_mark.get(int(s["citation_no"])),
-                     "offtopic": offtopic_reason(
+                     "offtopic": ("对照实体" if is_contrast_source(
+                         contrast=contrast_by_mark.get(int(s["citation_no"]))) else None),
+                     "overseas": is_overseas_source(
                          {"platform": platform_by_mark.get(int(s["citation_no"]))},
-                         contrast=contrast_by_mark.get(int(s["citation_no"])),
                          question=question),
                      "same_thread": same_thread_by_mark.get(int(s["citation_no"])) or [],
                      "raw_title": raw_title_by_mark.get(int(s["citation_no"]))}
