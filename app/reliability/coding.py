@@ -1528,11 +1528,59 @@ def _row_marks(items: Iterable[Mapping[str, Any]], marks: Mapping[str, int]) -> 
     )]
 
 
+#: §SEL-4 货 5：按地域拆开时两侧的名字。⚠️「海外社区」与写手池里那一栏、
+#: 与共用规则 §5.7.2 **必须是同一个词**——三处各起一个名字，读者会以为是三样东西。
+LOCALE_DOMESTIC = "国内"
+LOCALE_OVERSEAS = "海外社区"
+#: coverage 里那一份按地域拆开的态度合计挂在这个键上。
+ATTITUDE_BY_LOCALE = "态度合计·按地域"
+
+
+def _attitude_by_locale(coded: Sequence[Mapping[str, Any]],
+                        question: str) -> dict[str, Any]:
+    """§SEL-4 货 5：把四档态度合计按「国内 / 海外社区」拆成两侧。
+
+    题面不是只问国内（`question` 空，或不含「国内」一类词）⇒ 返回 `{}`，**不拆**：
+    题面本来就问全球时，分不分地域对读者没有意义，硬拆反而制造一个假的分界。
+
+    ⚠️ 不变量（摘要那行照这份数写，尺子 ④ 也按它核）：
+    **每一侧的四数之和 = 该侧条数，两侧条数之和 = 总条数。** 一条 UGC 只可能落在
+    一侧（`is_overseas_source` 是非此即彼的判定），所以这个不变量天然成立——
+    但它是这一货的判据，所以用例里钉死，⛔ 不靠「应该成立」。
+    """
+    # 延迟 import，理由同 `build_tables` 里那处：⛔ 不把两层的依赖拉成环。
+    from app.report.polish.tables import is_overseas_source
+
+    if not _asks_domestic_only(question):
+        return {}
+    sides: dict[str, list[Mapping[str, Any]]] = {LOCALE_DOMESTIC: [], LOCALE_OVERSEAS: []}
+    for item in coded:
+        side = (LOCALE_OVERSEAS
+                if is_overseas_source({"platform": item.get("platform")}, question=question)
+                else LOCALE_DOMESTIC)
+        sides[side].append(item)
+    return {ATTITUDE_BY_LOCALE: {
+        name: {"条数": len(items),
+               **{attitude: sum(1 for item in items
+                                if item["coding"]["attitude"] == attitude)
+                  for attitude in ATTITUDES}}
+        for name, items in sides.items()}}
+
+
+def _asks_domestic_only(question: str) -> bool:
+    """题面是不是只问国内。判法与 `tables.is_overseas_source` **同一张词表**，
+    ⛔ 不在这里另抄一份「国内」的说法——两处词表迟早有一处漏词，而漏词是静默的。"""
+    from app.report.polish.tables import DOMESTIC_MARKERS
+
+    return any(marker in str(question or "") for marker in DOMESTIC_MARKERS)
+
+
 def polish_tables(
     rows: Iterable[Mapping[str, Any]], *, citations: Mapping[str, int] | None = None,
     total_evidence: int | None = None, entity_names: Sequence[str] | None = None,
     grade_by_mark: Mapping[int, Any] | None = None,
     entity_roles: Mapping[str, Mapping[str, Any]] | None = None,
+    question: str = "",
 ) -> dict[str, Any]:
     """把 `coding_tables` 的聚合结果包成正式稿要的三张标准壳表。
 
@@ -1547,6 +1595,14 @@ def polish_tables(
     ⛔ 闸不下沉到 `coded_rows` / `coding_tables`：那两个是「已编码的行」的事实读数，
     备料与离线核数要看全量；这里才是出给客户的那张表，分母归这里管。
     剔掉的条数**不静默**——写进 `coverage["只有题面无正文条数"]` 与各表 `basis`。
+
+    §SEL-4 货 5（用户 2026-09-18 拍乙）：题面只问国内时，`question` 一给，
+    `scenario_attitude` 的态度合计**按地域拆成两侧**（`coverage["态度合计·按地域"]`）。
+    ⚠️ 这不是新口径，是那条拍板在统计量上的落法：拍板说「海外可以进正文，
+    但必须让读者看得出是海外的声音」，而一个合并成一个数的统计量**根本标不了**——
+    第三轮真稿摘要那句「已编码评论 90 条：正 27 / 负 17 …」里有 19 条是 Reddit，
+    读者读到的却是「国内大家」。⛔ 不走「把海外剔出去」那条路（丢数据）。
+    不给 `question`，或题面本来就不是只问国内 ⇒ 不拆，行为一字不差。
     """
 
     from app.report.polish.tables import ENTITY_CONTRAST, ENTITY_SUBJECT, ENTITY_UNNAMED
@@ -1760,9 +1816,12 @@ def polish_tables(
             ),
             # §RPT-4 货 2（C-7）：四档态度合计。执行摘要那行「正 a / 负 b …」就是这几个数，
             # 挂在表上才进得了尺子 ④ 的白名单——程序注入的数也得有出处。
+            # §SEL-4 货 5：题面只问国内时再多挂一份**按地域拆开**的，摘要那行照它写两侧。
+            # ⛔ 数一律现算，⛔ 不写死——分母会变（§RPT-9 刚把空正文的行踢出去，90→88）。
             coverage={**coverage, "态度合计": {
                 attitude: sum(1 for item in coded if item["coding"]["attitude"] == attitude)
-                for attitude in ATTITUDES}}),
+                for attitude in ATTITUDES},
+                **_attitude_by_locale(coded, question)}),
         # §RPT-4 货 2：对照实体的评论只作参照，挂附录（run.contrast_reference_table），
         # 写手看不见——三份 SKILL 的 `tables:` 行不点它。一条都没有就不出。
         **({} if not contrast_items else {"contrast_attitude": _shell(

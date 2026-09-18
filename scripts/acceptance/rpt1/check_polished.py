@@ -819,7 +819,11 @@ CHECKS = ("① 无内部词", "② 一级标题齐", "③ 角标不越池", "④
           # ⚠️ 它们在 2026-09-18 那份第三轮稿上判红是**预期**：那正是用户读出来的三处
           # 毛病（整篇一刀切判低、标题比证据大、建议超出证据），是下一版稿要修的内容，
           # 不是本包的红。前 ⑰ 条对那份稿仍全过。
-          "⑱ 把握度按条分层", "⑲ 标题不得大过证据", "⑳ 建议与证据强度匹配")
+          "⑱ 把握度按条分层", "⑲ 标题不得大过证据", "⑳ 建议与证据强度匹配",
+          # §SEL-4（用户 2026-09-18 拍乙）：海外源放行进关键发现与建议，**代价是这道硬闸**。
+          # ⛔ 它不是软检：放行之后没人标出身，读者会把海外网友的话读成国内用户的声音，
+          # 那正是 09-14 那次事故的形状（关键发现拿 Reddit 一个水印帖当结论）。
+          "㉑ 引了海外就得标明")
 #: 判黄的那些：报出来给人看，但不掀掉这一格。红一格 = 写手整节重写（实测 60–80 分钟），
 #: 文风密度这种事不值当付这个钱；调度 09-07 拍的也是「>2 判黄」。
 WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅",
@@ -828,7 +832,9 @@ WARNINGS = ("⒜ 限定句密度", "⒝ 篇幅",
             "⒞ 摘要关键发现跑题", "⒟ 两条关键发现角标重合", "⒠ 同一张表正文重复", "⒡ 机器话残留")
 
 
-#: ⒞：一条关键发现的角标里旁证（对照实体 / 海外平台）占到这个比例就判黄。
+#: ⒞：一条关键发现的角标里**对照实体**占到这个比例就判黄。
+#: ⚠️ §SEL-4 起判域**只剩对照实体**：海外 09-18 放行进关键发现，再按它判跑题就是拿
+#: 一条已作废的规矩判红。海外那一支改由硬判据 ㉑ 管（要的不是「别引」，是「引了要标明」）。
 OFFTOPIC_SHARE = 0.8
 #: ⒟：两条关键发现的角标集合，重合数 / 较小那条的角标数 ≥ 这个比例就判黄。
 MARK_OVERLAP = 2 / 3
@@ -847,12 +853,152 @@ def summary_findings(markdown: str) -> list[tuple[str, set[int]]]:
 
 
 def offtopic_findings(markdown: str, offtopic: set[int]) -> list[str]:
-    """⒞ 关键发现的角标大半是旁证——题面问国内看研究对象，它答的是别处或别家。"""
+    """⒞ 关键发现的角标大半是**对照实体**——题面问的是研究对象，它答的是别家。"""
     problems = []
     for index, (line, marks) in enumerate(summary_findings(markdown), start=1):
         if marks and len(marks & offtopic) / len(marks) >= OFFTOPIC_SHARE:
             problems.append(f"第 {index} 条关键发现的角标 {len(marks & offtopic)}/{len(marks)} "
-                            f"是旁证（对照实体或海外平台）：{line[:40]}")
+                            f"是对照实体：{line[:40]}")
+    return problems
+
+
+# ---------------------------------------------------------------- ㉑ 引了海外就得标明
+
+#: 认法之一：**地域说法**。读者看到这些词就知道说话的人不在国内。
+#: ⚠️ 单独一张词表就是「孤零零的关键词」，本项目在词面尺子上栽过多次，所以它
+#: **不是唯一认法**——下面那张平台名表是另一条独立的路，命中任一条即算标明。
+OVERSEAS_LOCALE_WORDS = ("海外", "国外", "境外", "外网", "英文社区", "英文论坛",
+                         "英文圈", "国际社区", "欧美", "非国内")
+#: 认法之二：**点名平台**。中文读者看到「Reddit」「Hacker News」就知道这是海外社区，
+#: 不必再说一遍「海外」，所以点名平台**单独成立**（与地域说法是「或」不是「且」：
+#: 要求两样都写会逼出「海外社区 Reddit 上的海外用户」这种车轱辘话）。
+#:
+#: ⛔ **`x` 不在这张表里，这是有意的。** X（推特）上大量是中文帖——第三轮真稿池里
+#: S23「doubao真有这么好用吗」、S28「apple输入法你再这么烂我真得换doubao了」都是中文。
+#: 写「X 上有用户说……」，读者完全看不出这是海外来源；而且「X」是单字母，
+#: 拿它做词面匹配会把「X 轴」「产品 X」全认成命中（假绿）。
+#: ⇒ 引了 X 的条目**必须用地域说法**，光点名平台不算标明。
+OVERSEAS_PLATFORM_WORDS = {
+    "reddit": ("Reddit", "reddit", "r/"),
+    "hacker_news": ("Hacker News", "HackerNews", "Hacker news", "hacker news"),
+    "product_hunt": ("Product Hunt", "ProductHunt", "Product hunt"),
+    "x": (),                       # ⛔ 故意留空，理由见上
+}
+#: 整条全是海外时的加码要求：还得写死适用范围。两类词都要有，缺一不可——
+#: 只说「只有一条」不够（没说是海外），只说「海外」也不够（没说不代表国内）。
+OVERSEAS_SCOPE_WORDS = ("只反映", "仅反映", "只代表", "仅代表", "只见于", "仅见于",
+                        "不代表国内", "不能代表国内", "不等于国内", "不能推及国内",
+                        "国内语料", "国内未", "国内没有", "国内暂无", "未见国内",
+                        "本轮国内", "没有对应", "无对应")
+
+
+def _overseas_marks(sources: Sequence[Mapping[str, Any]]) -> dict[int, str]:
+    """角标 → 平台（只收海外那些）。⚠️ 认两种产物形态，⛔ 不猜。
+
+    - **新产物**（§SEL-4 起）：`sources[].overseas` 是布尔位，`offtopic` 只剩对照实体。
+    - **老产物**（09-18 之前）：两支揉在 `offtopic` 一个字符串里，字面是
+      「海外平台」/「对照实体」。按**字面**拆回两支，⛔ 不按真值一把抓——
+      一把抓会把老稿里的对照实体也当成海外，这道闸就会对着 DeepSeek 的角标
+      要求写「这是海外社区的声音」（假红）。
+    """
+    got: dict[int, str] = {}
+    for source in sources or []:
+        mark = str(source.get("mark") or "")
+        if not mark.startswith("S") or not mark[1:].isdigit():
+            continue
+        overseas = source.get("overseas")
+        if overseas is None:                       # 老产物：只有那个揉在一起的字符串
+            overseas = str(source.get("offtopic") or "") == "海外平台"
+        if overseas:
+            got[int(mark[1:])] = str(source.get("platform") or "")
+    return got
+
+
+def _overseas_attributed(text: str, platforms: Sequence[str]) -> bool:
+    """这一条里，读者认得出「这是海外社区的声音」吗？两条独立认法命中任一即可。"""
+    if any(word in text for word in OVERSEAS_LOCALE_WORDS):
+        return True
+    return any(word in text
+               for platform in platforms
+               for word in OVERSEAS_PLATFORM_WORDS.get(platform, ()))
+
+
+def _judged_entries(markdown: str, template) -> list[tuple[str, str]]:
+    """㉑ 的判域：`(条目说明, 这一条的正文)`。三处，都是「一条结论」的粒度。
+
+    1. 开篇节里的编号关键发现行（与软检 ⒞ 同一份 `summary_findings` 的取法）；
+    2. 「关键发现」节里的每个二级小节（标题 + 它的正文，到下一个二级标题为止）；
+    3. 建议节里的每条编号建议——⚠️ **连降级区那几条一起判**
+       （`run.advice_entries(include_downgraded=True)`）。理由：标明出身与证据强不强
+       无关，读者读降级区那几条时同样有权知道依据来自海外。实测第三轮真稿里
+       **唯一**一条海外引用就落在降级区，按门禁那个判域整道闸一条都量不到 ⇒ 假绿。
+    """
+    from app.report.polish.run import advice_entries
+
+    bodies = _section_bodies(markdown)
+    judged: list[tuple[str, str]] = []
+    for index, (line, _marks) in enumerate(summary_findings(markdown), start=1):
+        judged.append((f"开篇节第 {index} 条关键发现", line))
+    section = next((n for n in template.sections if n == "关键发现"), None)
+    if section:
+        title, block = "", []
+        for line in bodies.get(section, []):
+            if line.startswith("## "):
+                if title:
+                    judged.append((f"「关键发现」小节「{title[:20]}」", "\n".join(block)))
+                title, block = line[3:].strip(), [line]
+            elif title:
+                block.append(line)
+        if title:
+            judged.append((f"「关键发现」小节「{title[:20]}」", "\n".join(block)))
+    for name in resolved_sections(markdown, template):
+        if name not in ADVICE_SECTIONS or name not in bodies:
+            continue
+        # ⚠️ `advice_entries` 会把第一条之前的空行攒成一个空条目（既有行为，
+        # 生产侧两道门禁对空条目本来就判不出词，看不出来）。这里要把条号写进判词给人读，
+        # 空条目占掉「第 1 条」会让人对不上稿子 ⇒ 只给**有正文的**条目编号。
+        entries = [entry for entry in advice_entries(bodies[name], include_downgraded=True)
+                   if any(line.strip() for line in entry)]
+        for index, entry in enumerate(entries, start=1):
+            judged.append((f"「{name}」第 {index} 条", "\n".join(entry)))
+    return judged
+
+
+def check_overseas_attributed(markdown: str, template,
+                              sources: Sequence[Mapping[str, Any]]) -> list[str]:
+    """㉑ 引了海外角标的那一条，必须让读者看得出这是海外社区的声音。
+
+    §SEL-4：用户 2026-09-18 拍乙，海外平台的证据放行进关键发现与建议，
+    **放行的条件就是这道闸**。⛔ 它不替代写手规则（`_shared/writing-rules.md §5.7.2`），
+    两边写的是同一件事——规则给写法，这里判到底写没写（§D-083：规则与闸各说各话，
+    两边都「对」而稿子被打回）。
+
+    判词两档：
+    - **掺了海外**（角标里有海外、也有国内）：这一条里要有地域说法，或点名了它引的
+      那个海外平台（`x` 除外，理由见 `OVERSEAS_PLATFORM_WORDS`）。
+    - **整条全是海外**：加码——还得写死适用范围（「只反映海外社区」「国内语料没有对应说法」
+      一类）。这是 09-14 那次事故的防线：一条关键发现全靠 Reddit 撑着，
+      读者会以为那是国内用户的声音。
+    """
+    overseas = _overseas_marks(sources)
+    if not overseas:
+        return []
+    problems = []
+    for label, text in _judged_entries(markdown, template):
+        marks = {int(n) for n in MARK.findall(text)}
+        hit = marks & set(overseas)
+        if not hit:
+            continue
+        platforms = sorted({overseas[n] for n in hit})
+        shown = "、".join(f"S{n:02d}" for n in sorted(hit))
+        if not _overseas_attributed(text, platforms):
+            problems.append(
+                f"{label}引了海外角标（{shown}，平台 {'/'.join(platforms)}）却没标明出身，"
+                f"读者会当成国内的声音：{text.strip()[:40]}")
+        elif hit == marks and not any(w in text for w in OVERSEAS_SCOPE_WORDS):
+            problems.append(
+                f"{label}的角标{shown}**全部**来自海外（{'/'.join(platforms)}），"
+                f"只标出身还不够，要写明这条只反映海外社区：{text.strip()[:40]}")
     return problems
 
 
@@ -972,6 +1118,9 @@ def run(md_path: Path, tables_path: Path, work_path: Path) -> dict[str, list[str
         CHECKS[17]: check_confidence_tiers(markdown, template, sources, tables),
         CHECKS[18]: check_title_within_evidence(markdown, template, sources, tables),
         CHECKS[19]: check_advice_evidence_strength(markdown, template, sources, tables),
+        # §SEL-4：海外放行的代价。老产物（`sources[].overseas` 不存在）按 `offtopic`
+        # 的字面认回海外那一支，所以旧稿也量得出来，⛔ 不会因为字段没有就静默放行。
+        CHECKS[20]: check_overseas_attributed(markdown, template, sources),
     }
     if pool != work_marks:
         findings[CHECKS[2]].append(
@@ -983,8 +1132,12 @@ def warnings_of(md_path: Path, tables_path: Path | None = None) -> dict[str, lis
     """判黄的那几条。与 `run()` 分开返回：调用方（`rpt1_matrix`）按 `run()` 判过不过，
     黄的只记进账本给人看——混进 `run()` 会让一格因为文风被判红重写。
 
-    ⒞ 要读 tables.json 里每条源的「旁证」标；不给 `tables_path` 时按成稿同名规则去找，
-    找不到就当没有旁证（⒞ 读数为空，不猜）。"""
+    ⒞ 要读 tables.json 里每条源的「旁证·对照实体」标；不给 `tables_path` 时按成稿同名
+    规则去找，找不到就当没有（⒞ 读数为空，不猜）。
+
+    ⚠️ §SEL-4：⒞ 的判域**只剩对照实体**。老产物（09-18 之前）的 `offtopic` 里两支
+    揉在一起，字面是「海外平台」/「对照实体」——这里按**字面**只取对照实体那一支，
+    ⛔ 不按真值一把抓：一把抓会把已经放行的海外照旧判成跑题（拿作废的规矩判黄）。"""
     markdown = md_path.read_text(encoding="utf-8")
     if tables_path is None:
         guess = md_path.with_name(md_path.name.removesuffix(".md") + ".tables.json")
@@ -993,7 +1146,7 @@ def warnings_of(md_path: Path, tables_path: Path | None = None) -> dict[str, lis
     if tables_path is not None:
         data = json.loads(tables_path.read_text(encoding="utf-8"))
         offtopic = {int(str(s["mark"])[1:]) for s in data.get("sources") or []
-                    if s.get("mark") and s.get("offtopic")}
+                    if s.get("mark") and str(s.get("offtopic") or "") == "对照实体"}
     return {WARNINGS[0]: hedge_density(markdown),
             WARNINGS[1]: length_budget(markdown),
             WARNINGS[2]: offtopic_findings(markdown, offtopic),

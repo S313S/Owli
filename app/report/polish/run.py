@@ -23,7 +23,7 @@ from app.orchestrator.sectioning import (SectionWallClockExpired,  # 只 import�
 from app.report.polish.sharding import (FINDING_LINE, Finding, merge_shards, parse_findings,
                                         shard_paths, should_shard)
 from app.report.polish.skills import Template, get_template, shared_rules
-from app.report.polish.tables import collect_inputs
+from app.report.polish.tables import OVERSEAS_COLUMN, collect_inputs
 
 AGENT_ID = "report-polisher"
 AGENT_KIND = "report_writing"
@@ -914,6 +914,11 @@ def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> st
     正多还是负多」——那是「大家怎么看」最直接的答案，数在论据章的表里，结论没人写。
     数从 `scenario_attitude` 取（每条一个场景一个态度，四档相加 = 表的 n）；§RPT-4 货 2
     之后这张表只数点名了研究对象的评论，所以这一行的分母也是主体。
+
+    §SEL-4 货 5（用户 2026-09-18 拍乙）：题面只问国内时，这一行**按地域写两侧**
+    （读数来自 `coverage["态度合计·按地域"]`，程序算好的）。⚠️ 理由不是好看：
+    合并成一个数的统计量**没法标明出身**——第三轮真稿这一行里 19/90 条来自 Reddit，
+    读者读到的却是「国内大家」。⛔ 数一律从表里取，不写死；⛔ 也不把海外剔出去（丢数据）。
     """
     table = (tables or {}).get("scenario_attitude")
     if not isinstance(table, Mapping) or not table.get("n"):
@@ -928,8 +933,43 @@ def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> st
     who = "、".join(str(s) for s in subjects if s)
     scope = (f"只数点名了{who}的评论；这批评论取自引用池，不是随机抽样，口径见附录「各表口径」"
              if who else "这批评论取自引用池，不是随机抽样，口径见附录「各表口径」")
-    return (f"已编码评论 {int(table['n'])} 条：{parts}（{scope}）。"
+    split = _attitude_locale_split(table)
+    # ⚠️ 两侧写法与合并写法**共用同一个括号**：拆完再另起一个括号，读者会连读到
+    # 「…混合 2）（只数点名了…」两个挨着的括号，像是漏了一句话。
+    head = f"已编码评论 {int(table['n'])} 条" + ("" if split else f"：{parts}")
+    return (f"{head}（{split + '；' if split else ''}{scope}）。"
             + attitude_traceability(tables))
+
+
+def _attitude_locale_split(table: Mapping[str, Any]) -> str:
+    """§SEL-4 货 5：「国内 71 条：正 22 / …；海外社区 17 条：正 5 / …」那半句（不带括号）。
+
+    没有这份读数（题面不是只问国内，或老产物）⇒ 返回空串，调用方写回合并的老写法，
+    **行为一字不差**。⛔ 不在这里重算：条数与四档都从 `coverage` 取，
+    算两遍迟早对不上账（§RATE-4 那条 447 行的教训）。
+
+    ⚠️ 不变量：**每侧四数之和 = 该侧条数**。凑不上就整段不写——宁可退回合并的老写法，
+    也不能吐一句自相矛盾的数（有一把复审尺子按「四数之和 = N」判红，它判得对）。
+    """
+    from app.reliability.coding import ATTITUDE_BY_LOCALE
+
+    split = (table.get("coverage") or {}).get(ATTITUDE_BY_LOCALE)
+    if not isinstance(split, Mapping) or not split:
+        return ""
+    sides = []
+    for name, got in split.items():
+        if not isinstance(got, Mapping):
+            return ""
+        total = int(got.get("条数") or 0)
+        if sum(int(got.get(k) or 0) for k in _ATTITUDE_ORDER) != total:
+            return ""                   # 自相矛盾就别写，退回合并写法
+        if not total:
+            continue                    # 一侧一条都没有就不占篇幅
+        body = " / ".join(f"{k} {int(got.get(k) or 0)}" for k in _ATTITUDE_ORDER)
+        sides.append(f"{name} {total} 条：{body}")
+    # 只剩一侧（全是国内，或全是海外）就不拆——「其中国内 88 条」是句废话，
+    # 而且那种时候合并写法本来就没有误导。
+    return "；".join(sides) if len(sides) > 1 else ""
 
 
 #: §RPT-8 货 4①：这一行要交代可追溯性的那个态度档。⛔ 只挑「负」一个：
@@ -1378,10 +1418,15 @@ def build_prompt(template: Template, data: Mapping[str, Any], report_text: str,
     # §RPT-3 货 2：引得了的评论行（A/B/C 级，§RPT-5 起含 C）在末尾多一栏「原话：…」
     # （`tables.quote_prefix`，程序截取）。
     # 写手按**评论内容**归题、可直接从这一栏摘原声；没有这一栏的行照旧只有标题。
-    # §RPT-4 货 3（C-3）：与题面对象/地域对不上的源多一栏「旁证·对照实体 / 旁证·海外平台」。
+    # §RPT-4 货 3（C-3）：讲别家产品的源多一栏「旁证·对照实体」——这一支照旧不进关键发现。
+    # §SEL-4（用户 09-18 拍乙）：来自海外平台的源另有一栏「海外社区」，⛔ 栏名里**没有
+    # 「旁证」二字**——它已经放行，可以进关键发现与建议，这一栏是在告诉写手
+    # 「引它的时候必须让读者看得出这是海外的声音」，不是在拦它。两栏字面必须分得开，
+    # 写手只读得到这一行字，栏名含糊等于规则没下达。
     pool = "\n".join(
         f"- {s['mark']}｜{s.get('grade') or '?'} 级｜{verdicts.get(str(s.get('crossref')), '未登记')}"
         + (f"｜旁证·{s['offtopic']}" if s.get("offtopic") else "")
+        + (f"｜{OVERSEAS_COLUMN}" if s.get("overseas") else "")
         # §RPT-4 C-10：同一帖子下的别的池内评论，写手引用时并排标注、不当成独立用户。
         + (f"｜同帖：{'、'.join(s['same_thread'])}" if s.get("same_thread") else "")
         + f"｜{s.get('title') or ''}｜{s.get('url') or ''}"
@@ -1834,22 +1879,30 @@ def singlesource_advice(lines: Sequence[str], crossref: Mapping[int, Any]) -> li
     return problems
 
 
-def advice_entries(lines: Sequence[str]) -> list[list[str]]:
-    """建议节里**受门禁管的**那几条，按「条」切开（降级区之后的不返回）。
+def advice_entries(lines: Sequence[str], *,
+                   include_downgraded: bool = False) -> list[list[str]]:
+    """建议节里**受门禁管的**那几条，按「条」切开（降级区之后的默认不返回）。
 
     §RPT-8 货 5 把它从 `singlesource_advice` 里抽出来：本包要在同一批条目上再加一条
     判词（证据太弱的建议），两道闸必须切在同一个地方。⛔ 不许另写一份切法——
     切得不一样时，一道闸认为降级区已经开始、另一道还在判，写手照两份相反的判词改，
     改不到点上（§D-083 那 2 h 37 min 就是这个形状）。
+
+    `include_downgraded=True`（§SEL-4 加的）：连降级区那几条一起返回。⚠️ 它**不是**
+    给证据强度门禁用的——降级区的条目本来就已经降过一级，再判一次强度是重复处罚。
+    它是给「引了海外就得标明出身」那道闸用的：**标明出身跟证据强不强没有关系**，
+    读者读降级区那几条时同样有权知道依据来自海外社区（实测：第三轮真稿里唯一一条
+    海外引用 S38 就落在降级区，按旧判域整道闸一条都量不到，那是假绿）。
+    ⛔ 切法仍是**这一个函数**，只多一个开关——别再另写一份。
     """
     entries: list[list[str]] = []
     current: list[str] = []
     for line in lines:
         if line.strip().startswith("#"):
-            if DOWNGRADE_HEADING in line:
+            if DOWNGRADE_HEADING in line and not include_downgraded:
                 break                   # 降级区之后的都不受门禁管
             continue
-        if _DOWNGRADE_ENTRY_HEAD.match(line):
+        if _DOWNGRADE_ENTRY_HEAD.match(line) and not include_downgraded:
             # 行内前缀形态：这一条**本身**就是降级区的第一条，它和它后面的都不受管。
             # 已攒的 `current`（前缀之前的那些条）留给循环外收尾，照旧判。
             break
