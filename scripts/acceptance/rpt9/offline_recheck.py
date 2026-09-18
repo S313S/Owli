@@ -40,6 +40,17 @@ def _load(db: str, research_id: str):
     rows = _with_extra([dict(r) for r in con.execute(
         "select * from evidence where report_id=? order by id", (research_id,))])
     con.close()
+    # ⚠️ 裸读 sqlite 拿到的 `raw_metrics` 是 JSON **字符串**，生产路走
+    # `store.list_evidence` 拿到的是解好的 dict（`store/dao.py` 那道）。
+    # 不在这儿解开，`engagement_value` 对每行都返回 None、原声表全体互动量并列 0，
+    # 排序退化成按 id——**量出来的「修后」就不是生产会出的那张表**。
+    # 09-18 本包实测撞到过：附录渲染出来互动量整列空白。先怀疑自己的尺子，就是这个。
+    for row in rows:
+        if isinstance(row.get("raw_metrics"), str):
+            try:
+                row["raw_metrics"] = json.loads(row["raw_metrics"] or "{}")
+            except json.JSONDecodeError:
+                row["raw_metrics"] = {}
     return plan, rows
 
 
