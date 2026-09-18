@@ -46,6 +46,8 @@ def _real_shaped_plan(question: str = "国内大家对豆包的看法") -> dict:
 
 def _coded(index: int, quote: str):
     return {"id": f"ev-{index:03d}", "platform": "douyin", "goal_id": "goal-2",
+            # §RPT-9 货 4②：quote 要落在这条自己的正文里，本文件验的是名单不是那道闸。
+            "content_excerpt": quote,
             "extra": {"coding": {
                 "coding_version": CODING_VERSION, "audience": "不明", "scenario": "工作",
                 "attitude": "正", "topics": ["功能与能力"], "quote": quote}}}

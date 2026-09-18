@@ -122,6 +122,76 @@ def source_text(item: Mapping[str, Any]) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def has_own_body(item: Mapping[str, Any]) -> bool:
+    """这条证据有没有**自己的正文**（`content_excerpt` 去空白后非空）。
+
+    §RPT-9 货 3。⛔ 不看 `title`：`source_text` 把标题也算原文，于是「只有题面、
+    没有正文」的行照样过得了 `coding_targets` 那道闸。真机 r-3b3482ca7f8b 漏进来
+    2 条——两条都是 Reddit 的**图片/视频链接帖**（`extra.external_url` 指
+    i.redd.it / v.redd.it，`domain` 同源，`status=normal`、`removed_by_category` 空，
+    没被删），原帖**本来就没有正文**，不是采集时丢的。
+
+    标题是帖子的题面，不是用户的看法；把题面当成一条「已编码评论」计进态度分母，
+    分母就含了水。⚠️ 判的是「这条有没有人话可读」，不是「采没采全」——补采也补
+    不出来，所以这不是一条待补的缺口，是一条**不该进分母**的行。
+    """
+
+    return bool(_squeeze(item.get("content_excerpt") or ""))
+
+
+def own_source_text(item: Mapping[str, Any]) -> str:
+    """判 `quote` 是不是**这个人自己说的话**时该看的原文。
+
+    §RPT-9 货 4②。帖子行：标题是发帖人自己写的，标题 + 正文都算他的话
+    （帖子标题当不当得了原声是另一道闸 `polish/tables.is_speech_quote` 管的，
+    那道判的是「招牌不是人话」，与这里判的「是不是这个人说的」不是一回事）。
+    **评论行：只算正文**——评论的 `title` 是 `source_mcp` 拼的「评论 · 父帖标题」，
+    那是**楼主**的话，不是评论人的话。
+
+    ⚠️ 这条与 `polish/tables._own_text`（D-069，判实体归属用）是同一条道理的两个
+    落点：评论借了父帖标题，判归属就把父帖里的实体算到评论头上，判原声就把父帖的
+    标题当成评论人说的话。⛔ 不合并成一个函数：那边还要在正文为空时借 `coding.quote`
+    兜底，这边正是要禁掉那种借用。
+    """
+
+    if str(item.get("kind") or "post") != "comment":
+        return source_text(item)
+    return str(item.get("content_excerpt") or "")
+
+
+def quote_is_own_words(item: Mapping[str, Any]) -> bool:
+    """这条编码摘出来的 `quote`，是不是**这条证据自己**的话。
+
+    §RPT-9 货 4②。用户 09-18 读第三轮正式稿圈出「放过豆包吧！」被归进
+    「交互体验·正」。查库：这句话是**父帖的标题**（抖音视频《放过豆包吧！它只是一个
+    无性别的 ai…》），而摘了它的那条评论 S39 自己说的是「不许碰我的电子闺蜜[发怒]」。
+    同一个父帖下有 6 条评论的 `quote` 都是这半句标题。
+
+    为什么既有的两道闸都没拦住：
+    - 编码期的正文子串闸比的是 `source_text`（标题 + 正文），而评论的标题就是父帖
+      标题，所以「摘父帖标题」天然是子串、判不出来；
+    - 出表期 `is_speech_quote` 的「这句就是某条证据的标题」那一条，包含匹配要求
+      两边去噪后都 ≥ `MIN_TITLE_OVERLAP`（8 字）才算数——「放过豆包吧」只有 5 字，
+      短句撞车的保护把它放了过去。
+
+    ⇒ 这里换一把**不靠长度**的尺子：评论的话必须落在评论自己的正文里。
+    ⛔ 不去调 `MIN_TITLE_OVERLAP`：调短了会把真人博文的短句整批误杀
+    （§D-060 货 1 刚为这件事翻过一次案）。
+    """
+
+    # `coded_rows` 把 `extra.coding` 提到了顶层，裸库行没提——两种形状都认，
+    # 只认一种的后果是静默判空（`_extra` 那条注释记的就是这个坑）。
+    coding = item.get("coding")
+    if not isinstance(coding, Mapping):
+        coding = _extra(item).get("coding")
+    if not isinstance(coding, Mapping):
+        return False
+    quote = _squeeze(coding.get("quote") or "")
+    if not quote:
+        return False
+    return quote in _squeeze(own_source_text(item) or "")
+
+
 def _squeeze(text: str) -> str:
     """比子串时两边都去掉空白：引擎常把换行和空格重排，但不会凭空造字。"""
 
@@ -212,11 +282,16 @@ def is_coded(item: Mapping[str, Any]) -> bool:
 def coding_targets(
     rows: Iterable[Mapping[str, Any]], *, force: bool = False,
 ) -> list[dict[str, Any]]:
-    """该编码的行：UGC、进得了池（非 D）、正文不空。
+    """该编码的行：UGC、进得了池（非 D）、**自己的正文**不空。
 
     D 级不进池（`sectioning.py` 那道闸），给它编码等于给写手永远看不到的东西
     付钱。正文空的行编不出 `quote`，也一并不进——覆盖率分母跟着这里走，
     不拿「应编码」的定义去凑分子。
+
+    §RPT-9 货 3：这道「正文不空」原先按 `source_text`（标题 + 正文）判，
+    **标题非空就算数**，于是只有题面的链接帖照样被拉进来编码，
+    与上面这句注释写的口径对不上。改判 `has_own_body`（只看 `content_excerpt`），
+    注释与实现归一。
     """
 
     selected: list[dict[str, Any]] = []
@@ -226,7 +301,7 @@ def coding_targets(
         grade = item.get("grade")
         if not isinstance(grade, str) or grade == "D":
             continue
-        if not _squeeze(source_text(item)):
+        if not has_own_body(item):
             continue
         if not force and is_coded(item):
             continue
@@ -361,6 +436,11 @@ def _coding_prompt(items: Sequence[Mapping[str, Any]], *, output_path: Path,
         f"topics 是数组，取值只能来自：{'、'.join(TOPICS)}。可多选，"
         "一个都不沾就给空数组，不要硬塞。\n"
         f"quote 是从输入 title 或 text 里**逐字摘出**的一句，不超过 {QUOTE_MAX} 字，"
+        # §RPT-9 货 4②：kind=comment 时 title 是「评论 · 父帖标题」，那是楼主的话。
+        # 闸已经在程序侧收紧（`own_source_text`），提示词也得说——只改闸不改话，
+        # 模型会照旧摘、批批退回重打，三轮赔的是钱。
+        "；**kind 是 comment 的，只许从 text 里摘**——那种条目的 title 是它所在"
+        "帖子的标题，是楼主写的，不是这条评论的人说的话，摘了整批退回重打。"
         "要能代表这条的态度。**必须是把话说完的一句**：结尾要落在句末标点"
         f"（{SENTENCE_TERMINALS}）上，或落在原文的换行处、结尾处。"
         "⛔ 不许停在逗号、顿号前，不许话说到一半就断——"
@@ -505,7 +585,11 @@ async def _code_batch(
     """一批编码；三次重打都过不了闸就整批返回 None，绝不半信半疑地写库。"""
 
     compact = [engine_input(item) for item in items]
-    sources = {str(item.get("id")): source_text(item) for item in items}
+    # §RPT-9 货 4②：子串闸比的是**这个人自己的话**。评论的 `title` 是
+    # 「评论 · 父帖标题」，按 `source_text` 比等于允许评论摘楼主的标题当原声，
+    # 真机 r-3b3482ca7f8b 一个父帖下就漏了 6 条。⛔ 这道闸不能只加在出表那头：
+    # 出表那头挡住的是「摆出来」，这里挡住的是「先摘错、再赔三轮重打」。
+    sources = {str(item.get("id")): own_source_text(item) for item in items}
     output_path.parent.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     for _attempt in range(1, MAX_ATTEMPTS + 1):
@@ -1103,6 +1187,8 @@ def coding_tables(
                     # 弃用是浪费，裸引会被尺子③判红，摆出来只会诱导它裸引。
                     # 不给角标表时（备料、离线核数）不过滤，行为不变。
                     and (not marks or str(item.get("id")) in marks)
+                    # §RPT-9 货 4②：评论摘了父帖标题的，不是这个人说的话。
+                    and quote_is_own_words(item)
                     and _names_the_entity(item["coding"]["quote"], accepted)
                     and _quotable_grade(item, marks, grades)
                 ),
@@ -1135,6 +1221,8 @@ def coding_tables(
                     "grade": (grades.get(int(marks[str(item.get("id"))]))
                               if str(item.get("id")) in marks else None),
                     "platform": item.get("platform"),
+                    # §RPT-9 货 4③：这句话是从哪一篇里摘的。
+                    "context": quote_context(item),
                     "engagement": engagement_value(item),
                     # §QUOTE-1 货 2：光摆一个「0」不够。写手看见一列数字里的 0，
                     # 照样会把那句话写进执行摘要当「头号负评」（评审实测 S25，
@@ -1151,8 +1239,17 @@ def coding_tables(
         1 for item in coded
         if item["coding"].get("quote")
         and (not marks or str(item.get("id")) in marks)
+        and quote_is_own_words(item)
         and _names_the_entity(item["coding"]["quote"], accepted)
         and not _quotable_grade(item, marks, grades)
+    )
+    # §RPT-9 货 4②：借了别人的话的也要数出来，理由同上一条——
+    # 这一格少了一行，读者不该靠猜。
+    dropped["不是本人说的"] = sum(
+        1 for item in coded
+        if item["coding"].get("quote")
+        and (not marks or str(item.get("id")) in marks)
+        and not quote_is_own_words(item)
     )
     audience = Counter(item["coding"]["audience"] for item in coded)
     unknown = audience.get("不明", 0)
@@ -1212,8 +1309,16 @@ def _quotes_footnote(dropped: Mapping[str, Any]) -> str:
     所以行数少的时候必须自己交代是筛短的。措辞不出字段名与表名：读表的是人。
     """
 
+    # §RPT-9 货 4②：借了别人的话的那一刀单独交代——它砍的既不是「没在说研究对象」，
+    # 也不是「证据不够硬」，而是「这句压根不是这个人说的」。
+    # ⚠️ 必须算在下面那道早退**之前**：实体闸没设时（备料、离线核数）早退返回空串，
+    # 而「借来的话」这一刀任何时候都在，跟着一起被吞掉就又成了一次静默筛选。
+    borrowed_note = (
+        f"另有 {dropped['不是本人说的']} 条候选摘的不是发言人自己的话"
+        f"（评论摘了它所在那条帖子的标题，那是楼主写的，不是评论人说的），已剔除。"
+    ) if dropped.get("不是本人说的") else ""
     if not dropped.get("设闸") or not dropped.get("丢弃"):
-        return ""
+        return borrowed_note
     # §D-059 货 4：等级那一刀单独交代。它和上面那刀砍的是**不同的东西**——
     # 上面是「这句没在说研究对象」，这里是「这句说的是研究对象，但撑它的那条证据
     # 只够作旁证」。合成一句会让读者以为原声少是因为没人谈，而实情是证据不够硬。
@@ -1226,10 +1331,172 @@ def _quotes_footnote(dropped: Mapping[str, Any]) -> str:
         f"本表只收**点名了研究对象**的原声：另有 {dropped['本可入表被丢']} 条原本够格"
         f"进表的原声通篇没提到研究对象（多半在说别的产品，或与研究对象无关），已排除；"
         f"全部已编码原声里同样没点名的共 {dropped['丢弃']} 条。"
-        + grade_note +
+        + grade_note + borrowed_note +
         f"所以**行数少是筛选后的结果**——既不代表没人讨论这个产品，"
         f"也不代表没有采到某个平台的声音。"
     )
+
+
+def _unmarked_note(cells: Mapping[Any, Sequence[Mapping[str, Any]]],
+                   marks: Mapping[str, int]) -> str:
+    """§RPT-9 货 2：「有条数、角标列是『—』」的格子，**由程序在表下交代是哪一层没给**。
+
+    用户 09-18 读第三轮正式稿，在附录「对照实体的评论」表上问的就是这件事：
+    文心一言 负 20 / 正 7 / 混合 5、通义千问 负 5，角标列整片「—」，表下一句解释都没有——
+    读者会怀疑这些数是编的。
+
+    ⚠️ 这是一条**通用规矩**，同族的表（态度表、场景表、主题表、对照表、人群表、
+    触发表）都要照办，⛔ 不是只给露出来的那一张打补丁。
+
+    ⛔ 不许写「数据缺失」这种糊弄话。层只有两种，两种都是库里查得到的事实：
+    ① `citation_no is None` —— 本轮没进引用池，库里有这条编码但没有可点开的角标；
+    ② 有 `citation_no`、却不在本次 `marks` 表里 —— 进了池但角标表没收录它。
+    两类**互斥且穷尽**：一个格子里的行只要有一条既有 `citation_no` 又在 `marks` 里，
+    这个格子就有角标、根本进不了这里，所以不设第三类兜底
+    （设一个永远取不到的分支，等于给自己造一句永远不会被检验的话）。
+
+    ① 里再拆一层等级：D 级是线索级、`sectioning.py` 那道闸本来就不让它进池——
+    「没进池」对 D 级是**设计如此**，对 A/B/C 级才是这一轮取数的缺口。
+    两者混在一起说，读者分不出哪些是还能补的。
+    """
+
+    blind = [list(items) for items in cells.values()
+             if items and not any(str(item.get("id")) in marks for item in items)]
+    if not blind:
+        return ""
+    rows = [item for items in blind for item in items]
+    offpool = [item for item in rows if item.get("citation_no") is None]
+    unlisted = [item for item in rows if item.get("citation_no") is not None]
+    parts: list[str] = []
+    if offpool:
+        lowest = sum(1 for item in offpool if str(item.get("grade") or "") == "D")
+        tail = (f"，其中 {lowest} 条是 D 级线索、本来就不进池，"
+                f"另 {len(offpool) - lowest} 条是这一轮取数没排上" if lowest else "")
+        parts.append(f"{len(offpool)} 条本轮没进引用池——库里有这条编码，"
+                     f"但正文点不到它的原文{tail}")
+    if unlisted:
+        parts.append(f"{len(unlisted)} 条进了引用池却没拿到角标（角标表没收录，属登记缺口）")
+    return (f"本表有 {len(blind)} 个格子有条数、一个角标都没有，共 {len(rows)} 条："
+            f"{'；'.join(parts)}。条数本身是逐条编码数出来的，没角标不等于这几条不存在。")
+
+
+#: §RPT-9 货 1：「其他」占已编码条数到这个比例以上，就在表下交代它的构成。
+#:
+#: **阈值依据**：场景闭集是 6 个真场景 + 1 个兜底桶（`SCENARIOS`），七格均分是
+#: 1/7 ≈ 14%。兜底桶超过 **1/5** 就已经不是零头、而是表里数一数二的行，读者会
+#: 顺着别的行把它当成「一种使用场景」读——那正是用户 09-18 第 9 条问的
+#: 「『其他』到底是什么」。低于这条线不加这句：口径栏是给人读的，不是越长越好。
+#: 真机 r-3b3482ca7f8b：25/90 ≈ 27.8%（本包货 3 剔掉无正文行后 23/88 ≈ 26.1%），触发。
+SCENARIO_OTHER_SHARE = 0.20
+#: 兜底场景的名字就取闭集最后一格，⛔ 不另写一份字面量——闭集改了这里要跟着改，
+#: 而两份字面量分叉是静默的（`TOPICS` 与词表同理，见本文件开头那条）。
+SCENARIO_OTHER = SCENARIOS[-1]
+#: 构成说明里带几条例子。两条：一条看不出是不是孤例，三条以上这句话就太长了。
+SCENARIO_OTHER_SAMPLES = 2
+
+
+def _scenario_other_note(by_scenario: Mapping[str, Sequence[Mapping[str, Any]]],
+                         marks: Mapping[str, int]) -> str:
+    """§RPT-9 货 1（用户意见第 9 条）：「其他」这一行自己交代构成。
+
+    **「其他」不是一个漏掉的使用场景**，是「这条内容根本不在讲使用场景」——
+    场景闭集默认每条 UGC 都是一个使用故事，而真机 90 条里有 25 条不是
+    （竞品盘点帖、价格与产品动态、平台治理与安全、以及读不出所以然的）。
+    ⛔ 不拆闭集、不重跑编码（那是编码 schema 改动，要付引擎；根治见 §RPT-9 worklog
+    的待拍事项「编码前加一层内容类型」）。这里只做一件零引擎的事：**把桶里是什么
+    按现有 `coding.topics` 数出来写在表下**。
+
+    ⛔ 数不许手写死——每份研究的「其他」都不一样，写死等于把这一份的读数
+    刻进代码，下一份照抄一遍假话。
+
+    ⚠️ 主题闭集只有 8 格，**没有「平台治理」这一格**：复审会话读 25 条原文归出的
+    「平台治理与安全 ≈4 条」（智能体下架、站点打不开、AI 黄谣……），在 `topics` 里
+    分别落在功能与能力 / 速度与稳定 / 隐私与安全上，程序按 topics 算不出那一堆。
+    这不是尺子读错，是**闭集里没有这个桶**——正是「加一层内容类型」要解的问题。
+    所以这句话只报 topics 命中，⛔ 不替读者把它们归成四堆。
+    """
+
+    items = [dict(item) for item in by_scenario.get(SCENARIO_OTHER) or []]
+    total = sum(len(v) for v in by_scenario.values())
+    if not items or not total or len(items) / total < SCENARIO_OTHER_SHARE:
+        return ""
+    hits: Counter[str] = Counter()
+    for item in items:
+        for topic in item["coding"].get("topics") or []:
+            hits[str(topic)] += 1
+    blank = sum(1 for item in items if not (item["coding"].get("topics") or []))
+    listed = "、".join(f"{topic} {count} 条"
+                      for topic, count in sorted(hits.items(),
+                                                 key=lambda kv: (-kv[1], kv[0])))
+    blank_note = (f"；另有 {blank} 条一个主题都没命中，读不出它在谈什么"
+                  if blank else "")
+    tail = (f"（一条可命中多个主题，故各项相加大于 {len(items)} 条）"
+            if sum(hits.values()) > len(items) else "")
+    return (f"⚠️「{SCENARIO_OTHER}」这一行的 {len(items)} 条**不是一种使用场景**——"
+            f"是这些内容根本不在讲使用场景。按主题看，它们谈的是："
+            f"{listed}{tail}{blank_note}。"
+            + _scenario_other_samples(items, marks))
+
+
+def _scenario_other_samples(items: Sequence[Mapping[str, Any]],
+                            marks: Mapping[str, int]) -> str:
+    """「其他」构成说明后面的两条例子，按互动量取前两条。
+
+    ⛔ **不另写一道摘句逻辑**：例子只从 `coding.quote` 里取，且要过原声表同一道
+    「正文子串」闸（`quote_is_own_words`，§RPT-9 货 4 那道）。自己再摘一遍句子，
+    就会出现「这句例子和原声表对不上」，而那种不一致是静默的（`reuse-before-rewrite`）。
+    取不到够格的句子就只出构成句、不出例子——提货单给的退路，比编一句强。
+
+    没进引用池的照出，但**写明点不到原文**：与 §RPT-8 货 4① 的线索块同一条道理
+    （要求带角标等于把这一货要的东西全筛掉）。
+    """
+
+    # ⛔ 不自己写排序：原声表用的是 `_quote_sort_key`（先档位后互动量，取不到互动量
+    # 的当 0），例子与原声表排不一样就会出现「表里第一条和例子不是同一条」。
+    # 真机撞过一次：这里原先直接 `-engagement_value(item)`，而它对拿不到互动量的行
+    # 返回 None，整份复核当场崩在一元负号上。
+    picked = sorted((item for item in items if quote_is_own_words(item)),
+                    key=_quote_sort_key)[:SCENARIO_OTHER_SAMPLES]
+    if not picked:
+        return ""
+    shown = []
+    for item in picked:
+        where = (f"[S{marks[str(item.get('id'))]:02d}]"
+                 if str(item.get("id")) in marks else "本轮未进引用池、点不到原文")
+        shown.append(f"「{item['coding']['quote']}」（{item.get('platform') or '社媒'}，{where}）")
+    return "例如：" + "；".join(shown) + "。"
+
+
+#: 出处栏里帖子标题最多留几个字。够看出这是一篇什么文章就行，再长会把附录那张表撑爆。
+QUOTE_CONTEXT_CHARS = 30
+#: 评论行 `title` 的前缀，`source_mcp` 拼的。⛔ 不在这里另造一份写法。
+COMMENT_TITLE_PREFIX = "评论 · "
+
+
+def quote_context(item: Mapping[str, Any]) -> str:
+    """这句原声是从哪一篇里摘的，一句人话。§RPT-9 货 4③。
+
+    用户 09-18 读第三轮正式稿圈出「🔹豆包：app标识就很社交感。」归「功能与能力·正」，
+    问这是不是广告。查库：这句**确实**是那条小红书笔记的正文原文，那一段整体也确实
+    是正向的（「整体的交互感非常好……主打一个放松心情」），编码没判错——
+    真正的毛病是**读者看不见上下文**：它出自《在手机用上这五个免费AI的我简直强的可怕》，
+    一篇一口气点评 5 个产品的盘点帖，那个「🔹」就是列表符号。一句从榜单里抠出来的
+    条目，摆在「代表原声」表里读着就像文案。
+
+    ⇒ 不改数据、不改编码，**把出处摆出来**：读者看一眼标题就知道这句话是什么身份。
+    ⛔ 不去猜「这是不是一篇盘点帖」：那要靠数它提了几个产品，是另一层判断，
+    判错了比不判更坏；标题是库里现成的事实，摆出来就够读者自己判。
+    """
+
+    title = " ".join(str(item.get("title") or "").split())
+    is_comment = str(item.get("kind") or "post") == "comment"
+    if is_comment and title.startswith(COMMENT_TITLE_PREFIX):
+        title = title[len(COMMENT_TITLE_PREFIX):].strip()
+    if not title:
+        return "评论" if is_comment else "帖子正文"
+    if len(title) > QUOTE_CONTEXT_CHARS:
+        title = title[:QUOTE_CONTEXT_CHARS] + "…"
+    return (f"《{title}》下的评论" if is_comment else f"帖子《{title}》正文")
 
 
 def _shell(name: str, title: str, columns: Sequence[str], rows: Sequence[Mapping[str, Any]],
@@ -1265,6 +1532,11 @@ def polish_tables(
     `entity_roles`（§RPT-4 货 2，`tables.coding_entity_roles` 算的）给了就**只拿主体行**
     出正文的各张表，点名对照实体的另出一张 `contrast_attitude` 挂附录，谁都没点名的
     不计入、但在口径里写出条数。不给（题面读不出主角）⇒ 不分，行为与本包之前一字不差。
+
+    §RPT-9 货 3：**只有题面没有正文的已编码行不进这里的分母**（`has_own_body`）。
+    ⛔ 闸不下沉到 `coded_rows` / `coding_tables`：那两个是「已编码的行」的事实读数，
+    备料与离线核数要看全量；这里才是出给客户的那张表，分母归这里管。
+    剔掉的条数**不静默**——写进 `coverage["只有题面无正文条数"]` 与各表 `basis`。
     """
 
     from app.report.polish.tables import ENTITY_CONTRAST, ENTITY_SUBJECT, ENTITY_UNNAMED
@@ -1273,6 +1545,13 @@ def polish_tables(
     marks = dict(citations or {})
     total = len(rows) if total_evidence is None else total_evidence
     roles = dict(entity_roles or {})
+    # §RPT-9 货 3：编过码、但自己一句正文都没有的行整行退出分母。
+    # ⚠️ 只踢**已编码**的：没编码的行本来就不进任何一张编码表，
+    # 连带踢掉会让 `total_evidence` 之外的读数无声改口径。
+    bodyless = [item for item in rows if is_coded(item) and not has_own_body(item)]
+    if bodyless:
+        dropped_ids = {str(item.get("id")) for item in bodyless}
+        rows = [item for item in rows if str(item.get("id")) not in dropped_ids]
     all_rows = rows
     all_coded = coded_rows(rows)
 
@@ -1307,11 +1586,19 @@ def polish_tables(
     ) if roles else ""
     pool_note = ("这些评论是进了引用池的那一批——引用池按每个研究目标保底、再按证据评分挑出，"
                  "**不是随机抽样**，条数不能读成全网比例。") if pooled else ""
+    # §RPT-9 货 3：踢出去的条数要说出来。⛔ 不写「数据缺失」——补采补不出来，
+    # 那是「原帖只有题面」，读者据此才知道这几条不是漏采的。
+    bodyless_note = (
+        f"另有 {len(bodyless)} 条已编码的行只有帖子题面、没有正文（图片/视频链接帖之类），"
+        f"无从判读它在讲哪个场景、态度如何，**不计入上面的分母**；"
+        f"这不是漏采——原帖本身就没有正文。" if bodyless else ""
+    )
     # 分母写进 coverage 与 basis：表里的 n 是**已编码的 UGC 条数**，不是全库条数。
     # 写手看不见机器表名，只看得见 title 与 basis，防误读只能靠这两处。
     coverage = {"已编码 UGC 条数": n, "全库证据条数": total,
                 "身份不明条数": sum(
-                    1 for item in coded if item["coding"]["audience"] == "不明")}
+                    1 for item in coded if item["coding"]["audience"] == "不明"),
+                **({"只有题面无正文条数": len(bodyless)} if bodyless else {})}
     by_cell: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     by_scenario: dict[str, list[Mapping[str, Any]]] = {}
     # §RPT-2 货 3：人群 × 态度、场景 × 态度。两张都从同一批 `coded` 里聚，
@@ -1336,6 +1623,11 @@ def polish_tables(
             by_trigger.setdefault(str(value), []).append(item)
     triggered = sum(len(v) for v in by_trigger.values())
     coverage = {**coverage, "带触发事件条数": triggered}
+    # §RPT-9 货 2：对照表的格子先分好组，出表与「有数无角标」那句交代读同一份
+    # （⛔ 分两处各分一次组，两边迟早对不上——§RATE-4 那条 447 行的教训）。
+    contrast_cells = _group(contrast_items, lambda item: (
+        str((roles.get(str(item.get("id"))) or {}).get("entity_name") or "未登记"),
+        item["coding"]["attitude"]))
     return {
         "attitude_by_topic": _shell(
             "attitude_by_topic", "UGC 逐条编码：主题 × 态度条数",
@@ -1352,6 +1644,8 @@ def polish_tables(
                 f"没命中任何主题的归入「{TOPIC_NONE}」，不设它这一格四成条目会凭空消失。"
                 f"条数覆盖全部 {n} 条已编码 UGC；角标只标其中**进了引用池**的那些，"
                 f"所以有的格有条数没角标——那是没进池，不是数据可疑。"
+                + bodyless_note
+                + _unmarked_note(by_cell, marks)
             ),
             coverage=coverage),
         "scenario_counts": _shell(
@@ -1366,16 +1660,23 @@ def polish_tables(
                 f"每条归一个场景，各行相加 = {data['reconciliation']['scenario_sum']}"
                 f" = 已编码条数 {n}。分母是{unit}，不是全库 {total} 条证据。" + pool_note +
                 f"{data['audience_note']}，故人群不单独出表。"
+                + bodyless_note
+                + _scenario_other_note(by_scenario, marks)
+                + _unmarked_note({(k,): v for k, v in by_scenario.items()}, marks)
             ),
             coverage=coverage),
         "quotes": _shell(
             "quotes", "UGC 代表原声（每格按互动量取前 3）",
-            ("主题", "态度", "原声", "等级", "平台", "互动量", "代表性"),
+            # §RPT-9 货 4③：加「出处」一栏。⛔ 既有各栏一栏不动——尺子④「数字有出处」
+            # 的白名单按表格行整行跳过，加栏不影响它；删栏才会静默改判域。
+            ("主题", "态度", "原声", "出处", "等级", "平台", "互动量", "代表性"),
             # 呈现层**永远**只出引得动的：一条角标都没有的原声，写手弃用是浪费、
             # 裸引会被尺子③判红。`coding_tables` 在没给角标表时不过滤（备料、
             # 离线核数要看全量），但走到这里就是要喂给写手了，没有回退。
             [row for row in (
                 {"主题": q["topic"], "态度": q["attitude"], "原声": q["quote"],
+                 # §RPT-9 货 4③：出处紧挨着原声——隔着三栏读者就不会把两者连起来看。
+                 "出处": q.get("context") or "",
                  # §RPT-5 货 1：等级摆在原声旁边，C 级一眼看得出是旁证。
                  "等级": q.get("grade") or "?",
                  "平台": q["platform"], "互动量": q["engagement"],
@@ -1410,6 +1711,8 @@ def polish_tables(
             basis=(
                 f"每条 UGC 归一个人群、一个态度，各行相加 = 已编码条数 {n}；"
                 f"其中身份不明 {unknown_audience} 条，占比不到一半才出这张表。"
+                + bodyless_note
+                + _unmarked_note(by_audience, marks)
             ),
             coverage=coverage)}),
         # §RPT-2 货 4③：触发事件条数。一条都没标就整张不出——v1 编码的行没这个字段，
@@ -1424,6 +1727,7 @@ def polish_tables(
                 f"分母是**标出了触发事件的** {triggered} 条，不是已编码的 {n} 条，"
                 f"更不是全库 {total} 条——多数帖子不交代为什么开始用，"
                 f"没标出来的不计入，也不能当成「不明」那一格的人。"
+                + _unmarked_note({(k,): v for k, v in by_trigger.items()}, marks)
             ),
             coverage=coverage)}),
         # §RPT-2 货 3：场景 × 态度。`scenario_counts` 只答「在什么场景下被谈」，
@@ -1441,6 +1745,8 @@ def polish_tables(
                 f"每条归一个场景、一个态度，各行相加 = 已编码条数 {n}。"
                 f"分母是{unit}，不是全库 {total} 条证据。" + pool_note +
                 f"角标只标其中进了引用池的那些，有条数没角标是没进池、不是数据可疑。"
+                + bodyless_note
+                + _unmarked_note(by_scene_cell, marks)
             ),
             # §RPT-4 货 2（C-7）：四档态度合计。执行摘要那行「正 a / 负 b …」就是这几个数，
             # 挂在表上才进得了尺子 ④ 的白名单——程序注入的数也得有出处。
@@ -1455,14 +1761,15 @@ def polish_tables(
             [{"对照实体": name, "态度": attitude, "条数": len(items),
               "marks": _row_marks(items, marks)}
              for (name, attitude), items in sorted(
-                 _group(contrast_items, lambda item: (
-                     str((roles.get(str(item.get("id"))) or {}).get("entity_name") or "未登记"),
-                     item["coding"]["attitude"])).items(),
+                 contrast_cells.items(),
                  key=lambda kv: (kv[0][0], -len(kv[1]), kv[0][1]))],
             n=len(contrast_items),
             basis=(
                 f"{len(contrast_items)} 条{unit}说的是对照实体、不是研究对象（原文只点名了对照实体，"
                 "或没点名但出自对照实体的帖子），**只作参照**，不计入正文的态度表。"
+                # §RPT-9 货 2：这张表原先一个字都没交代「角标为什么是 —」。
+                # 用户 09-18 读第三轮稿正是在这张表上问的（文心一言负 20 条，角标全空）。
+                + _unmarked_note(contrast_cells, marks)
             ),
             coverage={"对照实体评论条数": len(contrast_items),
                       "未点名条数": unnamed_count})}),
