@@ -188,7 +188,7 @@ status=**missing**，reason=`tool_unavailable`）与 `goals/goal-1/data-collecti
 
 ### 判据 4 · 禁区正列举扫（⛔ 没用否定前瞻）
 
-`git diff --name-only c5f7b7c HEAD` 完整输出（四行，请调度逐行核）：
+`git diff --name-only c5f7b7c HEAD` 完整输出（六行，请调度逐行核）：
 
 ```
 app/replay/import_research.py
@@ -208,11 +208,24 @@ tests/test_sel3_import_rebases_ledger_paths.py
 起工时刻文件 `var/.sel3-start-marker`（13:14:58 建）。
 
 ```
-find ../Owli-src5 -newer var/.sel3-start-marker -type f | head   → 空
+find ../Owli-src5 -newer var/.sel3-start-marker -type f | head
+→ ../Owli-src5/var/logs/serve-8981.log      ← 只有这一条
 ```
 
-8981 全程没停没重启；`../Owli-src5` 只做了两件读操作：`mode=ro` 连库做 backup、
-`copytree` 读 `var/runs/r-3b3482ca7f8b`。`../Owli-wx1` 一个字没碰。
+⚠️ **这一条不是我改的，如实记下来**：它是 8981 自己写的访问日志，尾巴上是浏览器发的
+`GET /api/researches/r-3b3482ca7f8b`、`.../polished`（13:31，有人在看报告）。本包全程没对
+8981 发过任何请求。真正该盯的三样，mtime 全部**早于**起工时刻、一个字没动：
+
+| | mtime |
+| --- | --- |
+| `var/src5-backfill.db` | 09-18 03:36 |
+| `var/src5-backfill.db-wal` | 09-18 06:49 |
+| `var/src5-backfill.db-shm` | 09-18 08:00 |
+| `var/runs/r-3b3482ca7f8b/` | 09-15 19:12 |
+
+8981 全程没停没重启（`lsof -iTCP:8981` 仍是同一个 PID 31873 在 LISTEN）；
+`../Owli-src5` 只做了两件读操作：`mode=ro` 连库做 backup、`copytree` 读
+`var/runs/r-3b3482ca7f8b`。`../Owli-wx1` 一个字没碰。
 
 ## 四、同族漏改：发现了，⛔ 没顺手改（按解禁范围）
 
