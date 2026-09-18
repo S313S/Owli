@@ -193,3 +193,85 @@ def test_货2_父帖判法走父帖自己的_own_text_标题对父帖算数对�
     assert roles["p1"] == {"entity": "对照", "entity_name": "Kimi"}, "父帖的标题算它自己的话"
     assert roles["c1"] == {"entity": "对照", "entity_name": "Kimi"}, \
         "随父帖（Kimi），⛔ 不随章（DeepSeek）"
+
+
+# ------------------------------------------------- 货 4 平台 UI 词缀（微博「豆包翻译」）
+
+WEIBO_FAN_POST = (
+    "DaouOffroad \nmix哥x更新\nOffroad（林小路）让我们看到，努力终有回报、努力是有价值的。"
+    "陪伴走过这5年，他每一天都在成长。我会一直在每一个重要的时刻陪着他。真的太棒啦 🫶🏻🫶🏻\n豆包翻译"
+)
+
+
+def _weibo(rid: str, body: str, *, quote: str = "") -> dict:
+    from app.reliability.coding import CODING_VERSION
+
+    return {"id": rid, "kind": "post", "agent_name": "xhs-doubao", "platform": "weibo",
+            "permalink": f"https://m.weibo.cn/detail/{rid}",
+            # 真机那条的 title 是正文的截断拷贝，所以词缀同时出现在 title 与 body 里。
+            "title": body[:60], "content_excerpt": body, "grade": "C",
+            "extra": {"content_kind": "user_opinion", "coding": {
+                "coding_version": CODING_VERSION, "audience": "不明", "scenario": "其他",
+                "attitude": "中", "topics": ["功能与能力"], "quote": quote}}}
+
+
+def test_货4_微博翻译按钮文案不算点名_追星帖不该进池() -> None:
+    """S26 病象：`…真的太棒啦 🫶🏻🫶🏻\\n豆包翻译` —— 那四个字是微博的内联翻译按钮。
+
+    真机 `ev-01d66661b8ad4f11a190`（weibo，goal-1，citation_no=26）就是靠这四个字
+    过了相关闸、进了引用池，读者点开角标看到的是一条粉丝写偶像的微博。
+    """
+    row = _weibo("w1", WEIBO_FAN_POST, quote="豆包翻译")
+    assert rows_naming_entities([row], PLAN) == [], "按钮文案不是人说的话，⛔ 不许靠它过闸"
+
+
+def test_货4_按钮文案也不该把它编成主体() -> None:
+    from app.report.polish.tables import coding_entity_roles
+
+    row = _weibo("w1", WEIBO_FAN_POST, quote="豆包翻译")
+    roles = coding_entity_roles(PLAN, [row])
+    # 剔掉按钮文案后它谁都没点名；它挂在主角章下 ⇒ 落规则 ④「未点名」（⛔ 不硬归主体）。
+    assert roles["w1"] == {"entity": "未点名", "entity_name": None}, \
+        "⛔ 不许把一条追星帖算进豆包的态度表"
+
+
+def test_货4_反向护栏_人真说的豆包翻译仍然算点名() -> None:
+    """⚠️ 「豆包翻译」也可能是人真说的话，剔了就是**静默丢掉真证据**。
+
+    「我用豆包翻译了这段，意外地准」是一句完全合法的正向口碑：词出现在**句中**、
+    不独占整行 ⇒ 必须照常算点名、照常进池。
+    """
+    row = _weibo("w2", "我用豆包翻译了这段外网测评，意外地准，比我自己啃英文快多了")
+    assert [r["id"] for r in rows_naming_entities([row], PLAN)] == ["w2"]
+
+    from app.report.polish.tables import coding_entity_roles
+    assert coding_entity_roles(PLAN, [row])["w2"] == {"entity": "主体", "entity_name": "豆包"}
+
+
+def test_货4_尺子自检_做成全文替换的错误实现会被这条护栏抓住(monkeypatch) -> None:
+    """⚠️ 光让护栏跑绿不算数——得证明它**抓得住**那个错误实现（本项目坑 23′）。
+
+    这里把 `strip_ui_affordances` 换成「全文 replace」那版错误实现，
+    上一条护栏量的那句真口碑就会被判成没点名 ⇒ 护栏确实在防这件事，不是摆设。
+    """
+    import app.reliability.platform_noise as noise
+
+    def naive(text, affordances=noise.PLATFORM_UI_AFFORDANCES):
+        for word in affordances:
+            text = (text or "").replace(word, "")
+        return text
+
+    monkeypatch.setattr(noise, "strip_ui_affordances", naive)
+    row = _weibo("w2", "我用豆包翻译了这段外网测评，意外地准，比我自己啃英文快多了")
+    assert rows_naming_entities([row], PLAN) == [], \
+        "错误实现下这句真口碑应当被误挡——没被误挡说明这条护栏根本没在量它"
+
+
+def test_货4_词缀只在独占整行时才剔() -> None:
+    from app.reliability.platform_noise import strip_ui_affordances
+
+    assert strip_ui_affordances("好用\n豆包翻译") == "好用"          # 尾部独占行 ⇒ 剔
+    assert strip_ui_affordances("好用\n豆包翻译\n") == "好用"        # 后面只剩空行 ⇒ 照剔
+    assert strip_ui_affordances("豆包翻译真好用") == "豆包翻译真好用"   # 整行 ≠ 词缀 ⇒ 不剔
+    assert strip_ui_affordances("豆包翻译\n然后我又试了别的") == "豆包翻译\n然后我又试了别的"  # 不在尾部 ⇒ 不剔
+    assert strip_ui_affordances("") == ""

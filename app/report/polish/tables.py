@@ -481,6 +481,7 @@ def coding_entity_roles(plan: Mapping[str, Any],
     """
     from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
     from app.reliability.parentage import parent_index    # 评论→父帖：与相关闸共用那一份
+    from app.reliability.platform_noise import strip_ui_affordances   # 与相关闸共用那一份
 
     subjects = set(subject_canonicals(plan))
     if not subjects:
@@ -493,8 +494,13 @@ def coding_entity_roles(plan: Mapping[str, Any],
     parents = parent_index(rows)
 
     def _named_in(row: Mapping[str, Any]) -> list[str]:
-        """这一行自己的话点到的 canonical 们。一处定义，本行与父帖共用同一把尺子。"""
-        text = _own_text(row)
+        """这一行自己的话点到的 canonical 们。一处定义，本行与父帖共用同一把尺子。
+
+        §SEL-2 货 4：先剔掉**尾部独占整行**的平台 UI 词缀（微博「豆包翻译」按钮文案）。
+        剔在这里而不是剔进 `_own_text`：`_own_text` 是「这一行自己的话是哪些字」，
+        本函数才是「这些字点没点名」，词缀只该影响后者。
+        """
+        text = strip_ui_affordances(_own_text(row))
         return [c for c, names in aliases.items() if any(mentions(text, n) for n in names)]
 
     def _by_own_words(named: list[str]) -> tuple[str, Any] | None:

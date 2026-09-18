@@ -30,8 +30,16 @@ def entity_names_of(plan: Any) -> list[str]:
 
 
 def gate_text(row: Mapping[str, Any]) -> str:
-    """闸看的那段文字：标题 + 摘要。一处定义，本行与「父帖过没过闸」共用同一把尺子。"""
-    return f"{row.get('title') or ''} {row.get('content_excerpt') or ''}"
+    """闸看的那段文字：标题 + 摘要。一处定义，本行与「父帖过没过闸」共用同一把尺子。
+
+    §SEL-2 货 4：先剔掉**尾部独占整行**的平台 UI 词缀（微博的「豆包翻译」按钮文案）。
+    那四个字不是人说的话，却让一条追星帖过了闸、进了池、还被编成「豆包·主体」。
+    ⛔ 只按位置剔，不做全文替换——「我用豆包翻译了这段」是真口碑，剔了就是静默丢证据。
+    """
+    from app.reliability.platform_noise import strip_ui_affordances
+
+    return strip_ui_affordances(
+        f"{row.get('title') or ''} {row.get('content_excerpt') or ''}")
 
 
 def rows_naming_entities(rows: Sequence[Mapping[str, Any]], plan: Any,
