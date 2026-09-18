@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 
 @dataclass(frozen=True)
@@ -168,17 +169,39 @@ def _expected_schema_version(schema_path: Path) -> int:
         return -1
 
 
-def _rebase_ledger_paths(database: Path, research_id: str, runs_root: Path) -> int:
-    """把账本里指向底料根的绝对产物路径改写到沙盒根。
+def _rebase_ledger_paths(
+    database: Path,
+    research_id: str,
+    runs_root: Path,
+    *,
+    source_research_ids: Sequence[str] = (),
+) -> int:
+    """把账本里指向底料根的绝对产物路径改写到沙盒根 / 新树。
 
     §RD-1 抓到的保真缺口：`chapter_progress.actual_output_path` 落库时是绝对路径
     （指向底料那台 worktree 的 runs），而计划里 `opening.inputs` 是相对路径，跑时按
     沙盒根拼绝对路径；两边对不上，`_declared_done_goal_closure` 就永远只剩本 goal，
     跨 goal 证据在沙盒里全部不可见——已 done 的节被判角标失效重写，重放读数全污染。
     只改这一列：闭包只读它，别的绝对路径（事件 payload 等）不参与判定。
+
+    §SEL-3 起 `import_research` 也走这一支，但它是**换 id** 的场景：新 id 是刚生成的，
+    一个字都不会出现在复制过来的路径里；路径里带的是**源那一串 id**，而且源自己也可能
+    是导入来的，于是一份账本里能同时出现好几代 id（真机一份账本 110 行里同时有
+    `r-20271e8a5028` 104 行、`r-f9bb30969cf2` 4 行、`r-96e0257a86b4` 2 行）。
+    所以 marker 改成一组：`source_research_ids` 是「路径里可能出现的旧 id」，
+    `research_id` 仍是**目标**——行的作用域，也是新树下的目录名。
+    沙盒那条路不传 `source_research_ids`，marker 仍只有 `/{research_id}/` 一个，
+    行为与 §RD-1 验过的那版逐字相同。
+
+    一条路径认不出任何 marker 就**原样保留**：猜着改会把账本指向一个不存在的地方，
+    比不改更糟（`file_exists` 当场假绿或假红都可能）。
     """
 
-    marker = f"/{research_id}/"
+    markers: list[str] = []
+    for candidate in (*source_research_ids, research_id):
+        marker = f"/{candidate}/"
+        if candidate and marker not in markers:
+            markers.append(marker)
     connection = sqlite3.connect(database)
     try:
         rows = connection.execute(
@@ -189,10 +212,16 @@ def _rebase_ledger_paths(database: Path, research_id: str, runs_root: Path) -> i
         changed = 0
         for rowid, raw in rows:
             text = str(raw or "")
-            index = text.find(marker)
+            index = -1
+            width = 0
+            for marker in markers:
+                found = text.find(marker)
+                # 取最左的那一处：路径里只该有一个 id 段，真撞上多个也以最上游为界。
+                if found >= 0 and (index < 0 or found < index):
+                    index, width = found, len(marker)
             if index < 0:
                 continue
-            rebased = str(runs_root.resolve() / research_id / text[index + len(marker):])
+            rebased = str(runs_root.resolve() / research_id / text[index + width:])
             if rebased != text:
                 connection.execute(
                     "UPDATE chapter_progress SET actual_output_path = ? WHERE rowid = ?",
