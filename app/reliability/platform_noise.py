@@ -37,8 +37,12 @@ from __future__ import annotations
 PLATFORM_UI_AFFORDANCES: tuple[str, ...] = ("豆包翻译",)
 
 
-def strip_ui_affordances(text: str, affordances: tuple[str, ...] = PLATFORM_UI_AFFORDANCES) -> str:
+def strip_ui_affordances(text: str, affordances: tuple[str, ...] | None = None) -> str:
     """剔掉**尾部独占整行**的平台 UI 词缀；其余位置一个字不动。
+
+    ⚠️ 词表**在调用时**才读模块全局，⛔ 不写成默认参数——默认参数在函数定义那一刻
+    就绑死了，验收脚本把 `PLATFORM_UI_AFFORDANCES` 清空来做「只货 2」对照时会**静默无效**，
+    量出来两侧一模一样、还以为是「这一改没影响」。§SEL-2 的归因脚本正是这么被骗了一次。
 
     锚法（⛔ 三个条件缺一不可，写死在这里免得下一个人改松）：
     1. 那一行 `strip()` 之后**整行就是**词缀本身——⛔ 不是「这一行里含有」；
@@ -50,7 +54,8 @@ def strip_ui_affordances(text: str, affordances: tuple[str, ...] = PLATFORM_UI_A
     - `"我用豆包翻译了这段，意外地准"` ⇒ **不剔**（人真说的话，得留着算点名）；
     - `"豆包翻译真好用"` ⇒ **不剔**（整行不等于词缀）。
     """
-    if not text or not affordances:
+    words = PLATFORM_UI_AFFORDANCES if affordances is None else affordances
+    if not text or not words:
         return text
     lines = text.splitlines()
     end = len(lines)
@@ -59,7 +64,7 @@ def strip_ui_affordances(text: str, affordances: tuple[str, ...] = PLATFORM_UI_A
         if not tail:                      # 尾部空行：跳过，继续往前看
             end -= 1
             continue
-        if tail in affordances:           # 整行就是词缀：剥掉
+        if tail in words:                 # 整行就是词缀：剥掉
             end -= 1
             continue
         break                             # 撞到真正的正文，停

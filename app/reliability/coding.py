@@ -189,6 +189,16 @@ def quote_is_own_words(item: Mapping[str, Any]) -> bool:
     quote = _squeeze(coding.get("quote") or "")
     if not quote:
         return False
+    # §SEL-2 货 4：摘出来的整句**就是**一个平台 UI 词缀时，不算这个人说的话。
+    # 实测 `r-3b3482ca7f8b` 的 S26，`coding.quote` 逐字就是「豆包翻译」——微博的内联
+    # 翻译按钮文案，被当成正文采了进来，于是它天然是自己正文的子串、这道闸判不出来。
+    # 与 §RPT-9 这道闸是同一族（都在问「这句话是不是这个人说的」），所以搭在一起，
+    # ⛔ 不另起第三套判定。⚠️ 只在**整句等于词缀**时挡：
+    # 「我用豆包翻译了这段，意外地准」是真口碑，照常算数。
+    from app.reliability.platform_noise import PLATFORM_UI_AFFORDANCES
+
+    if quote in {_squeeze(word) for word in PLATFORM_UI_AFFORDANCES}:
+        return False
     return quote in _squeeze(own_source_text(item) or "")
 
 
