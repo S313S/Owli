@@ -456,16 +456,32 @@ def coding_entity_roles(plan: Mapping[str, Any],
     判法（按顺序）：
     ① 自己的话（`_own_text`）点名了主角的任何叫法 ⇒ 主体（同时点名竞品也算主体——在拿豆包比）；
     ② 只点名了对照实体 ⇒ 对照，`entity_name` 取第一个命中的 canonical；
-    ③ 谁都没点名，但挂在对照实体的章下（证据 agent_name → 计划 agent.entity，与
+    ②′ 自己没点名、但**父帖点了名** ⇒ **随父帖**（父帖按 ①② 判，§SEL-2 货 2）；
+    ③ 自己和父帖都没点名，但挂在对照实体的章下（证据 agent_name → 计划 agent.entity，与
        `build_tables` 里 `contrast_by_mark` 同一个判法）⇒ 对照——Kimi 教程帖下的
        「这是一定要逼开会员啊」说的是 Kimi，不是没人说；
     ④ 其余 ⇒ 未点名（主角章下没点名的评论也在这里：多半在说主角，但原文里查不到，不硬归）。
+
+    **②′ 为什么要插在 ③ 前面**（§SEL-2）：规则 ③ 按**章的实体**兜底，而不是按
+    **父帖点名的实体**。实测 `r-3b3482ca7f8b`「文心一言·负 20 条」里有 **13 条来自
+    同一个父帖，而那个父帖被判成 DeepSeek**（「D老师」是 DeepSeek 的叫法）——这 13 条
+    评论被算进了文心一言的负向计数。**这不是「少了角标」，是附录对照实体态度表里的数
+    本身就归错了家**，比缺角标严重。父帖比章更近：章是采集时分配的，父帖是这条评论
+    真正挂着的那篇。规则 ①② 仍然优先于父帖——**评论自己说的话最权威**。
+
+    ⚠️ 父帖拿的是**父帖自己的 `_own_text`**，⛔ 不是评论行的 `title`。评论行 `title`
+    是「评论 · 父帖标题」，而 `_own_text` 对评论**有意剔掉了 title**（09-15 实测有 3 条
+    评论的「原声」摘的就是父帖标题，借了它父帖名就漏回来了）。绕过它等于把那条修好的
+    坑重新挖开。父帖映射走 `reliability.parentage.parent_index`，与撰写期的相关性硬闸
+    `rows_naming_entities` **共用同一份**，⛔ 两边不各写一份（`reuse-before-rewrite`）。
 
     主角名单走 `subject_canonicals`、叫法走 `_entity_aliases`、命中走 `mentions`——
     与原声闸同一把尺子（⛔ 不改那两个函数，D-069 接缝）。题面读不出主角时返回空表，
     调用方据此**不分主体/对照**（退回旧行为，理由同 `subject_canonicals` 的兜底）。
     """
     from app.plan.entities import mentions      # 延迟 import：避免 plan ↔ report 成环
+    from app.reliability.parentage import parent_index    # 评论→父帖：与相关闸共用那一份
+    from app.reliability.platform_noise import strip_ui_affordances   # 与相关闸共用那一份
 
     subjects = set(subject_canonicals(plan))
     if not subjects:
@@ -475,21 +491,42 @@ def coding_entity_roles(plan: Mapping[str, Any],
     rows = list(rows)
     entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
     canonical_of = {name: canonical for canonical, names in aliases.items() for name in names}
+    parents = parent_index(rows)
+
+    def _named_in(row: Mapping[str, Any]) -> list[str]:
+        """这一行自己的话点到的 canonical 们。一处定义，本行与父帖共用同一把尺子。
+
+        §SEL-2 货 4：先剔掉**尾部独占整行**的平台 UI 词缀（微博「豆包翻译」按钮文案）。
+        剔在这里而不是剔进 `_own_text`：`_own_text` 是「这一行自己的话是哪些字」，
+        本函数才是「这些字点没点名」，词缀只该影响后者。
+        """
+        text = strip_ui_affordances(_own_text(row))
+        return [c for c, names in aliases.items() if any(mentions(text, n) for n in names)]
+
+    def _by_own_words(named: list[str]) -> tuple[str, Any] | None:
+        """规则 ①②：点了名就按点到的判；谁都没点名返回 None，交给下一条规则。"""
+        if any(c in subjects for c in named):
+            return ENTITY_SUBJECT, sorted(subjects & set(named))[0]
+        if named:
+            return ENTITY_CONTRAST, named[0]
+        return None
+
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
-        text = _own_text(row)
-        named = [c for c, names in aliases.items() if any(mentions(text, n) for n in names)]
-        if any(c in subjects for c in named):
-            role, name = ENTITY_SUBJECT, sorted(subjects & set(named))[0]
-        elif named:
-            role, name = ENTITY_CONTRAST, named[0]
+        verdict = _by_own_words(_named_in(row))                     # ①②
+        if verdict is None:
+            parent = parents.get(str(row.get("id")))
+            if parent is not None:
+                verdict = _by_own_words(_named_in(parent))          # ②′ 随父帖
+        if verdict is not None:
+            role, name = verdict
         else:
             chapter_entity = str(entity_by_agent.get(str(row.get("agent_name") or "")) or "")
             canonical = canonical_of.get(chapter_entity, chapter_entity)
             if canonical and canonical not in subjects:
-                role, name = ENTITY_CONTRAST, canonical
+                role, name = ENTITY_CONTRAST, canonical             # ③
             else:
-                role, name = ENTITY_UNNAMED, None
+                role, name = ENTITY_UNNAMED, None                   # ④
         out[str(row.get("id"))] = {"entity": role, "entity_name": name}
     return out
 
