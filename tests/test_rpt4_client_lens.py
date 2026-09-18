@@ -342,7 +342,7 @@ def test_货3_四道软检判黄不判红(tmp_path: Path) -> None:
         "# 执行摘要\n\n答案[S01]。\n\n"
         "1. 【A】豆包情感陪伴被夸[S01][S02][S03]\n"
         "2. 【B】豆包回答质量被骂[S01][S02][S04]\n"
-        "3. 【A】海外玩家嘲笑水印[S05][S06]\n\n"
+        "3. 【A】DeepSeek 的联网检索被夸[S05][S06]\n\n"
         "> 本报告结论的把握度为**低**。\n\n"
         # 同一组数换了表形（透视 vs 长表）也要认出是同一张表
         "# 关键发现\n\n## 一\n\n| 场景 | 正 | 负 |\n|---|---|---|\n| 陪伴 | 10 | 4 |\n\n"
@@ -350,8 +350,11 @@ def test_货3_四道软检判黄不判红(tmp_path: Path) -> None:
         "占比 0.8226，支撑本报告结论的是 80 条被引证据。\n\n"
         "# 附录\n\n无。\n", encoding="utf-8")
     tables = md.with_name("r.polished.consulting.tables.json")
+    # ⚠️ §SEL-4：⒞ 的判域收窄成**只有对照实体**。这个夹具原本用的是「海外平台」，
+    # 海外 09-18 放行之后拿它造红等于用一条作废的规矩造红 ⇒ 改成对照实体，
+    # 锁的仍是「⒞ 判黄不判红」这件事本身。海外那一支改由硬判据 ㉑ 管。
     tables.write_text(json.dumps({"sources": [
-        {"mark": "S05", "offtopic": "海外平台"}, {"mark": "S06", "offtopic": "海外平台"},
+        {"mark": "S05", "offtopic": "对照实体"}, {"mark": "S06", "offtopic": "对照实体"},
         {"mark": "S01"}]}, ensure_ascii=False), encoding="utf-8")
     warns = ruler.warnings_of(md)
     assert len(warns["⒞ 摘要关键发现跑题"]) == 1 and "第 3 条" in warns["⒞ 摘要关键发现跑题"][0]

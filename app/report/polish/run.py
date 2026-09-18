@@ -1839,22 +1839,30 @@ def singlesource_advice(lines: Sequence[str], crossref: Mapping[int, Any]) -> li
     return problems
 
 
-def advice_entries(lines: Sequence[str]) -> list[list[str]]:
-    """建议节里**受门禁管的**那几条，按「条」切开（降级区之后的不返回）。
+def advice_entries(lines: Sequence[str], *,
+                   include_downgraded: bool = False) -> list[list[str]]:
+    """建议节里**受门禁管的**那几条，按「条」切开（降级区之后的默认不返回）。
 
     §RPT-8 货 5 把它从 `singlesource_advice` 里抽出来：本包要在同一批条目上再加一条
     判词（证据太弱的建议），两道闸必须切在同一个地方。⛔ 不许另写一份切法——
     切得不一样时，一道闸认为降级区已经开始、另一道还在判，写手照两份相反的判词改，
     改不到点上（§D-083 那 2 h 37 min 就是这个形状）。
+
+    `include_downgraded=True`（§SEL-4 加的）：连降级区那几条一起返回。⚠️ 它**不是**
+    给证据强度门禁用的——降级区的条目本来就已经降过一级，再判一次强度是重复处罚。
+    它是给「引了海外就得标明出身」那道闸用的：**标明出身跟证据强不强没有关系**，
+    读者读降级区那几条时同样有权知道依据来自海外社区（实测：第三轮真稿里唯一一条
+    海外引用 S38 就落在降级区，按旧判域整道闸一条都量不到，那是假绿）。
+    ⛔ 切法仍是**这一个函数**，只多一个开关——别再另写一份。
     """
     entries: list[list[str]] = []
     current: list[str] = []
     for line in lines:
         if line.strip().startswith("#"):
-            if DOWNGRADE_HEADING in line:
+            if DOWNGRADE_HEADING in line and not include_downgraded:
                 break                   # 降级区之后的都不受门禁管
             continue
-        if _DOWNGRADE_ENTRY_HEAD.match(line):
+        if _DOWNGRADE_ENTRY_HEAD.match(line) and not include_downgraded:
             # 行内前缀形态：这一条**本身**就是降级区的第一条，它和它后面的都不受管。
             # 已攒的 `current`（前缀之前的那些条）留给循环外收尾，照旧判。
             break
