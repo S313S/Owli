@@ -15,6 +15,10 @@ def _row(index: int, *, attitude="正", topics=("功能与能力",), scenario="�
          audience="不明", quote="很好用", liked=0):
     return {
         "id": f"ev-{index:03d}", "platform": "xhs",
+        # §RPT-9 货 3/货 4②：真行永远有自己的正文，且 quote 是从正文里摘的。
+        # 夹具早先省了这一栏，于是「只有题面的行」与「摘了别人的话」两种坏形状
+        # 在夹具里根本造不出来——省掉的那一栏正是本包两道闸要看的东西。
+        "content_excerpt": quote or "这条的正文",
         "raw_metrics": {"liked_count": liked, "comments_count": 0,
                         "collected_count": 0},
         "extra": {"content_kind": "user_opinion", "coding": {
@@ -115,9 +119,11 @@ def test_库里已编码的主题都在闭集内():
 
 
 def _coded(index: int, *, topics, attitude="正", scenario="学习", quote="好用"):
-    return {"id": f"ev-{index:03d}", "platform": "xhs", "extra": {"coding": {
-        "coding_version": "v1", "audience": "不明", "scenario": scenario,
-        "attitude": attitude, "topics": topics, "quote": quote}}}
+    # §RPT-9 货 3/货 4②：真行有自己的正文，quote 从正文里摘。
+    return {"id": f"ev-{index:03d}", "platform": "xhs",
+            "content_excerpt": quote or "这条的正文", "extra": {"coding": {
+                "coding_version": "v1", "audience": "不明", "scenario": scenario,
+                "attitude": attitude, "topics": topics, "quote": quote}}}
 
 
 def test_三张表用的是正式稿标准壳():

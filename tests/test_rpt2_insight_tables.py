@@ -15,6 +15,8 @@ from app.report.polish.tables import TABLE_NAMES
 def _row(index: int, *, attitude="正", scenario="学习", audience="不明"):
     return {
         "id": f"ev-{index:03d}", "platform": "xhs",
+        # §RPT-9 货 3：只有题面没有正文的行不进分母，夹具得带上真行必有的这一栏。
+        "content_excerpt": "很好用",
         "raw_metrics": {"liked_count": index, "comments_count": 0, "collected_count": 0},
         "extra": {"content_kind": "user_opinion", "coding": {
             "coding_version": CODING_VERSION, "audience": audience,

@@ -18,6 +18,9 @@ def _coded(index: int, quote: str, *, attitude: str = "正",
            topics: list[str] | None = None, platform: str = "weibo"):
     return {
         "id": f"ev-{index:03d}", "platform": platform, "goal_id": "goal-2",
+        # §RPT-9 货 4②：quote 得真落在这条自己的正文里，否则先被「不是本人说的」挡掉，
+        # 本文件要验的实体闸根本走不到。
+        "content_excerpt": quote,
         "extra": {"coding": {
             "coding_version": CODING_VERSION, "audience": "不明", "scenario": "工作",
             "attitude": attitude, "topics": topics or ["功能与能力"], "quote": quote,
