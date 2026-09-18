@@ -855,6 +855,9 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
                  view: Mapping[str, Any]) -> dict[str, Any]:
     """算出全部确定性表 + 写手要用的元信息。`timeline` 数据不够时不出现在结果里。"""
     rows = _with_extra(evidence)
+    # 题面：编码表的地域拆分（§SEL-4 货 5）与 `sources[].overseas` 都读它，
+    # ⛔ 只取一次——两处各取一份，改了一处就是静默分叉。
+    question = str(plan.get("research_question") or report.get("research_question") or "")
     tables = {
         "platform_mix": _platform_mix(rows),
         "grade_mix": _grade_mix(rows),
@@ -894,6 +897,10 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
         grade_by_mark=grade_by_mark,
         # §RPT-4 货 2：正文的态度表只数主体，对照实体另表进附录。
         entity_roles=coding_entity_roles(plan, rows),
+        # §SEL-4 货 5：题面只问国内时，态度合计按地域拆两侧——摘要那句
+        # 「已编码评论 N 条：正 a / 负 b …」回答的是「国内大家」，
+        # 把海外算进这个比例是事实错误，而一个合并的数**标不了**出身。
+        question=question,
     )
     # §RULE-1 货 5：原声候选先过一道「这是不是人说的话」。挡在这里而不是挡在写手那边——
     # 摆出来的候选写手就会用，规则拦不住一张摆在眼前的表（评审 #7 实测）。
@@ -945,7 +952,6 @@ def build_tables(*, report: Mapping[str, Any], plan: Mapping[str, Any],
     subject_names = set(quote_gate_names(plan))
     entity_by_agent = {str(c["agent_id"]): c["entity"] for c in chapter_rows(plan, rows)}
     contrast_by_mark = {}
-    question = str(plan.get("research_question") or report.get("research_question") or "")
     platform_by_mark = {int(r["citation_no"]): r.get("platform") for r in cited}
     # §RPT-4 C-15：库里的原题。工作稿信息源清单是写手誊的，三种写法混着、Reddit 还被译成中文。
     raw_title_by_mark = {int(r["citation_no"]): r.get("title") for r in cited}

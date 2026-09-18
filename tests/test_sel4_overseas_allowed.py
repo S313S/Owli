@@ -275,3 +275,104 @@ def test_货4_是硬判据不是软检() -> None:
     ruler = _ruler()
     assert "㉑ 引了海外就得标明" in ruler.CHECKS
     assert not any("海外" in name for name in ruler.WARNINGS)
+
+
+# ---------------------------------------------------------------- 货 5 国内总体倾向
+
+def _coded(eid: str, platform: str, attitude: str) -> dict:
+    from app.reliability.coding import CODING_VERSION
+
+    quote = f"豆包这个{attitude}向的体验很具体 {eid}"
+    return {"id": eid, "platform": platform, "kind": "comment", "citation_no": None,
+            "title": "帖", "content_excerpt": quote,
+            "raw_metrics": {"liked_count": 0, "comments_count": 0, "collected_count": 0},
+            "extra": {"content_kind": "user_opinion", "coding": {
+                "coding_version": CODING_VERSION, "audience": "个人用户",
+                "scenario": "生活娱乐", "attitude": attitude,
+                "topics": ["功能与能力"], "quote": quote}}}
+
+
+_LOCALE_ROWS = ([_coded(f"ev-cn{i}", "xhs", a) for i, a in enumerate("正正负中")]
+                + [_coded(f"ev-ov{i}", "reddit", a) for i, a in enumerate("正负")])
+
+
+def test_货5_国内总体倾向那句按地域拆两侧_不把海外算进国内() -> None:
+    """用户 2026-09-18 拍乙在**统计量**上的落法（调度 09-18 拍，范围变更已批）。
+
+    ⚠️ 合并成一个数的统计量**没法标明出身**：第三轮真稿那句「已编码评论 90 条」里
+    19 条来自 Reddit，读者读到的却是「国内大家」。⛔ 不走「把海外剔出去」（丢数据）。
+    """
+    from app.reliability.coding import ATTITUDE_BY_LOCALE, polish_tables
+    from app.report.polish.run import attitude_line
+
+    tables = polish_tables(_LOCALE_ROWS, question="国内大家对豆包的看法")
+    split = tables["scenario_attitude"]["coverage"][ATTITUDE_BY_LOCALE]
+    assert split["国内"] == {"条数": 4, "正": 2, "负": 1, "中": 1, "混合": 0}
+    assert split["海外社区"] == {"条数": 2, "正": 1, "负": 1, "中": 0, "混合": 0}
+    line = attitude_line(tables, ["豆包"])
+    assert "已编码评论 6 条（国内 4 条：正 2 / 负 1 / 中 1 / 混合 0；" \
+           "海外社区 2 条：正 1 / 负 1 / 中 0 / 混合 0；" in line, line
+    # ⛔ 括号不许挨着括号（读者会以为漏了一句）。
+    assert "）（" not in line
+
+
+def test_货5_不变量_每侧四数之和等于该侧条数_两侧之和等于总条数() -> None:
+    """⚠️ 调度点名的硬要求：有一把复审尺子按「四数之和 = N」判红，拆完两侧都要自洽。"""
+    from app.reliability.coding import ATTITUDE_BY_LOCALE, polish_tables
+
+    tables = polish_tables(_LOCALE_ROWS, question="国内大家对豆包的看法")
+    table = tables["scenario_attitude"]
+    split = table["coverage"][ATTITUDE_BY_LOCALE]
+    for got in split.values():
+        assert sum(got[k] for k in ("正", "负", "中", "混合")) == got["条数"]
+    assert sum(got["条数"] for got in split.values()) == table["n"]
+    # 合并的那份照旧在，⛔ 没被拆分顶掉（附录与别的读数还在用）。
+    merged = table["coverage"]["态度合计"]
+    for key in ("正", "负", "中", "混合"):
+        assert merged[key] == sum(got[key] for got in split.values())
+
+
+def test_货5_题面不是只问国内就不拆_行为一字不差() -> None:
+    """⛔ 题面本来就问全球时硬拆，是凭空造一个假的分界。"""
+    from app.reliability.coding import ATTITUDE_BY_LOCALE, polish_tables
+    from app.report.polish.run import attitude_line
+
+    for question in ("", "大家怎么看豆包", "全球用户怎么看豆包"):
+        tables = polish_tables(_LOCALE_ROWS, question=question)
+        assert ATTITUDE_BY_LOCALE not in tables["scenario_attitude"]["coverage"]
+        line = attitude_line(tables, ["豆包"])
+        assert line.startswith("已编码评论 6 条：正 3 / 负 2 / 中 1 / 混合 0（"), line
+
+
+def test_货5_只有一侧有数就不拆_别写一句废话() -> None:
+    from app.reliability.coding import polish_tables
+    from app.report.polish.run import attitude_line
+
+    only_cn = [r for r in _LOCALE_ROWS if r["platform"] == "xhs"]
+    line = attitude_line(polish_tables(only_cn, question="国内大家对豆包的看法"), ["豆包"])
+    assert line.startswith("已编码评论 4 条：正 2 / 负 1 / 中 1 / 混合 0（"), line
+
+
+def test_货5_两侧对不上账就整段不写_宁可退回合并写法() -> None:
+    """⛔ 自相矛盾的数比少一句话坏得多——尺子会判红，而且判得对。"""
+    from app.report.polish.run import _attitude_locale_split
+
+    good = {"coverage": {"态度合计·按地域": {
+        "国内": {"条数": 3, "正": 2, "负": 1, "中": 0, "混合": 0},
+        "海外社区": {"条数": 1, "正": 1, "负": 0, "中": 0, "混合": 0}}}}
+    assert _attitude_locale_split(good)
+    bad = {"coverage": {"态度合计·按地域": {
+        "国内": {"条数": 9, "正": 2, "负": 1, "中": 0, "混合": 0},
+        "海外社区": {"条数": 1, "正": 1, "负": 0, "中": 0, "混合": 0}}}}
+    assert _attitude_locale_split(bad) == ""
+    assert _attitude_locale_split({"coverage": {}}) == "", "老产物没有这份读数 ⇒ 退回合并写法"
+
+
+def test_货5_地域名与写手池那一栏是同一个词() -> None:
+    """⚠️ 三处各起一个名字，读者会以为是三样东西。"""
+    from app.reliability.coding import LOCALE_OVERSEAS
+    from app.report.polish.skills import shared_rules
+    from app.report.polish.tables import OVERSEAS_COLUMN
+
+    assert LOCALE_OVERSEAS == OVERSEAS_COLUMN == "海外社区"
+    assert "海外社区" in shared_rules()

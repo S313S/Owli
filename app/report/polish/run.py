@@ -914,6 +914,11 @@ def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> st
     正多还是负多」——那是「大家怎么看」最直接的答案，数在论据章的表里，结论没人写。
     数从 `scenario_attitude` 取（每条一个场景一个态度，四档相加 = 表的 n）；§RPT-4 货 2
     之后这张表只数点名了研究对象的评论，所以这一行的分母也是主体。
+
+    §SEL-4 货 5（用户 2026-09-18 拍乙）：题面只问国内时，这一行**按地域写两侧**
+    （读数来自 `coverage["态度合计·按地域"]`，程序算好的）。⚠️ 理由不是好看：
+    合并成一个数的统计量**没法标明出身**——第三轮真稿这一行里 19/90 条来自 Reddit，
+    读者读到的却是「国内大家」。⛔ 数一律从表里取，不写死；⛔ 也不把海外剔出去（丢数据）。
     """
     table = (tables or {}).get("scenario_attitude")
     if not isinstance(table, Mapping) or not table.get("n"):
@@ -928,8 +933,43 @@ def attitude_line(tables: Mapping[str, Any], subjects: Sequence[str] = ()) -> st
     who = "、".join(str(s) for s in subjects if s)
     scope = (f"只数点名了{who}的评论；这批评论取自引用池，不是随机抽样，口径见附录「各表口径」"
              if who else "这批评论取自引用池，不是随机抽样，口径见附录「各表口径」")
-    return (f"已编码评论 {int(table['n'])} 条：{parts}（{scope}）。"
+    split = _attitude_locale_split(table)
+    # ⚠️ 两侧写法与合并写法**共用同一个括号**：拆完再另起一个括号，读者会连读到
+    # 「…混合 2）（只数点名了…」两个挨着的括号，像是漏了一句话。
+    head = f"已编码评论 {int(table['n'])} 条" + ("" if split else f"：{parts}")
+    return (f"{head}（{split + '；' if split else ''}{scope}）。"
             + attitude_traceability(tables))
+
+
+def _attitude_locale_split(table: Mapping[str, Any]) -> str:
+    """§SEL-4 货 5：「国内 71 条：正 22 / …；海外社区 17 条：正 5 / …」那半句（不带括号）。
+
+    没有这份读数（题面不是只问国内，或老产物）⇒ 返回空串，调用方写回合并的老写法，
+    **行为一字不差**。⛔ 不在这里重算：条数与四档都从 `coverage` 取，
+    算两遍迟早对不上账（§RATE-4 那条 447 行的教训）。
+
+    ⚠️ 不变量：**每侧四数之和 = 该侧条数**。凑不上就整段不写——宁可退回合并的老写法，
+    也不能吐一句自相矛盾的数（有一把复审尺子按「四数之和 = N」判红，它判得对）。
+    """
+    from app.reliability.coding import ATTITUDE_BY_LOCALE
+
+    split = (table.get("coverage") or {}).get(ATTITUDE_BY_LOCALE)
+    if not isinstance(split, Mapping) or not split:
+        return ""
+    sides = []
+    for name, got in split.items():
+        if not isinstance(got, Mapping):
+            return ""
+        total = int(got.get("条数") or 0)
+        if sum(int(got.get(k) or 0) for k in _ATTITUDE_ORDER) != total:
+            return ""                   # 自相矛盾就别写，退回合并写法
+        if not total:
+            continue                    # 一侧一条都没有就不占篇幅
+        body = " / ".join(f"{k} {int(got.get(k) or 0)}" for k in _ATTITUDE_ORDER)
+        sides.append(f"{name} {total} 条：{body}")
+    # 只剩一侧（全是国内，或全是海外）就不拆——「其中国内 88 条」是句废话，
+    # 而且那种时候合并写法本来就没有误导。
+    return "；".join(sides) if len(sides) > 1 else ""
 
 
 #: §RPT-8 货 4①：这一行要交代可追溯性的那个态度档。⛔ 只挑「负」一个：
