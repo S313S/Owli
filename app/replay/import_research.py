@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.adapters.transcript import TRANSCRIPT_SUFFIX
+# §SEL-3：路径改写沿用沙盒那一份（记忆 `reuse-before-rewrite`：重写出来的差异是静默的），
+# 不另写一份——两边要改的是同一列、同一个含义。
+from app.replay.sandbox import _rebase_ledger_paths
 
 #: 复制时重发、不从源行抄的列：新研究要新主键、挂到新 research 上。
 _EVIDENCE_IDENTITY_COLUMNS = frozenset({"id", "report_id"})
@@ -75,6 +78,44 @@ def _read_source(database: Path, research_id: str) -> dict[str, Any]:
         }
     finally:
         connection.close()
+
+
+def _source_lineage(database: Path, research_id: str) -> tuple[str, ...]:
+    """源研究自己的 id + 它一路 replay 上来的祖先 id（自近及远）。
+
+    账本里的 `actual_output_path` 带的是**当初真跑出那份产物的那个研究**的 id。
+    源自己若是导入来的，它的账本就还带着上一代的 id——这一列从来没被改写过，
+    所以一份账本里能同时出现好几代（真机 `r-3b3482ca7f8b` 的账本里 104 行是
+    `r-20271e8a5028`、4 行 `r-f9bb30969cf2`、2 行 `r-96e0257a86b4`，**一行都不是**
+    它自己）。只认「直接源」那一个 id，这次导入一行都改不动。
+
+    id 不靠猜：走 `reports.extra.replay_of` 这条自己写下的溯源链（§RP-1 落的那格）。
+    链断在库外（祖先那一行不在本库里，比如它跑在另一台 worktree 的库里）时，
+    **它的 id 仍从子代的 `replay_of` 里拿到**，只是走不动下一跳，就停在那儿。
+    """
+
+    lineage: list[str] = []
+    seen: set[str] = set()
+    current: str | None = str(research_id)
+    connection = sqlite3.connect(f"file:{Path(database).resolve()}?mode=ro", uri=True)
+    try:
+        while current and current not in seen:
+            seen.add(current)
+            lineage.append(current)
+            row = connection.execute(
+                "SELECT extra FROM reports WHERE id = ?", (current,)
+            ).fetchone()
+            if row is None:
+                break
+            try:
+                extra = json.loads(row[0] or "{}")
+            except (TypeError, ValueError):
+                break
+            parent = extra.get("replay_of") if isinstance(extra, Mapping) else None
+            current = str(parent).strip() if isinstance(parent, str) and parent.strip() else None
+    finally:
+        connection.close()
+    return tuple(lineage)
 
 
 def _replay_chapters(
@@ -310,6 +351,17 @@ def _write(
         snapshot=snapshot,
         target_dir=target_dir,
         only_chapters=only_chapters,
+    )
+    # §SEL-3：账本里的产物路径是**绝对路径**，抄过来还指着源树、源 id；而计划里
+    # `opening.inputs` 是相对路径，跑时按**新树 / 新 id** 拼绝对路径。不改写这一列，
+    # 两边永远对不上：`_declared_done_goal_closure` 追不到任何上游产物，每一节的
+    # 可见 goal 只剩它自己，跨章互证节因此一条跨 goal 证据都引不到。
+    # 真机实证（`r-3b3482ca7f8b` → 导入）：goal-6/ch-4 的 18 条 inputs 命中 0/18。
+    _rebase_ledger_paths(
+        Path(_database_of(store)),
+        research_id,
+        target_dir.parent,
+        source_research_ids=_source_lineage(source_database, source_research_id),
     )
     return ImportedResearch(
         research_id=research_id,
